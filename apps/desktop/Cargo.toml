@@ -1,13 +1,15 @@
 [package]
-name = "opencut-desktop"
-description = "OpenCut desktop app, built with GPUI"
+name = "libre-effects-desktop"
+description = "Libre Effects motion graphics editor, built with GPUI"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "opencut-desktop"
+name = "libre-effects"
 path = "src/main.rs"
 
 [dependencies]
 gpui = { workspace = true }
+libre-effects-core = { path = "../../crates/core" }
+tempfile = "3"

@@ -1,10 +1,12 @@
 use gpui::{
-    px, size, App, AppContext, Application, Bounds, SharedString, TitlebarOptions, WindowBounds,
-    WindowOptions,
+    App, AppContext, Application, Bounds, SharedString, TitlebarOptions, WindowBounds,
+    WindowOptions, px, size,
 };
 
 mod components;
+mod editor;
 mod panels;
+mod project_io;
 mod shell;
 mod theme;
 
@@ -15,8 +17,7 @@ fn main() {
     {
         let is_wsl = std::fs::read_to_string("/proc/sys/kernel/osrelease")
             .is_ok_and(|release| release.to_ascii_lowercase().contains("microsoft"));
-        let x11_configured =
-            std::env::var_os("DISPLAY").is_some_and(|display| !display.is_empty());
+        let x11_configured = std::env::var_os("DISPLAY").is_some_and(|display| !display.is_empty());
         let wayland_configured =
             std::env::var_os("WAYLAND_DISPLAY").is_some_and(|display| !display.is_empty());
 
@@ -36,7 +37,7 @@ fn main() {
         cx.open_window(
             WindowOptions {
                 titlebar: Some(TitlebarOptions {
-                    title: Some(SharedString::from("OpenCut")),
+                    title: Some(SharedString::from("Libre Effects")),
                     ..Default::default()
                 }),
                 window_bounds: Some(WindowBounds::Maximized(bounds)),

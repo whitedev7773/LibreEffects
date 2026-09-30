@@ -16,6 +16,8 @@ tasks:
       - 'Cargo.toml'
       - '/Cargo.toml'
       - '/Cargo.lock'
+      - '/crates/core/src/**/*'
+      - '/crates/core/Cargo.toml'
 
   build:
     command: 'cargo build --release'
@@ -24,5 +26,7 @@ tasks:
       - 'Cargo.toml'
       - '/Cargo.toml'
       - '/Cargo.lock'
+      - '/crates/core/src/**/*'
+      - '/crates/core/Cargo.toml'
     outputs:
-      - '/target/release/opencut-desktop'
+      - '/target/release/libre-effects{,.exe}'

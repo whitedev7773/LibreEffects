@@ -1,0 +1,552 @@
+//! UI-independent editing model. Frame numbers are integral; layer index zero is on top.
+use std::collections::{BTreeMap, BTreeSet};
+
+use serde::{Deserialize, Serialize};
+
+pub type Frame = u32;
+pub type LayerId = u64;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Interpolation {
+    #[default]
+    Linear,
+    Hold,
+    /// Smoothstep interpolation, not After Effects temporal Bezier compatibility.
+    Smooth,
+}
+
+impl Interpolation {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Linear => Self::Hold,
+            Self::Hold => Self::Smooth,
+            Self::Smooth => Self::Linear,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum Property {
+    PositionX,
+    PositionY,
+    AnchorX,
+    AnchorY,
+    ScaleX,
+    ScaleY,
+    Rotation,
+    Opacity,
+}
+
+impl Property {
+    pub const ALL: [Self; 8] = [
+        Self::PositionX,
+        Self::PositionY,
+        Self::AnchorX,
+        Self::AnchorY,
+        Self::ScaleX,
+        Self::ScaleY,
+        Self::Rotation,
+        Self::Opacity,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::PositionX => "Position X",
+            Self::PositionY => "Position Y",
+            Self::AnchorX => "Anchor X",
+            Self::AnchorY => "Anchor Y",
+            Self::ScaleX => "Scale X (%)",
+            Self::ScaleY => "Scale Y (%)",
+            Self::Rotation => "Rotation (deg)",
+            Self::Opacity => "Opacity (%)",
+        }
+    }
+
+    fn accepts(self, value: f64) -> bool {
+        value.is_finite()
+            && match self {
+                Self::Opacity => (0.0..=100.0).contains(&value),
+                Self::ScaleX | Self::ScaleY => (-10_000.0..=10_000.0).contains(&value),
+                _ => value.abs() <= 1_000_000.0,
+            }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Keyframe {
+    pub value: f64,
+    /// Controls the segment leaving this keyframe.
+    pub interpolation: Interpolation,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AnimatedProperty {
+    value: f64,
+    keys: BTreeMap<Frame, Keyframe>,
+}
+
+impl AnimatedProperty {
+    fn new(value: f64) -> Self {
+        Self {
+            value,
+            keys: BTreeMap::new(),
+        }
+    }
+
+    pub fn keys(&self) -> &BTreeMap<Frame, Keyframe> {
+        &self.keys
+    }
+
+    pub fn value_at(&self, frame: Frame) -> f64 {
+        let left = self.keys.range(..=frame).next_back();
+        let right = self.keys.range(frame..).next();
+        match (left, right) {
+            (Some((start, a)), Some((end, b))) if start != end => {
+                let t = (frame - start) as f64 / (end - start) as f64;
+                let t = match a.interpolation {
+                    Interpolation::Linear => t,
+                    Interpolation::Hold => 0.0,
+                    Interpolation::Smooth => t * t * (3.0 - 2.0 * t),
+                };
+                a.value + (b.value - a.value) * t
+            }
+            (Some((_, key)), _) | (_, Some((_, key))) => key.value,
+            _ => self.value,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Layer {
+    id: LayerId,
+    name: String,
+    visible: bool,
+    locked: bool,
+    width: f64,
+    height: f64,
+    color: u32,
+    properties: BTreeMap<Property, AnimatedProperty>,
+}
+
+impl Layer {
+    pub fn id(&self) -> LayerId {
+        self.id
+    }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn visible(&self) -> bool {
+        self.visible
+    }
+    pub fn locked(&self) -> bool {
+        self.locked
+    }
+    pub fn color(&self) -> u32 {
+        self.color
+    }
+    pub fn property(&self, property: Property) -> &AnimatedProperty {
+        &self.properties[&property]
+    }
+
+    /// Composition-space corners, after anchor, scale, rotation, and position.
+    pub fn corners_at(&self, frame: Frame) -> [[f64; 2]; 4] {
+        let value = |property| self.property(property).value_at(frame);
+        let angle = value(Property::Rotation).to_radians();
+        let (sin, cos) = angle.sin_cos();
+        [
+            [0.0, 0.0],
+            [self.width, 0.0],
+            [self.width, self.height],
+            [0.0, self.height],
+        ]
+        .map(|[x, y]| {
+            let x = (x - value(Property::AnchorX)) * value(Property::ScaleX) / 100.0;
+            let y = (y - value(Property::AnchorY)) * value(Property::ScaleY) / 100.0;
+            [
+                x * cos - y * sin + value(Property::PositionX),
+                x * sin + y * cos + value(Property::PositionY),
+            ]
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Composition {
+    name: String,
+    width: u32,
+    height: u32,
+    fps: u32,
+    duration: Frame,
+    layers: Vec<Layer>,
+}
+
+impl Composition {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+    pub fn fps(&self) -> u32 {
+        self.fps
+    }
+    pub fn duration(&self) -> Frame {
+        self.duration
+    }
+    pub fn layers(&self) -> &[Layer] {
+        &self.layers
+    }
+    pub fn layer(&self, id: LayerId) -> Option<&Layer> {
+        self.layers.iter().find(|layer| layer.id == id)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Project {
+    version: u32,
+    next_layer_id: LayerId,
+    composition: Composition,
+}
+
+impl Default for Project {
+    fn default() -> Self {
+        Self {
+            version: 1,
+            next_layer_id: 1,
+            composition: Composition {
+                name: "Composition 01".into(),
+                width: 1920,
+                height: 1080,
+                fps: 30,
+                duration: 150,
+                layers: Vec::new(),
+            },
+        }
+    }
+}
+
+impl Project {
+    pub fn composition(&self) -> &Composition {
+        &self.composition
+    }
+
+    pub fn to_json(&self) -> Result<String, String> {
+        serde_json::to_string_pretty(self).map_err(|error| error.to_string())
+    }
+
+    pub fn from_json(json: &str) -> Result<Self, String> {
+        let project: Self = serde_json::from_str(json).map_err(|error| error.to_string())?;
+        project.validate()?;
+        Ok(project)
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        let comp = &self.composition;
+        if self.version != 1 {
+            return Err("Unsupported project version".into());
+        }
+        if !(1..=16_384).contains(&comp.width)
+            || !(1..=16_384).contains(&comp.height)
+            || !(1..=240).contains(&comp.fps)
+            || comp.duration == 0
+            || comp.duration > comp.fps * 86_400
+            || comp.layers.len() > 1_000
+            || comp.name.len() > 1024
+        {
+            return Err("Invalid composition settings".into());
+        }
+        let mut ids = BTreeSet::new();
+        for layer in &comp.layers {
+            if layer.id == 0
+                || layer.id >= self.next_layer_id
+                || !ids.insert(layer.id)
+                || layer.name.len() > 1024
+                || layer.color > 0xff_ffff
+                || !layer.width.is_finite()
+                || !(1.0..=16_384.0).contains(&layer.width)
+                || !layer.height.is_finite()
+                || !(1.0..=16_384.0).contains(&layer.height)
+                || layer.properties.len() != Property::ALL.len()
+            {
+                return Err("Invalid layer".into());
+            }
+            for property in Property::ALL {
+                let track = layer
+                    .properties
+                    .get(&property)
+                    .ok_or("Missing transform property")?;
+                if !property.accepts(track.value)
+                    || track
+                        .keys
+                        .iter()
+                        .any(|(frame, key)| *frame >= comp.duration || !property.accepts(key.value))
+                {
+                    return Err("Invalid property or keyframe".into());
+                }
+            }
+        }
+        if self.next_layer_id == 0 || self.next_layer_id == u64::MAX {
+            return Err("Invalid next layer ID".into());
+        }
+        Ok(())
+    }
+}
+
+/// The future scripting bridge and native controls both dispatch these commands.
+#[derive(Clone, Debug)]
+pub enum Command {
+    AddRectangle,
+    RemoveLayer(LayerId),
+    MoveLayer {
+        id: LayerId,
+        index: usize,
+    },
+    ToggleVisible(LayerId),
+    ToggleLocked(LayerId),
+    SetValue {
+        id: LayerId,
+        property: Property,
+        frame: Frame,
+        value: f64,
+    },
+    ToggleKeyframe {
+        id: LayerId,
+        property: Property,
+        frame: Frame,
+    },
+    SetInterpolation {
+        id: LayerId,
+        property: Property,
+        frame: Frame,
+        interpolation: Interpolation,
+    },
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Snapshot {
+    project: Project,
+    selected: Option<LayerId>,
+}
+
+#[derive(Default)]
+pub struct Editor {
+    current: Snapshot,
+    undo: Vec<Snapshot>,
+    redo: Vec<Snapshot>,
+}
+
+impl Editor {
+    pub fn project(&self) -> &Project {
+        &self.current.project
+    }
+    pub fn selected(&self) -> Option<LayerId> {
+        self.current.selected
+    }
+    pub fn selected_layer(&self) -> Option<&Layer> {
+        self.selected()
+            .and_then(|id| self.project().composition.layer(id))
+    }
+    pub fn select(&mut self, id: LayerId) {
+        if self.project().composition.layer(id).is_some() {
+            self.current.selected = Some(id);
+        }
+    }
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+
+    fn record(&mut self, previous: Snapshot) {
+        const HISTORY_LIMIT: usize = 100;
+        if self.undo.len() == HISTORY_LIMIT {
+            self.undo.remove(0);
+        }
+        self.undo.push(previous);
+        self.redo.clear();
+    }
+
+    /// Loading is undoable, so opening a project does not discard current work.
+    pub fn replace_project(&mut self, project: Project) -> Result<(), String> {
+        project.validate()?;
+        let selected = project.composition.layers.first().map(Layer::id);
+        let previous = std::mem::replace(&mut self.current, Snapshot { project, selected });
+        self.record(previous);
+        Ok(())
+    }
+
+    pub fn undo(&mut self) {
+        if let Some(previous) = self.undo.pop() {
+            self.redo
+                .push(std::mem::replace(&mut self.current, previous));
+        }
+    }
+    pub fn redo(&mut self) {
+        if let Some(next) = self.redo.pop() {
+            self.undo.push(std::mem::replace(&mut self.current, next));
+        }
+    }
+
+    pub fn execute(&mut self, command: Command) -> Result<(), String> {
+        // Apply to a candidate so invalid commands never partially mutate the project.
+        let mut next = self.current.clone();
+        apply(&mut next, command)?;
+        if next != self.current {
+            let previous = std::mem::replace(&mut self.current, next);
+            self.record(previous);
+        }
+        Ok(())
+    }
+}
+
+fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
+    let comp = &mut state.project.composition;
+    if let Command::AddRectangle = command {
+        if comp.layers.len() >= 1_000 || state.project.next_layer_id >= u64::MAX - 1 {
+            return Err("Layer limit reached".into());
+        }
+        let id = state.project.next_layer_id;
+        state.project.next_layer_id += 1;
+        let colors = [0x9a8cff, 0x53d8c4, 0xffbc70, 0xf580ad];
+        comp.layers.insert(
+            0,
+            Layer {
+                id,
+                name: format!("Rectangle {id}"),
+                visible: true,
+                locked: false,
+                width: 320.0,
+                height: 200.0,
+                color: colors[((id - 1) % 4) as usize],
+                properties: Property::ALL
+                    .into_iter()
+                    .map(|property| {
+                        let value = match property {
+                            Property::PositionX => comp.width as f64 / 2.0,
+                            Property::PositionY => comp.height as f64 / 2.0,
+                            Property::AnchorX => 160.0,
+                            Property::AnchorY => 100.0,
+                            Property::ScaleX | Property::ScaleY | Property::Opacity => 100.0,
+                            Property::Rotation => 0.0,
+                        };
+                        (property, AnimatedProperty::new(value))
+                    })
+                    .collect(),
+            },
+        );
+        state.selected = Some(id);
+        return Ok(());
+    }
+    let id = match &command {
+        Command::RemoveLayer(id) | Command::ToggleVisible(id) | Command::ToggleLocked(id) => *id,
+        Command::MoveLayer { id, .. }
+        | Command::SetValue { id, .. }
+        | Command::ToggleKeyframe { id, .. }
+        | Command::SetInterpolation { id, .. } => *id,
+        Command::AddRectangle => unreachable!(),
+    };
+    let index = comp
+        .layers
+        .iter()
+        .position(|layer| layer.id == id)
+        .ok_or("Layer not found")?;
+    let layer = &mut comp.layers[index];
+    if layer.locked && !matches!(command, Command::ToggleLocked(_)) {
+        return Err("Unlock the layer before editing".into());
+    }
+    match command {
+        Command::RemoveLayer(_) => {
+            comp.layers.remove(index);
+            if state.selected == Some(id) {
+                state.selected = comp.layers.first().map(Layer::id);
+            }
+        }
+        Command::MoveLayer { index: target, .. } => {
+            if target >= comp.layers.len() {
+                return Err("Layer index out of range".into());
+            }
+            let layer = comp.layers.remove(index);
+            comp.layers.insert(target, layer);
+        }
+        Command::ToggleVisible(_) => layer.visible = !layer.visible,
+        Command::ToggleLocked(_) => layer.locked = !layer.locked,
+        Command::SetValue {
+            property,
+            frame,
+            value,
+            ..
+        } => {
+            if frame >= comp.duration || !property.accepts(value) {
+                return Err("Value or frame out of range".into());
+            }
+            let track = layer
+                .properties
+                .get_mut(&property)
+                .ok_or("Property not found")?;
+            if track.keys.is_empty() {
+                track.value = value;
+            } else {
+                let interpolation = track
+                    .keys
+                    .range(..=frame)
+                    .next_back()
+                    .map_or(Interpolation::Linear, |(_, key)| key.interpolation);
+                track.keys.insert(
+                    frame,
+                    Keyframe {
+                        value,
+                        interpolation,
+                    },
+                );
+            }
+        }
+        Command::ToggleKeyframe {
+            property, frame, ..
+        } => {
+            if frame >= comp.duration {
+                return Err("Frame out of range".into());
+            }
+            let track = layer
+                .properties
+                .get_mut(&property)
+                .ok_or("Property not found")?;
+            let value = track.value_at(frame);
+            if track.keys.remove(&frame).is_some() {
+                // Removing the final key retains its value as a static property.
+                if track.keys.is_empty() {
+                    track.value = value;
+                }
+            } else {
+                track.keys.insert(
+                    frame,
+                    Keyframe {
+                        value,
+                        interpolation: Interpolation::Linear,
+                    },
+                );
+            }
+        }
+        Command::SetInterpolation {
+            property,
+            frame,
+            interpolation,
+            ..
+        } => {
+            let key = layer
+                .properties
+                .get_mut(&property)
+                .and_then(|track| track.keys.get_mut(&frame))
+                .ok_or("Select a frame containing a keyframe")?;
+            key.interpolation = interpolation;
+        }
+        Command::AddRectangle => unreachable!(),
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests;

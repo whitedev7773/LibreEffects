@@ -1,31 +1,23 @@
-<table width="100%">
-  <tr>
-    <td align="left" width="120">
-      <img src="https://assets.opencut.app/branding/symbol.svg" alt="OpenCut Logo" width="100" />
-    </td>
-    <td align="right">
-      <h1>OpenCut</h1>
-      <h3 style="margin-top: -10px;">A free and open source video editor for web, desktop, and mobile.</h3>
-    </td>
-  </tr>
-</table>
+# Libre Effects
 
-[![Discord](https://img.shields.io/discord/1386309140057690133?label=Discord&logo=discord&logoColor=fff&color=5865F2&style=flat)](https://discord.gg/zmR9N35cjK)
-[![X](https://img.shields.io/badge/follow-%40opencutapp-000?logo=x&logoColor=fff&style=flat)](https://x.com/opencutapp)
+A Windows-first, open source motion graphics and compositing editor, forked from
+[OpenCut](https://github.com/opencut-app/opencut). The goal is a composition and
+layer workflow familiar to After Effects users, with extensive scripting support.
+
 [![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat)](LICENSE)
 
 ## Status
 
-**OpenCut is being rewritten from the ground up.** What's coming:
+**Early desktop foundation.** Rectangle layers, transform properties, keyframes,
+interpolation, preview/playback, undo/redo, and JSON project persistence are implemented.
+The shared Rust editing model lives in `crates/core`.
 
-- An Editor API
-- First-class third party plugins (made possible by a plugin-first architecture)
-- Desktop, mobile, and browser from one codebase (Rust core)
-- MCP server (for AI agents)
-- Headless mode (automation, batch rendering)
-- A scripting tab directly in the editor
+JSX/ExtendScript compatibility, expressions, advanced motion graphics tools, media
+import, and export remain future work. Web and API apps are inherited from the
+OpenCut rewrite and do not expose the desktop editor yet.
 
-You can still find the previous version at [opencut-app/opencut-classic](https://github.com/opencut-app/opencut-classic), which is the one to reach for today. [opencut.app](https://opencut.app) still runs the classic version. The rewrite will live at [new.opencut.app](https://new.opencut.app) until it's ready to take over.
+See [the desktop guide](apps/desktop/README.md) for the animation walkthrough and
+current limitations. Original OpenCut copyright and MIT license notices are retained.
 
 ## Development
 
