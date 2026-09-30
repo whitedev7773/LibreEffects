@@ -126,9 +126,22 @@ pub struct Layer {
     height: f64,
     color: u32,
     properties: BTreeMap<Property, AnimatedProperty>,
+    #[serde(default)]
+    in_frame: Frame,
+    #[serde(default)]
+    out_frame: Option<Frame>,
 }
 
 impl Layer {
+    pub fn in_frame(&self) -> Frame {
+        self.in_frame
+    }
+    pub fn out_frame(&self, duration: Frame) -> Frame {
+        self.out_frame.unwrap_or(duration)
+    }
+    pub fn active_at(&self, frame: Frame, duration: Frame) -> bool {
+        self.visible && frame >= self.in_frame && frame < self.out_frame(duration)
+    }
     pub fn id(&self) -> LayerId {
         self.id
     }
@@ -261,6 +274,8 @@ impl Project {
         let mut ids = BTreeSet::new();
         for layer in &comp.layers {
             if layer.id == 0
+                || layer.in_frame >= layer.out_frame(comp.duration)
+                || layer.out_frame(comp.duration) > comp.duration
                 || layer.id >= self.next_layer_id
                 || !ids.insert(layer.id)
                 || layer.name.len() > 1024
@@ -299,6 +314,40 @@ impl Project {
 #[derive(Clone, Debug)]
 pub enum Command {
     AddRectangle,
+    SetPosition {
+        id: LayerId,
+        frame: Frame,
+        x: f64,
+        y: f64,
+    },
+    DuplicateLayer(LayerId),
+    RenameLayer {
+        id: LayerId,
+        name: String,
+    },
+    SetLayerRange {
+        id: LayerId,
+        start: Frame,
+        end: Frame,
+    },
+    ConfigureComposition {
+        name: String,
+        width: u32,
+        height: u32,
+        fps: u32,
+        duration: Frame,
+    },
+    MoveKeyframe {
+        id: LayerId,
+        property: Property,
+        from: Frame,
+        to: Frame,
+    },
+    ToggleAnimation {
+        id: LayerId,
+        property: Property,
+        frame: Frame,
+    },
     RemoveLayer(LayerId),
     MoveLayer {
         id: LayerId,
@@ -404,7 +453,62 @@ impl Editor {
 }
 
 fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
+    if let Command::SetPosition { id, frame, x, y } = command {
+        apply(
+            state,
+            Command::SetValue {
+                id,
+                property: Property::PositionX,
+                frame,
+                value: x,
+            },
+        )?;
+        return apply(
+            state,
+            Command::SetValue {
+                id,
+                property: Property::PositionY,
+                frame,
+                value: y,
+            },
+        );
+    }
     let comp = &mut state.project.composition;
+    if let Command::ConfigureComposition {
+        name,
+        width,
+        height,
+        fps,
+        duration,
+    } = &command
+    {
+        if name.trim().is_empty()
+            || name.len() > 1024
+            || !(1..=16_384).contains(width)
+            || !(1..=16_384).contains(height)
+            || !(1..=240).contains(fps)
+            || *duration == 0
+            || *duration > fps * 86_400
+        {
+            return Err("Invalid composition settings".into());
+        }
+        if comp.layers.iter().any(|layer| {
+            layer.in_frame >= *duration
+                || layer.out_frame.is_some_and(|end| end > *duration)
+                || layer
+                    .properties
+                    .values()
+                    .any(|track| track.keys.keys().any(|frame| frame >= duration))
+        }) {
+            return Err("Duration would exclude existing layer ranges or keyframes".into());
+        }
+        comp.name = name.trim().into();
+        comp.width = *width;
+        comp.height = *height;
+        comp.fps = *fps;
+        comp.duration = *duration;
+        return Ok(());
+    }
     if let Command::AddRectangle = command {
         if comp.layers.len() >= 1_000 || state.project.next_layer_id >= u64::MAX - 1 {
             return Err("Layer limit reached".into());
@@ -422,6 +526,8 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
                 width: 320.0,
                 height: 200.0,
                 color: colors[((id - 1) % 4) as usize],
+                in_frame: 0,
+                out_frame: None,
                 properties: Property::ALL
                     .into_iter()
                     .map(|property| {
@@ -442,12 +548,21 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
         return Ok(());
     }
     let id = match &command {
-        Command::RemoveLayer(id) | Command::ToggleVisible(id) | Command::ToggleLocked(id) => *id,
+        Command::RemoveLayer(id)
+        | Command::ToggleVisible(id)
+        | Command::ToggleLocked(id)
+        | Command::DuplicateLayer(id) => *id,
+        Command::RenameLayer { id, .. }
+        | Command::SetLayerRange { id, .. }
+        | Command::MoveKeyframe { id, .. }
+        | Command::ToggleAnimation { id, .. } => *id,
         Command::MoveLayer { id, .. }
         | Command::SetValue { id, .. }
         | Command::ToggleKeyframe { id, .. }
         | Command::SetInterpolation { id, .. } => *id,
-        Command::AddRectangle => unreachable!(),
+        Command::AddRectangle
+        | Command::ConfigureComposition { .. }
+        | Command::SetPosition { .. } => unreachable!(),
     };
     let index = comp
         .layers
@@ -459,6 +574,73 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
         return Err("Unlock the layer before editing".into());
     }
     match command {
+        Command::DuplicateLayer(_) => {
+            if comp.layers.len() >= 1_000 || state.project.next_layer_id >= u64::MAX - 1 {
+                return Err("Layer limit reached".into());
+            }
+            let mut copy = comp.layers[index].clone();
+            copy.id = state.project.next_layer_id;
+            // Keep a bounded name even when duplicating repeatedly.
+            if copy.name.len() < 1000 {
+                copy.name.push_str(" copy");
+            }
+            state.project.next_layer_id += 1;
+            state.selected = Some(copy.id);
+            comp.layers.insert(index, copy);
+        }
+        Command::RenameLayer { name, .. } => {
+            if name.trim().is_empty() || name.len() > 1024 {
+                return Err("Enter a layer name (1–1024 bytes)".into());
+            }
+            layer.name = name.trim().into();
+        }
+        Command::SetLayerRange { start, end, .. } => {
+            if start >= end || end > comp.duration {
+                return Err("Layer range must fit the composition".into());
+            }
+            layer.in_frame = start;
+            layer.out_frame = Some(end);
+        }
+        Command::MoveKeyframe {
+            property, from, to, ..
+        } => {
+            if to >= comp.duration {
+                return Err("Keyframe is outside the composition".into());
+            }
+            let track = layer
+                .properties
+                .get_mut(&property)
+                .ok_or("Property not found")?;
+            if from != to && track.keys.contains_key(&to) {
+                return Err("A keyframe already exists at that frame".into());
+            }
+            let key = track.keys.remove(&from).ok_or("Keyframe not found")?;
+            track.keys.insert(to, key);
+        }
+        Command::ToggleAnimation {
+            property, frame, ..
+        } => {
+            if frame >= comp.duration {
+                return Err("Frame out of range".into());
+            }
+            let track = layer
+                .properties
+                .get_mut(&property)
+                .ok_or("Property not found")?;
+            let value = track.value_at(frame);
+            if track.keys.is_empty() {
+                track.keys.insert(
+                    frame,
+                    Keyframe {
+                        value,
+                        interpolation: Interpolation::Linear,
+                    },
+                );
+            } else {
+                track.value = value;
+                track.keys.clear();
+            }
+        }
         Command::RemoveLayer(_) => {
             comp.layers.remove(index);
             if state.selected == Some(id) {
@@ -543,7 +725,9 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
                 .ok_or("Select a frame containing a keyframe")?;
             key.interpolation = interpolation;
         }
-        Command::AddRectangle => unreachable!(),
+        Command::AddRectangle
+        | Command::ConfigureComposition { .. }
+        | Command::SetPosition { .. } => unreachable!(),
     }
     Ok(())
 }

@@ -13,6 +13,7 @@ tasks:
     command: 'cargo check'
     inputs:
       - 'src/**/*'
+      - 'assets/**/*'
       - 'Cargo.toml'
       - '/Cargo.toml'
       - '/Cargo.lock'
@@ -23,6 +24,7 @@ tasks:
     command: 'cargo build --release'
     inputs:
       - 'src/**/*'
+      - 'assets/**/*'
       - 'Cargo.toml'
       - '/Cargo.toml'
       - '/Cargo.lock'

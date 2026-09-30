@@ -9,6 +9,7 @@ mod panels;
 mod project_io;
 mod shell;
 mod theme;
+mod ui;
 
 use shell::Shell;
 
@@ -32,28 +33,36 @@ fn main() {
         }
     }
 
-    Application::new().run(|cx: &mut App| {
-        let bounds = Bounds::centered(None, size(px(960.), px(600.)), cx);
-        cx.open_window(
-            WindowOptions {
-                titlebar: Some(TitlebarOptions {
-                    title: Some(SharedString::from("Libre Effects")),
+    Application::new()
+        .with_assets(ui::Assets)
+        .run(|cx: &mut App| {
+            cx.text_system()
+                .add_fonts(vec![std::borrow::Cow::Borrowed(include_bytes!(
+                    "../assets/fonts/WantedSans-Regular.ttf"
+                ))])
+                .expect("load bundled Wanted Sans");
+            let bounds = Bounds::centered(None, size(px(1440.), px(900.)), cx);
+            cx.open_window(
+                WindowOptions {
+                    titlebar: Some(TitlebarOptions {
+                        title: Some(SharedString::from("Libre Effects")),
+                        ..Default::default()
+                    }),
+                    window_bounds: Some(WindowBounds::Maximized(bounds)),
+                    window_min_size: Some(size(px(1100.), px(700.))),
                     ..Default::default()
-                }),
-                window_bounds: Some(WindowBounds::Maximized(bounds)),
-                ..Default::default()
-            },
-            |window, cx| {
-                cx.new(|cx| {
-                    cx.observe_window_appearance(window, |_, window, _| {
-                        window.refresh();
-                    })
-                    .detach();
+                },
+                |window, cx| {
+                    cx.new(|cx| {
+                        cx.observe_window_appearance(window, |_, window, _| {
+                            window.refresh();
+                        })
+                        .detach();
 
-                    Shell::new(cx)
-                })
-            },
-        )
-        .expect("failed to open the main window");
-    });
+                        Shell::new(cx)
+                    })
+                },
+            )
+            .expect("failed to open the main window");
+        });
 }

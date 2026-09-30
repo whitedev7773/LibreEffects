@@ -6,6 +6,7 @@ use libre_effects_core::{Command, Editor, Frame, LayerId, Project};
 use crate::components::{Button, ButtonSize, ButtonVariant};
 use crate::project_io::{read_project, write_project};
 
+#[derive(Clone)]
 pub(crate) enum Action {
     Edit(Command),
     Select(LayerId),
@@ -17,6 +18,46 @@ pub(crate) enum Action {
     New,
     Open,
     SaveAs,
+    ZoomTimeline(f32),
+    PanTimeline(i32),
+    ZoomPreview(f32),
+    FitPreview,
+    Checkerboard,
+    SetTool(Tool),
+    WorkStart,
+    WorkEnd,
+    PreviousKey,
+    NextKey,
+    ToggleExpanded,
+    Filter(Option<PropertyFilter>),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Tool {
+    Select,
+    Hand,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PropertyFilter {
+    Position,
+    Anchor,
+    Scale,
+    Rotation,
+    Opacity,
+    Animated,
+}
+impl PropertyFilter {
+    pub fn includes(self, property: libre_effects_core::Property) -> bool {
+        use libre_effects_core::Property::*;
+        match self {
+            Self::Position => matches!(property, PositionX | PositionY),
+            Self::Anchor => matches!(property, AnchorX | AnchorY),
+            Self::Scale => matches!(property, ScaleX | ScaleY),
+            Self::Rotation => property == Rotation,
+            Self::Opacity => property == Opacity,
+            Self::Animated => true,
+        }
+    }
 }
 
 pub(crate) struct EditorState {
@@ -24,6 +65,15 @@ pub(crate) struct EditorState {
     pub frame: Frame,
     pub playing: bool,
     pub status: String,
+    pub timeline_zoom: f32,
+    pub timeline_start: Frame,
+    pub preview_zoom: Option<f32>,
+    pub checkerboard: bool,
+    pub tool: Tool,
+    pub work_start: Frame,
+    pub work_end: Frame,
+    pub expanded: bool,
+    pub property_filter: Option<PropertyFilter>,
     playback_origin: Option<(Instant, Frame)>,
     playback_generation: u64,
 }
@@ -35,6 +85,15 @@ impl Default for EditorState {
             frame: 0,
             playing: false,
             status: "Add a rectangle to start. Projects are saved as .lfe.json.".into(),
+            timeline_zoom: 1.0,
+            timeline_start: 0,
+            preview_zoom: None,
+            checkerboard: false,
+            tool: Tool::Select,
+            work_start: 0,
+            work_end: 150,
+            expanded: true,
+            property_filter: None,
             playback_origin: None,
             playback_generation: 0,
         }
@@ -42,6 +101,20 @@ impl Default for EditorState {
 }
 
 impl EditorState {
+    pub fn visible_frames(&self) -> Frame {
+        ((self.editor.project().composition().duration() as f32 / self.timeline_zoom).ceil()
+            as Frame)
+            .max(2)
+    }
+    fn normalize(&mut self) {
+        let duration = self.editor.project().composition().duration();
+        self.frame = self.frame.min(duration - 1);
+        self.work_start = self.work_start.min(duration - 1);
+        self.work_end = self.work_end.min(duration).max(self.work_start + 1);
+        self.timeline_start = self
+            .timeline_start
+            .min(duration.saturating_sub(self.visible_frames()));
+    }
     fn stop(&mut self) {
         self.playing = false;
         self.playback_origin = None;
@@ -50,6 +123,60 @@ impl EditorState {
 
     pub fn dispatch(&mut self, action: &Action, window: &mut Window, cx: &mut Context<Self>) {
         match action {
+            Action::ZoomTimeline(factor) => {
+                self.timeline_zoom = (self.timeline_zoom * factor).clamp(1.0, 64.0);
+                self.timeline_start = self.frame.saturating_sub(self.visible_frames() / 2);
+            }
+            Action::PanTimeline(delta) => {
+                self.timeline_start =
+                    (i64::from(self.timeline_start) + i64::from(*delta)).max(0) as Frame
+            }
+            Action::ZoomPreview(factor) => {
+                self.preview_zoom =
+                    Some((self.preview_zoom.unwrap_or(0.5) * factor).clamp(0.0625, 8.0))
+            }
+            Action::FitPreview => self.preview_zoom = None,
+            Action::Checkerboard => self.checkerboard = !self.checkerboard,
+            Action::SetTool(tool) => self.tool = *tool,
+            Action::WorkStart => {
+                self.work_start = self.frame;
+                self.work_end = self.work_end.max(self.frame + 1);
+            }
+            Action::WorkEnd => {
+                self.work_end = self.frame + 1;
+                self.work_start = self.work_start.min(self.frame);
+            }
+            Action::ToggleExpanded => self.expanded = !self.expanded,
+            Action::Filter(filter) => {
+                self.property_filter = *filter;
+                self.expanded = true;
+            }
+            Action::PreviousKey | Action::NextKey => {
+                let next = matches!(action, Action::NextKey);
+                let mut frames: Vec<_> = self
+                    .editor
+                    .selected_layer()
+                    .into_iter()
+                    .flat_map(|layer| {
+                        libre_effects_core::Property::ALL
+                            .into_iter()
+                            .flat_map(|property| layer.property(property).keys().keys().copied())
+                    })
+                    .filter(|frame| {
+                        if next {
+                            *frame > self.frame
+                        } else {
+                            *frame < self.frame
+                        }
+                    })
+                    .collect();
+                frames.sort_unstable();
+                if let Some(frame) = if next { frames.first() } else { frames.last() } {
+                    let frame = *frame;
+                    self.stop();
+                    self.frame = frame;
+                }
+            }
             Action::Edit(command) => {
                 self.stop();
                 self.status = match self.editor.execute(command.clone()) {
@@ -74,6 +201,9 @@ impl EditorState {
                     self.stop();
                 } else {
                     self.playing = true;
+                    if self.frame < self.work_start || self.frame >= self.work_end {
+                        self.frame = self.work_start;
+                    }
                     self.playback_origin = Some((Instant::now(), self.frame));
                     self.playback_generation = self.playback_generation.wrapping_add(1);
                     self.schedule_frame(self.playback_generation, window, cx);
@@ -96,6 +226,9 @@ impl EditorState {
                 match self.editor.replace_project(Project::default()) {
                     Ok(()) => {
                         self.frame = 0;
+                        self.work_start = 0;
+                        self.work_end = 150;
+                        self.timeline_start = 0;
                         self.status = "New composition. Undo restores the previous project.".into();
                     }
                     Err(error) => self.status = error,
@@ -104,6 +237,7 @@ impl EditorState {
             Action::Open => self.open(cx),
             Action::SaveAs => self.save_as(cx),
         }
+        self.normalize();
         cx.notify();
     }
 
@@ -115,7 +249,11 @@ impl EditorState {
             if let Some((start, first)) = state.playback_origin {
                 let comp = state.editor.project().composition();
                 let elapsed = (start.elapsed().as_secs_f64() * f64::from(comp.fps())) as u64;
-                state.frame = ((u64::from(first) + elapsed) % u64::from(comp.duration())) as Frame;
+                let end = state.work_end.min(comp.duration());
+                let start = state.work_start.min(end - 1);
+                state.frame = start
+                    + ((u64::from(first.saturating_sub(start)) + elapsed) % u64::from(end - start))
+                        as Frame;
                 cx.notify();
                 state.schedule_frame(generation, window, cx);
             }
@@ -154,6 +292,9 @@ impl EditorState {
                     Ok(()) => {
                         state.stop();
                         state.frame = 0;
+                        state.work_start = 0;
+                        state.work_end = state.editor.project().composition().duration();
+                        state.timeline_start = 0;
                         state.status = "Project opened. Undo restores the previous project.".into();
                     }
                     Err(error) => state.status = format!("Open failed: {error}"),
