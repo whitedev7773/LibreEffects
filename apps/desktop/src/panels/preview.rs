@@ -245,6 +245,9 @@ impl Preview {
         }
         let state = self.state.read(cx);
         let comp = state.editor.project().composition();
+        if !hand && layer.is_some_and(|id| !state.selected_layers.contains(&id)) {
+            return;
+        }
         let transform = layer.and_then(|id| match state.tool {
             Tool::Rotate => TransformGesture::rotate(comp, id, frame, p),
             Tool::Anchor => TransformGesture::anchor(comp, id, frame),
@@ -253,6 +256,24 @@ impl Preview {
             }
             Tool::Hand => None,
         });
+        let transform = if let Some(transform) = transform {
+            match transform.with_selection(
+                comp,
+                state.selected_layers.iter().copied().collect(),
+                frame,
+            ) {
+                Ok(transform) => Some(transform),
+                Err(error) => {
+                    self.state.update(cx, |s, cx| {
+                        s.status = error;
+                        cx.notify();
+                    });
+                    return;
+                }
+            }
+        } else {
+            None
+        };
         if !hand && state.tool != Tool::Select && transform.is_none() {
             return;
         }

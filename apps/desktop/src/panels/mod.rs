@@ -6,6 +6,7 @@ mod graph;
 mod inspector;
 mod markers;
 mod matte;
+mod parent_drag;
 mod preview;
 mod sidebar;
 mod timeline;

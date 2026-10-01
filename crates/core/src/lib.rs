@@ -27,6 +27,8 @@ pub use matte::{MatteMode, TrackMatte};
 mod media;
 pub use media::MediaReplacement;
 mod precompositions;
+mod selection_transform;
+pub use selection_transform::AlignTarget;
 mod time;
 mod tracks;
 pub use editing::{Content, Effects, KeyCopy, KeyRef, Mask, VideoPlayback};
@@ -791,6 +793,29 @@ pub enum Command {
         frame: Frame,
         alignment: Alignment,
     },
+    AlignLayers {
+        ids: Vec<LayerId>,
+        frame: Frame,
+        alignment: Alignment,
+        target: AlignTarget,
+    },
+    DistributeLayers {
+        ids: Vec<LayerId>,
+        frame: Frame,
+        alignment: Alignment,
+    },
+    RotateLayers {
+        ids: Vec<LayerId>,
+        frame: Frame,
+        degrees: f64,
+    },
+    ScaleLayers {
+        ids: Vec<LayerId>,
+        frame: Frame,
+        factor: [f64; 2],
+        /// Percentage-point adjustment for a driving axis starting at zero.
+        offset: [f64; 2],
+    },
     SetParent {
         id: LayerId,
         parent: Option<LayerId>,
@@ -1141,6 +1166,9 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
         return Ok(());
     }
     if let Some(result) = editing::apply_extended(state, &command) {
+        return result;
+    }
+    if let Some(result) = selection_transform::apply(state, &command) {
         return result;
     }
     if let Command::AlignLayer {

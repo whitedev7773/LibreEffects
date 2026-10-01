@@ -216,6 +216,7 @@ impl Shell {
         let key = event.keystroke.key.as_str();
         let m = event.keystroke.modifiers;
         if key == "escape" {
+            cx.stop_active_drag(window);
             self.closing = false;
             self.pending_document = None;
             self.pending_save = false;

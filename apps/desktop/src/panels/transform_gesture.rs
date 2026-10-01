@@ -2,6 +2,12 @@ use libre_effects_core::{Affine, Command, Composition, LayerId, Property};
 
 #[derive(Clone)]
 pub(super) enum TransformGesture {
+    Selection {
+        driver: Box<TransformGesture>,
+        ids: Vec<LayerId>,
+        rotation: f64,
+        scale: [f64; 2],
+    },
     Scale {
         id: LayerId,
         inverse: Affine,
@@ -151,6 +157,145 @@ mod tests {
         close(new_anchor[0], anchor[0] + 40.0);
         close(new_anchor[1], anchor[1] - 25.0);
     }
+    #[test]
+    fn selection_rotation_and_negative_scale_preserve_relative_values_and_child_local_pose() {
+        let mut e = scene();
+        e.execute(Command::AddRectangle).unwrap();
+        for (property, value) in [
+            (Property::ScaleX, -60.0),
+            (Property::ScaleY, 140.0),
+            (Property::Rotation, -10.0),
+        ] {
+            e.execute(Command::SetValue {
+                id: 3,
+                property,
+                frame: 0,
+                value,
+            })
+            .unwrap();
+        }
+        let comp = e.project().composition();
+        let center = [960.0, 540.0];
+        let mut rotate = TransformGesture::rotate(comp, 1, 0, [center[0] + 100.0, center[1]])
+            .unwrap()
+            .with_selection(comp, vec![1, 2, 3], 0)
+            .unwrap();
+        rotate.update([center[0], center[1] + 100.0]);
+        e.execute(rotate.command(0, [0.0; 2], true)).unwrap();
+        close(
+            e.project()
+                .composition()
+                .layer(1)
+                .unwrap()
+                .property(Property::Rotation)
+                .value_at(0),
+            120.0,
+        );
+        close(
+            e.project()
+                .composition()
+                .layer(3)
+                .unwrap()
+                .property(Property::Rotation)
+                .value_at(0),
+            75.0,
+        );
+        close(value(&e, Property::Rotation), 28.0);
+        let comp = e.project().composition();
+        let before = e.project().clone();
+        let driver = TransformGesture::scale(comp, 1, 0, 4)
+            .unwrap()
+            .with_selection(comp, vec![1, 2, 3], 0)
+            .unwrap();
+        let corner = comp.corners_at(1, 0).unwrap()[2];
+        e.execute(Command::ScaleLayers {
+            ids: vec![1],
+            frame: 0,
+            factor: [-0.5, 2.0],
+            offset: [0.0; 2],
+        })
+        .unwrap();
+        let goal = e.project().composition().corners_at(1, 0).unwrap()[2];
+        e.undo();
+        e.execute(driver.command(0, [goal[0] - corner[0], goal[1] - corner[1]], false))
+            .unwrap();
+        close(
+            e.project()
+                .composition()
+                .layer(1)
+                .unwrap()
+                .property(Property::ScaleX)
+                .value_at(0),
+            -80.0,
+        );
+        close(
+            e.project()
+                .composition()
+                .layer(3)
+                .unwrap()
+                .property(Property::ScaleX)
+                .value_at(0),
+            30.0,
+        );
+        close(
+            e.project()
+                .composition()
+                .layer(3)
+                .unwrap()
+                .property(Property::ScaleY)
+                .value_at(0),
+            280.0,
+        );
+        close(value(&e, Property::ScaleX), 100.0);
+        let changed = e.project().clone();
+        e.undo();
+        assert_eq!(e.project(), &before);
+        e.redo();
+        assert_eq!(e.project(), &changed);
+        let saved = libre_effects_core::Project::from_json(&changed.to_json().unwrap()).unwrap();
+        let renderer = crate::rendering::Renderer::new();
+        assert_eq!(
+            renderer.render(&saved, 0, 200).unwrap(),
+            renderer.render(&changed, 0, 200).unwrap()
+        );
+    }
+    #[test]
+    fn selection_scale_can_leave_zero_without_nan_and_rejects_locked_members() {
+        let mut e = libre_effects_core::Editor::default();
+        e.execute(Command::AddRectangle).unwrap();
+        e.execute(Command::AddRectangle).unwrap();
+        e.execute(Command::SetValue {
+            id: 1,
+            property: Property::ScaleX,
+            frame: 0,
+            value: 0.0,
+        })
+        .unwrap();
+        let comp = e.project().composition();
+        let gesture = TransformGesture::scale(comp, 1, 0, 3)
+            .unwrap()
+            .with_selection(comp, vec![1, 2], 0)
+            .unwrap();
+        e.execute(gesture.command(0, [16.0, 0.0], false)).unwrap();
+        close(
+            e.project()
+                .composition()
+                .layer(1)
+                .unwrap()
+                .property(Property::ScaleX)
+                .value_at(0),
+            10.0,
+        );
+        close(value(&e, Property::ScaleX), 110.0);
+        close(value(&e, Property::ScaleY), 100.0);
+        e.execute(Command::ToggleLocked(2)).unwrap();
+        assert!(
+            TransformGesture::scale(e.project().composition(), 1, 0, 3)
+                .unwrap()
+                .with_selection(e.project().composition(), vec![1, 2], 0)
+                .is_err()
+        );
+    }
 }
 pub(super) fn handles(width: f64, height: f64) -> [[f64; 2]; 8] {
     [
@@ -165,6 +310,31 @@ pub(super) fn handles(width: f64, height: f64) -> [[f64; 2]; 8] {
     ]
 }
 impl TransformGesture {
+    pub fn with_selection(
+        self,
+        comp: &Composition,
+        ids: Vec<LayerId>,
+        frame: u32,
+    ) -> Result<Self, String> {
+        if ids.len() <= 1 || matches!(self, Self::Anchor { .. }) {
+            return Ok(self);
+        }
+        let id = match &self {
+            Self::Scale { id, .. } | Self::Rotate { id, .. } => *id,
+            _ => return Ok(self),
+        };
+        comp.selection_roots(&ids)?;
+        let layer = comp.layer(id).ok_or("Layer not found")?;
+        Ok(Self::Selection {
+            rotation: layer.property(Property::Rotation).value_at(frame),
+            scale: [
+                layer.property(Property::ScaleX).value_at(frame),
+                layer.property(Property::ScaleY).value_at(frame),
+            ],
+            driver: Box::new(self),
+            ids,
+        })
+    }
     pub fn scale(comp: &Composition, id: LayerId, frame: u32, handle: usize) -> Option<Self> {
         let l = comp.layer(id)?;
         let anchor = [
@@ -216,6 +386,10 @@ impl TransformGesture {
         })
     }
     pub fn update(&mut self, pointer: [f64; 2]) {
+        if let Self::Selection { driver, .. } = self {
+            driver.update(pointer);
+            return;
+        }
         if let Self::Rotate {
             inverse,
             center,
@@ -236,6 +410,42 @@ impl TransformGesture {
     }
     pub fn command(&self, frame: u32, delta: [f64; 2], constrained: bool) -> Command {
         match self {
+            Self::Selection {
+                driver,
+                ids,
+                rotation,
+                scale,
+            } => match driver.command(frame, delta, constrained) {
+                Command::SetValue {
+                    property: Property::Rotation,
+                    value,
+                    ..
+                } => Command::RotateLayers {
+                    ids: ids.clone(),
+                    frame,
+                    degrees: value - rotation,
+                },
+                Command::Batch(changes) => {
+                    let mut factor = [1.0; 2];
+                    let mut offset = [0.0; 2];
+                    for (axis, change) in changes.into_iter().enumerate() {
+                        if let Command::SetValue { value, .. } = change {
+                            if scale[axis].abs() < 1e-12 {
+                                offset[axis] = value;
+                            } else {
+                                factor[axis] = value / scale[axis];
+                            }
+                        }
+                    }
+                    Command::ScaleLayers {
+                        ids: ids.clone(),
+                        frame,
+                        factor,
+                        offset,
+                    }
+                }
+                _ => unreachable!("Only rotation and scale use a selection driver"),
+            },
             Self::Anchor {
                 id,
                 inverse,

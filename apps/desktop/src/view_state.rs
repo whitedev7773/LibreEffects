@@ -61,6 +61,7 @@ pub(crate) struct WorkspaceView {
     pub sidebar_expanded: [bool; 4],
     pub effect_controls_open: bool,
     pub snapping: bool,
+    pub align_to_selection: bool,
 }
 impl Default for WorkspaceView {
     fn default() -> Self {
@@ -70,6 +71,7 @@ impl Default for WorkspaceView {
             sidebar_expanded: [true, false, false, false],
             effect_controls_open: false,
             snapping: true,
+            align_to_selection: false,
         }
     }
 }
@@ -167,6 +169,7 @@ mod tests {
             },
         );
         views.workspace.fractions = [0.8, 0.25, 0.7, 0.5];
+        views.workspace.align_to_selection = true;
         let json = views.write(&p).unwrap();
         assert_eq!(Project::from_json(&json).unwrap(), p);
         assert_eq!(ProjectViews::read(&json, &p), views);

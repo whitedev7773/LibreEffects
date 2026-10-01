@@ -18,7 +18,7 @@ editor, not a complete After Effects replacement or an AEP-compatible applicatio
 - Drag panel dividers to resize; double-click a divider or choose Window → Reset
   default workspace to restore the layout.
 - Save (Ctrl+S) also records panel proportions, the timeline column width, right
-  dock sections, Effect Controls tab and Snap preference in optional `editor_view`
+  dock sections, Effect Controls tab, Align target and Snap preference in optional `editor_view`
   metadata. Each composition remembers its playhead, timeline zoom/position,
   preview zoom/pan/resolution, checkerboard and graph visibility.
   View changes do not add Undo steps or mark the render document dirty; save
@@ -67,14 +67,23 @@ editor, not a complete After Effects replacement or an AEP-compatible applicatio
 - Drag selected layers in the composition to move them together in one undo step.
   Selected parent/child groups move once through their selected root ancestors.
   Drag any of the eight handles to scale, or use W/Y for rotation/anchor editing.
+  Rotation and scale gestures affect all selected roots around each root's own
+  anchor: rotation adds the same angle; scale multiplies by the same axis factors.
+  A driver axis starting at zero instead adds its percentage-point change.
+  Selected descendants inherit the root transform once. Unlock every selected
+  layer first; numeric fields and the anchor tool still edit one layer.
 - Hand tool pans the composition. Fit resets pan and scale; zoom controls support
   6.25%–800%. The transparency grid can be toggled.
 - Drag layer bars to shift the selected layers and their keys; drag bar edges or
   edit In/Out fields to trim visibility. Out is exclusive. Moves outside the
   composition and edits to locked layers are rejected atomically.
-- Align offers six composition-edge/center actions for the selected unlocked layer.
-  Alignment uses transformed bounds, including rotation and parenting, and commits
-  one undo step. Animated position channels receive a key at the current frame.
+- Align offers six edge/center actions against Composition or Selection bounds.
+  Selection alignment needs two independent roots; the six distribution buttons
+  need three and space the chosen edges/centers between the existing extremes.
+  Rotated/negative-scale source bounds are included; masks and effect expansion
+  are excluded. Selected parents carry selected children without a second edit.
+  Each operation commits one undo step; animated positions receive a current-frame
+  key. Alignment through a zero-scale parent is rejected when movement is needed.
 
 ## Parenting
 
@@ -82,6 +91,11 @@ Layer > New null object creates an invisible 100 × 100 transform controller,
 with its anchor at the upper-left corner. Its outline is a viewer overlay and
 is never rendered into PNG/video or a nested composition. Assign children through
 Parent & Link; its animated transforms affect children even when the Null is hidden.
+Drag the Gravity link icon beside the parent dropdown onto another layer's name
+for Pick Whip parenting. Valid targets highlight; Escape cancels. The current
+world pose is preserved by a transform offset. Self/circular links, locked children,
+zero-scale parents and a drag from an outdated document are rejected. Clicking the
+icon also opens the existing keyboard-operable parent menu.
 
 ### Layer switches and clipboard
 

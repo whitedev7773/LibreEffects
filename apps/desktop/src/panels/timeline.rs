@@ -1,3 +1,4 @@
+use super::parent_drag::ParentDrag;
 use crate::{
     components::TextField,
     editor::{Action, EditorState, PropertyFilter},
@@ -411,6 +412,16 @@ impl Render for Timeline {
         let work_start = state.work_start;
         let work_end = state.work_end;
         let bounds = self.ruler.clone();
+        let parent_drags: BTreeMap<_, _> = comp
+            .layers()
+            .iter()
+            .map(|layer| {
+                (
+                    layer.id(),
+                    ParentDrag::new(state, layer.id(), layer.name().to_string()),
+                )
+            })
+            .collect();
         let mut rows = div().flex().flex_col().w_full();
         let query = self.search.read(cx).value().trim().to_lowercase();
         for (index, layer) in comp.layers().iter().enumerate() {
@@ -522,6 +533,26 @@ impl Render for Timeline {
                         .min_w_0()
                         .justify_start()
                         .overflow_hidden()
+                        .drag_over::<ParentDrag>({
+                            let state = self.state.clone();
+                            move |style, drag, _, cx| {
+                                if drag.command(state.read(cx), id).is_some() {
+                                    style.bg(rgb(0x164a7b))
+                                } else {
+                                    style
+                                }
+                            }
+                        })
+                        .on_drop(cx.listener(move |this, drag: &ParentDrag, window, cx| {
+                            let command = drag.command(this.state.read(cx), id);
+                            if let Some(command) = command {
+                                this.parent_open = None;
+                                this.state.update(cx, |s, cx| {
+                                    s.dispatch(&Action::Edit(command), window, cx)
+                                });
+                            }
+                            cx.stop_propagation();
+                        }))
                         .on_click(cx.listener(
                             move |this, event: &gpui::ClickEvent, window, cx| {
                                 window.focus(&this.focus);
@@ -571,8 +602,21 @@ impl Render for Timeline {
                     .w(px(135.0))
                     .flex_none()
                     .child(
+                        div().flex().items_center().child(
+                            ui::tool(control_id("pick-whip"),"circle-link",
+                                "Parent Pick Whip: drag to a layer name; click for the parent menu",false)
+                                .w(px(22.0)).h(px(22.0))
+                                .when(layer.locked(),|b|b.opacity(0.35))
+                                .when(!layer.locked(),|b| b.on_drag(
+                                    parent_drags[&id].clone(),
+                                    |drag,_,_,cx|cx.new(|_|drag.clone())))
+                                .on_click(cx.listener(move|this,_,_,cx| {
+                                    this.parent_open=if this.parent_open==Some(id) {None} else {Some(id)};
+                                    cx.notify();
+                                }))
+                        ).child(
                         ui::text_button(control_id("parent"), format!("{parent_name} ▾"))
-                            .w_full()
+                            .flex_1().min_w_0()
                             .overflow_hidden()
                             .justify_start()
                             .on_click(cx.listener(move |this, _, _, cx| {
@@ -582,7 +626,7 @@ impl Render for Timeline {
                                     Some(id)
                                 };
                                 cx.notify();
-                            })),
+                            }))),
                     )
                     .when(self.parent_open == Some(id), |s| {
                         let choices = std::iter::once((None, "None".to_string())).chain(

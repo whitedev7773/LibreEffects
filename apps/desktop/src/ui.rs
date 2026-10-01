@@ -77,7 +77,8 @@ impl AssetSource for Assets {
             "object-align-top",
             "object-align-center-vertical",
             "object-align-bottom",
-            "chart-line"
+            "chart-line",
+            "circle-link"
         ))
     }
     fn list(&self, _: &str) -> anyhow::Result<Vec<SharedString>> {

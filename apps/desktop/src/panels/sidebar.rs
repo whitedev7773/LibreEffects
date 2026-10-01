@@ -4,7 +4,7 @@ use crate::{
     ui,
 };
 use gpui::{Context, Entity, Window, div, prelude::*, px, rgb};
-use libre_effects_core::{Alignment, Command};
+use libre_effects_core::{AlignTarget, Alignment, Command};
 
 pub(crate) struct Sidebar {
     state: Entity<EditorState>,
@@ -147,9 +147,32 @@ impl Align {
 impl Render for Align {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.state.read(cx);
-        let selected = state.editor.selected();
+        let ids: Vec<_> = state.selected_layers.iter().copied().collect();
         let frame = state.frame;
-        let enabled = state.editor.selected_layer().is_some_and(|l| !l.locked());
+        let roots = state.editor.project().composition().selection_roots(&ids);
+        let count = roots.as_ref().map_or(0, |ids| ids.len());
+        let selection = state.workspace.align_to_selection;
+        let enabled = count >= if selection { 2 } else { 1 };
+        let distribute_enabled = count >= 3;
+        let mut target_controls = div().flex().gap_1();
+        for (key, label, target) in [
+            ("align-composition", "Composition", false),
+            ("align-selection", "Selection", true),
+        ] {
+            target_controls = target_controls.child(
+                ui::text_button(key, label)
+                    .when(selection == target, |b| {
+                        b.bg(rgb(0x164a7b)).text_color(rgb(ui::BLUE))
+                    })
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.state.update(cx, |s, cx| {
+                            s.workspace.align_to_selection = target;
+                            cx.notify();
+                        });
+                    })),
+            );
+        }
+        let mut distributions = div().flex().gap_2();
         let mut controls = div().flex().gap_2();
         for (index, (icon, label, alignment)) in [
             ("object-align-left", "Align left", Alignment::Left),
@@ -180,16 +203,57 @@ impl Render for Align {
                 .when(!enabled, |s| s.opacity(0.35))
                 .on_click({
                     let state = self.state.clone();
+                    let ids = ids.clone();
                     move |_, window, cx| {
-                        if let Some(id) = selected.filter(|_| enabled) {
+                        if enabled {
                             state.update(cx, |s, cx| {
                                 s.dispatch(
-                                    &Action::Edit(Command::AlignLayer {
-                                        id,
+                                    &Action::Edit(Command::AlignLayers {
+                                        ids: ids.clone(),
+                                        target: if selection {
+                                            AlignTarget::Selection
+                                        } else {
+                                            AlignTarget::Composition
+                                        },
                                         frame,
                                         alignment,
                                     }),
                                     window,
+                                    cx,
+                                )
+                            });
+                        }
+                    }
+                }),
+            );
+            distributions = distributions.child(
+                ui::tool(
+                    gpui::SharedString::from(format!("distribute-{index}")),
+                    icon,
+                    match alignment {
+                        Alignment::Left => "Distribute left edges",
+                        Alignment::HorizontalCenter => "Distribute horizontal centers",
+                        Alignment::Right => "Distribute right edges",
+                        Alignment::Top => "Distribute top edges",
+                        Alignment::VerticalCenter => "Distribute vertical centers",
+                        Alignment::Bottom => "Distribute bottom edges",
+                    },
+                    false,
+                )
+                .when(!distribute_enabled, |b| b.opacity(0.35))
+                .on_click({
+                    let state = self.state.clone();
+                    let ids = ids.clone();
+                    move |_, w, cx| {
+                        if distribute_enabled {
+                            state.update(cx, |s, cx| {
+                                s.dispatch(
+                                    &Action::Edit(Command::DistributeLayers {
+                                        ids: ids.clone(),
+                                        frame,
+                                        alignment,
+                                    }),
+                                    w,
                                     cx,
                                 )
                             });
@@ -210,13 +274,18 @@ impl Render for Align {
                     .flex()
                     .flex_col()
                     .gap_3()
-                    .child("Align Layers to:  Composition")
+                    .child("Align Layers to:")
+                    .child(target_controls)
                     .child(controls)
+                    .child("Distribute Layers:")
+                    .child(distributions)
                     .child(div().text_size(px(10.0)).text_color(rgb(ui::MUTED)).child(
-                        if enabled {
-                            "Align selected layer bounds"
+                        if roots.is_err() {
+                            "Select unlocked layers"
+                        } else if count < 3 {
+                            "Distribution needs 3 independent layers"
                         } else {
-                            "Select an unlocked layer"
+                            "Selected parents carry their children"
                         },
                     )),
             )
