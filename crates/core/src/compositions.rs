@@ -100,6 +100,7 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                 comp.name = format!("{} copy", comp.name);
             } else {
                 comp.layers.clear();
+                comp.guides.clear();
                 comp.markers = Default::default();
                 comp.work_area = None;
                 comp.name = format!("Composition {id:02}");

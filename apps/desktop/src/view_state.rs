@@ -13,6 +13,7 @@ pub(crate) struct CompositionView {
     pub preview_pan: [f32; 2],
     pub preview_resolution: u32,
     pub checkerboard: bool,
+    pub viewer: crate::viewer_tools::ViewerOptions,
     pub graph_open: bool,
     pub expanded: bool,
 }
@@ -26,6 +27,7 @@ impl Default for CompositionView {
             preview_pan: [0.0; 2],
             preview_resolution: 1,
             checkerboard: false,
+            viewer: Default::default(),
             graph_open: false,
             expanded: true,
         }
@@ -41,6 +43,7 @@ fn finite(value: f32, default: f32, min: f32, max: f32) -> f32 {
 impl CompositionView {
     pub fn normalize(&mut self, duration: u32) {
         self.frame = self.frame.min(duration - 1);
+        self.viewer.normalize();
         self.timeline_zoom = finite(self.timeline_zoom, 1.0, 1.0, 64.0);
         let visible = ((duration as f32 / self.timeline_zoom).ceil() as u32).max(2);
         self.timeline_start = self.timeline_start.min(duration.saturating_sub(visible));
@@ -164,6 +167,12 @@ mod tests {
                 preview_zoom: Some(0.75),
                 preview_resolution: 2,
                 checkerboard: true,
+                viewer: crate::viewer_tools::ViewerOptions {
+                    rulers: true,
+                    grid: true,
+                    channel: crate::viewer_tools::Channel::Alpha,
+                    ..Default::default()
+                },
                 graph_open: true,
                 expanded: false,
             },

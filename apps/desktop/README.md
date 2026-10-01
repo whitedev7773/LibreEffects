@@ -85,6 +85,33 @@ editor, not a complete After Effects replacement or an AEP-compatible applicatio
   Each operation commits one undo step; animated positions receive a current-frame
   key. Alignment through a zero-scale parent is rejected when movement is needed.
 
+## Viewer guides and channels
+
+- Composition's **Guides** menu (also View) toggles rulers, grid, guides and the
+  90% action-safe / 80% title-safe rectangles. Ctrl+R toggles rulers. Fit reserves
+  ruler space; guide positions, grid spacing and labels follow composition pixels
+  through zoom and pan. The grid menu cycles 50 / 100 / 200-pixel spacing.
+- Drag from the top ruler for a horizontal guide or the left ruler for a vertical
+  guide. Drag a guide to move it; drag back onto a ruler or outside the viewer to
+  remove it. Escape cancels; Lock guides prevents editing and clearing.
+  Up to 256 guides per composition are saved with the document (version 20), and
+  add/move/remove/clear support Undo/Redo. Duplicate composition copies guides;
+  a new composition or precomposed source starts without them.
+- Guide/grid snapping moves selected layers as one unit using their transformed
+  source edges and centers. It activates within 8 logical pixels, independent of
+  zoom; Alt bypasses it. Only visible guides/grid snap. Rotation and scale gestures
+  are unaffected. Grid subdivisions under 8 screen pixels are hidden for clarity.
+- The channel menu shows RGB, Red, Green, Blue or Alpha. Individual channels use
+  opaque grayscale; the color channels show straight RGB. Info always samples
+  unmodified RGBA before the background, selection outlines and layout aids.
+  It reports composition X/Y and the sample buffer resolution; Half/Quarter or
+  the existing 1280-pixel preview cap can differ from a full-resolution export.
+- Both viewer menus support Up/Down, Enter/Space and Escape. Display preferences
+  are saved per composition in `editor_view`; they do not create Undo steps or
+  mark the document dirty. Save explicitly after changing only view preferences.
+  Guides and all display preferences are excluded from PNG, MP4, MOV and nested
+  compositions. No guide preset import/export or custom ruler origin is provided.
+
 ## Parenting
 
 Layer > New null object creates an invisible 100 × 100 transform controller,

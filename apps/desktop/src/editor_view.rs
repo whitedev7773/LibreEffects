@@ -11,6 +11,7 @@ impl EditorState {
             preview_pan: self.preview_pan,
             preview_resolution: self.preview_resolution,
             checkerboard: self.checkerboard,
+            viewer: self.viewer.clone(),
             graph_open: self.graph_open,
             expanded: self.expanded,
         }
@@ -40,6 +41,8 @@ impl EditorState {
         self.preview_pan = view.preview_pan;
         self.preview_resolution = view.preview_resolution;
         self.checkerboard = view.checkerboard;
+        self.viewer = view.viewer;
+        self.pixel_info = None;
         self.graph_open = view.graph_open;
         self.expanded = view.expanded;
     }

@@ -11,7 +11,18 @@ use libre_effects_core::{Affine, Command, LayerId, Property};
 use std::{cell::Cell, rc::Rc};
 #[path = "transform_gesture.rs"]
 mod transform_gesture;
+use crate::viewer_tools::{self, Channel, RULER, ViewOption};
+use libre_effects_core::{Guide, GuideAxis};
 use transform_gesture::{TransformGesture, handles};
+
+#[derive(Clone)]
+struct GuideGesture {
+    original: Vec<Guide>,
+    index: Option<usize>,
+    guide: Guide,
+    revision: u64,
+    composition: libre_effects_core::CompositionId,
+}
 
 #[derive(Clone)]
 struct MoveGesture {
@@ -26,6 +37,7 @@ struct MoveGesture {
     transform: Option<TransformGesture>,
     constrained: bool,
     moved: bool,
+    snap_points: Vec<[f64; 2]>,
 }
 fn move_command(g: &MoveGesture) -> Command {
     if let Some(transform) = &g.transform {
@@ -61,6 +73,13 @@ pub(crate) struct Preview {
     bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     gesture: Option<MoveGesture>,
     focus: FocusHandle,
+    guide_gesture: Option<GuideGesture>,
+    options_open: bool,
+    channels_open: bool,
+    menu_focus: FocusHandle,
+    menu_index: usize,
+    raw: Option<image::RgbaImage>,
+    display_channel: Channel,
     renderer: crate::rendering::Renderer,
     pending: bool,
     revision: u64,
@@ -99,7 +118,19 @@ fn geometry(
     height: u32,
     zoom: Option<f32>,
     pan: Point<Pixels>,
+    rulers: bool,
 ) -> (f32, Point<Pixels>) {
+    let bounds = if rulers {
+        Bounds::new(
+            bounds.origin + point(px(RULER), px(RULER)),
+            size(
+                (bounds.size.width - px(RULER)).max(px(1.0)),
+                (bounds.size.height - px(RULER)).max(px(1.0)),
+            ),
+        )
+    } else {
+        bounds
+    };
     let fit = ((f32::from(bounds.size.width) - 48.0).max(1.0) / width as f32)
         .min((f32::from(bounds.size.height) - 48.0).max(1.0) / height as f32);
     let zoom = zoom.unwrap_or(fit);
@@ -135,12 +166,176 @@ impl Preview {
             bounds: Rc::new(Cell::new(None)),
             gesture: None,
             focus: cx.focus_handle(),
+            guide_gesture: None,
+            options_open: false,
+            channels_open: false,
+            menu_focus: cx.focus_handle(),
+            menu_index: 0,
+            raw: None,
+            display_channel: Channel::Rgb,
             renderer: crate::rendering::Renderer::new(),
             pending: false,
             revision: 0,
             ready: None,
             failed: None,
             cached: None,
+        }
+    }
+    fn menu_key(&mut self, event: &gpui::KeyUpEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let count = if self.channels_open {
+            Channel::ALL.len()
+        } else {
+            ViewOption::ALL.len() + 1
+        };
+        match event.keystroke.key.as_str() {
+            "escape" => {
+                self.channels_open = false;
+                self.options_open = false;
+                window.focus(&self.focus);
+            }
+            "up" => self.menu_index = (self.menu_index + count - 1) % count,
+            "down" => self.menu_index = (self.menu_index + 1) % count,
+            "enter" | "space" => {
+                let action = if self.channels_open {
+                    Some(Action::PreviewChannel(Channel::ALL[self.menu_index]))
+                } else {
+                    Some(
+                        ViewOption::ALL
+                            .get(self.menu_index)
+                            .map_or(Action::ClearGuides, |option| Action::ViewerOption(*option)),
+                    )
+                };
+                if let Some(action) = action {
+                    self.state
+                        .update(cx, |s, cx| s.dispatch(&action, window, cx));
+                }
+                if self.channels_open {
+                    self.channels_open = false;
+                    window.focus(&self.focus);
+                }
+            }
+            _ => return,
+        }
+        cx.stop_propagation();
+        cx.notify();
+    }
+    fn cache_pixels(
+        &mut self,
+        project: libre_effects_core::Project,
+        frame: u32,
+        dimension: u32,
+        pixels: image::RgbaImage,
+        channel: Channel,
+        window: &mut Window,
+    ) {
+        if let Some((_, _, _, old)) = self.cached.take() {
+            let _ = window.drop_image(old);
+        }
+        let display = channel.display(&pixels);
+        self.raw = Some(pixels);
+        self.display_channel = channel;
+        self.cached = Some((
+            project,
+            frame,
+            dimension,
+            std::sync::Arc::new(gpui::RenderImage::new(vec![image::Frame::new(display)])),
+        ));
+    }
+    fn guide_update(&mut self, position: Point<Pixels>, cx: &Context<Self>) {
+        let Some(bounds) = self.bounds.get() else {
+            return;
+        };
+        let state = self.state.read(cx);
+        let comp = state.editor.project().composition();
+        let (zoom, origin) = geometry(
+            bounds,
+            comp.width(),
+            comp.height(),
+            state.preview_zoom,
+            point(px(state.preview_pan[0]), px(state.preview_pan[1])),
+            state.viewer.rulers,
+        );
+        if let Some(g) = &mut self.guide_gesture {
+            let value = match g.guide.axis {
+                GuideAxis::Vertical => f32::from(position.x - origin.x),
+                GuideAxis::Horizontal => f32::from(position.y - origin.y),
+            } / zoom;
+            g.guide.position = f64::from(value).round().clamp(-32768.0, 32768.0);
+        }
+    }
+    fn snap_move(&self, delta: Point<Pixels>, alt: bool, cx: &Context<Self>) -> Point<Pixels> {
+        let Some(g) = &self.gesture else {
+            return delta;
+        };
+        if g.layer.is_none() || g.transform.is_some() {
+            return delta;
+        }
+        // Merely selecting a layer near a guide must not move it.
+        if !g.moved && f32::from(delta.x).abs() + f32::from(delta.y).abs() <= 1.0 {
+            return delta;
+        }
+        let s = self.state.read(cx);
+        let snapped = viewer_tools::snap_delta(
+            &g.snap_points,
+            [
+                f64::from(f32::from(delta.x) / g.zoom),
+                f64::from(f32::from(delta.y) / g.zoom),
+            ],
+            g.zoom,
+            s.editor.project().composition().guides(),
+            &s.viewer,
+            alt,
+        );
+        point(
+            px(snapped[0] as f32 * g.zoom),
+            px(snapped[1] as f32 * g.zoom),
+        )
+    }
+    fn sample_pointer(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        let info = (|| {
+            let bounds = self.bounds.get()?;
+            if !bounds.contains(&position) {
+                return None;
+            }
+            let state = self.state.read(cx);
+            if state.viewer.rulers
+                && (position.x < bounds.left() + px(RULER) || position.y < bounds.top() + px(RULER))
+            {
+                return None;
+            }
+            let (project, frame, _, _) = self.cached.as_ref()?;
+            if project != state.editor.project() || *frame != state.frame {
+                return None;
+            }
+            let comp = project.composition();
+            let (zoom, origin) = geometry(
+                bounds,
+                comp.width(),
+                comp.height(),
+                state.preview_zoom,
+                point(px(state.preview_pan[0]), px(state.preview_pan[1])),
+                state.viewer.rulers,
+            );
+            let pixel = viewer_tools::sample(
+                self.raw.as_ref()?,
+                [comp.width(), comp.height()],
+                [
+                    f64::from(f32::from(position.x - origin.x) / zoom),
+                    f64::from(f32::from(position.y - origin.y) / zoom),
+                ],
+                *frame,
+            )?;
+            Some((
+                state.document_revision,
+                project.active_composition_id(),
+                pixel,
+            ))
+        })();
+        if self.state.read(cx).pixel_info != info {
+            self.state.update(cx, |s, cx| {
+                s.pixel_info = info;
+                cx.notify();
+            });
         }
     }
     fn down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -152,11 +347,64 @@ impl Preview {
         let comp = state.editor.project().composition();
         let frame = state.frame;
         let pan = point(px(state.preview_pan[0]), px(state.preview_pan[1]));
-        let (zoom, origin) = geometry(bounds, comp.width(), comp.height(), state.preview_zoom, pan);
+        let (zoom, origin) = geometry(
+            bounds,
+            comp.width(),
+            comp.height(),
+            state.preview_zoom,
+            pan,
+            state.viewer.rulers,
+        );
         let p = [
             f32::from(event.position.x - origin.x) as f64 / zoom as f64,
             f32::from(event.position.y - origin.y) as f64 / zoom as f64,
         ];
+        if state.viewer.rulers
+            && (event.position.x < bounds.left() + px(RULER)
+                || event.position.y < bounds.top() + px(RULER))
+        {
+            if !state.viewer.lock_guides {
+                let axis = if event.position.y < bounds.top() + px(RULER) {
+                    GuideAxis::Horizontal
+                } else {
+                    GuideAxis::Vertical
+                };
+                self.guide_gesture = Some(GuideGesture {
+                    original: comp.guides().to_vec(),
+                    index: None,
+                    guide: Guide {
+                        axis,
+                        position: 0.0,
+                    },
+                    revision: state.document_revision,
+                    composition: state.editor.project().active_composition_id(),
+                });
+                self.state.update(cx, |s, cx| {
+                    s.viewer.guides = true;
+                    cx.notify();
+                });
+                self.guide_update(event.position, cx);
+            }
+            cx.notify();
+            return;
+        }
+        if state.viewer.guides && !state.viewer.lock_guides && state.tool != Tool::Hand {
+            if let Some((index, guide)) = comp.guides().iter().enumerate().find(|(_, g)| {
+                (g.position - p[if g.axis == GuideAxis::Vertical { 0 } else { 1 }]).abs()
+                    * f64::from(zoom)
+                    <= 5.0
+            }) {
+                self.guide_gesture = Some(GuideGesture {
+                    original: comp.guides().to_vec(),
+                    index: Some(index),
+                    guide: *guide,
+                    revision: state.document_revision,
+                    composition: state.editor.project().active_composition_id(),
+                });
+                cx.notify();
+                return;
+            }
+        }
         let handle_hit = comp
             .layers()
             .iter()
@@ -282,7 +530,7 @@ impl Preview {
             .iter()
             .filter(|l| state.selected_layers.contains(&l.id()) && !l.locked())
             .collect();
-        let targets = candidates
+        let targets: Vec<_> = candidates
             .iter()
             .filter(|l| {
                 !candidates.iter().any(|parent| {
@@ -300,6 +548,11 @@ impl Preview {
                 ))
             })
             .collect();
+        let snap_points = targets
+            .iter()
+            .filter_map(|(id, _, _)| comp.layer_bounds(*id, frame))
+            .flat_map(|[l, t, r, b]| [[l, t], [r, b], [(l + r) / 2.0, (t + b) / 2.0]])
+            .collect();
         if hand || layer.is_some() {
             self.gesture = Some(MoveGesture {
                 start: event.position,
@@ -313,6 +566,7 @@ impl Preview {
                 transform,
                 constrained: event.modifiers.shift,
                 moved: false,
+                snap_points,
             });
             self.state
                 .update(cx, |s, cx| s.dispatch(&Action::Seek(frame), window, cx));
@@ -320,11 +574,21 @@ impl Preview {
         cx.notify();
     }
     fn moving(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+        self.sample_pointer(event.position, cx);
         if event.pressed_button != Some(MouseButton::Left) {
             return;
         }
+        if self.guide_gesture.is_some() {
+            self.guide_update(event.position, cx);
+            cx.notify();
+            return;
+        }
+        let snapped = self
+            .gesture
+            .as_ref()
+            .map(|g| self.snap_move(event.position - g.start, event.modifiers.alt, cx));
         if let Some(gesture) = &mut self.gesture {
-            gesture.delta = event.position - gesture.start;
+            gesture.delta = snapped.unwrap_or(event.position - gesture.start);
             gesture.moved |=
                 f32::from(gesture.delta.x).abs() + f32::from(gesture.delta.y).abs() > 1.0;
             gesture.constrained = event.modifiers.shift;
@@ -345,8 +609,44 @@ impl Preview {
         }
     }
     fn up(&mut self, event: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.guide_gesture.is_some() {
+            self.guide_update(event.position, cx);
+            let g = self.guide_gesture.take().unwrap();
+            let state = self.state.read(cx);
+            let comp = state.editor.project().composition();
+            if g.revision == state.document_revision
+                && g.original == comp.guides()
+                && g.composition == state.editor.project().active_composition_id()
+                && !state.viewer.lock_guides
+            {
+                let mut guides = comp.guides().to_vec();
+                let keep = self.bounds.get().is_some_and(|b| {
+                    b.contains(&event.position)
+                        && (!state.viewer.rulers
+                            || (event.position.x >= b.left() + px(RULER)
+                                && event.position.y >= b.top() + px(RULER)))
+                });
+                match (g.index, keep) {
+                    (Some(i), true) => guides[i] = g.guide,
+                    (Some(i), false) => {
+                        guides.remove(i);
+                    }
+                    (None, true) => guides.push(g.guide),
+                    _ => {}
+                }
+                self.state.update(cx, |s, cx| {
+                    s.dispatch(&Action::Edit(Command::SetGuides(guides)), window, cx)
+                });
+            }
+            cx.notify();
+            return;
+        }
+        let snapped = self
+            .gesture
+            .as_ref()
+            .map(|g| self.snap_move(event.position - g.start, event.modifiers.alt, cx));
         if let Some(mut gesture) = self.gesture.take() {
-            gesture.delta = event.position - gesture.start;
+            gesture.delta = snapped.unwrap_or(event.position - gesture.start);
             gesture.moved |=
                 f32::from(gesture.delta.x).abs() + f32::from(gesture.delta.y).abs() > 1.0;
             gesture.constrained = event.modifiers.shift;
@@ -379,7 +679,22 @@ impl Render for Preview {
         let frame = state.frame;
         let selected = state.selected_layers.clone();
         let zoom = state.preview_zoom;
-        let checker = state.checkerboard;
+        let viewer = state.viewer.clone();
+        let channel = viewer.channel;
+        let checker = state.checkerboard && channel == Channel::Rgb;
+        let mut guides = comp.guides().to_vec();
+        if let Some(g) = &self.guide_gesture {
+            if g.revision == state.document_revision
+                && g.original == comp.guides()
+                && g.composition == state.editor.project().active_composition_id()
+            {
+                if let Some(i) = g.index {
+                    guides[i] = g.guide;
+                } else {
+                    guides.push(g.guide);
+                }
+            }
+        }
         let resolution = state.preview_resolution;
         let revision = state.preview_revision;
         let playing = state.playing;
@@ -423,18 +738,8 @@ impl Render for Preview {
                     let _ = window.drop_image(old);
                 }
                 match result {
-                    Ok(mut pixels) => {
-                        for p in pixels.pixels_mut() {
-                            p.0.swap(0, 2);
-                        }
-                        self.cached = Some((
-                            project,
-                            ready_frame,
-                            dimension,
-                            std::sync::Arc::new(gpui::RenderImage::new(vec![image::Frame::new(
-                                pixels,
-                            )])),
-                        ));
+                    Ok(pixels) => {
+                        self.cache_pixels(project, ready_frame, dimension, pixels, channel, window);
                         self.failed = None;
                     }
                     Err(e) => self.failed = Some((project, ready_frame, dimension, e)),
@@ -499,18 +804,15 @@ impl Render for Preview {
                     .renderer
                     .render_preview(&render_project, frame, max_dimension)
                 {
-                    Ok(mut pixels) => {
-                        for pixel in pixels.pixels_mut() {
-                            pixel.0.swap(0, 2);
-                        }
-                        self.cached = Some((
+                    Ok(pixels) => {
+                        self.cache_pixels(
                             render_project.clone(),
                             frame,
                             max_dimension,
-                            std::sync::Arc::new(gpui::RenderImage::new(vec![image::Frame::new(
-                                pixels,
-                            )])),
-                        ));
+                            pixels,
+                            channel,
+                            window,
+                        );
                     }
                     Err(error) => {
                         self.cached = None;
@@ -519,6 +821,18 @@ impl Render for Preview {
                 }
             }
         }
+        if channel != self.display_channel {
+            if let Some((_, _, _, image)) = &mut self.cached {
+                if let Some(raw) = &self.raw {
+                    let _ = window.drop_image(image.clone());
+                    *image = std::sync::Arc::new(gpui::RenderImage::new(vec![image::Frame::new(
+                        channel.display(raw),
+                    )]));
+                    self.display_channel = channel;
+                }
+            }
+        }
+        let overlay_options = viewer.clone();
         let error = self
             .failed
             .as_ref()
@@ -596,6 +910,7 @@ impl Render for Preview {
                     .id("composition-canvas")
                     .track_focus(&self.focus)
                     .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
+                        if event.keystroke.key == "escape" && this.guide_gesture.take().is_some() {cx.stop_propagation();cx.notify();return;}
                         if event.keystroke.key == "escape"
                             && let Some(gesture) = this.gesture.take()
                         {
@@ -622,9 +937,9 @@ impl Render for Preview {
                     .child(
                         canvas(
                             move |bounds, _, _| measured.set(Some(bounds)),
-                            move |bounds, _, window, _| {
+                            move |bounds, _, window, cx| {
                                 let (zoom, origin) =
-                                    geometry(bounds, comp.width(), comp.height(), zoom, pan);
+                                    geometry(bounds, comp.width(), comp.height(), zoom, pan,overlay_options.rulers);
                                 let stage = Bounds::new(
                                     origin,
                                     size(
@@ -789,6 +1104,7 @@ impl Render for Preview {
                                             }
                                         },
                                     );
+                                    viewer_tools::paint(&overlay_options,&guides,bounds,stage,zoom,window,cx);
                                 });
                             },
                         )
@@ -797,6 +1113,7 @@ impl Render for Preview {
             )
             .child(
                 div()
+                    .relative()
                     .h(px(32.0))
                     .flex_none()
                     .flex()
@@ -855,6 +1172,29 @@ impl Render for Preview {
                         Action::Checkerboard,
                         checker,
                     ))
+                    .child(ui::text_button("viewer-layout-options", "Guides ▾")
+                        .on_click(cx.listener(|this,_,w,cx| {this.options_open=!this.options_open;this.channels_open=false;this.menu_index=0;w.focus(&this.menu_focus);cx.notify();})))
+                    .child(ui::text_button("viewer-channel-options",format!("{} ▾",channel.label()))
+                        .on_click(cx.listener(|this,_,w,cx| {this.channels_open=!this.channels_open;this.options_open=false;this.menu_index=0;w.focus(&this.menu_focus);cx.notify();})))
+                    .when(self.options_open, |toolbar| {
+                        let mut menu=div().id("viewer-layout-menu").track_focus(&self.menu_focus).on_key_down(|_,_,cx|cx.stop_propagation()).on_key_up(cx.listener(Self::menu_key)).absolute().bottom(px(32.0)).left(px(164.0)).w(px(250.0)).p_1().bg(rgb(0x2b2b2b)).border_1().border_color(rgb(0x4a4a4a)).shadow_lg().occlude()
+                            .on_mouse_down_out(cx.listener(|this,_,_,cx|{this.options_open=false;cx.notify();}));
+                        for (index,option) in ViewOption::ALL.into_iter().enumerate() {
+                            let label=if option==ViewOption::GridSize {format!("Grid spacing: {:.0} px",viewer.grid_size)} else {format!("{} {}",if viewer.enabled(option) {"✓"} else {"  "},option.label())};
+                            menu=menu.child(ui::text_button(("viewer-option",index),label).w_full().justify_start().when(index==self.menu_index,|b|b.bg(rgb(0x164a7b))).on_click(cx.listener(move|this,_,w,cx| {this.state.update(cx,|s,cx|s.dispatch(&Action::ViewerOption(option),w,cx));})));
+                        }
+                        menu=menu.child(ui::text_button("viewer-clear-guides","Clear guides").w_full().justify_start().when(self.menu_index==8,|b|b.bg(rgb(0x164a7b))).when(viewer.lock_guides,|b|b.opacity(0.35)).on_click(cx.listener(|this,_,w,cx| {this.state.update(cx,|s,cx|s.dispatch(&Action::ClearGuides,w,cx));this.options_open=false;cx.notify();})))
+                            .child(div().p_2().text_size(px(10.0)).text_color(rgb(ui::MUTED)).child("Drag from a ruler to add a guide. Drag back to remove. Alt bypasses snapping."));
+                        toolbar.child(menu)
+                    })
+                    .when(self.channels_open, |toolbar| {
+                        let mut menu=div().id("viewer-channel-menu").track_focus(&self.menu_focus).on_key_down(|_,_,cx|cx.stop_propagation()).on_key_up(cx.listener(Self::menu_key)).absolute().bottom(px(32.0)).left(px(240.0)).w(px(140.0)).p_1().bg(rgb(0x2b2b2b)).border_1().border_color(rgb(0x4a4a4a)).shadow_lg().occlude()
+                            .on_mouse_down_out(cx.listener(|this,_,_,cx|{this.channels_open=false;cx.notify();}));
+                        for (index,c) in Channel::ALL.into_iter().enumerate() {
+                            menu=menu.child(ui::text_button(("viewer-channel",index),format!("{} {}",if c==channel {"✓"} else {"  "},c.label())).w_full().justify_start().when(index==self.menu_index,|b|b.bg(rgb(0x164a7b))).on_click(cx.listener(move|this,_,w,cx| {this.state.update(cx,|s,cx|s.dispatch(&Action::PreviewChannel(c),w,cx));this.channels_open=false;cx.notify();})));
+                        }
+                        toolbar.child(menu)
+                    })
                     .child(div().flex_1())
                     .child(
                         div()
@@ -870,6 +1210,28 @@ impl Render for Preview {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fitted_stage_reserves_rulers_and_mapping_survives_zoom_and_pan() {
+        let bounds = Bounds::new(point(px(100.0), px(200.0)), size(px(1200.0), px(500.0)));
+        let (zoom, origin) = geometry(bounds, 960, 540, None, point(px(0.0), px(0.0)), true);
+        assert!(origin.x >= bounds.left() + px(RULER + 24.0));
+        assert!(origin.y >= bounds.top() + px(RULER + 24.0));
+        assert!(origin.x + px(960.0 * zoom) <= bounds.right() - px(24.0));
+        assert!(origin.y + px(540.0 * zoom) <= bounds.bottom() - px(24.0));
+        for scale in [0.0625, 0.5, 1.0, 8.0] {
+            let (zoom, origin) = geometry(
+                bounds,
+                960,
+                540,
+                Some(scale),
+                point(px(127.0), px(-54.0)),
+                true,
+            );
+            let p = origin + point(px(321.5 * zoom), px(123.75 * zoom));
+            assert!((f32::from(p.x - origin.x) / zoom - 321.5).abs() < 0.001);
+            assert!((f32::from(p.y - origin.y) / zoom - 123.75).abs() < 0.001);
+        }
+    }
     #[test]
     fn hit_test_rejects_outside_and_degenerate_shapes() {
         assert!(point_in_quad(

@@ -26,7 +26,9 @@ mod matte;
 pub use matte::{MatteMode, TrackMatte};
 mod media;
 pub use media::MediaReplacement;
+mod guides;
 mod precompositions;
+pub use guides::{Guide, GuideAxis};
 mod selection_transform;
 pub use selection_transform::AlignTarget;
 mod time;
@@ -325,6 +327,8 @@ impl Layer {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Composition {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    guides: Vec<Guide>,
     #[serde(default, skip_serializing_if = "markers::Markers::is_default")]
     markers: markers::Markers,
     name: String,
@@ -478,6 +482,7 @@ impl Default for Project {
             next_composition_id: 2,
             other_compositions: BTreeMap::new(),
             composition: Composition {
+                guides: Vec::new(),
                 markers: Default::default(),
                 name: "Composition 01".into(),
                 width: 1920,
@@ -510,7 +515,7 @@ impl Project {
     }
 
     fn validate(&self) -> Result<(), String> {
-        if !(1..=19).contains(&self.version) {
+        if !(1..=20).contains(&self.version) {
             return Err("Unsupported project version".into());
         }
         if self.version < 9
@@ -537,6 +542,10 @@ impl Project {
         let mut image_bytes = 0usize;
         for (_, comp) in self.compositions() {
             matte::validate(comp, self.version)?;
+            guides::validate(&comp.guides)?;
+            if self.version < 20 && !comp.guides.is_empty() {
+                return Err("Composition guides require project version 20".into());
+            }
             if self.version < 19
                 && comp.layers.iter().flat_map(|l| &l.effect_stack).any(|e| {
                     matches!(
@@ -658,6 +667,7 @@ impl Project {
 /// The future scripting bridge and native controls both dispatch these commands.
 #[derive(Clone, Debug)]
 pub enum Command {
+    SetGuides(Vec<Guide>),
     SetTrackMatte {
         id: LayerId,
         matte: Option<TrackMatte>,
@@ -1096,6 +1106,14 @@ impl Editor {
         }) {
             next.project.version = 19;
         }
+        if next
+            .project
+            .compositions()
+            .into_iter()
+            .any(|(_, c)| !c.guides.is_empty())
+        {
+            next.project.version = 20;
+        }
         next.project.validate()?;
         if next != self.current {
             let previous = std::mem::replace(&mut self.current, next);
@@ -1106,6 +1124,11 @@ impl Editor {
 }
 
 fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
+    if let Command::SetGuides(guides) = command {
+        guides::validate(&guides)?;
+        state.project.composition.guides = guides;
+        return Ok(());
+    }
     if let Command::SetTrackMatte { id, matte } = command {
         return matte::set(state, id, matte);
     }

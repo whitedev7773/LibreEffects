@@ -273,6 +273,9 @@ impl Shell {
                 } else {
                     Action::DuplicateSelection
                 }),
+                "r" => Some(Action::ViewerOption(
+                    crate::viewer_tools::ViewOption::Rulers,
+                )),
                 "k" => {
                     self.open_settings(window, cx);
                     None
@@ -809,6 +812,52 @@ impl Render for Shell {
                     ("Zoom in", "", Some(Action::ZoomPreview(2.0))),
                     ("Zoom out", "", Some(Action::ZoomPreview(0.5))),
                     ("Transparency grid", "", Some(Action::Checkerboard)),
+                    (
+                        "Rulers",
+                        "Ctrl+R",
+                        Some(Action::ViewerOption(
+                            crate::viewer_tools::ViewOption::Rulers,
+                        )),
+                    ),
+                    (
+                        "Grid",
+                        "",
+                        Some(Action::ViewerOption(crate::viewer_tools::ViewOption::Grid)),
+                    ),
+                    (
+                        "Guides",
+                        "",
+                        Some(Action::ViewerOption(
+                            crate::viewer_tools::ViewOption::Guides,
+                        )),
+                    ),
+                    (
+                        "Title / Action Safe",
+                        "",
+                        Some(Action::ViewerOption(crate::viewer_tools::ViewOption::Safe)),
+                    ),
+                    (
+                        "Snap to guides",
+                        "",
+                        Some(Action::ViewerOption(
+                            crate::viewer_tools::ViewOption::SnapGuides,
+                        )),
+                    ),
+                    (
+                        "Snap to grid",
+                        "",
+                        Some(Action::ViewerOption(
+                            crate::viewer_tools::ViewOption::SnapGrid,
+                        )),
+                    ),
+                    (
+                        "Lock guides",
+                        "",
+                        Some(Action::ViewerOption(
+                            crate::viewer_tools::ViewOption::LockGuides,
+                        )),
+                    ),
+                    ("Clear guides", "", Some(Action::ClearGuides)),
                 ],
                 _ => Vec::new(),
             };
@@ -839,6 +888,18 @@ impl Render for Shell {
                     cx.notify();
                 }));
             for (index, (label, shortcut, action)) in items.into_iter().enumerate() {
+                let label = if let Some(Action::ViewerOption(option)) = &action {
+                    format!(
+                        "{} {label}",
+                        if self.state.read(cx).viewer.enabled(*option) {
+                            "✓"
+                        } else {
+                            "  "
+                        }
+                    )
+                } else {
+                    label.to_string()
+                };
                 dropdown = dropdown.child(
                     ui::text_button(("menu-action", index), "")
                         .w_full()

@@ -25,7 +25,7 @@ impl Render for Sidebar {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.state.read(cx);
         let comp = state.editor.project().composition();
-        let info = format!(
+        let mut info = format!(
             "{}\n{} × {} · {} fps\nTime: {}\n{} layers",
             comp.name(),
             comp.width(),
@@ -34,6 +34,16 @@ impl Render for Sidebar {
             comp.timecode(state.frame),
             comp.layers().len()
         );
+        if let Some((revision, composition, pixel)) = &state.pixel_info
+            && *revision == state.document_revision
+            && *composition == state.editor.project().active_composition_id()
+            && pixel.frame == state.frame
+        {
+            let [r, g, b, a] = pixel.rgba;
+            info.push_str(&format!("\nX: {}   Y: {}\nR: {r}  G: {g}  B: {b}  A: {a}\n#{r:02X}{g:02X}{b:02X} · Alpha {:.1}%\nPreview sample: {} × {}",pixel.position[0],pixel.position[1],f64::from(a)/255.0*100.0,pixel.resolution[0],pixel.resolution[1]));
+        } else {
+            info.push_str("\nMove over the composition to sample RGBA");
+        }
         let playing = state.playing;
         let expanded = state.workspace.sidebar_expanded;
         let work = format!("Work area: {}–{}f", state.work_start, state.work_end);

@@ -90,6 +90,9 @@ pub(crate) enum Action {
     FitPreview,
     CyclePreviewResolution,
     Checkerboard,
+    ViewerOption(crate::viewer_tools::ViewOption),
+    PreviewChannel(crate::viewer_tools::Channel),
+    ClearGuides,
     SetTool(Tool),
     WorkStart,
     WorkEnd,
@@ -176,6 +179,8 @@ pub(crate) struct EditorState {
     pub document_revision: u64,
     pub importing_video: bool,
     pub checkerboard: bool,
+    pub viewer: crate::viewer_tools::ViewerOptions,
+    pub pixel_info: Option<(u64, CompositionId, crate::viewer_tools::PixelInfo)>,
     pub tool: Tool,
     pub work_start: Frame,
     pub work_end: Frame,
@@ -231,6 +236,8 @@ impl Default for EditorState {
             document_revision: 0,
             importing_video: false,
             checkerboard: false,
+            viewer: Default::default(),
+            pixel_info: None,
             tool: Tool::Select,
             work_start: 0,
             work_end: 150,
@@ -378,6 +385,21 @@ impl EditorState {
     }
 
     pub fn dispatch(&mut self, action: &Action, window: &mut Window, cx: &mut Context<Self>) {
+        if !matches!(
+            action,
+            Action::Select(_)
+                | Action::SelectMany(..)
+                | Action::Seek(_)
+                | Action::Step(_)
+                | Action::Play
+                | Action::ViewerOption(_)
+                | Action::PreviewChannel(_)
+                | Action::Checkerboard
+                | Action::FitPreview
+                | Action::ZoomPreview(_)
+        ) {
+            self.pixel_info = None;
+        }
         if matches!(
             action,
             Action::Open
@@ -841,6 +863,15 @@ impl EditorState {
                 }
             }
             Action::Checkerboard => self.checkerboard = !self.checkerboard,
+            Action::ViewerOption(option) => self.viewer.toggle(*option),
+            Action::PreviewChannel(channel) => self.viewer.channel = *channel,
+            Action::ClearGuides => {
+                if self.viewer.lock_guides {
+                    self.status = "Unlock guides before clearing them".into();
+                } else {
+                    self.dispatch(&Action::Edit(Command::SetGuides(Vec::new())), window, cx);
+                }
+            }
             Action::SetTool(tool) => self.tool = *tool,
             Action::WorkStart => {
                 self.stop();
