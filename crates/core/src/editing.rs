@@ -109,6 +109,9 @@ pub(super) fn apply_extended(
     if !matches!(
         command,
         Command::Batch(_)
+            | Command::DuplicateLayers(_)
+            | Command::SplitLayers { .. }
+            | Command::SetAnchor { .. }
             | Command::AddContent { .. }
             | Command::SetContent { .. }
             | Command::SetEffects { .. }
@@ -123,6 +126,107 @@ pub(super) fn apply_extended(
     }
     Some((|| {
         match command {
+            Command::DuplicateLayers(ids) | Command::SplitLayers { ids, .. } => {
+                let ids: BTreeSet<_> = ids.iter().copied().collect();
+                if ids.is_empty() {
+                    return Err("Select a layer first".into());
+                }
+                let duration = state.project.composition.duration;
+                for id in &ids {
+                    let layer = editable(state, *id)?;
+                    if let Command::SplitLayers { frame, .. } = command {
+                        if *frame <= layer.in_frame || *frame >= layer.out_frame(duration) {
+                            return Err(
+                                "Place the playhead inside every selected layer to split".into()
+                            );
+                        }
+                    }
+                }
+                if state.project.composition.layers.len() + ids.len() > 1000
+                    || state
+                        .project
+                        .next_layer_id
+                        .checked_add(ids.len() as u64)
+                        .is_none_or(|n| n >= u64::MAX)
+                {
+                    return Err("Layer limit reached".into());
+                }
+                let originals: Vec<_> = state
+                    .project
+                    .composition
+                    .layers
+                    .iter()
+                    .filter(|l| ids.contains(&l.id))
+                    .cloned()
+                    .collect();
+                let mut mapping = BTreeMap::new();
+                for layer in &originals {
+                    mapping.insert(layer.id, state.project.next_layer_id);
+                    state.project.next_layer_id += 1;
+                }
+                for mut copy in originals {
+                    let index = state
+                        .project
+                        .composition
+                        .layers
+                        .iter()
+                        .position(|l| l.id == copy.id)
+                        .unwrap();
+                    copy.id = mapping[&copy.id];
+                    if let Command::SplitLayers { frame, .. } = command {
+                        state.project.composition.layers[index].out_frame = Some(*frame);
+                        copy.in_frame = *frame;
+                    } else if copy.name.len() < 1000 {
+                        copy.name.push_str(" copy");
+                    }
+                    copy.parent = copy.parent.map(|p| mapping.get(&p).copied().unwrap_or(p));
+                    state.selected = Some(copy.id);
+                    state.project.composition.layers.insert(index, copy);
+                }
+            }
+            Command::SetAnchor { id, frame, x, y } => {
+                let layer = editable(state, *id)?;
+                let old = [
+                    layer.property(Property::AnchorX).value_at(*frame),
+                    layer.property(Property::AnchorY).value_at(*frame),
+                ];
+                // Compensate in position-property space so the rendered layer stays still,
+                // including when it has a rotated/scaled parent or a parenting offset.
+                let delta = layer
+                    .local_transform(*frame)
+                    .vector([x - old[0], y - old[1]]);
+                let position = [
+                    layer.property(Property::PositionX).value_at(*frame) + delta[0],
+                    layer.property(Property::PositionY).value_at(*frame) + delta[1],
+                ];
+                apply(
+                    state,
+                    Command::SetValue {
+                        id: *id,
+                        property: Property::AnchorX,
+                        frame: *frame,
+                        value: *x,
+                    },
+                )?;
+                apply(
+                    state,
+                    Command::SetValue {
+                        id: *id,
+                        property: Property::AnchorY,
+                        frame: *frame,
+                        value: *y,
+                    },
+                )?;
+                apply(
+                    state,
+                    Command::SetPosition {
+                        id: *id,
+                        frame: *frame,
+                        x: position[0],
+                        y: position[1],
+                    },
+                )?;
+            }
             Command::Batch(commands) => {
                 if commands.len() > 10000 {
                     return Err("Too many edits".into());

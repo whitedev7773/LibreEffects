@@ -1,6 +1,181 @@
 use super::*;
 
 #[test]
+fn anchor_tool_preserves_parented_pose_and_keys_in_one_undo() {
+    let mut e = editor_with_layer();
+    e.execute(Command::AddRectangle).unwrap();
+    set_property(&mut e, 1, Property::Rotation, 37.0);
+    set_property(&mut e, 1, Property::ScaleX, 175.0);
+    set_property(&mut e, 1, Property::ScaleY, -65.0);
+    e.execute(Command::SetParent {
+        id: 2,
+        parent: Some(1),
+        frame: 0,
+    })
+    .unwrap();
+    set_property(&mut e, 2, Property::Rotation, -28.0);
+    for property in [
+        Property::AnchorX,
+        Property::AnchorY,
+        Property::PositionX,
+        Property::PositionY,
+    ] {
+        e.execute(Command::ToggleKeyframe {
+            id: 2,
+            property,
+            frame: 0,
+        })
+        .unwrap();
+    }
+    let before = e.project().clone();
+    let corners = before.composition().corners_at(2, 30).unwrap();
+    e.execute(Command::SetAnchor {
+        id: 2,
+        frame: 30,
+        x: -40.0,
+        y: 280.0,
+    })
+    .unwrap();
+    assert_corners_close(
+        corners,
+        e.project().composition().corners_at(2, 30).unwrap(),
+    );
+    for property in [
+        Property::AnchorX,
+        Property::AnchorY,
+        Property::PositionX,
+        Property::PositionY,
+    ] {
+        assert!(
+            e.project()
+                .composition()
+                .layer(2)
+                .unwrap()
+                .property(property)
+                .keys()
+                .contains_key(&30)
+        );
+    }
+    e.undo();
+    assert_eq!(e.project(), &before);
+    assert!(
+        e.execute(Command::SetAnchor {
+            id: 2,
+            frame: 30,
+            x: f64::NAN,
+            y: 0.0
+        })
+        .is_err()
+    );
+    assert_eq!(e.project(), &before);
+}
+
+#[test]
+fn group_duplicate_remaps_internal_parents_and_keeps_external_parents() {
+    let mut e = editor_with_layer();
+    e.execute(Command::AddRectangle).unwrap();
+    e.execute(Command::AddRectangle).unwrap();
+    e.execute(Command::SetParent {
+        id: 2,
+        parent: Some(1),
+        frame: 0,
+    })
+    .unwrap();
+    e.execute(Command::SetParent {
+        id: 3,
+        parent: Some(2),
+        frame: 0,
+    })
+    .unwrap();
+    set_property(&mut e, 1, Property::Rotation, 31.0);
+    let before = e.project().clone();
+    e.execute(Command::DuplicateLayers(vec![2, 3, 2])).unwrap();
+    let comp = e.project().composition();
+    let child = &comp.layers()[0];
+    let parent = &comp.layers()[2];
+    assert_eq!(child.parent(), Some(parent.id()));
+    assert_eq!(parent.parent(), Some(1));
+    assert_corners_close(
+        comp.corners_at(child.id(), 0).unwrap(),
+        before.composition().corners_at(3, 0).unwrap(),
+    );
+    e.undo();
+    assert_eq!(e.project(), &before);
+    e.execute(Command::ToggleLocked(3)).unwrap();
+    let locked = e.project().clone();
+    assert!(e.execute(Command::DuplicateLayers(vec![2, 3])).is_err());
+    assert_eq!(e.project(), &locked);
+}
+
+#[test]
+fn split_preserves_keyframes_pose_and_exclusive_ranges_with_atomic_failures() {
+    let mut e = editor_with_layer();
+    key(&mut e, 0);
+    set(&mut e, 100, 500.0);
+    e.execute(Command::AddRectangle).unwrap();
+    e.execute(Command::SetParent {
+        id: 2,
+        parent: Some(1),
+        frame: 0,
+    })
+    .unwrap();
+    let before = e.project().clone();
+    for frame in [0, 150] {
+        assert!(
+            e.execute(Command::SplitLayers {
+                ids: vec![1, 2],
+                frame
+            })
+            .is_err()
+        );
+        assert_eq!(e.project(), &before);
+    }
+    e.execute(Command::SplitLayers {
+        ids: vec![1, 2],
+        frame: 50,
+    })
+    .unwrap();
+    let comp = e.project().composition();
+    for (original, split) in [(2, 3), (1, 4)] {
+        let head = comp.layer(original).unwrap();
+        let tail = comp.layer(split).unwrap();
+        assert!(head.active_at(49, comp.duration()));
+        assert!(!head.active_at(50, comp.duration()));
+        assert!(!tail.active_at(49, comp.duration()));
+        assert!(tail.active_at(50, comp.duration()));
+        assert_eq!(head.properties, tail.properties);
+        for frame in [50, 75, 149] {
+            assert_corners_close(
+                comp.corners_at(split, frame).unwrap(),
+                before.composition().corners_at(original, frame).unwrap(),
+            );
+        }
+    }
+    assert_eq!(comp.layer(3).unwrap().parent(), Some(4));
+    assert_eq!(
+        Project::from_json(&e.project().to_json().unwrap()).unwrap(),
+        *e.project()
+    );
+    e.undo();
+    assert_eq!(e.project(), &before);
+    e.execute(Command::SetLayerRange {
+        id: 2,
+        start: 70,
+        end: 100,
+    })
+    .unwrap();
+    let restricted = e.project().clone();
+    assert!(
+        e.execute(Command::SplitLayers {
+            ids: vec![1, 2],
+            frame: 50
+        })
+        .is_err()
+    );
+    assert_eq!(e.project(), &restricted);
+}
+
+#[test]
 fn batch_key_move_handles_overlapping_sources_and_rolls_back_collisions() {
     let mut e = editor_with_layer();
     for frame in [10, 20, 40] {

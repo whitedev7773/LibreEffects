@@ -37,6 +37,7 @@ pub(crate) enum Action {
     PasteKeys,
     DeleteSelection,
     DuplicateSelection,
+    SplitSelection,
     SelectMany(LayerId, bool, bool),
     ZoomTimeline(f32),
     PanTimeline(i32),
@@ -57,6 +58,8 @@ pub(crate) enum Action {
 pub(crate) enum Tool {
     Select,
     Hand,
+    Rotate,
+    Anchor,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PropertyFilter {
@@ -196,6 +199,21 @@ impl EditorState {
         self.playback_generation = self.playback_generation.wrapping_add(1);
     }
 
+    fn step_history(&mut self, redo: bool) {
+        self.stop();
+        if redo {
+            self.editor.redo();
+        } else {
+            self.editor.undo();
+        }
+        // Core history restores its primary selection. Keep every panel in sync
+        // instead of retaining a now-inactive head after redoing a layer split.
+        self.selected_layers = self.editor.selected().into_iter().collect();
+        self.selected_keys.clear();
+        self.normalize();
+        self.status = "History updated".into();
+    }
+
     pub fn dispatch(&mut self, action: &Action, window: &mut Window, cx: &mut Context<Self>) {
         match action {
             Action::SelectMany(id, toggle, range) => {
@@ -305,7 +323,7 @@ impl EditorState {
                 };
                 self.dispatch(&Action::Edit(command), window, cx);
             }
-            Action::DuplicateSelection => {
+            Action::DuplicateSelection | Action::SplitSelection => {
                 let original: BTreeSet<_> = self
                     .editor
                     .project()
@@ -315,13 +333,14 @@ impl EditorState {
                     .map(|l| l.id())
                     .collect();
                 self.dispatch(
-                    &Action::Edit(Command::Batch(
-                        self.selected_layers
-                            .iter()
-                            .copied()
-                            .map(Command::DuplicateLayer)
-                            .collect(),
-                    )),
+                    &Action::Edit(if matches!(action, Action::SplitSelection) {
+                        Command::SplitLayers {
+                            ids: self.selected_layers.iter().copied().collect(),
+                            frame: self.frame,
+                        }
+                    } else {
+                        Command::DuplicateLayers(self.selected_layers.iter().copied().collect())
+                    }),
                     window,
                     cx,
                 );
@@ -454,16 +473,7 @@ impl EditorState {
                 }
             }
             Action::Undo | Action::Redo => {
-                self.stop();
-                if matches!(action, Action::Undo) {
-                    self.editor.undo();
-                } else {
-                    self.editor.redo();
-                }
-                self.frame = self
-                    .frame
-                    .min(self.editor.project().composition().duration() - 1);
-                self.status = "History updated".into();
+                self.step_history(matches!(action, Action::Redo));
             }
             Action::New => {
                 self.stop();
@@ -536,4 +546,36 @@ pub(crate) fn timecode(frame: Frame, fps: u32) -> String {
         seconds % 60,
         frame % fps
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn split_undo_redo_keeps_timeline_and_preview_selection_on_restored_layer() {
+        let mut state = EditorState::default();
+        state.editor.execute(Command::AddRectangle).unwrap();
+        state.selected_layers.insert(1);
+        state.frame = 75;
+        state
+            .editor
+            .execute(Command::SplitLayers {
+                ids: vec![1],
+                frame: 75,
+            })
+            .unwrap();
+        state.selected_layers = [2].into();
+        state.step_history(false);
+        assert_eq!(state.selected_layers, [1].into());
+        state.step_history(true);
+        assert_eq!(state.selected_layers, [2].into());
+        assert_eq!(state.editor.selected(), Some(2));
+        assert!(
+            state
+                .editor
+                .selected_layer()
+                .unwrap()
+                .active_at(state.frame, 150)
+        );
+    }
 }

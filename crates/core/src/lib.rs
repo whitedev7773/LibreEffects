@@ -457,6 +457,17 @@ impl Project {
 #[derive(Clone, Debug)]
 pub enum Command {
     Batch(Vec<Command>),
+    DuplicateLayers(Vec<LayerId>),
+    SplitLayers {
+        ids: Vec<LayerId>,
+        frame: Frame,
+    },
+    SetAnchor {
+        id: LayerId,
+        frame: Frame,
+        x: f64,
+        y: f64,
+    },
     AddContent {
         content: Content,
         width: f64,

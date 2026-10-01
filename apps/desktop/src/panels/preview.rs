@@ -9,6 +9,9 @@ use gpui::{
 };
 use libre_effects_core::{Affine, Command, LayerId, Property};
 use std::{cell::Cell, rc::Rc};
+#[path = "transform_gesture.rs"]
+mod transform_gesture;
+use transform_gesture::{TransformGesture, handles};
 
 #[derive(Clone)]
 struct MoveGesture {
@@ -19,8 +22,22 @@ struct MoveGesture {
     frame: u32,
     zoom: f32,
     pan: Point<Pixels>,
+    pointer: [f64; 2],
+    transform: Option<TransformGesture>,
+    constrained: bool,
+    moved: bool,
 }
 fn move_command(g: &MoveGesture) -> Command {
+    if let Some(transform) = &g.transform {
+        return transform.command(
+            g.frame,
+            [
+                f32::from(g.delta.x) as f64 / g.zoom as f64,
+                f32::from(g.delta.y) as f64 / g.zoom as f64,
+            ],
+            g.constrained,
+        );
+    }
     Command::Batch(
         g.targets
             .iter()
@@ -116,12 +133,40 @@ impl Preview {
             f32::from(event.position.x - origin.x) as f64 / zoom as f64,
             f32::from(event.position.y - origin.y) as f64 / zoom as f64,
         ];
-        let hit = comp.layers().iter().find(|layer| {
-            layer.active_at(frame, comp.duration())
-                && !layer.locked()
-                && comp
-                    .corners_at(layer.id(), frame)
-                    .is_some_and(|corners| point_in_quad(p, corners))
+        let handle_hit = comp
+            .layers()
+            .iter()
+            .filter(|l| {
+                state.selected_layers.contains(&l.id())
+                    && !l.locked()
+                    && l.active_at(frame, comp.duration())
+            })
+            .find_map(|l| {
+                let world = comp.world_transform(l.id(), frame)?;
+                let points = if state.tool == Tool::Anchor {
+                    vec![[
+                        l.property(Property::AnchorX).value_at(frame),
+                        l.property(Property::AnchorY).value_at(frame),
+                    ]]
+                } else if state.tool == Tool::Select {
+                    handles(l.width(), l.height()).to_vec()
+                } else {
+                    Vec::new()
+                };
+                points.iter().enumerate().find_map(|(index, handle)| {
+                    let h = world.point(*handle);
+                    ((h[0] - p[0]).hypot(h[1] - p[1]) * zoom as f64 <= 7.0)
+                        .then_some((l.id(), index))
+                })
+            });
+        let hit = handle_hit.and_then(|(id, _)| comp.layer(id)).or_else(|| {
+            comp.layers().iter().find(|layer| {
+                layer.active_at(frame, comp.duration())
+                    && !layer.locked()
+                    && comp
+                        .corners_at(layer.id(), frame)
+                        .is_some_and(|corners| point_in_quad(p, corners))
+            })
         });
         let (layer, _) = hit.map_or((None, [0.0, 0.0]), |layer| {
             (
@@ -137,6 +182,14 @@ impl Preview {
             .and_then(|id| comp.position_space(id, frame))
             .and_then(Affine::inverse);
         if !hand && inverse_space.is_none() {
+            if layer.is_none() && !event.modifiers.control && !event.modifiers.shift {
+                self.state.update(cx, |s, cx| {
+                    s.editor.clear_selection();
+                    s.selected_layers.clear();
+                    s.selected_keys.clear();
+                    cx.notify();
+                });
+            }
             return;
         }
         if !hand && let Some(id) = layer {
@@ -155,6 +208,17 @@ impl Preview {
         }
         let state = self.state.read(cx);
         let comp = state.editor.project().composition();
+        let transform = layer.and_then(|id| match state.tool {
+            Tool::Rotate => TransformGesture::rotate(comp, id, frame, p),
+            Tool::Anchor => TransformGesture::anchor(comp, id, frame),
+            Tool::Select => {
+                handle_hit.and_then(|(_, handle)| TransformGesture::scale(comp, id, frame, handle))
+            }
+            Tool::Hand => None,
+        });
+        if !hand && state.tool != Tool::Select && transform.is_none() {
+            return;
+        }
         let candidates: Vec<_> = comp
             .layers()
             .iter()
@@ -187,7 +251,13 @@ impl Preview {
                 frame,
                 zoom,
                 pan: self.pan,
+                pointer: p,
+                transform,
+                constrained: event.modifiers.shift,
+                moved: false,
             });
+            self.state
+                .update(cx, |s, cx| s.dispatch(&Action::Seek(frame), window, cx));
         }
         cx.notify();
     }
@@ -197,17 +267,37 @@ impl Preview {
         }
         if let Some(gesture) = &mut self.gesture {
             gesture.delta = event.position - gesture.start;
+            gesture.moved |=
+                f32::from(gesture.delta.x).abs() + f32::from(gesture.delta.y).abs() > 1.0;
+            gesture.constrained = event.modifiers.shift;
+            if let Some(transform) = &mut gesture.transform {
+                transform.update([
+                    gesture.pointer[0] + f32::from(gesture.delta.x) as f64 / gesture.zoom as f64,
+                    gesture.pointer[1] + f32::from(gesture.delta.y) as f64 / gesture.zoom as f64,
+                ]);
+            }
             if gesture.layer.is_none() {
                 self.pan = gesture.pan + gesture.delta;
             }
             cx.notify();
         }
     }
-    fn up(&mut self, _: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(gesture) = self.gesture.take() {
-            if gesture.layer.is_some()
-                && f32::from(gesture.delta.x).abs() + f32::from(gesture.delta.y).abs() > 1.0
-            {
+    fn up(&mut self, event: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(mut gesture) = self.gesture.take() {
+            gesture.delta = event.position - gesture.start;
+            gesture.moved |=
+                f32::from(gesture.delta.x).abs() + f32::from(gesture.delta.y).abs() > 1.0;
+            gesture.constrained = event.modifiers.shift;
+            if let Some(transform) = &mut gesture.transform {
+                transform.update([
+                    gesture.pointer[0] + f32::from(gesture.delta.x) as f64 / gesture.zoom as f64,
+                    gesture.pointer[1] + f32::from(gesture.delta.y) as f64 / gesture.zoom as f64,
+                ]);
+            }
+            if gesture.layer.is_none() {
+                self.pan = gesture.pan + gesture.delta;
+            }
+            if gesture.layer.is_some() && gesture.moved {
                 let command = move_command(&gesture);
                 self.state
                     .update(cx, |s, cx| s.dispatch(&Action::Edit(command), window, cx));
@@ -238,6 +328,7 @@ impl Render for Preview {
             let _ = temporary.execute(move_command(g));
             render_project = temporary.project().clone();
         }
+        let comp = render_project.composition().clone();
         if self
             .cached
             .as_ref()
@@ -284,6 +375,15 @@ impl Render for Preview {
                 div()
                     .id("composition-canvas")
                     .track_focus(&self.focus)
+                    .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
+                        if event.keystroke.key == "escape"
+                            && let Some(gesture) = this.gesture.take()
+                        {
+                            this.pan = gesture.pan;
+                            cx.stop_propagation();
+                            cx.notify();
+                        }
+                    }))
                     .relative()
                     .flex_1()
                     .min_h_0()
@@ -372,26 +472,13 @@ impl Render for Preview {
                                                     layer.active_at(frame, comp.duration())
                                                 })
                                             {
-                                                let delta = gesture
-                                                    .as_ref()
-                                                    // Descendants move with a dragged parent, including hidden parents.
-                                                    .filter(|g| {
-                                                        g.targets.iter().any(|(id, _, _)| {
-                                                            !comp.can_parent(*id, Some(layer.id()))
-                                                        })
-                                                    })
-                                                    .map_or(point(px(0.0), px(0.0)), |g| g.delta);
                                                 let corners = comp
                                                     .corners_at(layer.id(), frame)
                                                     .unwrap_or([[0.0; 2]; 4])
                                                     .map(|[x, y]| {
                                                         point(
-                                                            origin.x
-                                                                + px(x as f32 * zoom)
-                                                                + delta.x,
-                                                            origin.y
-                                                                + px(y as f32 * zoom)
-                                                                + delta.y,
+                                                            origin.x + px(x as f32 * zoom),
+                                                            origin.y + px(y as f32 * zoom),
                                                         )
                                                     });
                                                 if selected.contains(&layer.id()) {
@@ -404,7 +491,17 @@ impl Render for Preview {
                                                     if let Ok(path) = outline.build() {
                                                         window.paint_path(path, rgb(ui::BLUE));
                                                     }
-                                                    for corner in corners {
+                                                    let world = comp
+                                                        .world_transform(layer.id(), frame)
+                                                        .unwrap_or_default();
+                                                    for handle in
+                                                        handles(layer.width(), layer.height())
+                                                    {
+                                                        let [x, y] = world.point(handle);
+                                                        let corner = point(
+                                                            origin.x + px(x as f32 * zoom),
+                                                            origin.y + px(y as f32 * zoom),
+                                                        );
                                                         window.paint_quad(fill(
                                                             Bounds::new(
                                                                 corner - point(px(2.5), px(2.5)),
@@ -425,12 +522,8 @@ impl Render for Preview {
                                                                 .value_at(frame),
                                                         ]);
                                                     let anchor = point(
-                                                        origin.x
-                                                            + px(anchor[0] as f32 * zoom)
-                                                            + delta.x,
-                                                        origin.y
-                                                            + px(anchor[1] as f32 * zoom)
-                                                            + delta.y,
+                                                        origin.x + px(anchor[0] as f32 * zoom),
+                                                        origin.y + px(anchor[1] as f32 * zoom),
                                                     );
                                                     window.paint_quad(fill(
                                                         Bounds::new(

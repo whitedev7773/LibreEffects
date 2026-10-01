@@ -189,7 +189,11 @@ impl Shell {
                 "v" => Some(Action::PasteKeys),
                 "z" => Some(if m.shift { Action::Redo } else { Action::Undo }),
                 "y" => Some(Action::Edit(Command::AddRectangle)),
-                "d" => Some(Action::DuplicateSelection),
+                "d" => Some(if m.shift {
+                    Action::SplitSelection
+                } else {
+                    Action::DuplicateSelection
+                }),
                 "k" => {
                     self.open_settings(window, cx);
                     None
@@ -216,6 +220,8 @@ impl Shell {
                 "delete" | "backspace" => Some(Action::DeleteSelection),
                 "v" => Some(Action::SetTool(Tool::Select)),
                 "h" => Some(Action::SetTool(Tool::Hand)),
+                "w" => Some(Action::SetTool(Tool::Rotate)),
+                "y" => Some(Action::SetTool(Tool::Anchor)),
                 "p" => Some(Action::Filter(Some(PropertyFilter::Position))),
                 "a" => Some(Action::Filter(Some(PropertyFilter::Anchor))),
                 "s" => Some(Action::Filter(Some(PropertyFilter::Scale))),
@@ -375,6 +381,22 @@ impl Render for Shell {
                         Action::SetTool(Tool::Hand),
                         tool == Tool::Hand,
                     ))
+                    .child(ui::action_tool(
+                        "rotate",
+                        "arrow-rotate-right",
+                        "Rotation tool (W)",
+                        &self.state,
+                        Action::SetTool(Tool::Rotate),
+                        tool == Tool::Rotate,
+                    ))
+                    .child(ui::action_tool(
+                        "anchor",
+                        "target",
+                        "Pan Behind / Anchor Point tool (Y)",
+                        &self.state,
+                        Action::SetTool(Tool::Anchor),
+                        tool == Tool::Anchor,
+                    ))
                     .child(div().mx_2().w(px(1.0)).h(px(20.0)).bg(rgb(0x414141)))
                     .child(ui::action_tool(
                         "rectangle",
@@ -458,6 +480,11 @@ impl Render for Shell {
                         selected.map(|_| Action::DuplicateSelection),
                     ),
                     ("Delete selection", "Delete", Some(Action::DeleteSelection)),
+                    (
+                        "Split layers",
+                        "Ctrl+Shift+D",
+                        selected.map(|_| Action::SplitSelection),
+                    ),
                 ],
                 "Layer" => vec![
                     ("New text", "", Some(Action::AddText)),
@@ -641,8 +668,11 @@ impl Render for Shell {
                     );
             } else {
                 for line in [
-                    "V / H — Selection / Hand tool",
+                    "V / H / W / Y — Selection / Hand / Rotation / Anchor",
                     "Ctrl+Y — New rectangle    Ctrl+D — Duplicate",
+                    "Ctrl+Shift+D — Split layers at playhead",
+                    "Drag handles — Scale    Shift — Proportional scale / 15° rotation",
+                    "Esc — Cancel canvas drag",
                     "Ctrl+Z / Ctrl+Shift+Z — Undo / Redo",
                     "Ctrl+S / Ctrl+Shift+S — Save / Save as",
                     "Ctrl+I — Import image    Ctrl+C / Ctrl+V — Copy / Paste keys",

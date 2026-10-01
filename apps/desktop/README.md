@@ -45,8 +45,7 @@ editor, not a complete After Effects replacement or an AEP-compatible applicatio
   visible keys when keys are selected. Delete/duplicate act on the layer selection.
 - Drag selected layers in the composition to move them together in one undo step.
   Selected parent/child groups move once through their selected root ancestors.
-  The displayed corner markers indicate selection; resizing/rotation
-  by dragging those markers is not implemented.
+  Drag any of the eight handles to scale, or use W/Y for rotation/anchor editing.
 - Hand tool pans the composition. Fit resets pan and scale; zoom controls support
   6.25%–800%. The transparency grid can be toggled.
 - Drag layer bars to shift the selected layers and their keys; drag bar edges or
@@ -138,7 +137,8 @@ cargo run -p libre-effects-core --example make_animation_study -- examples/curve
 | Ctrl+Z / Ctrl+Shift+Z | Undo / Redo |
 | Ctrl+Y / Ctrl+D | Add rectangle / Duplicate selected layer |
 | Ctrl+K | Composition settings |
-| V / H | Selection / Hand tool |
+| V / H / W / Y | Selection / Hand / Rotation / Anchor Point tool |
+| Ctrl+Shift+D | Split selected layers at the playhead |
 | Space | Play / Pause |
 | Home / End | First / Last composition frame |
 | Page Up / Page Down | Previous / Next frame (Shift: 10 frames) |
@@ -154,6 +154,22 @@ cargo run -p libre-effects-core --example make_animation_study -- examples/curve
 Help → Keyboard shortcuts lists the controls in the app. Text fields keep typing
 isolated from editor shortcuts; Save, New, Open and Alt+F4 commit the field before
 continuing. Buttons support Tab and Enter/Space.
+
+The eight selection handles scale a layer around its anchor; Shift preserves the
+existing scale ratio. W rotates the clicked layer around its anchor, with Shift
+snapping to 15° increments. Y moves the anchor and compensates Position so the
+content stays in place at the current frame. These tools account for transformed
+parents, preview while dragging, commit as one undo step, and cancel with Escape.
+Scale, rotation and anchor gestures edit the clicked layer; Selection-tool movement
+moves the selected group. Existing animation tracks receive keys at the playhead.
+The W/Y shortcuts and Shift rotation increments follow Adobe's
+[current keyboard reference](https://helpx.adobe.com/sg/after-effects/desktop/get-started/keyboard-shortcuts/keyboard-shortcuts-reference.html).
+
+Edit → Split layers divides each selected layer at the playhead, retaining its
+animation tracks and remapping parent links within the new group. Every selected
+layer must contain the split frame; invalid or locked selections leave the project
+unchanged. Group duplication also preserves parent links within the duplicated
+group, while links to unselected parents keep their original targets.
 
 ## Masks, effects and rendering
 
@@ -197,9 +213,8 @@ instance, not a versioned backup system. A normal save/discard close clears it.
 
 Still pending: multiple compositions and precompositions, audio/video footage,
 video encoding, freeform/animated masks, an effect stack and animated effects,
-rich text layout, 3D, JSX, ExtendScript and expressions. Layer marker handles do
-not yet resize/rotate content. Parent links of separately duplicated layers keep
-their original targets. PNG sequences can be assembled in an external video tool.
+rich text layout, 3D, JSX, ExtendScript and expressions. PNG sequences can be
+assembled in an external video tool.
 There is no claim of AEP or Adobe script compatibility.
 
 ## Development
