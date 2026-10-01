@@ -675,6 +675,54 @@ mod tests {
         assert_eq!(renderer.render_preview(&restored, 3, 100).unwrap(), before);
     }
     #[test]
+    fn fractional_rate_and_timecode_preserve_keyframe_pixels_and_nested_samples() {
+        let mut e = scene();
+        e.execute(Command::AddRectangle).unwrap();
+        e.execute(Command::ToggleKeyframe {
+            id: 1,
+            property: Property::Opacity,
+            frame: 0,
+        })
+        .unwrap();
+        e.execute(Command::SetValue {
+            id: 1,
+            property: Property::Opacity,
+            frame: 8,
+            value: 0.0,
+        })
+        .unwrap();
+        let renderer = Renderer::new();
+        let before = renderer.render(e.project(), 4, 100).unwrap();
+        e.execute(Command::ConfigureCompositionRate {
+            name: "Film".into(),
+            width: 100,
+            height: 100,
+            fps: "23.976".parse().unwrap(),
+            duration: 10,
+            display_start: 86400,
+        })
+        .unwrap();
+        let saved = Project::from_json(&e.project().to_json().unwrap()).unwrap();
+        assert_eq!(renderer.render(&saved, 4, 100).unwrap(), before);
+        assert_eq!(renderer.render_preview(&saved, 4, 100).unwrap(), before);
+        e.execute(Command::NewComposition).unwrap();
+        e.execute(Command::ConfigureCompositionRate {
+            name: "NTSC".into(),
+            width: 100,
+            height: 100,
+            fps: "29.97".parse().unwrap(),
+            duration: 20,
+            display_start: 0,
+        })
+        .unwrap();
+        e.execute(Command::AddCompositionLayer {
+            composition: 1,
+            frame: 0,
+        })
+        .unwrap();
+        assert_eq!(renderer.render(e.project(), 5, 100).unwrap(), before);
+    }
+    #[test]
     fn renderer_preserves_alpha_color_and_mask_with_effects() {
         let mut e = scene();
         e.execute(Command::AddContent {

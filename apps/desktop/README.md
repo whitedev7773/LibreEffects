@@ -29,9 +29,19 @@ editor, not a complete After Effects replacement or an AEP-compatible applicatio
   column, and a draggable boundary between its layer list and time area.
 - Wanted Sans and Gravity Icons are embedded in the executable, with their licenses
   under assets/. No system font installation or runtime download is required.
-- Composition settings (Ctrl+K): name, dimensions, integer frame rate, duration
+- Composition settings (Ctrl+K): name, dimensions, exact rational frame rate, duration
   and RGB background color, with a live swatch and Black/White/Slate/Navy presets.
-  Duration is in frames. Settings are undoable; shortening across existing keys or layer ranges
+  FPS accepts integers, ratios (`24000/1001`, `30000/1001`) and NTSC shorthand
+  (`23.976`, `29.97`, `59.94`, `119.88`). HD/UHD presets set size and rate.
+  Duration accepts frames (`240` or `240f`), elapsed seconds (`10s`), or
+  `HH:MM:SS:FF`; seconds round to the nearest frame. The 5/10/30/60-second
+  buttons set duration. Rates support 1–240 fps and durations up to 24 hours.
+  Start timecode is a non-drop-frame display offset before 24:00:00:00. It does
+  not shift keys, source sampling or CLI frame numbers. At 29.97 fps, a one-hour
+  NDF label spans 3603.6 elapsed seconds; drop-frame numbering is not implemented.
+  Changing FPS retains existing frame numbers. The timeline displays a compact
+  decimal FPS label; settings and encoding keep the exact numerator/denominator.
+  Settings are undoable; shortening across existing keys or layer ranges
   is rejected rather than silently discarding edits.
 
 ## Editing
@@ -309,6 +319,9 @@ right/bottom for H.264 compatibility. Render work area — MOV with alpha export
 ProRes 4444 with transparency and the exact composition dimensions. Both use the
 composition frame rate and the B/N work area; the first output frame is the work
 area's first frame. These presets currently export silent video.
+Exact fractional clocks are passed directly to FFmpeg. When a nonzero start
+timecode is set, MP4/MOV include its NDF timecode plus the work-area offset.
+PNG sequence manifests record the exact rate, first-frame timecode and NDF format.
 
 ### Composition background and transparent output
 
@@ -478,7 +491,7 @@ the source. Project rows have a plus button to insert an existing composition at
 the active playhead. Renaming uses Ctrl+K in the source composition.
 
 Nested layers retain alpha, support transforms/masks/effects, and sample the
-preceding source frame using integer FPS conversion. Trimming preserves the
+preceding source frame using exact rational FPS conversion. Trimming preserves the
 source origin; moving shifts it. A source's background color is a viewer/output
 matte, so it is not baked into its nested layers; use a background solid when needed.
 Changing a source canvas retains the existing instance's layer dimensions.
@@ -494,7 +507,7 @@ Versioned .lfe.json files contain compositions, layer ranges, transforms and
 keyframes. Files from the initial rectangle editor remain readable. Bezier or
 parenting edits upgrade the project to version 2; text, images, masks or effects
 upgrade it to version 3; linked videos require version 4, and altered video playback
-requires version 5. Nonblack composition backgrounds require version 6; shared embedded image assets require version 7, saved work areas require version 8, multiple compositions require version 9, nested layers require version 10, Null/Solo/Shy/Guide require version 11, ordered animated effects require version 12, and timeline markers require version 13. Older applications reject
+requires version 5. Nonblack composition backgrounds require version 6; shared embedded image assets require version 7, saved work areas require version 8, multiple compositions require version 9, nested layers require version 10, Null/Solo/Shy/Guide require version 11, ordered animated effects require version 12, timeline markers require version 13, and rational FPS/nonzero start timecode require version 14. Integer FPS files remain readable; fractional rates serialize as `{numerator, denominator}`. Older applications reject
 unsupported versions. Save writes
 the snapshot captured when clicked using a temporary file before replacement.
 Files are limited to 256 MiB, with up to 128 MiB of unique base64 image data and

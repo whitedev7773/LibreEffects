@@ -70,6 +70,90 @@ mod tests {
         e.project().clone()
     }
     #[test]
+    #[ignore = "requires FFmpeg; validates exact fractional clocks and start timecode"]
+    fn fractional_rate_mp4_and_mov_preserve_frame_count_duration_and_timecode() {
+        use libre_effects_core::FrameRate;
+        let dir = tempfile::tempdir().unwrap();
+        for rate in ["24000/1001", "30000/1001"] {
+            let fps: FrameRate = rate.parse().unwrap();
+            let mut e = Editor::default();
+            e.replace_project(scene()).unwrap();
+            e.execute(Edit::ConfigureCompositionRate {
+                name: "Fractional export".into(),
+                width: 101,
+                height: 99,
+                fps,
+                duration: 120,
+                display_start: fps.nominal() * 3600,
+            })
+            .unwrap();
+            e.execute(Edit::Precompose {
+                layers: vec![1],
+                name: "Nested clock".into(),
+            })
+            .unwrap();
+            let project = Project::from_json(&e.project().to_json().unwrap()).unwrap();
+            for preset in [VideoPreset::H264, VideoPreset::ProResAlpha] {
+                let path = dir
+                    .path()
+                    .join(format!("fractional.{}", preset.extension()));
+                export_video(
+                    &project,
+                    2..62,
+                    preset,
+                    &path,
+                    Default::default(),
+                    Default::default(),
+                )
+                .unwrap();
+                let probe = command(&crate::footage::probe_path()).args([
+                    "-v", "error", "-select_streams", "v:0", "-count_frames", "-show_entries",
+                    "stream=r_frame_rate,avg_frame_rate,time_base,duration_ts,nb_read_frames:stream_tags=timecode", "-of", "json",
+                ]).arg(&path).output().unwrap();
+                assert!(
+                    probe.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&probe.stderr)
+                );
+                let metadata: serde_json::Value = serde_json::from_slice(&probe.stdout).unwrap();
+                let stream = &metadata["streams"][0];
+                assert_eq!(stream["r_frame_rate"], rate);
+                assert_eq!(stream["avg_frame_rate"], rate);
+                assert_eq!(stream["nb_read_frames"], "60");
+                assert_eq!(stream["tags"]["timecode"], "01:00:00:02");
+                let (n, d) = stream["time_base"]
+                    .as_str()
+                    .unwrap()
+                    .split_once('/')
+                    .unwrap();
+                let ticks = stream["duration_ts"].as_u64().unwrap();
+                assert_eq!(
+                    u128::from(ticks) * n.parse::<u128>().unwrap() * u128::from(fps.numerator()),
+                    60 * u128::from(fps.denominator()) * d.parse::<u128>().unwrap()
+                );
+                let decoded = command(&ffmpeg_path())
+                    .args(["-v", "error", "-i"])
+                    .arg(&path)
+                    .args(["-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"])
+                    .output()
+                    .unwrap();
+                assert!(decoded.status.success());
+                let (width, height) = if preset == VideoPreset::H264 {
+                    (102, 100)
+                } else {
+                    (101, 99)
+                };
+                assert_eq!(decoded.stdout.len(), width * height * 4 * 60);
+                let first = &decoded.stdout[(49 * width + 50) * 4..][..4];
+                if preset == VideoPreset::H264 {
+                    assert!((i32::from(first[0]) - 128).abs() < 8, "{first:?}");
+                } else {
+                    assert!((i32::from(first[3]) - 128).abs() < 3, "{first:?}");
+                }
+            }
+        }
+    }
+    #[test]
     fn canceled_or_failed_encoder_preserves_destination_and_cleans_temp_files() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("existing.mp4");
@@ -480,6 +564,9 @@ fn encode(
                 "mov",
             ]);
         }
+    }
+    if comp.display_start() != 0 {
+        cmd.args(["-timecode", &comp.timecode(range.start)]);
     }
     cmd.arg(output.path())
         .stdin(Stdio::piped())

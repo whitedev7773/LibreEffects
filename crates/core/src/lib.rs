@@ -19,10 +19,12 @@ mod layer_workflow;
 pub use layer_workflow::{LayerClipboard, LayerSwitch};
 mod markers;
 mod precompositions;
+mod time;
 mod tracks;
 pub use editing::{Content, Effects, KeyCopy, KeyRef, Mask, VideoPlayback};
 pub use geometry::{Affine, Bezier};
 pub use markers::{Marker, MarkerEdit, MarkerId, MarkerTarget};
+pub use time::{FrameRate, FrameRounding};
 pub use tracks::{PropertyPath, TrackEdit};
 
 #[derive(Clone, Copy, Debug)]
@@ -311,7 +313,10 @@ pub struct Composition {
     name: String,
     width: u32,
     height: u32,
-    fps: u32,
+    fps: FrameRate,
+    /// Non-drop-frame display offset; source sampling remains zero based.
+    #[serde(default)]
+    display_start: Frame,
     duration: Frame,
     /// Preview and opaque-output matte; does not change the composition's alpha.
     #[serde(default)]
@@ -324,6 +329,13 @@ pub struct Composition {
 }
 
 impl Composition {
+    pub fn display_start(&self) -> Frame {
+        self.display_start
+    }
+    pub fn timecode(&self, frame: Frame) -> String {
+        self.fps
+            .timecode(u64::from(self.display_start) + u64::from(frame))
+    }
     pub fn hide_shy(&self) -> bool {
         self.hide_shy
     }
@@ -397,7 +409,7 @@ impl Composition {
     pub fn height(&self) -> u32 {
         self.height
     }
-    pub fn fps(&self) -> u32 {
+    pub fn fps(&self) -> FrameRate {
         self.fps
     }
     pub fn duration(&self) -> Frame {
@@ -453,7 +465,8 @@ impl Default for Project {
                 name: "Composition 01".into(),
                 width: 1920,
                 height: 1080,
-                fps: 30,
+                fps: 30.into(),
+                display_start: 0,
                 duration: 150,
                 background_color: 0x000000,
                 work_area: None,
@@ -480,7 +493,7 @@ impl Project {
     }
 
     fn validate(&self) -> Result<(), String> {
-        if !(1..=13).contains(&self.version) {
+        if !(1..=14).contains(&self.version) {
             return Err("Unsupported project version".into());
         }
         if self.version < 9
@@ -506,6 +519,11 @@ impl Project {
         let mut images = BTreeSet::new();
         let mut image_bytes = 0usize;
         for (_, comp) in self.compositions() {
+            if self.version < 14 && (comp.fps.denominator() != 1 || comp.display_start != 0) {
+                return Err(
+                    "Fractional frame rates and start timecode require project version 14".into(),
+                );
+            }
             comp.markers.validate(comp.duration)?;
             if self.version < 13
                 && (!comp.markers.is_default()
@@ -527,9 +545,10 @@ impl Project {
             }
             if !(1..=16_384).contains(&comp.width)
                 || !(1..=16_384).contains(&comp.height)
-                || !(1..=240).contains(&comp.fps)
+                || !comp.fps.valid()
                 || comp.duration == 0
-                || comp.duration > comp.fps * 86_400
+                || comp.duration > comp.fps.max_duration()
+                || comp.display_start >= comp.fps.nominal() * 86_400
                 || comp.layers.len() > 1_000
                 || comp.name.len() > 1024
                 || comp.background_color > 0xffffff
@@ -751,6 +770,14 @@ pub enum Command {
         fps: u32,
         duration: Frame,
     },
+    ConfigureCompositionRate {
+        name: String,
+        width: u32,
+        height: u32,
+        fps: FrameRate,
+        duration: Frame,
+        display_start: Frame,
+    },
     MoveKeyframe {
         id: LayerId,
         property: Property,
@@ -947,6 +974,14 @@ impl Editor {
         }) {
             next.project.version = 13;
         }
+        if next
+            .project
+            .compositions()
+            .into_iter()
+            .any(|(_, c)| c.fps.denominator() != 1 || c.display_start != 0)
+        {
+            next.project.version = 14;
+        }
         next.project.validate()?;
         if next != self.current {
             let previous = std::mem::replace(&mut self.current, next);
@@ -957,6 +992,26 @@ impl Editor {
 }
 
 fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
+    if let Command::ConfigureComposition {
+        name,
+        width,
+        height,
+        fps,
+        duration,
+    } = command
+    {
+        return apply(
+            state,
+            Command::ConfigureCompositionRate {
+                name,
+                width,
+                height,
+                fps: fps.into(),
+                duration,
+                display_start: state.project.composition.display_start,
+            },
+        );
+    }
     if let Command::Marker { target, edit } = command {
         return markers::apply(state, target, edit);
     }
@@ -1111,12 +1166,13 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
         layer.transform_offset = offset;
         return Ok(());
     }
-    if let Command::ConfigureComposition {
+    if let Command::ConfigureCompositionRate {
         name,
         width,
         height,
         fps,
         duration,
+        display_start,
     } = &command
     {
         if *width as u64 * *height as u64 > 33_554_432 {
@@ -1126,9 +1182,10 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
             || name.len() > 1024
             || !(1..=16_384).contains(width)
             || !(1..=16_384).contains(height)
-            || !(1..=240).contains(fps)
+            || !fps.valid()
             || *duration == 0
-            || *duration > fps * 86_400
+            || *duration > fps.max_duration()
+            || *display_start >= fps.nominal() * 86_400
         {
             return Err("Invalid composition settings".into());
         }
@@ -1146,6 +1203,7 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
         comp.width = *width;
         comp.height = *height;
         comp.fps = *fps;
+        comp.display_start = *display_start;
         comp.duration = *duration;
         if let Some([start, end]) = comp.work_area {
             comp.work_area = Some([start.min(duration - 1), end.min(*duration)]);

@@ -1,6 +1,6 @@
 use super::Inspector;
 use crate::{
-    editor::{Action, EditorState, timecode},
+    editor::{Action, EditorState},
     ui,
 };
 use gpui::{Context, Entity, Window, div, prelude::*, px, rgb};
@@ -30,8 +30,8 @@ impl Render for Sidebar {
             comp.name(),
             comp.width(),
             comp.height(),
-            comp.fps(),
-            timecode(state.frame, comp.fps()),
+            comp.fps().label(),
+            comp.timecode(state.frame),
             comp.layers().len()
         );
         let playing = state.playing;

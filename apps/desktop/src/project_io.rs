@@ -3,7 +3,7 @@ use std::{
     path::Path,
 };
 
-use libre_effects_core::{Content, Project};
+use libre_effects_core::{Content, FrameRounding, Project};
 
 const MAX_BYTES: u64 = 256 * 1024 * 1024;
 
@@ -89,14 +89,25 @@ fn validate_sources(
                 let source = project
                     .composition_by_id(*composition)
                     .ok_or("Missing source composition")?;
-                let last = i64::from(end - 1) - *start_frame;
+                let last = i64::from(end - 1)
+                    .checked_sub(*start_frame)
+                    .ok_or("Nested source time overflow")?;
                 if last < 0 {
                     continue;
                 }
-                let first = (i64::from(start) - *start_frame).max(0) as u64
-                    * u64::from(source.fps())
-                    / u64::from(comp.fps());
-                let end = (last as u64 * u64::from(source.fps()) / u64::from(comp.fps()) + 1)
+                let first = i64::from(start)
+                    .checked_sub(*start_frame)
+                    .ok_or("Nested source time overflow")?
+                    .max(0) as u64;
+                let first = comp
+                    .fps()
+                    .convert_frames(first, source.fps(), FrameRounding::Floor)
+                    .ok_or("Nested source time overflow")?;
+                let end = comp
+                    .fps()
+                    .convert_frames(last as u64, source.fps(), FrameRounding::Floor)
+                    .ok_or("Nested source time overflow")?
+                    .saturating_add(1)
                     .min(u64::from(source.duration()));
                 if first < end {
                     validate_sources(project, *composition, first as u32..end as u32, seen)?;

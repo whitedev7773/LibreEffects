@@ -5,17 +5,20 @@ impl Content {
     pub fn composition_frame(
         &self,
         frame: Frame,
-        parent_fps: u32,
+        parent_fps: impl Into<FrameRate>,
         source: &Composition,
     ) -> Option<Frame> {
         let Self::Composition { start_frame, .. } = self else {
             return None;
         };
-        let elapsed = i64::from(frame) - *start_frame;
-        if elapsed < 0 || parent_fps == 0 {
+        let elapsed = i64::from(frame).checked_sub(*start_frame)?;
+        if elapsed < 0 {
             return None;
         }
-        let source_frame = elapsed as u64 * u64::from(source.fps) / u64::from(parent_fps);
+        let source_frame =
+            parent_fps
+                .into()
+                .convert_frames(elapsed as u64, source.fps, FrameRounding::Floor)?;
         (source_frame < u64::from(source.duration)).then_some(source_frame as Frame)
     }
 }
@@ -86,7 +89,9 @@ fn add_layer(state: &mut Snapshot, composition: CompositionId, frame: Frame) -> 
         return Err("Place the composition inside the timeline".into());
     }
     let end = (u64::from(frame)
-        + (u64::from(duration) * u64::from(parent.fps)).div_ceil(u64::from(fps)))
+        + fps
+            .convert_frames(u64::from(duration), parent.fps, FrameRounding::Ceil)
+            .ok_or("Nested composition duration overflow")?)
     .min(u64::from(parent.duration)) as Frame;
     super::apply(
         state,

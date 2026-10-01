@@ -49,7 +49,8 @@ pub enum Content {
 }
 impl Content {
     /// Unquantized source seconds, including times outside the source's range.
-    pub fn video_source_time(&self, frame: Frame, fps: u32) -> Option<f64> {
+    pub fn video_source_time(&self, frame: Frame, fps: impl Into<FrameRate>) -> Option<f64> {
+        let fps = fps.into();
         let Self::Video {
             start_frame,
             playback,
@@ -58,14 +59,15 @@ impl Content {
         else {
             return None;
         };
-        if fps == 0 {
+        if !fps.valid() {
             return None;
         }
         Some(
-            playback.source_in + (frame as f64 - *start_frame as f64) / fps as f64 * playback.speed,
+            playback.source_in
+                + (frame as f64 - *start_frame as f64) / fps.as_f64() * playback.speed,
         )
     }
-    pub fn video_time(&self, frame: Frame, fps: u32) -> Option<f64> {
+    pub fn video_time(&self, frame: Frame, fps: impl Into<FrameRate>) -> Option<f64> {
         let Self::Video {
             duration,
             source_fps,
@@ -540,7 +542,7 @@ pub(super) fn apply_extended(
                     }
                     l.in_frame = *start_frame as u32;
                     l.out_frame = Some(
-                        (l.in_frame as u64 + (seconds * fps as f64).ceil() as u64)
+                        (l.in_frame as u64 + (seconds * fps.as_f64()).ceil() as u64)
                             .min(duration as u64) as u32,
                     );
                     let scale = (cw as f64 / width).min(ch as f64 / height).min(1.0) * 100.0;

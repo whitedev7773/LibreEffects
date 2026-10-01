@@ -93,10 +93,18 @@ impl Markers {
         }
         self.validate(duration)
     }
-    pub(super) fn resample(&mut self, from: u32, to: u32, duration: Frame) -> Result<(), String> {
+    pub(super) fn resample(
+        &mut self,
+        from: FrameRate,
+        to: FrameRate,
+        duration: Frame,
+    ) -> Result<(), String> {
         let convert = |f: Frame| -> Result<Frame, String> {
-            u32::try_from((u64::from(f) * u64::from(to) + u64::from(from) / 2) / u64::from(from))
-                .map_err(|_| "Marker time overflow".into())
+            u32::try_from(
+                from.convert_frames(u64::from(f), to, FrameRounding::Nearest)
+                    .ok_or("Marker time overflow")?,
+            )
+            .map_err(|_| "Marker time overflow".into())
         };
         for m in &mut self.items {
             let end = convert(m.end())?;

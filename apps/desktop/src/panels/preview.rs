@@ -1,5 +1,5 @@
 use crate::{
-    editor::{Action, EditorState, Tool, timecode},
+    editor::{Action, EditorState, Tool},
     ui,
 };
 use gpui::{
@@ -343,7 +343,7 @@ impl Render for Preview {
             .into_iter()
             .map(|(id, comp)| (id, comp.name().to_string()))
             .collect();
-        let time = timecode(frame, comp.fps());
+        let time = comp.timecode(frame);
         let pan = point(px(state.preview_pan[0]), px(state.preview_pan[1]));
         let gesture = self.gesture.clone();
         let mut render_project = state.editor.project().clone();

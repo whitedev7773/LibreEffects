@@ -110,9 +110,9 @@ impl Render for Browser {
                                 comp.height()
                             )))
                             .child(div().text_color(rgb(ui::MUTED)).child(format!(
-                                "{:.2} fps  •  {:.2} s",
-                                comp.fps(),
-                                comp.duration() as f32 / comp.fps() as f32
+                                "{} fps  •  {:.2} s",
+                                comp.fps().label(),
+                                comp.fps().seconds(u64::from(comp.duration()))
                             )))
                             .child(
                                 div()

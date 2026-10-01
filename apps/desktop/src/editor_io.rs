@@ -422,6 +422,8 @@ impl EditorState {
                 let manifest = serde_json::json!({
                     "composition": project.composition().name(),
                     "fps": project.composition().fps(),
+                    "start_timecode": project.composition().timecode(first_frame),
+                    "timecode_format": "non-drop-frame",
                     "width": project.composition().width(),
                     "height": project.composition().height(),
                     "first_frame": first_frame,

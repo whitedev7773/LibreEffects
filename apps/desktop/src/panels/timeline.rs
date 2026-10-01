@@ -1,6 +1,6 @@
 use crate::{
     components::TextField,
-    editor::{Action, EditorState, PropertyFilter, timecode},
+    editor::{Action, EditorState, PropertyFilter},
     ui,
 };
 use gpui::{
@@ -1260,13 +1260,13 @@ impl Render for Timeline {
                                 div()
                                     .text_size(px(14.0))
                                     .text_color(rgb(ui::BLUE))
-                                    .child(timecode(frame, comp.fps())),
+                                    .child(comp.timecode(frame)),
                             )
                             .child(
                                 div()
                                     .text_size(px(10.0))
                                     .text_color(rgb(ui::MUTED))
-                                    .child(format!("{frame:05}  ({} fps)", comp.fps())),
+                                    .child(format!("{frame:05}  ({} fps)", comp.fps().label())),
                             ),
                     )
                     .child(
@@ -1530,7 +1530,7 @@ impl Render for Timeline {
                                     .child(format!(
                                         "{:.2}s",
                                         (start as f32 + visible as f32 * tick as f32 / 10.0)
-                                            / comp.fps() as f32
+                                            / comp.fps().as_f64() as f32
                                     ))
                             }))
                             .when(frame >= start && frame <= start + visible, |s| {

@@ -13,7 +13,7 @@ pub enum LayerSwitch {
 pub struct LayerClipboard {
     layers: Vec<Layer>,
     composition: CompositionId,
-    fps: u32,
+    fps: FrameRate,
     duration: Frame,
 }
 impl LayerClipboard {
@@ -129,11 +129,14 @@ fn paste(state: &mut Snapshot, clipboard: &LayerClipboard) -> Result<(), String>
         .enumerate()
         .map(|(i, l)| (l.id, state.project.next_layer_id + i as u64))
         .collect();
-    let fps = u64::from(comp.fps);
-    let source_fps = u64::from(clipboard.fps);
     let convert = |frame: Frame| -> Result<Frame, String> {
-        u32::try_from((u64::from(frame) * fps + source_fps / 2) / source_fps)
-            .map_err(|_| "Copied time exceeds supported range".into())
+        u32::try_from(
+            clipboard
+                .fps
+                .convert_frames(u64::from(frame), comp.fps, FrameRounding::Nearest)
+                .ok_or("Copied time exceeds supported range")?,
+        )
+        .map_err(|_| "Copied time exceeds supported range".into())
     };
     let mut layers = clipboard.layers.clone();
     for layer in &mut layers {
@@ -177,10 +180,10 @@ fn paste(state: &mut Snapshot, clipboard: &LayerClipboard) -> Result<(), String>
         if let Content::Video { start_frame, .. } | Content::Composition { start_frame, .. } =
             &mut layer.content
         {
-            let value = i128::from(*start_frame) * i128::from(comp.fps);
-            let divisor = i128::from(clipboard.fps);
-            *start_frame = i64::try_from((value.abs() + divisor / 2) / divisor * value.signum())
-                .map_err(|_| "Copied source time overflow")?;
+            *start_frame = clipboard
+                .fps
+                .convert_origin(*start_frame, comp.fps)
+                .ok_or("Copied source time overflow")?;
         }
     }
     let index = state

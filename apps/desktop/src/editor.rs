@@ -967,7 +967,7 @@ impl EditorState {
             }
             if let Some((start, first)) = state.playback_origin {
                 let comp = state.editor.project().composition();
-                let elapsed = (start.elapsed().as_secs_f64() * f64::from(comp.fps())) as u64;
+                let elapsed = (start.elapsed().as_secs_f64() * comp.fps().as_f64()) as u64;
                 let end = state.work_end.min(comp.duration());
                 let start = state.work_start.min(end - 1);
                 state.frame = start
@@ -993,17 +993,6 @@ pub(crate) fn action_button(
         .on_click(move |_, window, cx| {
             state.update(cx, |state, cx| state.dispatch(&action, window, cx));
         })
-}
-
-pub(crate) fn timecode(frame: Frame, fps: u32) -> String {
-    let seconds = frame / fps;
-    format!(
-        "{:02}:{:02}:{:02}:{:02}",
-        seconds / 3600,
-        (seconds / 60) % 60,
-        seconds % 60,
-        frame % fps
-    )
 }
 
 #[cfg(test)]

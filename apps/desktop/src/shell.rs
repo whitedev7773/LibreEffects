@@ -5,7 +5,7 @@ use crate::{
     ui,
 };
 use gpui::{Context, Entity, FocusHandle, KeyDownEvent, Window, div, prelude::*, px, rgb};
-use libre_effects_core::Command;
+use libre_effects_core::{Command, FrameRate};
 
 pub(crate) struct Shell {
     state: Entity<EditorState>,
@@ -55,7 +55,7 @@ impl Shell {
                 .initial_fraction(0.84)
                 .minimum_fraction(0.12)
         });
-        let fields: Vec<_> = (0..6)
+        let fields: Vec<_> = (0..7)
             .map(|_| cx.new(|cx| TextField::new(cx, |_, _, _| {})))
             .collect();
         for (index, panel) in [&layout, &upper, &middle, &right].into_iter().enumerate() {
@@ -132,6 +132,7 @@ impl Shell {
             comp.fps().to_string(),
             comp.duration().to_string(),
             format!("#{:06X}", comp.background_color()),
+            comp.fps().timecode(u64::from(comp.display_start())),
         ];
         for (field, value) in self.fields.iter().zip(values) {
             field.update(cx, |field, _| {
@@ -145,14 +146,37 @@ impl Shell {
     }
     fn apply_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let name = self.fields[0].read(cx).value().to_string();
-        let numbers: Result<Vec<u32>, _> = self.fields[1..5]
-            .iter()
-            .map(|field| field.read(cx).value().parse::<u32>())
-            .collect();
-        let Ok(n) = numbers else {
-            self.settings_error = "Enter whole numbers for size, frame rate and duration.".into();
-            cx.notify();
-            return;
+        let parsed = (|| -> Result<_, String> {
+            let width = self.fields[1]
+                .read(cx)
+                .value()
+                .trim()
+                .parse::<u32>()
+                .map_err(|_| "Width must be a whole number")?;
+            let height = self.fields[2]
+                .read(cx)
+                .value()
+                .trim()
+                .parse::<u32>()
+                .map_err(|_| "Height must be a whole number")?;
+            let fps: FrameRate = self.fields[3].read(cx).value().parse()?;
+            let duration = fps.parse_duration(self.fields[4].read(cx).value())?;
+            let display_start = fps.parse_timecode(self.fields[6].read(cx).value())?;
+            if display_start >= fps.nominal() * 86_400 {
+                return Err("Start timecode must be before 24:00:00:00".into());
+            }
+            if duration == 0 || duration > fps.max_duration() {
+                return Err("Duration must be at least one frame and at most 24 hours".into());
+            }
+            Ok((width, height, fps, duration, display_start))
+        })();
+        let (width, height, fps, duration, display_start) = match parsed {
+            Ok(values) => values,
+            Err(error) => {
+                self.settings_error = error;
+                cx.notify();
+                return;
+            }
         };
         let background = match ui::parse_hex_color(self.fields[5].read(cx).value()) {
             Ok(color) => color,
@@ -164,12 +188,13 @@ impl Shell {
         };
         self.dispatch(
             Action::Edit(Command::Batch(vec![
-                Command::ConfigureComposition {
+                Command::ConfigureCompositionRate {
                     name,
-                    width: n[0],
-                    height: n[1],
-                    fps: n[2],
-                    duration: n[3],
+                    width,
+                    height,
+                    fps,
+                    duration,
+                    display_start,
                 },
                 Command::SetCompositionBackground(background),
             ])),
@@ -884,13 +909,44 @@ impl Render for Shell {
                     },
                 ));
             if self.settings {
+                let mut presets = div().flex().items_center().gap_2();
+                for (label, width, height, fps) in [
+                    ("HD 23.976", "1920", "1080", "24000/1001"),
+                    ("HD 29.97", "1920", "1080", "30000/1001"),
+                    ("UHD 25", "3840", "2160", "25"),
+                ] {
+                    presets = presets.child(
+                        ui::text_button(
+                            gpui::SharedString::from(format!("comp-preset-{label}")),
+                            label,
+                        )
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                window.focus(&this.focus);
+                                for (index, value) in [(1, width), (2, height), (3, fps)] {
+                                    this.fields[index].update(cx, |field, _| {
+                                        field.sync(
+                                            "composition-settings".into(),
+                                            value.into(),
+                                            window,
+                                        )
+                                    });
+                                }
+                                this.settings_error.clear();
+                                cx.notify();
+                            },
+                        )),
+                    );
+                }
+                dialog = dialog.child(presets);
                 for (index, label) in [
                     "Composition name",
                     "Width (px)",
                     "Height (px)",
                     "Frame rate (fps)",
-                    "Duration (frames)",
+                    "Duration",
                     "Background (RGB)",
+                    "Start timecode (NDF)",
                 ]
                 .into_iter()
                 .enumerate()
@@ -904,6 +960,27 @@ impl Render for Shell {
                             .child(div().flex_1().child(self.fields[index].clone())),
                     );
                 }
+                let mut durations = div().flex().items_center().gap_2().child("Duration:");
+                for value in ["5s", "10s", "30s", "60s"] {
+                    durations = durations.child(
+                        ui::text_button(
+                            gpui::SharedString::from(format!("duration-{value}")),
+                            value,
+                        )
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                window.focus(&this.focus);
+                                this.fields[4].update(cx, |field, _| {
+                                    field.sync("composition-settings".into(), value.into(), window)
+                                });
+                                this.settings_error.clear();
+                                cx.notify();
+                            },
+                        )),
+                    );
+                }
+                dialog = dialog.child(durations).child(div().text_size(px(11.0)).text_color(rgb(ui::MUTED))
+                    .child("FPS: 24, 23.976 or 24000/1001. Duration: 240f, 10s or HH:MM:SS:FF. Timecode is non-drop-frame; seconds use the exact rate. Changing FPS preserves keyframe numbers."));
                 let color = ui::parse_hex_color(self.fields[5].read(cx).value()).ok();
                 let mut palette = div().flex().items_center().gap_2().child(
                     div()
