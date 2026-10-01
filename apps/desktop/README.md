@@ -490,15 +490,54 @@ controls to put footage below a title, then save the project and render MP4/MOV.
   including locked instances. Replacement dimensions must match every instance. A shorter replacement is
   transparent beyond its duration. File → Refresh footage retries after restoring
   or replacing a file at the same path.
-- Preview decoding runs in the background with one request in flight and a bounded
-  32 MiB / 24-frame PNG cache. Playback may skip preview frames; uncached frames are
-  decoded on demand and real-time playback is not guaranteed. Output renders every
-  frame. Frame decoding times out after 15 seconds; cancellation can wait for the
-  current source-frame decode. Preview resolution does not reduce output quality.
+- All composition previews, including shape/text/effect-only scenes, run off the
+  UI thread with one compositor request in flight. The renderer and font database
+  persist between requests. Seek, loop wrap, document/quality changes and refresh
+  reject stale results; decoder waits check cancellation every 5 ms. SVG parsing
+  and a single CPU raster pass are not preemptible; canceled results are discarded.
+- Preview and output renderers reuse up to four CFR decoder sessions with bounded
+  read-ahead (at most two queued raw frames / 8 MiB per session, plus one in-flight
+  frame). Sources up to 4096 × 4096 can require 64 MiB for that single frame;
+  these limits exclude FFmpeg's codec buffers and the compositor's allocations.
+  Each renderer retains at most 120 source PNG frames / 32 MiB. A sequential miss
+  up to 32 frames ahead continues the process; a distant or uncached backward seek
+  restarts accurate seeking. Cached Hold/reverse/loop samples reuse their frames.
+  File size/mtime, source FPS and decoded dimensions participate in the cache key.
+  Refresh footage and document/view revision changes clear preview decoders.
+- Playback may skip preview frames; output renders every frame. Whole-composition
+  RAM/disk caching and stable cached playback remain J02. A source-frame wait has
+  a 15-second deadline, and cancellation/drop closes its pipe and reaps FFmpeg.
+  Preview resolution does not reduce output quality. Thumbnail/import validation
+  retains the separate one-shot decoder and 32 MiB / 24-frame cache.
 - Audio sources and waveforms are imported and mixed in video exports; Windows device preview is available as described below.
   Color processing is 8-bit RGBA and is
   not an HDR/color-managed workflow. Source files must stay unchanged during export;
   project snapshots preserve edits, not the external file bytes.
+
+### Decoder validation and performance
+
+`cargo test -p libre-effects-desktop --release video_decoder -- --include-ignored --nocapture`
+compares sequential frames, random seeks, Hold/reverse/loop, scaled output and
+file metadata changes with continuous FFmpeg reference pixels. Fixtures include
+30000/1001 FFV1, 24000/1001 H.264 with B-frames, and alpha QuickTime Animation.
+Four interleaved sources retain four sessions across 600 requests while evicting
+old PNG frames. A canceled waiting reader and a full prefetch channel both shut down.
+Shared preview/export regression tests also cover nested Time Remap, alpha
+interpretation, masks, effects, image sequences, persistence and MP4/MOV output.
+
+On 2026-10-02, Windows / Ryzen 5 4600G (12 logical processors, approximately 32 GiB
+RAM), FFmpeg N-118651-g0e917389fe-20250305, the release benchmark processed 60
+640 × 360 H.264 source frames in 193.820 ms versus 8.843 s with separate FFmpeg
+processes. The persistent path started once; cold first-frame time was 80.806 ms,
+pipe waits totaled 64.129 ms and PNG encoding/base64 46.916 ms. Cached PNG data
+occupied 7,824,448 bytes. These measurements include pixel verification and do
+not measure total app FPS, compositor/GPU/OS memory, display latency or acoustic
+A/V sync. Timing assertions are deliberately excluded from shared CI.
+
+Seeking uses FFmpeg's accurate input seek between adjacent CFR timestamps;
+`-fps_mode passthrough` avoids synthesized duplicate output frames. See the
+[official FFmpeg seek and frame-rate documentation](https://ffmpeg.org/ffmpeg.html).
+VFR import and a direct raw-pixel/GPU compositor remain outside this implementation.
 
 ### Portable projects and missing media
 
@@ -1104,7 +1143,7 @@ block meters are described below. MP4/MOV include the offline mix. Per-layer aud
 level/pan/fade animation and a measured-range meter are described below. Existing
 visual rendering and PNG output remain unchanged.
 
-Validation includes 230 ordinary tests plus 25 FFmpeg integration tests; the physical audio-device test is separate. Audio
+Validation includes 232 ordinary tests plus 29 FFmpeg integration tests; the physical audio-device test is separate. Audio
 coverage includes opposite-phase stereo, silence, chunk boundaries, delayed video
 sound, WAV/FLAC/MP3/AAC imports, mixed version-25 document serialization, timing and
 shared relinking. Native QA covered mixed import, audio-source composition creation,
@@ -1146,7 +1185,7 @@ size/modification changes between new chunks abort the job. Prepared mixed audio
 uses an automatically removed temporary file, up to 384,000 bytes per second of
 output (about 33.2 GB for 24 hours); disk/write failures leave the destination
 unchanged. The UI shows mixing progress before video frames. This is not yet the
-persistent decoder/RAM preview cache planned in H02/J01–J03.
+Windows device transport in H02 and persistent video decoding in J01; whole-composition RAM caching remains J02.
 
 Current arbitrary-time sampling uses linear interpolation between 48 kHz PCM
 samples. High-speed retiming can alias: band-limited variable-rate resampling and
@@ -1248,8 +1287,8 @@ meters, not intersample true-peak or peak-hold measurements.
 
 Rational loop boundaries carry their sample remainder across repetitions. Preview
 and export share the source clock, but video decoding and display refresh still
-determine the latency of actual displayed images. Persistent video decoding and
-RAM video preview remain J01/J02. Device selection, hot-plug auto-recovery,
+determine the latency of actual displayed images. Persistent video decoding is
+implemented in J01; RAM video preview remains J02. Device selection, hot-plug auto-recovery,
 non-Windows audio backends and remembered preview preferences remain extensions.
 The current mixer still uses linear interpolation for arbitrary source times.
 

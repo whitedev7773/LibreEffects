@@ -14,6 +14,9 @@ mod transform_gesture;
 use crate::viewer_tools::{self, Channel, RULER, ViewOption};
 use libre_effects_core::{Guide, GuideAxis};
 use transform_gesture::{TransformGesture, handles};
+#[path = "preview_render.rs"]
+mod preview_render;
+use preview_render::Request;
 
 #[derive(Clone)]
 struct GuideGesture {
@@ -80,16 +83,12 @@ pub(crate) struct Preview {
     menu_index: usize,
     raw: Option<image::RgbaImage>,
     display_channel: Channel,
-    renderer: crate::rendering::Renderer,
-    pending: bool,
+    renderer: std::sync::Arc<crate::rendering::Renderer>,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pending: Option<Request>,
     revision: u64,
-    ready: Option<(
-        libre_effects_core::Project,
-        u32,
-        u32,
-        u64,
-        Result<image::RgbaImage, String>,
-    )>,
+    decoder_revision: u64,
+    ready: Option<(Request, Result<image::RgbaImage, String>)>,
     failed: Option<(libre_effects_core::Project, u32, u32, String)>,
     cached: Option<(
         libre_effects_core::Project,
@@ -162,6 +161,7 @@ fn controls_active(
 impl Preview {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         Self {
             state,
             bounds: Rc::new(Cell::new(None)),
@@ -174,8 +174,10 @@ impl Preview {
             menu_index: 0,
             raw: None,
             display_channel: Channel::Rgb,
-            renderer: crate::rendering::Renderer::new(),
-            pending: false,
+            renderer: std::sync::Arc::new(crate::rendering::Renderer::with_cancel(cancel.clone())),
+            cancel,
+            pending: None,
+            decoder_revision: 0,
             revision: 0,
             ready: None,
             failed: None,
@@ -700,6 +702,7 @@ impl Render for Preview {
         let resolution = state.preview_resolution;
         let revision = state.preview_revision;
         let playing = state.playing;
+        let transport = state.transport_generation();
         let max_dimension = (comp.width().max(comp.height()).min(1280) / resolution).max(1);
         let hand = state.tool == Tool::Hand;
         let active_composition = state.editor.project().active_composition_id();
@@ -723,107 +726,19 @@ impl Render for Preview {
             render_project = temporary.project().clone();
         }
         let comp = render_project.composition().clone();
-        if self.revision != revision {
-            self.revision = revision;
-            self.failed = None;
-            if let Some((_, _, _, old)) = self.cached.take() {
-                let _ = window.drop_image(old);
-            }
-        }
-        if let Some((project, ready_frame, dimension, generation, result)) = self.ready.take() {
-            if project == render_project
-                && dimension == max_dimension
-                && generation == revision
-                && (playing || ready_frame == frame)
-            {
-                if let Some((_, _, _, old)) = self.cached.take() {
-                    let _ = window.drop_image(old);
-                }
-                match result {
-                    Ok(pixels) => {
-                        self.cache_pixels(project, ready_frame, dimension, pixels, channel, window);
-                        self.failed = None;
-                    }
-                    Err(e) => self.failed = Some((project, ready_frame, dimension, e)),
-                }
-            }
-        }
-        if self.cached.as_ref().is_none_or(|(p, f, dimension, _)| {
-            p != &render_project || *f != frame || *dimension != max_dimension
-        }) {
-            let has_video = comp.layers().iter().any(|l| {
-                matches!(
-                    l.content(),
-                    libre_effects_core::Content::Video { .. }
-                        | libre_effects_core::Content::ImageSequence { .. }
-                        | libre_effects_core::Content::Composition { .. }
-                )
-            });
-            if has_video {
-                if self
-                    .cached
-                    .as_ref()
-                    .is_some_and(|(p, _, _, _)| p != &render_project)
-                {
-                    if let Some((_, _, _, old)) = self.cached.take() {
-                        let _ = window.drop_image(old);
-                    }
-                }
-                let failed = self.failed.as_ref().is_some_and(|(p, f, d, _)| {
-                    p == &render_project && *f == frame && *d == max_dimension
-                });
-                if !self.pending && !failed {
-                    self.pending = true;
-                    let project = render_project.clone();
-                    cx.spawn(async move |entity, cx| {
-                        let worker_project = project.clone();
-                        let result = cx
-                            .background_executor()
-                            .spawn(async move {
-                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                    crate::rendering::Renderer::new().render_preview(
-                                        &worker_project,
-                                        frame,
-                                        max_dimension,
-                                    )
-                                }))
-                                .unwrap_or_else(|_| Err("Video preview failed".into()))
-                            })
-                            .await;
-                        let _ = entity.update(cx, |s, cx| {
-                            s.pending = false;
-                            s.ready = Some((project, frame, max_dimension, revision, result));
-                            cx.notify();
-                        });
-                    })
-                    .detach();
-                }
-            } else {
-                self.failed = None;
-                if let Some((_, _, _, old)) = self.cached.take() {
-                    let _ = window.drop_image(old);
-                }
-                match self
-                    .renderer
-                    .render_preview(&render_project, frame, max_dimension)
-                {
-                    Ok(pixels) => {
-                        self.cache_pixels(
-                            render_project.clone(),
-                            frame,
-                            max_dimension,
-                            pixels,
-                            channel,
-                            window,
-                        );
-                    }
-                    Err(error) => {
-                        self.cached = None;
-                        self.failed = Some((render_project.clone(), frame, max_dimension, error));
-                    }
-                }
-            }
-        }
+        self.update_render(
+            Request {
+                project: render_project.clone(),
+                frame,
+                dimension: max_dimension,
+                revision,
+                transport,
+            },
+            playing,
+            channel,
+            window,
+            cx,
+        );
         if channel != self.display_channel {
             if let Some((_, _, _, image)) = &mut self.cached {
                 if let Some(raw) = &self.raw {
@@ -901,8 +816,8 @@ impl Render for Preview {
                     .child(format!(
                         "{}  ›  Active Camera{}",
                         comp.name(),
-                        if self.pending {
-                            "  ·  Decoding footage…"
+                        if self.pending.is_some() {
+                            "  ·  Rendering…"
                         } else {
                             ""
                         }

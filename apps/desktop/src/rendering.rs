@@ -12,6 +12,8 @@ fn xml(s: &str) -> String {
 }
 pub(crate) struct Renderer {
     pub(crate) options: resvg::usvg::Options<'static>,
+    decoders: std::sync::Mutex<crate::video_decoder::Pool>,
+    cancel: Arc<std::sync::atomic::AtomicBool>,
 }
 fn text_svg(text: &str, font_size: f64, color: &str) -> String {
     text.lines().enumerate().map(|(line,s)| format!("<text x='0' y='{}' font-family='Wanted Sans' font-size='{font_size}' fill='{color}' xml:space='preserve'>{}</text>",font_size * (1.0 + 1.2 * line as f64),xml(s))).collect()
@@ -75,11 +77,24 @@ fn count_layer(count: &mut usize) -> Result<(), String> {
 }
 impl Renderer {
     pub fn new() -> Self {
+        Self::with_cancel(Default::default())
+    }
+    pub fn with_cancel(cancel: Arc<std::sync::atomic::AtomicBool>) -> Self {
         let mut options = resvg::usvg::Options::default();
         Arc::make_mut(&mut options.fontdb)
             .load_font_data(include_bytes!("../assets/fonts/WantedSans-Regular.ttf").to_vec());
         options.font_family = "Wanted Sans".into();
-        Self { options }
+        Self {
+            options,
+            decoders: Default::default(),
+            cancel,
+        }
+    }
+    pub fn clear_decoders(&self) {
+        self.decoders.lock().unwrap().clear();
+    }
+    fn check_cancel(&self) -> Result<(), String> {
+        crate::video_decoder::check_cancel(&self.cancel)
     }
     fn layers_svg(
         &self,
@@ -99,6 +114,7 @@ impl Renderer {
             c.layer_active(l, frame, include_guides)
                 && !matches!(l.content(), Content::Null | Content::Audio { .. })
         }) {
+            self.check_cancel()?;
             if matches!(l.content(), Content::Adjustment) {
                 let Some(matrix) = c.world_transform(l.id(), frame) else {
                     continue;
@@ -317,16 +333,28 @@ impl Renderer {
                 }
             }
             Content::Audio { .. } => {}
-            Content::Video { path, .. } => {
+            Content::Video {
+                path, source_fps, ..
+            } => {
                 if let Some(seconds) = l.video_decode_time(frame, c.fps()) {
-                    let png = crate::footage::interpreted_frame_png(
+                    let interpretation = l.footage_interpretation();
+                    let alpha_changed = interpretation.alpha
+                        != libre_effects_core::AlphaInterpretation::Straight
+                        || interpretation.invert_alpha;
+                    let png = self.decoders.lock().unwrap().frame_png(
                         path,
                         seconds,
+                        *source_fps,
                         l.width() as u32,
                         l.height() as u32,
-                        max_dimension,
-                        l.footage_interpretation(),
+                        if alpha_changed {
+                            (l.width() as u32).max(l.height() as u32)
+                        } else {
+                            max_dimension
+                        },
+                        &self.cancel,
                     )?;
+                    let png = crate::source_render::alpha_png(&png, interpretation)?;
                     svg.push_str(&format!(
                         "<image width='{}' height='{}' xlink:href='data:image/png;base64,{png}'/>",
                         l.width(),
@@ -391,6 +419,7 @@ impl Renderer {
         include_guides: bool,
         output_size: Option<[u32; 2]>,
     ) -> Result<image::RgbaImage, String> {
+        self.check_cancel()?;
         let c = project.composition();
         if frame >= c.duration() {
             return Err("Frame is outside the composition".into());
@@ -417,7 +446,9 @@ impl Renderer {
             include_guides,
         )?);
         svg.push_str("</svg>");
+        self.check_cancel()?;
         let tree = resvg::usvg::Tree::from_str(&svg, &self.options).map_err(|e| e.to_string())?;
+        self.check_cancel()?;
         let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)
             .ok_or("Could not allocate render buffer")?;
         resvg::render(
@@ -436,6 +467,7 @@ impl Renderer {
                 [p.red(), p.green(), p.blue(), p.alpha()]
             })
             .collect();
+        self.check_cancel()?;
         image::RgbaImage::from_raw(width, height, pixels).ok_or("Invalid render buffer".into())
     }
 }

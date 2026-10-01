@@ -290,6 +290,9 @@ impl Default for EditorState {
 }
 
 impl EditorState {
+    pub(crate) fn transport_generation(&self) -> u64 {
+        self.playback_generation
+    }
     pub fn selected_marker(
         &self,
     ) -> Option<(

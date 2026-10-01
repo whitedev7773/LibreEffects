@@ -35,6 +35,7 @@ mod theme;
 #[cfg(test)]
 mod time_remap_render;
 mod ui;
+mod video_decoder;
 mod video_export;
 mod view_state;
 mod viewer_tools;

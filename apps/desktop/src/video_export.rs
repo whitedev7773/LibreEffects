@@ -690,7 +690,7 @@ fn encode_with_settings(
         }
     });
     let result = (|| {
-        let renderer = Renderer::new();
+        let renderer = Renderer::with_cancel(cancel.clone());
         for index in 0..plan.frames {
             let frame = plan.source_frame(index);
             if cancel.load(Ordering::Relaxed) {
