@@ -31,6 +31,11 @@ pub enum Content {
     Image {
         png: std::sync::Arc<str>,
     },
+    Composition {
+        composition: CompositionId,
+        /// Parent frame at which source frame zero occurs. Trimming does not shift it.
+        start_frame: i64,
+    },
     Video {
         path: String,
         duration: f64,
@@ -121,6 +126,10 @@ pub(super) fn validate_content(
 ) -> Result<(), String> {
     let valid = match content {
         Content::Rectangle => true,
+        Content::Composition {
+            composition,
+            start_frame,
+        } => *composition > 0 && start_frame.abs_diff(0) <= 100_000_000,
         Content::Text { text, font_size } => {
             text.len() <= 16384 && font_size.is_finite() && (1.0..=2048.0).contains(font_size)
         }
@@ -544,7 +553,9 @@ pub(super) fn apply_extended(
                 let end = l.out_frame(duration);
                 l.in_frame = shifted(l.in_frame, *delta, duration, false)?;
                 l.out_frame = Some(shifted(end, *delta, duration, true)?);
-                if let Content::Video { start_frame, .. } = &mut l.content {
+                if let Content::Video { start_frame, .. }
+                | Content::Composition { start_frame, .. } = &mut l.content
+                {
                     *start_frame = start_frame
                         .checked_add(*delta)
                         .ok_or("Video timing overflow")?;

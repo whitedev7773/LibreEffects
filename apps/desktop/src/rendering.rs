@@ -61,27 +61,19 @@ impl Renderer {
         options.font_family = "Wanted Sans".into();
         Self { options }
     }
-    pub fn render(
+    fn layers_svg(
         &self,
         project: &Project,
+        composition: libre_effects_core::CompositionId,
         frame: u32,
         max_dimension: u32,
-    ) -> Result<image::RgbaImage, String> {
-        let c = project.composition();
-        if frame >= c.duration() {
-            return Err("Frame is outside the composition".into());
-        }
-        let scale = (max_dimension as f64 / c.width().max(c.height()) as f64).min(1.0);
-        let width = (c.width() as f64 * scale).round().max(1.0) as u32;
-        let height = (c.height() as f64 * scale).round().max(1.0) as u32;
-        if width as u64 * height as u64 > 33_554_432 {
-            return Err("Rendering supports up to 32 megapixels per frame".into());
-        }
-        let mut svg = format!(
-            "<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' width='{}' height='{}'>",
-            c.width(),
-            c.height()
-        );
+        prefix: &str,
+        layer_count: &mut usize,
+    ) -> Result<String, String> {
+        let c = project
+            .composition_by_id(composition)
+            .ok_or("Missing source composition")?;
+        let mut svg = String::new();
         for l in c
             .layers()
             .iter()
@@ -91,7 +83,13 @@ impl Renderer {
             let Some(matrix) = c.world_transform(l.id(), frame) else {
                 continue;
             };
-            let id = l.id();
+            *layer_count += 1;
+            if *layer_count > 4096 {
+                return Err(
+                    "Frame exceeds 4096 nested layer instances; simplify the composition".into(),
+                );
+            }
+            let id = format!("{prefix}-{}", l.id());
             let e = l.effects();
             svg.push_str(&format!(
                 "<defs><filter id='fx{id}' x='-100%' y='-100%' width='300%' height='300%'>"
@@ -154,6 +152,37 @@ impl Renderer {
                     l.width(),
                     l.height()
                 )),
+                Content::Composition { composition, .. } => {
+                    let source = project
+                        .composition_by_id(*composition)
+                        .ok_or("Missing source composition")?;
+                    if let Some(source_frame) =
+                        l.content().composition_frame(frame, c.fps(), source)
+                    {
+                        let inner = self.layers_svg(
+                            project,
+                            *composition,
+                            source_frame,
+                            max_dimension,
+                            &id,
+                            layer_count,
+                        )?;
+                        // An unchanged full-canvas group already shares its parent's clip.
+                        // Avoid a redundant clip pass, which can round antialiased edges again.
+                        if source.width() == c.width()
+                            && source.height() == c.height()
+                            && l.width() == f64::from(source.width())
+                            && l.height() == f64::from(source.height())
+                            && matrix == libre_effects_core::Affine::default()
+                            && e == libre_effects_core::Effects::default()
+                        {
+                            svg.push_str(&inner);
+                        } else {
+                            // Nested viewports clip to the source canvas and retain alpha.
+                            svg.push_str(&format!("<svg width='{}' height='{}' viewBox='0 0 {} {}' preserveAspectRatio='none' overflow='hidden'>{inner}</svg>", l.width(), l.height(), source.width(), source.height()));
+                        }
+                    }
+                }
                 Content::Video { path, .. } => {
                     if let Some(seconds) = l.content().video_time(frame, c.fps()) {
                         let png = crate::footage::frame_png(
@@ -168,7 +197,41 @@ impl Renderer {
                 }
             }
             svg.push_str("</g></g>");
+            if svg.len() > 64 * 1024 * 1024 {
+                return Err("Frame SVG exceeds 64 MiB; reduce embedded image instances".into());
+            }
         }
+        Ok(svg)
+    }
+    pub fn render(
+        &self,
+        project: &Project,
+        frame: u32,
+        max_dimension: u32,
+    ) -> Result<image::RgbaImage, String> {
+        let c = project.composition();
+        if frame >= c.duration() {
+            return Err("Frame is outside the composition".into());
+        }
+        let scale = (max_dimension as f64 / c.width().max(c.height()) as f64).min(1.0);
+        let width = (c.width() as f64 * scale).round().max(1.0) as u32;
+        let height = (c.height() as f64 * scale).round().max(1.0) as u32;
+        if width as u64 * height as u64 > 33_554_432 {
+            return Err("Rendering supports up to 32 megapixels per frame".into());
+        }
+        let mut svg = format!(
+            "<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' width='{}' height='{}'>",
+            c.width(),
+            c.height()
+        );
+        svg.push_str(&self.layers_svg(
+            project,
+            project.active_composition_id(),
+            frame,
+            max_dimension,
+            "root",
+            &mut 0,
+        )?);
         svg.push_str("</svg>");
         let tree = resvg::usvg::Tree::from_str(&svg, &self.options).map_err(|e| e.to_string())?;
         let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)
@@ -217,6 +280,134 @@ pub(crate) fn import_image(path: &Path) -> Result<(Content, u32, u32), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn precompose_and_split_preserve_animated_pixels_after_file_roundtrip() {
+        let renderer = Renderer::new();
+        for json in [
+            include_str!("../../../examples/lower-third.lfe.json"),
+            include_str!("../../../examples/content-study.lfe.json"),
+            include_str!("../../../examples/precomposition-study.lfe.json"),
+        ] {
+            let original = Project::from_json(json).unwrap();
+            let mut e = Editor::default();
+            e.replace_project(original.clone()).unwrap();
+            for layer in original
+                .composition()
+                .layers()
+                .iter()
+                .filter(|l| l.locked())
+            {
+                e.execute(Command::ToggleLocked(layer.id())).unwrap();
+            }
+            e.execute(Command::Precompose {
+                layers: original
+                    .composition()
+                    .layers()
+                    .iter()
+                    .map(|l| l.id())
+                    .collect(),
+                name: "Nested".into(),
+            })
+            .unwrap();
+            let id = e.selected().unwrap();
+            let duration = original.composition().duration();
+            e.execute(Command::SplitLayers {
+                ids: vec![id],
+                frame: duration / 2,
+            })
+            .unwrap();
+            let nested = Project::from_json(&e.project().to_json().unwrap()).unwrap();
+            for frame in [
+                0,
+                1,
+                duration / 4,
+                duration / 2 - 1,
+                duration / 2,
+                duration - 1,
+            ] {
+                let before = renderer.render(&original, frame, 384).unwrap();
+                let after = renderer.render(&nested, frame, 384).unwrap();
+                let changed = before
+                    .pixels()
+                    .zip(after.pixels())
+                    .filter(|(a, b)| a != b)
+                    .count();
+                assert_eq!(changed, 0, "Nested pixels changed at frame {frame}");
+            }
+        }
+    }
+    #[test]
+    fn nested_instances_sample_different_times_and_ignore_source_background() {
+        let mut e = scene();
+        e.execute(Command::ConfigureComposition {
+            name: "Parent".into(),
+            width: 100,
+            height: 100,
+            fps: 30,
+            duration: 60,
+        })
+        .unwrap();
+        e.execute(Command::NewComposition).unwrap();
+        e.execute(Command::ConfigureComposition {
+            name: "Source".into(),
+            width: 100,
+            height: 100,
+            fps: 24,
+            duration: 24,
+        })
+        .unwrap();
+        e.execute(Command::SetCompositionBackground(0x00ff00))
+            .unwrap();
+        e.execute(Command::AddContent {
+            content: Content::Rectangle,
+            width: 20.0,
+            height: 20.0,
+            name: "Animated".into(),
+        })
+        .unwrap();
+        e.execute(Command::ToggleKeyframe {
+            id: 1,
+            property: Property::Opacity,
+            frame: 0,
+        })
+        .unwrap();
+        e.execute(Command::SetValue {
+            id: 1,
+            property: Property::Opacity,
+            frame: 12,
+            value: 0.0,
+        })
+        .unwrap();
+        e.activate_composition(1).unwrap();
+        e.execute(Command::AddCompositionLayer {
+            composition: 2,
+            frame: 0,
+        })
+        .unwrap();
+        e.execute(Command::SetPosition {
+            id: 2,
+            frame: 0,
+            x: 25.0,
+            y: 50.0,
+        })
+        .unwrap();
+        e.execute(Command::AddCompositionLayer {
+            composition: 2,
+            frame: 15,
+        })
+        .unwrap();
+        e.execute(Command::SetPosition {
+            id: 3,
+            frame: 0,
+            x: 75.0,
+            y: 50.0,
+        })
+        .unwrap();
+        let image = Renderer::new().render(e.project(), 15, 100).unwrap();
+        assert_eq!(image.get_pixel(25, 50)[3], 0);
+        assert_eq!(image.get_pixel(75, 50)[3], 255);
+        assert_eq!(image.get_pixel(0, 0)[3], 0);
+    }
     #[test]
     fn opaque_background_composites_straight_alpha_without_changing_alpha_exports() {
         let mut e = scene();

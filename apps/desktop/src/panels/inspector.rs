@@ -339,7 +339,7 @@ impl Render for Inspector {
         }
         if matches!(
             layer.content(),
-            Content::Image { .. } | Content::Video { .. }
+            Content::Image { .. } | Content::Video { .. } | Content::Composition { .. }
         ) {
             entries.retain(|(index, _, _)| *index != 2);
         }
@@ -351,6 +351,19 @@ impl Render for Inspector {
                 .border_color(rgb(ui::BORDER))
                 .child("Content & Effects"),
         );
+        if let Content::Composition { composition, .. } = layer.content() {
+            let source = *composition;
+            let state = self.state.clone();
+            contents = contents.child(
+                ui::text_button("open-source-composition", "Open source composition").on_click(
+                    move |_, window, cx| {
+                        state.update(cx, |s, cx| {
+                            s.dispatch(&Action::ActivateComposition(source), window, cx)
+                        })
+                    },
+                ),
+            );
+        }
         if let Content::Video {
             path,
             duration,

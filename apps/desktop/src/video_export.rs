@@ -93,83 +93,94 @@ mod tests {
     #[ignore = "requires FFmpeg with libx264 and prores_ks; run explicitly for export validation"]
     fn ffmpeg_roundtrip_preserves_range_rate_alpha_and_black_matte() {
         let dir = tempfile::tempdir().unwrap();
-        for preset in [VideoPreset::H264, VideoPreset::ProResAlpha] {
-            let path = dir
-                .path()
-                .join(format!("한글 output.{}", preset.extension()));
-            let progress = Arc::new(AtomicU32::new(0));
-            export_video(
-                &scene(),
-                2..5,
-                preset,
-                &path,
-                Default::default(),
-                progress.clone(),
-            )
-            .unwrap();
-            assert_eq!(progress.load(Ordering::Relaxed), 3);
-            let metadata = command(&crate::footage::probe_path())
-                .args([
-                    "-v",
-                    "error",
-                    "-select_streams",
-                    "v:0",
-                    "-show_entries",
-                    "stream=color_range,color_space,color_transfer,color_primaries",
-                    "-of",
-                    "json",
-                ])
-                .arg(&path)
-                .output()
+        for nested in [false, true] {
+            let mut e = Editor::default();
+            e.replace_project(scene()).unwrap();
+            if nested {
+                e.execute(Edit::Precompose {
+                    layers: vec![1],
+                    name: "Nested export".into(),
+                })
                 .unwrap();
-            assert!(metadata.status.success());
-            let metadata: serde_json::Value = serde_json::from_slice(&metadata.stdout).unwrap();
-            let stream = &metadata["streams"][0];
-            assert_eq!(stream["color_space"], "bt709");
-            assert_eq!(stream["color_primaries"], "bt709");
-            assert_eq!(stream["color_transfer"], "iec61966-2-1");
-            if preset == VideoPreset::H264 {
-                assert_eq!(stream["color_range"], "tv");
             }
-            let decoded = command(&ffmpeg_path())
-                .args(["-v", "error", "-i"])
-                .arg(&path)
-                .args(["-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"])
-                .output()
+            for preset in [VideoPreset::H264, VideoPreset::ProResAlpha] {
+                let path = dir
+                    .path()
+                    .join(format!("한글 output.{}", preset.extension()));
+                let progress = Arc::new(AtomicU32::new(0));
+                export_video(
+                    e.project(),
+                    2..5,
+                    preset,
+                    &path,
+                    Default::default(),
+                    progress.clone(),
+                )
                 .unwrap();
-            assert!(
-                decoded.status.success(),
-                "{}",
-                String::from_utf8_lossy(&decoded.stderr)
-            );
-            let (w, h) = if preset == VideoPreset::H264 {
-                (102, 100)
-            } else {
-                (101, 99)
-            };
-            assert_eq!(decoded.stdout.len(), w * h * 4 * 3);
-            let center = &decoded.stdout[(49 * w + 50) * 4..][..4];
-            let background = &decoded.stdout[..4];
-            if preset == VideoPreset::H264 {
-                assert!((center[0] as i32 - 128).abs() < 8, "{center:?}");
-                assert!(center[1] < 8 && center[2] < 8);
-                assert_eq!(background, [0, 0, 0, 255]);
-            } else {
-                assert!((center[3] as i32 - 128).abs() < 3, "{center:?}");
-                assert!(center[0] > 245);
-                assert_eq!(background[3], 0);
+                assert_eq!(progress.load(Ordering::Relaxed), 3);
+                let metadata = command(&crate::footage::probe_path())
+                    .args([
+                        "-v",
+                        "error",
+                        "-select_streams",
+                        "v:0",
+                        "-show_entries",
+                        "stream=color_range,color_space,color_transfer,color_primaries",
+                        "-of",
+                        "json",
+                    ])
+                    .arg(&path)
+                    .output()
+                    .unwrap();
+                assert!(metadata.status.success());
+                let metadata: serde_json::Value = serde_json::from_slice(&metadata.stdout).unwrap();
+                let stream = &metadata["streams"][0];
+                assert_eq!(stream["color_space"], "bt709");
+                assert_eq!(stream["color_primaries"], "bt709");
+                assert_eq!(stream["color_transfer"], "iec61966-2-1");
+                if preset == VideoPreset::H264 {
+                    assert_eq!(stream["color_range"], "tv");
+                }
+                let decoded = command(&ffmpeg_path())
+                    .args(["-v", "error", "-i"])
+                    .arg(&path)
+                    .args(["-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"])
+                    .output()
+                    .unwrap();
+                assert!(
+                    decoded.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&decoded.stderr)
+                );
+                let (w, h) = if preset == VideoPreset::H264 {
+                    (102, 100)
+                } else {
+                    (101, 99)
+                };
+                assert_eq!(decoded.stdout.len(), w * h * 4 * 3);
+                let center = &decoded.stdout[(49 * w + 50) * 4..][..4];
+                let background = &decoded.stdout[..4];
+                if preset == VideoPreset::H264 {
+                    assert!((center[0] as i32 - 128).abs() < 8, "{center:?}");
+                    assert!(center[1] < 8 && center[2] < 8);
+                    assert_eq!(background, [0, 0, 0, 255]);
+                } else {
+                    assert!((center[3] as i32 - 128).abs() < 3, "{center:?}");
+                    assert!(center[0] > 245);
+                    assert_eq!(background[3], 0);
+                }
+                // Decode at 24 fps; an incorrect encoded time base changes this count.
+                let rate = command(&ffmpeg_path())
+                    .args(["-v", "error", "-i"])
+                    .arg(&path)
+                    .args([
+                        "-vf", "fps=24", "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1",
+                    ])
+                    .output()
+                    .unwrap();
+                assert!(rate.status.success());
+                assert_eq!(rate.stdout.len(), decoded.stdout.len());
             }
-            // Decode at 24 fps; an incorrect encoded time base changes this count.
-            let rate = command(&ffmpeg_path())
-                .args(["-v", "error", "-i"])
-                .arg(&path)
-                .args([
-                    "-vf", "fps=24", "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1",
-                ])
-                .output()
-                .unwrap();
-            assert!(rate.status.success());
-            assert_eq!(rate.stdout.len(), decoded.stdout.len());
         }
     }
     #[test]

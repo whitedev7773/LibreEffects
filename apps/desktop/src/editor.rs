@@ -29,6 +29,8 @@ pub(crate) struct VideoJob {
 pub(crate) enum Action {
     Edit(Command),
     ActivateComposition(CompositionId),
+    AddComposition(CompositionId),
+    PrecomposeSelection,
     Select(LayerId),
     Seek(Frame),
     Step(i32),
@@ -390,6 +392,23 @@ impl EditorState {
                     Command::Batch(commands)
                 };
                 self.dispatch(&Action::Edit(command), window, cx);
+            }
+            Action::PrecomposeSelection => {
+                let command = Command::Precompose {
+                    layers: self.selected_layers.iter().copied().collect(),
+                    name: format!("Pre-comp {}", self.editor.project().compositions().len()),
+                };
+                self.dispatch(&Action::Edit(command), window, cx);
+            }
+            Action::AddComposition(composition) => {
+                self.dispatch(
+                    &Action::Edit(Command::AddCompositionLayer {
+                        composition: *composition,
+                        frame: self.frame,
+                    }),
+                    window,
+                    cx,
+                );
             }
             Action::DuplicateSelection | Action::SplitSelection => {
                 let original: BTreeSet<_> = self

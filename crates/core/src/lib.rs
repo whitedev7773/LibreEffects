@@ -11,6 +11,7 @@ mod compositions;
 mod document;
 mod editing;
 mod geometry;
+mod precompositions;
 pub use editing::{Content, Effects, KeyCopy, KeyRef, Mask, VideoPlayback};
 pub use geometry::{Affine, Bezier};
 
@@ -428,7 +429,7 @@ impl Project {
     }
 
     fn validate(&self) -> Result<(), String> {
-        if !(1..=9).contains(&self.version) {
+        if !(1..=10).contains(&self.version) {
             return Err("Unsupported project version".into());
         }
         if self.version < 9
@@ -517,6 +518,7 @@ impl Project {
         if self.next_layer_id == 0 || self.next_layer_id == u64::MAX {
             return Err("Invalid next layer ID".into());
         }
+        precompositions::validate(self)?;
         Ok(())
     }
 }
@@ -528,6 +530,14 @@ pub enum Command {
     NewComposition,
     DuplicateComposition,
     DeleteComposition,
+    AddCompositionLayer {
+        composition: CompositionId,
+        frame: Frame,
+    },
+    Precompose {
+        layers: Vec<LayerId>,
+        name: String,
+    },
     SetCompositionBackground(u32),
     SetWorkArea {
         start: Frame,
@@ -815,6 +825,13 @@ impl Editor {
         {
             next.project.version = 9;
         }
+        if next.project.compositions().into_iter().any(|(_, comp)| {
+            comp.layers
+                .iter()
+                .any(|layer| matches!(layer.content, Content::Composition { .. }))
+        }) {
+            next.project.version = 10;
+        }
         next.project.validate()?;
         if next != self.current {
             let previous = std::mem::replace(&mut self.current, next);
@@ -825,6 +842,9 @@ impl Editor {
 }
 
 fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
+    if let Some(result) = precompositions::apply(state, &command) {
+        return result;
+    }
     if let Some(result) = compositions::apply(state, &command) {
         return result;
     }

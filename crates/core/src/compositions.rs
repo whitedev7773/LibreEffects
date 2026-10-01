@@ -1,6 +1,13 @@
 use super::*;
 
 impl Project {
+    pub fn composition_by_id(&self, id: CompositionId) -> Option<&Composition> {
+        if id == self.composition_id {
+            Some(&self.composition)
+        } else {
+            self.other_compositions.get(&id)
+        }
+    }
     pub fn active_composition_id(&self) -> CompositionId {
         self.composition_id
     }
@@ -58,6 +65,9 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
     Some((|| {
         let project = &mut state.project;
         if matches!(command, Command::DeleteComposition) {
+            if project.compositions().into_iter().any(|(_, comp)| comp.layers.iter().any(|layer| matches!(layer.content, Content::Composition { composition, .. } if composition == project.composition_id))) {
+                return Err("This composition is used by another composition. Remove its layers before deleting it.".into());
+            }
             let id = *project
                 .other_compositions
                 .keys()

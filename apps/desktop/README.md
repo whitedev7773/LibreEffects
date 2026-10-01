@@ -353,14 +353,39 @@ duplicate and delete support Undo/Redo; the last composition cannot be deleted.
 Switching tabs does not create an edit or mark a saved document dirty. Selection
 and playhead reset on switching; view state persistence is still pending.
 The active composition is captured at save/export time. All compositions and
-their shared image assets are saved together. Nested composition layers and
-Pre-compose are not implemented yet.
+their shared image assets are saved together.
+
+### Pre-composing and nesting
+
+Open `examples/precomposition-study.lfe.json` for a reusable animated title
+inside a master composition with its own MP4 background.
+
+Select consecutive unlocked layers and use Layer > Pre-compose selection
+(Ctrl+Shift+C). This moves all attributes into a new source composition, keeping
+the original canvas size, frame rate and timeline origin. Include the complete
+parent hierarchy; selections with gaps or links across the boundary are rejected
+to preserve stacking and animation. The replacement stays in the active timeline
+and spans the selected layers' range. Undo restores the original layers in one step.
+Use its Properties > Open source composition button or the viewer tabs to edit
+the source. Project rows have a plus button to insert an existing composition at
+the active playhead. Renaming uses Ctrl+K in the source composition.
+
+Nested layers retain alpha, support transforms/masks/effects, and sample the
+preceding source frame using integer FPS conversion. Trimming preserves the
+source origin; moving shifts it. A source's background color is a viewer/output
+matte, so it is not baked into its nested layers; use a background solid when needed.
+Changing a source canvas retains the existing instance's layer dimensions.
+Circular/missing references and deleting a referenced composition are rejected.
+Nesting is limited to 16 levels, 4,096 rendered layer instances and a 64 MiB SVG
+description per frame. Unsupported frames fail without replacing an export.
+Time remapping, collapse-transform controls and the alternative "leave attributes"
+pre-compose mode remain pending.
 
 Versioned .lfe.json files contain compositions, layer ranges, transforms and
 keyframes. Files from the initial rectangle editor remain readable. Bezier or
 parenting edits upgrade the project to version 2; text, images, masks or effects
 upgrade it to version 3; linked videos require version 4, and altered video playback
-requires version 5. Nonblack composition backgrounds require version 6; shared embedded image assets require version 7, saved work areas require version 8, and multiple compositions require version 9. Older applications reject
+requires version 5. Nonblack composition backgrounds require version 6; shared embedded image assets require version 7, saved work areas require version 8, multiple compositions require version 9, and nested layers require version 10. Older applications reject
 unsupported versions. Save writes
 the snapshot captured when clicked using a temporary file before replacement.
 Files are limited to 256 MiB, with up to 128 MiB of unique base64 image data and
@@ -429,7 +454,7 @@ use `--output title.png --start 30 --png-background`. Use `--help` for syntax.
 See [the development backlog](DEVELOPMENT_BACKLOG.md) for the current capability
 audit, priorities, dependencies and proposed acceptance criteria.
 
-Still pending: precompositions, audio footage,
+Still pending: advanced precomposition time remapping, audio footage,
 audio output, freeform/animated masks, an effect stack and animated effects,
 rich text layout, 3D, JSX, ExtendScript and expressions. PNG sequences can be
 assembled in an external video tool.

@@ -393,10 +393,13 @@ impl Render for Preview {
         if self.cached.as_ref().is_none_or(|(p, f, dimension, _)| {
             p != &render_project || *f != frame || *dimension != max_dimension
         }) {
-            let has_video = comp
-                .layers()
-                .iter()
-                .any(|l| matches!(l.content(), libre_effects_core::Content::Video { .. }));
+            let has_video = comp.layers().iter().any(|l| {
+                matches!(
+                    l.content(),
+                    libre_effects_core::Content::Video { .. }
+                        | libre_effects_core::Content::Composition { .. }
+                )
+            });
             if has_video {
                 if self
                     .cached

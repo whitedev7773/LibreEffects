@@ -134,6 +134,16 @@ impl Render for Browser {
                                         .text_color(rgb(ui::MUTED))
                                         .child("Comp"),
                                 )
+                                .when(id != active, |s| {
+                                    s.child(ui::action_tool(
+                                        SharedString::from(format!("add-composition-{id}")),
+                                        "plus",
+                                        "Add to active composition",
+                                        &self.state,
+                                        Action::AddComposition(id),
+                                        false,
+                                    ))
+                                })
                                 .on_click(move |_, window, cx| {
                                     state.update(cx, |s, cx| {
                                         s.dispatch(&Action::ActivateComposition(id), window, cx)

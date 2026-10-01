@@ -40,15 +40,65 @@ pub(crate) fn validate_render(
             protect_source(destination, Path::new(path))?;
         }
     }
-    for layer in comp.layers() {
-        if let Content::Video { path, .. } = layer.content() {
-            if layer.visible()
-                && layer.in_frame() < range.end
-                && layer.out_frame(comp.duration()) > range.start
-                && !Path::new(path).is_file()
-            {
-                return Err(format!("Footage offline: {path}. Relink before rendering."));
+    validate_sources(
+        project,
+        project.active_composition_id(),
+        range.clone(),
+        &mut Default::default(),
+    )
+}
+
+fn validate_sources(
+    project: &Project,
+    id: libre_effects_core::CompositionId,
+    range: std::ops::Range<u32>,
+    seen: &mut std::collections::BTreeSet<(u64, u32, u32)>,
+) -> Result<(), String> {
+    if seen.len() >= 4096 {
+        return Err(
+            "Too many nested time ranges; simplify the composition before rendering".into(),
+        );
+    }
+    if !seen.insert((id, range.start, range.end)) {
+        return Ok(());
+    }
+    let comp = project
+        .composition_by_id(id)
+        .ok_or("Missing source composition")?;
+    for layer in comp.layers().iter().filter(|l| l.visible()) {
+        let start = range.start.max(layer.in_frame());
+        let end = range.end.min(layer.out_frame(comp.duration()));
+        if start >= end {
+            continue;
+        }
+        match layer.content() {
+            Content::Video { path, .. } if !Path::new(path).is_file() => {
+                return Err(format!(
+                    "Footage offline in {}: {path}. Relink before rendering.",
+                    comp.name()
+                ));
             }
+            Content::Composition {
+                composition,
+                start_frame,
+            } => {
+                let source = project
+                    .composition_by_id(*composition)
+                    .ok_or("Missing source composition")?;
+                let last = i64::from(end - 1) - *start_frame;
+                if last < 0 {
+                    continue;
+                }
+                let first = (i64::from(start) - *start_frame).max(0) as u64
+                    * u64::from(source.fps())
+                    / u64::from(comp.fps());
+                let end = (last as u64 * u64::from(source.fps()) / u64::from(comp.fps()) + 1)
+                    .min(u64::from(source.duration()));
+                if first < end {
+                    validate_sources(project, *composition, first as u32..end as u32, seen)?;
+                }
+            }
+            _ => {}
         }
     }
     Ok(())
@@ -170,6 +220,43 @@ mod tests {
         editor.execute(Command::NewComposition).unwrap();
         write_project(&path, &editor.project().to_json().unwrap()).unwrap();
         assert!(read_project(&path).unwrap_err().contains("Invalid image"));
+    }
+    #[test]
+    fn preflight_checks_nested_footage_only_in_the_requested_time_range() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut e = Editor::default();
+        e.execute(Command::NewComposition).unwrap();
+        e.execute(Command::AddContent {
+            content: Content::Video {
+                path: dir
+                    .path()
+                    .join("missing.mp4")
+                    .to_string_lossy()
+                    .into_owned(),
+                duration: 1.0,
+                source_fps: 30.0,
+                start_frame: 0,
+                playback: Default::default(),
+            },
+            width: 16.0,
+            height: 16.0,
+            name: "Offline".into(),
+        })
+        .unwrap();
+        e.activate_composition(1).unwrap();
+        e.execute(Command::AddCompositionLayer {
+            composition: 2,
+            frame: 60,
+        })
+        .unwrap();
+        let output = dir.path().join("output.mp4");
+        validate_render(e.project(), &output, &(0..60)).unwrap();
+        assert!(
+            validate_render(e.project(), &output, &(60..61))
+                .unwrap_err()
+                .contains("offline")
+        );
+        validate_render(e.project(), &output, &(90..150)).unwrap();
     }
 
     #[test]

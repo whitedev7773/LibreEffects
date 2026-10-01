@@ -203,7 +203,11 @@ impl Shell {
                 } else {
                     Action::ImportImage
                 }),
-                "c" => Some(Action::CopyKeys),
+                "c" => Some(if m.shift {
+                    Action::PrecomposeSelection
+                } else {
+                    Action::CopyKeys
+                }),
                 "v" => Some(Action::PasteKeys),
                 "z" => Some(if m.shift { Action::Redo } else { Action::Undo }),
                 "y" => Some(Action::Edit(Command::AddRectangle)),
@@ -620,6 +624,11 @@ impl Render for Shell {
                 ],
                 "Layer" => vec![
                     (
+                        "Pre-compose selection",
+                        "Ctrl+Shift+C",
+                        selected.map(|_| Action::PrecomposeSelection),
+                    ),
+                    (
                         "Trim In to playhead",
                         "Alt+[",
                         selected.map(|_| Action::TrimSelection(true)),
@@ -901,6 +910,7 @@ impl Render for Shell {
                     "Page Up / Down — Step frame (Shift: 10 frames)",
                     "P / A / S / R / T — Reveal transform property",
                     "U — Animated properties    J / K — Previous / Next key",
+                    "Ctrl+Shift+C — Pre-compose selected layers",
                     "Shift+F3 — Graph Editor    F9 — Ease selected graph segment",
                     "B / N — Work area start / end    + / − — Timeline zoom",
                     "Enter — Commit field    Escape — Cancel field",
