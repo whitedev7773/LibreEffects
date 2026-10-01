@@ -261,7 +261,8 @@ Properties provides a rectangular layer-space mask with inversion. The Effect me
 or the right dock's Effects & Presets search adds an effect and opens the left
 Effect Controls tab. The stack supports rename, duplicate, reorder, bypass, reset
 and removal, with up to 64 instances per layer. Available effects are Gaussian
-Blur, Brightness, Grayscale, Fill, Tint, Hue/Saturation, Levels, Drop Shadow and Glow.
+Blur, Brightness, Grayscale, Fill, Tint, Hue/Saturation, Levels, Drop Shadow, Glow,
+Curves, Linear Gradient and Radial Gradient.
 
 Use a parameter's stopwatch to enable animation, its diamond to add/remove a key,
 and its arrow buttons to visit keys. Editing an animated value inserts a key at
@@ -297,10 +298,30 @@ outgoing Bezier handles use the same validated commands as transform properties.
 Copying effect keys to another layer requires the same effect instance ID and kind;
 a missing or mismatched destination is rejected atomically. Effect IDs remain stable
 when the stack is reordered. Removing an effect clears stale key/graph selections.
-Preset saving, Curves, Gradient and additional effect families remain in the backlog.
+Preset saving and additional effect families remain in the backlog.
 The same
 resvg compositor renders both the composition preview and exported frames,
 including text, images, parenting, interpolation, layer timing and alpha.
+
+Curves has five fixed input points (0/25/50/75/100%) for the master RGB curve and
+each red, green and blue channel. Select a channel above the graph, drag vertically,
+or use Left/Right to select a point and Up/Down to change its output (Shift: 10).
+Escape cancels a drag; releasing commits one Undo step and updates the composition.
+Numeric output values range from 0 to 255; each point supports the usual keyframes.
+The master is applied before the individual channel curve, using shape-preserving
+cubic interpolation and a rounded 256-entry map in the 8-bit sRGB renderer.
+Alpha is preserved. Arbitrary point placement, pencil curves and ACV/AMP import
+are not implemented.
+
+Gradients use layer-space start/end positions, start/end RGB and Blend with original
+(0–100%), all animatable. Linear uses the start-to-end vector; Radial uses the start
+as center and its distance to the end as radius. Outside endpoints the colors hold;
+coincident endpoints produce the end color. The preceding effect stage's alpha
+limits the gradient, including blur or shadow extents. Reset initializes endpoints
+from the current source dimensions; resizing a source keeps existing endpoints.
+Curve/gradient projects use version 19. Open `examples/tonal-color-study.lfe.json`
+for animated contrast and a moving radial center. Gradient scatter/dithering and
+on-canvas endpoint handles remain in the backlog.
 
 File → Export current frame (PNG, alpha) writes a full-resolution RGBA PNG. Render work area
 writes a PNG sequence to a new subfolder of the chosen directory, with frame rate,

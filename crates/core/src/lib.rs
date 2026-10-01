@@ -9,6 +9,8 @@ pub type CompositionId = u64;
 
 mod blend;
 pub use blend::BlendMode;
+mod color_curves;
+pub use color_curves::{CurveChannel, sample_color_curve};
 mod compositions;
 mod document;
 mod editing;
@@ -506,7 +508,7 @@ impl Project {
     }
 
     fn validate(&self) -> Result<(), String> {
-        if !(1..=18).contains(&self.version) {
+        if !(1..=19).contains(&self.version) {
             return Err("Unsupported project version".into());
         }
         if self.version < 9
@@ -533,6 +535,18 @@ impl Project {
         let mut image_bytes = 0usize;
         for (_, comp) in self.compositions() {
             matte::validate(comp, self.version)?;
+            if self.version < 19
+                && comp.layers.iter().flat_map(|l| &l.effect_stack).any(|e| {
+                    matches!(
+                        e.kind(),
+                        EffectKind::Curves
+                            | EffectKind::LinearGradient
+                            | EffectKind::RadialGradient
+                    )
+                })
+            {
+                return Err("Curves and gradients require project version 19".into());
+            }
             if self.version < 17 && comp.layers.iter().any(|l| !l.blend_mode.is_normal()) {
                 return Err("Layer blending modes require project version 17".into());
             }
@@ -1046,6 +1060,16 @@ impl Editor {
             .any(|(_, c)| c.layers.iter().any(|l| l.track_matte.is_some()))
         {
             next.project.version = 18;
+        }
+        if next.project.compositions().into_iter().any(|(_, c)| {
+            c.layers.iter().flat_map(|l| &l.effect_stack).any(|e| {
+                matches!(
+                    e.kind(),
+                    EffectKind::Curves | EffectKind::LinearGradient | EffectKind::RadialGradient
+                )
+            })
+        }) {
+            next.project.version = 19;
         }
         next.project.validate()?;
         if next != self.current {

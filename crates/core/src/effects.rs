@@ -14,6 +14,9 @@ pub enum EffectKind {
     Levels,
     DropShadow,
     Glow,
+    Curves,
+    LinearGradient,
+    RadialGradient,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -33,6 +36,31 @@ pub enum EffectParam {
     Black,
     White,
     Gamma,
+    Curve0,
+    Curve25,
+    Curve50,
+    Curve75,
+    Curve100,
+    RedCurve0,
+    RedCurve25,
+    RedCurve50,
+    RedCurve75,
+    RedCurve100,
+    GreenCurve0,
+    GreenCurve25,
+    GreenCurve50,
+    GreenCurve75,
+    GreenCurve100,
+    BlueCurve0,
+    BlueCurve25,
+    BlueCurve50,
+    BlueCurve75,
+    BlueCurve100,
+    StartX,
+    StartY,
+    EndX,
+    EndY,
+    BlendOriginal,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -49,7 +77,7 @@ impl ParameterSpec {
     }
 }
 impl EffectKind {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 12] = [
         Self::GaussianBlur,
         Self::Brightness,
         Self::Grayscale,
@@ -59,6 +87,9 @@ impl EffectKind {
         Self::Levels,
         Self::DropShadow,
         Self::Glow,
+        Self::Curves,
+        Self::LinearGradient,
+        Self::RadialGradient,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -71,6 +102,9 @@ impl EffectKind {
             Self::Levels => "Levels",
             Self::DropShadow => "Drop Shadow",
             Self::Glow => "Glow",
+            Self::Curves => "Curves",
+            Self::LinearGradient => "Linear Gradient",
+            Self::RadialGradient => "Radial Gradient",
         }
     }
     pub fn parameters(self) -> Vec<ParameterSpec> {
@@ -92,6 +126,31 @@ impl EffectKind {
         let radius = || spec(Radius, "Radius (px)", 0.0, 100.0, 10.0);
         let opacity = || spec(Opacity, "Opacity (%)", 0.0, 100.0, 100.0);
         match self {
+            Self::Curves => CurveChannel::ALL
+                .into_iter()
+                .flat_map(|channel| {
+                    channel
+                        .parameters()
+                        .into_iter()
+                        .enumerate()
+                        .map(move |(i, p)| {
+                            spec(p, channel.point_labels()[i], 0.0, 255.0, i as f64 * 63.75)
+                        })
+                })
+                .collect(),
+            Self::LinearGradient | Self::RadialGradient => vec![
+                spec(StartX, "Start X (px)", -32768.0, 32768.0, 0.0),
+                spec(StartY, "Start Y (px)", -32768.0, 32768.0, 0.0),
+                spec(EndX, "End X (px)", -32768.0, 32768.0, 0.0),
+                spec(EndY, "End Y (px)", -32768.0, 32768.0, 100.0),
+                spec(DarkRed, "Start red", 0.0, 255.0, 0.0),
+                spec(DarkGreen, "Start green", 0.0, 255.0, 0.0),
+                spec(DarkBlue, "Start blue", 0.0, 255.0, 0.0),
+                spec(Red, "End red", 0.0, 255.0, 255.0),
+                spec(Green, "End green", 0.0, 255.0, 255.0),
+                spec(Blue, "End blue", 0.0, 255.0, 255.0),
+                spec(BlendOriginal, "Original (%)", 0.0, 100.0, 0.0),
+            ],
             Self::GaussianBlur => vec![radius()],
             Self::Brightness => vec![spec(Amount, "Multiplier", 0.0, 4.0, 1.0)],
             Self::Grayscale => vec![],
@@ -187,6 +246,24 @@ impl EffectInstance {
         self.parameters[&param]
             .value_at(frame)
             .clamp(spec.min, spec.max)
+    }
+    pub fn curve_values(&self, channel: CurveChannel, frame: Frame) -> [f64; 5] {
+        channel
+            .parameters()
+            .map(|p| self.value_at(p, frame) / 255.0)
+    }
+    fn gradient_defaults(&mut self, width: f64, height: f64) {
+        if matches!(
+            self.kind,
+            EffectKind::LinearGradient | EffectKind::RadialGradient
+        ) {
+            self.parameters.get_mut(&EffectParam::EndY).unwrap().value = height;
+            if self.kind == EffectKind::RadialGradient {
+                self.parameters.get_mut(&EffectParam::StartX).unwrap().value = width / 2.0;
+                self.parameters.get_mut(&EffectParam::StartY).unwrap().value = height / 2.0;
+                self.parameters.get_mut(&EffectParam::EndX).unwrap().value = width / 2.0;
+            }
+        }
     }
     fn new(id: EffectId, kind: EffectKind) -> Self {
         Self {
@@ -309,7 +386,9 @@ fn add(layer: &mut Layer, kind: EffectKind) -> Result<EffectId, String> {
     }
     let id = layer.next_effect_id;
     layer.next_effect_id += 1;
-    layer.effect_stack.push(EffectInstance::new(id, kind));
+    let mut effect = EffectInstance::new(id, kind);
+    effect.gradient_defaults(layer.width, layer.height);
+    layer.effect_stack.push(effect);
     Ok(id)
 }
 pub(super) fn apply(state: &mut Snapshot, id: LayerId, edit: EffectEdit) -> Result<(), String> {
@@ -455,6 +534,7 @@ pub(super) fn apply(state: &mut Snapshot, id: LayerId, edit: EffectEdit) -> Resu
                 .find(|e| e.id == effect)
                 .ok_or("Effect not found")?;
             let mut fresh = EffectInstance::new(effect, e.kind);
+            fresh.gradient_defaults(layer.width, layer.height);
             fresh.name = e.name.clone();
             fresh.color_space = e.color_space;
             *e = fresh;

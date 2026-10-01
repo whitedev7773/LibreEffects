@@ -10,6 +10,7 @@ use libre_effects_core::{
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) struct EffectControls {
+    curves: BTreeMap<(LayerId, EffectId), Entity<super::color_curve::ColorCurve>>,
     state: Entity<EditorState>,
     fields: BTreeMap<(LayerId, EffectId, EffectParam), Entity<TextField>>,
     names: BTreeMap<(LayerId, EffectId), Entity<TextField>>,
@@ -20,6 +21,7 @@ impl EffectControls {
         Self {
             state,
             fields: BTreeMap::new(),
+            curves: BTreeMap::new(),
             names: BTreeMap::new(),
         }
     }
@@ -39,6 +41,7 @@ impl Render for EffectControls {
             .gap_1()
             .text_size(px(11.0));
         let Some(layer) = layer else {
+            self.curves.clear();
             self.fields.clear();
             self.names.clear();
             return body.child("Select a layer to edit effects");
@@ -46,6 +49,13 @@ impl Render for EffectControls {
         if matches!(layer.content(), Content::Null) {
             return body.child("Null objects have no rendered pixels.");
         }
+        self.curves.retain(|(owner, effect), _| {
+            *owner == layer.id()
+                && layer
+                    .effect_stack()
+                    .iter()
+                    .any(|e| e.id() == *effect && e.kind() == EffectKind::Curves)
+        });
         let id = layer.id();
         let locked = layer.locked();
         let state_entity = self.state.clone();
@@ -215,7 +225,25 @@ impl Render for EffectControls {
                         false,
                     )),
             );
-            for spec in effect.kind().parameters() {
+            let mut shown_curve = None;
+            if effect.kind() == EffectKind::Curves {
+                if !self.curves.contains_key(&key) {
+                    let curve = cx.new(|cx| {
+                        super::color_curve::ColorCurve::new(self.state.clone(), id, effect_id, cx)
+                    });
+                    cx.observe(&curve, |_, _, cx| cx.notify()).detach();
+                    self.curves.insert(key, curve);
+                }
+                let curve = self.curves[&key].clone();
+                shown_curve = Some(curve.read(cx).channel.parameters());
+                section = section.child(curve);
+            }
+            for spec in effect
+                .kind()
+                .parameters()
+                .into_iter()
+                .filter(|s| shown_curve.is_none_or(|params| params.contains(&s.parameter)))
+            {
                 let parameter = spec.parameter;
                 let key = (id, effect_id, parameter);
                 keep_fields.insert(key);

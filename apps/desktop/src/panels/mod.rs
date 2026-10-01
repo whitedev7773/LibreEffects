@@ -1,5 +1,6 @@
 mod blend;
 mod browser;
+mod color_curve;
 mod effects;
 mod graph;
 mod inspector;
