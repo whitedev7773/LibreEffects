@@ -2,7 +2,9 @@ mod browser;
 mod graph;
 mod inspector;
 mod preview;
+mod sidebar;
 mod timeline;
+pub(crate) use sidebar::{Align, Sidebar};
 
 pub(crate) use browser::Browser;
 pub(crate) use inspector::Inspector;

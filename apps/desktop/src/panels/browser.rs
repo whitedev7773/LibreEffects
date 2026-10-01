@@ -1,4 +1,5 @@
 use crate::{
+    components::TextField,
     editor::{Action, EditorState},
     ui,
 };
@@ -7,16 +8,23 @@ use libre_effects_core::Command;
 
 pub(crate) struct Browser {
     state: Entity<EditorState>,
+    search: Entity<TextField>,
 }
 impl Browser {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
-        Self { state }
+        let search = cx.new(|cx| TextField::new(cx, |_, _, _| {}));
+        cx.observe(&search, |_, _, cx| cx.notify()).detach();
+        Self { state, search }
     }
 }
 impl Render for Browser {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let comp = self.state.read(cx).editor.project().composition();
+        let matches = comp
+            .name()
+            .to_lowercase()
+            .contains(&self.search.read(cx).value().trim().to_lowercase());
         div()
             .flex()
             .flex_col()
@@ -71,6 +79,16 @@ impl Render for Browser {
             .child(
                 div()
                     .flex()
+                    .items_center()
+                    .h(px(26.0))
+                    .mx_2()
+                    .gap_1()
+                    .child(ui::icon("magnifier"))
+                    .child(div().flex_1().child(self.search.clone())),
+            )
+            .child(
+                div()
+                    .flex()
                     .px_3()
                     .h(px(25.0))
                     .items_center()
@@ -81,37 +99,31 @@ impl Render for Browser {
                     .child(div().flex_1().child("Name"))
                     .child("Type"),
             )
-            .child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .items_center()
-                    .h(px(29.0))
-                    .px_3()
-                    .bg(rgb(0x343434))
-                    .child(ui::icon("filmstrip"))
-                    .child(
-                        div()
-                            .flex_1()
-                            .overflow_hidden()
-                            .child(comp.name().to_string()),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(10.0))
-                            .text_color(rgb(ui::MUTED))
-                            .child("Comp"),
-                    ),
-            )
+            .when(matches, |s| {
+                s.child(
+                    div()
+                        .flex()
+                        .gap_2()
+                        .items_center()
+                        .h(px(29.0))
+                        .px_3()
+                        .bg(rgb(0x343434))
+                        .child(ui::icon("filmstrip"))
+                        .child(
+                            div()
+                                .flex_1()
+                                .overflow_hidden()
+                                .child(comp.name().to_string()),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(10.0))
+                                .text_color(rgb(ui::MUTED))
+                                .child("Comp"),
+                        ),
+                )
+            })
             .child(div().flex_1())
-            .child(
-                div()
-                    .px_3()
-                    .py_2()
-                    .text_size(px(11.0))
-                    .text_color(rgb(ui::MUTED))
-                    .child("Create a rectangle with the toolbar or Ctrl+Y."),
-            )
             .child(
                 div()
                     .h(px(31.0))

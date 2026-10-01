@@ -4,11 +4,17 @@ A Windows-first motion graphics editor built with Rust and GPUI. Its workspace
 and basic editing workflow follow After Effects conventions. It is an early 2D
 editor, not a complete After Effects replacement or an AEP-compatible application.
 
-![Libre Effects workspace with the Motion Study sample](screenshots/workspace.png)
+![Libre Effects workspace with the Curve and Parent Study sample](screenshots/workspace.png)
 
 ## Workspace
 
-- Compact menu bar and toolbar, Project, Composition, Properties, and Timeline panels.
+- Compact menu bar and toolbar; Project and Composition above the Timeline, with a
+  full-height right dock for Properties / Info / Preview and a separate Align panel.
+  The default proportions follow the open After Effects 2026 workspace measured at
+  1920 × 1032. The Timeline ends at the right dock; toggling the graph changes only
+  its time area, preserving the layer list, composition tab and ruler.
+- Project and Timeline search fields filter composition and layer names as you type.
+- Preview controls live in the right dock; Info shows the current composition and time.
 - Drag panel dividers to resize; double-click a divider or choose Window → Reset
   default workspace to restore the layout.
 - Wanted Sans and Gravity Icons are embedded in the executable, with their licenses
@@ -30,6 +36,9 @@ editor, not a complete After Effects replacement or an AEP-compatible applicatio
 - Hand tool pans the composition. Fit resets pan and scale; zoom controls support
   6.25%–800%. The transparency grid can be toggled.
 - Layer In/Out fields trim visibility in whole frames; Out is exclusive.
+- Align offers six composition-edge/center actions for the selected unlocked layer.
+  Alignment uses transformed bounds, including rotation and parenting, and commits
+  one undo step. Animated position channels receive a key at the current frame.
 
 ## Parenting
 
@@ -70,17 +79,19 @@ a diamond to change its timing.
 
 ![Bezier value graph and outgoing segment controls](screenshots/graph-editor.png)
 
-Click Graph Editor in the timeline, use Animation → Toggle Graph Editor, or press
-Shift+F3. Select a transform channel at the left. The value graph shares timeline
+Click the graph icon in the timeline, use Animation → Toggle Graph Editor, or press
+Shift+F3. Select a transform channel in the persistent layer list. The value graph shares timeline
 zoom and pan; its vertical range fits the visible curve.
 
 - Click a key to select it; drag to change both frame and value. Release commits
   one undo step. Escape cancels; occupied frames and invalid values are rejected.
-- Frame and Value fields allow precise edits. Delete removes only the selected
+- Keyframe... opens a compact popup with Frame and Value fields for precise edits.
+  Escape or Close dismisses it. Delete removes only the selected
   graph key. The diamond adds/removes a key at the playhead.
 - Linear, Hold, Ease, Ease In and Ease Out presets affect the selected key's
   outgoing segment. F9 applies Ease while the graph has focus.
-- Drag the two blue handles in the outgoing segment editor or enter X1/Y1/X2/Y2.
+- Drag the two blue handles directly on the value graph, or use the outgoing
+  segment chart and X1/Y1/X2/Y2 fields in the popup. Flat segments use the popup.
   X is normalized time (0–1); Y is normalized progress (−2–3). Handles beyond the
   small chart's vertical range remain accessible through numeric fields.
 - This is a single-channel value graph with normalized segment easing. AE's speed

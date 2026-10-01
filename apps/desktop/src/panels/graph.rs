@@ -65,6 +65,47 @@ const EASE_VIEW: View = View {
     low: -0.3,
     high: 1.3,
 };
+#[derive(Clone, Copy)]
+struct HandleSpace {
+    view: View,
+    bounds: Bounds<Pixels>,
+    from: f64,
+    span: f64,
+    low: f64,
+    delta: f64,
+    inline: bool,
+}
+impl HandleSpace {
+    fn point(self, x: f64, y: f64) -> Point<Pixels> {
+        self.view.point(
+            self.bounds,
+            self.from + self.span * x,
+            self.low + self.delta * y,
+        )
+    }
+    fn value(self, p: Point<Pixels>) -> (f64, f64) {
+        let (f, v) = self.view.value(self.bounds, p);
+        ((f - self.from) / self.span, (v - self.low) / self.delta)
+    }
+    fn segment(
+        view: View,
+        bounds: Bounds<Pixels>,
+        track: &AnimatedProperty,
+        frame: u32,
+    ) -> Option<Self> {
+        let a = track.keys().get(&frame)?.value;
+        let (&end, b) = track.keys().range(frame + 1..).next()?;
+        ((b.value - a).abs() > 1e-9).then_some(Self {
+            view,
+            bounds,
+            from: frame as f64,
+            span: (end - frame) as f64,
+            low: a,
+            delta: b.value - a,
+            inline: true,
+        })
+    }
+}
 #[derive(Clone)]
 enum Drag {
     Key {
@@ -86,6 +127,7 @@ enum Drag {
         curve: Bezier,
         start: Point<Pixels>,
         moved: bool,
+        space: HandleSpace,
     },
 }
 pub(crate) struct Graph {
@@ -95,6 +137,7 @@ pub(crate) struct Graph {
     focus: FocusHandle,
     drag: Option<Drag>,
     fields: Vec<Entity<TextField>>,
+    details: bool,
 }
 fn selected(state: &EditorState) -> Option<(LayerId, u32, Property)> {
     let (id, frame) = state.graph_key?;
@@ -252,6 +295,7 @@ impl Graph {
             focus: cx.focus_handle(),
             drag: None,
             fields,
+            details: false,
         }
     }
     fn preset(&self, interpolation: Interpolation, window: &mut Window, cx: &mut Context<Self>) {
@@ -295,6 +339,35 @@ impl Graph {
                     && f32::from(p.y - event.position.y).abs() < 9.0
             })
             .map(|(f, k)| (*f, k.value));
+        if hit.is_none() && !layer.locked() {
+            if let Some((_, frame, _)) = selected(state)
+                && let Some(curve) = curve_at(state)
+                && let Some(space) = HandleSpace::segment(view, bounds, track, frame)
+            {
+                for (index, (x, y)) in [(curve.x1, curve.y1), (curve.x2, curve.y2)]
+                    .into_iter()
+                    .enumerate()
+                {
+                    let p = space.point(x, y);
+                    if f32::from(p.x - event.position.x).abs() < 10.0
+                        && f32::from(p.y - event.position.y).abs() < 10.0
+                    {
+                        self.drag = Some(Drag::Handle {
+                            id,
+                            property,
+                            frame,
+                            index,
+                            curve,
+                            start: event.position,
+                            moved: false,
+                            space,
+                        });
+                        cx.notify();
+                        return;
+                    }
+                }
+            }
+        }
         if let Some((frame, value)) = hit {
             if !layer.locked() {
                 self.drag = Some(Drag::Key {
@@ -353,6 +426,15 @@ impl Graph {
                     curve,
                     start: event.position,
                     moved: false,
+                    space: HandleSpace {
+                        view: EASE_VIEW,
+                        bounds,
+                        from: 0.0,
+                        span: 1.0,
+                        low: 0.0,
+                        delta: 1.0,
+                        inline: false,
+                    },
                 });
                 break;
             }
@@ -400,6 +482,7 @@ impl Graph {
                 curve,
                 start,
                 moved,
+                space,
                 ..
             }) => {
                 if !*moved
@@ -410,8 +493,8 @@ impl Graph {
                     return;
                 }
                 *moved = true;
-                if let Some(bounds) = self.easing.get() {
-                    let (x, y) = EASE_VIEW.value(bounds, event.position);
+                {
+                    let (x, y) = space.value(event.position);
                     let (x, y) = (x.clamp(0.0, 1.0), y.clamp(-2.0, 3.0));
                     if *index == 0 {
                         curve.x1 = x;
@@ -513,10 +596,11 @@ impl Render for Graph {
         let selection = selected(state);
         let curve = curve_at(state);
         let locked = layer.as_ref().is_none_or(|l| l.locked());
-        let mut root = div()
+        let root = div()
             .id("graph-editor")
             .track_focus(&self.focus)
-            .flex_1()
+            .size_full()
+            .relative()
             .min_h_0()
             .flex()
             .flex_col()
@@ -528,6 +612,7 @@ impl Render for Graph {
                 let key = event.keystroke.key.as_str();
                 if key == "escape" {
                     this.drag = None;
+                    this.details = false;
                     cx.stop_propagation();
                     cx.notify();
                 }
@@ -604,25 +689,14 @@ impl Render for Graph {
                     })),
             );
         }
-        toolbar = toolbar
-            .child(div().flex_1())
-            .child(ui::action_tool(
-                "graph-zoom-out",
-                "minus",
-                "Zoom timeline out",
-                &self.state,
-                Action::ZoomTimeline(0.5),
-                false,
-            ))
-            .child(ui::action_tool(
-                "graph-zoom-in",
-                "plus",
-                "Zoom timeline in",
-                &self.state,
-                Action::ZoomTimeline(2.0),
-                false,
-            ));
-        root = root.child(toolbar);
+        toolbar = toolbar.child(div().flex_1()).child(
+            ui::text_button("keyframe-details", "Keyframe...").on_click(cx.listener(
+                |this, _, _, cx| {
+                    this.details = !this.details;
+                    cx.notify();
+                },
+            )),
+        );
         let Some(layer) = layer else {
             return root.child(
                 div()
@@ -635,178 +709,157 @@ impl Render for Graph {
         if let Some(Drag::Key { view, .. }) = &self.drag {
             graph_view = *view;
         }
-        let mut properties = div()
-            .id("graph-properties")
-            .w(px(150.0))
-            .flex_none()
-            .overflow_y_scroll()
-            .border_r_1()
-            .border_color(rgb(ui::BORDER));
-        for p in Property::ALL {
-            let animated = !layer.property(p).keys().is_empty();
-            properties = properties.child(
-                ui::text_button(
-                    SharedString::from(format!("graph-{p:?}")),
-                    format!("{}{}", if animated { "• " } else { "" }, p.label()),
-                )
-                .justify_start()
-                .text_size(px(11.0))
-                .when(p == property, |s| {
-                    s.bg(rgb(0x164a7b)).text_color(rgb(ui::BLUE))
-                })
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.drag = None;
-                    this.state.update(cx, |s, cx| {
-                        s.graph_property = p;
-                        s.graph_key = None;
-                        cx.notify();
-                    });
-                })),
-            );
+        if let Some(Drag::Handle { space, .. }) = &self.drag
+            && space.inline
+        {
+            graph_view = space.view;
         }
         let measured = self.plot.clone();
         let drag = self.drag.clone();
         let plot_track = track.clone();
-        let chart = div()
-            .flex_1()
-            .min_w_0()
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .h(px(20.0))
-                    .px_3()
-                    .text_size(px(10.0))
-                    .text_color(rgb(ui::MUTED))
-                    .child(format!(
-                        "{} · {}   |   {:.2} to {:.2}",
-                        layer.name(),
-                        property.label(),
-                        graph_view.low,
-                        graph_view.high
-                    )),
-            )
-            .child(
-                div()
-                    .id("value-graph-canvas")
-                    .mx_3()
-                    .flex_1()
-                    .min_h_0()
-                    .relative()
-                    .overflow_hidden()
-                    .cursor_crosshair()
-                    .on_mouse_down(MouseButton::Left, cx.listener(Self::down))
-                    .child(
-                        canvas(
-                            move |bounds, _, _| measured.set(Some(bounds)),
-                            move |bounds, _, window, _| {
-                                window.with_content_mask(Some(ContentMask { bounds }), |window| {
-                                    for i in 0..=10 {
-                                        let x =
-                                            bounds.left() + bounds.size.width * (i as f32 / 10.0);
-                                        stroke(
-                                            window,
-                                            [point(x, bounds.top()), point(x, bounds.bottom())],
-                                            0x343434,
-                                            1.0,
-                                        );
-                                    }
-                                    for i in 0..=4 {
-                                        let y =
-                                            bounds.top() + bounds.size.height * (i as f32 / 4.0);
-                                        stroke(
-                                            window,
-                                            [point(bounds.left(), y), point(bounds.right(), y)],
-                                            0x343434,
-                                            1.0,
-                                        );
-                                    }
-                                    let zero = graph_view.point(bounds, graph_view.start, 0.0).y;
-                                    stroke(
-                                        window,
-                                        [point(bounds.left(), zero), point(bounds.right(), zero)],
-                                        0x555555,
-                                        1.0,
-                                    );
-                                    let evaluate = |frame: f64| {
-                                        if let Some(Drag::Handle {
-                                            frame: from, curve, ..
-                                        }) = &drag
-                                        {
-                                            if let Some((&end, b)) =
-                                                plot_track.keys().range(from + 1..).next()
-                                            {
-                                                if frame >= *from as f64 && frame <= end as f64 {
-                                                    let a = plot_track.keys()[from].value;
-                                                    return a
-                                                        + (b.value - a)
-                                                            * curve.progress(
-                                                                (frame - *from as f64)
-                                                                    / (end - *from) as f64,
-                                                            );
-                                                }
-                                            }
-                                        }
-                                        plot_track.sample(frame)
-                                    };
-                                    stroke(
-                                        window,
-                                        (0..=600).map(|i| {
-                                            let f = graph_view.start
-                                                + graph_view.span * i as f64 / 600.0;
-                                            graph_view.point(bounds, f, evaluate(f))
-                                        }),
-                                        0xffc66d,
-                                        1.5,
-                                    );
-                                    for (&f, k) in plot_track.keys() {
-                                        dot(
-                                            window,
-                                            graph_view.point(bounds, f as f64, k.value),
-                                            if selection.is_some_and(|(_, frame, _)| frame == f) {
-                                                ui::BLUE
-                                            } else {
-                                                0xffc66d
-                                            },
-                                        );
-                                    }
-                                    if let Some(Drag::Key { to, value, .. }) = &drag {
-                                        dot(
-                                            window,
-                                            graph_view.point(bounds, *to as f64, *value),
-                                            0xffffff,
-                                        );
-                                    }
-                                    let x = graph_view.point(bounds, current as f64, 0.0).x;
+        let chart = div().flex_1().min_h_0().min_w_0().flex().flex_col().child(
+            div()
+                .id("value-graph-canvas")
+                .flex_1()
+                .min_h_0()
+                .relative()
+                .overflow_hidden()
+                .bg(rgb(0x262626))
+                .cursor_crosshair()
+                .on_mouse_down(MouseButton::Left, cx.listener(Self::down))
+                .child(
+                    canvas(
+                        move |bounds, _, _| measured.set(Some(bounds)),
+                        move |bounds, _, window, _| {
+                            window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                                for i in 0..=10 {
+                                    let x = bounds.left() + bounds.size.width * (i as f32 / 10.0);
                                     stroke(
                                         window,
                                         [point(x, bounds.top()), point(x, bounds.bottom())],
+                                        0x343434,
+                                        1.0,
+                                    );
+                                }
+                                for i in 0..=4 {
+                                    let y = bounds.top() + bounds.size.height * (i as f32 / 4.0);
+                                    stroke(
+                                        window,
+                                        [point(bounds.left(), y), point(bounds.right(), y)],
+                                        0x343434,
+                                        1.0,
+                                    );
+                                }
+                                let zero = graph_view.point(bounds, graph_view.start, 0.0).y;
+                                stroke(
+                                    window,
+                                    [point(bounds.left(), zero), point(bounds.right(), zero)],
+                                    0x555555,
+                                    1.0,
+                                );
+                                let evaluate = |frame: f64| {
+                                    if let Some(Drag::Handle {
+                                        frame: from, curve, ..
+                                    }) = &drag
+                                    {
+                                        if let Some((&end, b)) =
+                                            plot_track.keys().range(from + 1..).next()
+                                        {
+                                            if frame >= *from as f64 && frame <= end as f64 {
+                                                let a = plot_track.keys()[from].value;
+                                                return a
+                                                    + (b.value - a)
+                                                        * curve.progress(
+                                                            (frame - *from as f64)
+                                                                / (end - *from) as f64,
+                                                        );
+                                            }
+                                        }
+                                    }
+                                    plot_track.sample(frame)
+                                };
+                                stroke(
+                                    window,
+                                    (0..=600).map(|i| {
+                                        let f =
+                                            graph_view.start + graph_view.span * i as f64 / 600.0;
+                                        graph_view.point(bounds, f, evaluate(f))
+                                    }),
+                                    0xffc66d,
+                                    1.5,
+                                );
+                                if let Some((_, frame, _)) = selection
+                                    && let Some(mut curve) = curve
+                                    && let Some(space) =
+                                        HandleSpace::segment(graph_view, bounds, &plot_track, frame)
+                                {
+                                    if let Some(Drag::Handle { curve: preview, .. }) = &drag {
+                                        curve = *preview;
+                                    }
+                                    stroke(
+                                        window,
+                                        [space.point(0.0, 0.0), space.point(curve.x1, curve.y1)],
                                         ui::BLUE,
                                         1.0,
                                     );
-                                });
-                            },
-                        )
-                        .size_full(),
-                    ),
-            )
-            .child(
-                div()
-                    .h(px(20.0))
-                    .relative()
-                    .mx_3()
-                    .children((0..=5).map(|i| {
-                        div()
-                            .absolute()
-                            .left(relative(i as f32 / 5.0 * 0.93))
-                            .text_size(px(10.0))
-                            .text_color(rgb(ui::MUTED))
-                            .child(format!("{}f", start + span * i / 5))
-                    })),
-            );
+                                    stroke(
+                                        window,
+                                        [space.point(1.0, 1.0), space.point(curve.x2, curve.y2)],
+                                        ui::BLUE,
+                                        1.0,
+                                    );
+                                    dot(window, space.point(curve.x1, curve.y1), ui::BLUE);
+                                    dot(window, space.point(curve.x2, curve.y2), ui::BLUE);
+                                }
+                                for (&f, k) in plot_track.keys() {
+                                    dot(
+                                        window,
+                                        graph_view.point(bounds, f as f64, k.value),
+                                        if selection.is_some_and(|(_, frame, _)| frame == f) {
+                                            ui::BLUE
+                                        } else {
+                                            0xffc66d
+                                        },
+                                    );
+                                }
+                                if let Some(Drag::Key { to, value, .. }) = &drag {
+                                    dot(
+                                        window,
+                                        graph_view.point(bounds, *to as f64, *value),
+                                        0xffffff,
+                                    );
+                                }
+                                let x = graph_view.point(bounds, current as f64, 0.0).x;
+                                stroke(
+                                    window,
+                                    [point(x, bounds.top()), point(x, bounds.bottom())],
+                                    ui::BLUE,
+                                    1.0,
+                                );
+                            });
+                        },
+                    )
+                    .size_full(),
+                )
+                .children((1..4).map(|i| {
+                    let value =
+                        graph_view.high - (graph_view.high - graph_view.low) * i as f64 / 4.0;
+                    div()
+                        .absolute()
+                        .left(px(5.0))
+                        .top(relative(i as f32 / 4.0))
+                        .text_size(px(10.0))
+                        .text_color(rgb(ui::MUTED))
+                        .child(format!("{value:.1}"))
+                })),
+        );
         let mut easing = div()
             .id("easing-controls")
-            .w(px(260.0))
+            .w(px(280.0))
+            .h(px(290.0))
+            .bg(rgb(ui::PANEL))
+            .border_1()
+            .border_color(rgb(0x555555))
             .flex_none()
             .overflow_y_scroll()
             .border_l_1()
@@ -950,62 +1003,46 @@ impl Render for Graph {
                     .child("Click a graph key to edit its time, value and outgoing curve."),
             );
         }
-        let info = match &self.drag {
-            Some(Drag::Key { to, value, .. }) => {
-                format!("Release to apply: {to}f / {value:.3} · Escape to cancel")
-            }
-            _ => {
-                "Drag keys: time + value · F9: ease outgoing segment · Delete: selected key".into()
-            }
-        };
-        root.child(
-            div()
-                .flex()
-                .flex_1()
-                .min_h_0()
-                .child(properties)
-                .child(chart)
-                .child(easing),
-        )
-        .child(
-            div()
-                .h(px(25.0))
-                .flex_none()
-                .flex()
-                .items_center()
-                .gap_2()
-                .px_2()
-                .border_t_1()
-                .border_color(rgb(ui::BORDER))
-                .child(ui::action_tool(
-                    "graph-pan-left",
-                    "arrow-left",
-                    "Pan timeline left",
-                    &self.state,
-                    Action::PanTimeline(-(span as i32 / 4).max(1)),
-                    false,
-                ))
-                .child(ui::action_tool(
-                    "graph-pan-right",
-                    "arrow-right",
-                    "Pan timeline right",
-                    &self.state,
-                    Action::PanTimeline((span as i32 / 4).max(1)),
-                    false,
-                ))
-                .child(
-                    div()
-                        .text_size(px(10.0))
-                        .text_color(rgb(ui::MUTED))
-                        .child(info),
-                ),
-        )
+        easing = easing.child(
+            ui::text_button("close-key-details", "Close").on_click(cx.listener(
+                |this, _, _, cx| {
+                    this.details = false;
+                    cx.notify();
+                },
+            )),
+        );
+        root.child(chart).child(toolbar).when(self.details, |s| {
+            s.child(gpui::deferred(
+                easing.absolute().right_0().bottom(px(30.0)).occlude(),
+            ))
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn inline_handle_coordinates_support_descending_segments() {
+        let bounds = Bounds::new(point(px(400.0), px(100.0)), size(px(600.0), px(200.0)));
+        let space = HandleSpace {
+            view: View {
+                start: 30.0,
+                span: 120.0,
+                low: -100.0,
+                high: 500.0,
+            },
+            bounds,
+            from: 60.0,
+            span: 60.0,
+            low: 400.0,
+            delta: -300.0,
+            inline: true,
+        };
+        let (x, y) = space.value(space.point(0.3, 1.25));
+        assert!((x - 0.3).abs() < 1e-5);
+        assert!((y - 1.25).abs() < 1e-5);
+    }
     #[test]
     fn graph_coordinates_round_trip_with_negative_values_and_zoom() {
         let view = View {

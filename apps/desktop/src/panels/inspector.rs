@@ -116,8 +116,7 @@ impl Render for Inspector {
             .flex_col()
             .size_full()
             .min_w_0()
-            .bg(rgb(ui::BG))
-            .child(ui::panel_header("Properties"));
+            .bg(rgb(ui::BG));
         let Some(layer) = selected else {
             return panel.child(
                 div()

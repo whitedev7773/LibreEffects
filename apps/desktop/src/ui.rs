@@ -49,7 +49,14 @@ impl AssetSource for Assets {
             "filmstrip",
             "target",
             "square-dashed",
-            "xmark"
+            "xmark",
+            "object-align-left",
+            "object-align-center-horizontal",
+            "object-align-right",
+            "object-align-top",
+            "object-align-center-vertical",
+            "object-align-bottom",
+            "chart-line"
         ))
     }
     fn list(&self, _: &str) -> anyhow::Result<Vec<SharedString>> {
@@ -123,7 +130,7 @@ pub fn panel_header(title: impl Into<SharedString>) -> impl IntoElement {
     div()
         .flex()
         .items_center()
-        .h(px(31.0))
+        .h(px(25.0))
         .flex_none()
         .px_3()
         .gap_2()

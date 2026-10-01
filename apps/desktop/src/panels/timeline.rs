@@ -1,4 +1,5 @@
 use crate::{
+    components::TextField,
     editor::{Action, EditorState, PropertyFilter, timecode},
     ui,
 };
@@ -9,7 +10,7 @@ use gpui::{
 use libre_effects_core::{Command, LayerId, Property};
 use std::{cell::Cell, rc::Rc};
 
-const LEFT: f32 = 430.0;
+pub(super) const LEFT: f32 = 560.0;
 #[derive(Clone)]
 struct KeyDrag {
     id: LayerId,
@@ -18,6 +19,7 @@ struct KeyDrag {
     to: u32,
 }
 pub(crate) struct Timeline {
+    search: Entity<TextField>,
     graph: Entity<super::graph::Graph>,
     state: Entity<EditorState>,
     ruler: Rc<Cell<Option<Bounds<Pixels>>>>,
@@ -33,7 +35,10 @@ fn frame_at(x: f32, left: f32, width: f32, start: u32, visible: u32, duration: u
 impl Timeline {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
+        let search = cx.new(|cx| TextField::new(cx, |_, _, _| {}));
+        cx.observe(&search, |_, _, cx| cx.notify()).detach();
         Self {
+            search,
             graph: cx.new(|cx| super::graph::Graph::new(state.clone(), cx)),
             state,
             ruler: Rc::new(Cell::new(None)),
@@ -142,35 +147,10 @@ fn grid(start: u32, visible: u32, frame: u32) -> impl IntoElement {
 }
 impl Render for Timeline {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if self.state.read(cx).graph_open {
-            return div()
-                .size_full()
-                .flex()
-                .flex_col()
-                .min_h_0()
-                .child(
-                    div()
-                        .h(px(31.0))
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .border_b_1()
-                        .border_color(rgb(ui::BORDER))
-                        .child(ui::text_button("back-to-layers", "Timeline").on_click({
-                            let state = self.state.clone();
-                            move |_, window, cx| {
-                                state.update(cx, |state, cx| {
-                                    state.dispatch(&Action::ToggleGraph, window, cx)
-                                })
-                            }
-                        }))
-                        .child(div().text_color(rgb(ui::BLUE)).px_3().child("Value Graph")),
-                )
-                .child(self.graph.clone())
-                .into_any_element();
-        }
         let state = self.state.read(cx);
         let comp = state.editor.project().composition().clone();
+        let graph_open = state.graph_open;
+        let graph_property = state.graph_property;
         let frame = state.frame;
         let start = state.timeline_start;
         let visible = state.visible_frames();
@@ -185,13 +165,16 @@ impl Render for Timeline {
         }
         let expanded = state.expanded;
         let filter = state.property_filter;
-        let playing = state.playing;
         let zoom = state.timeline_zoom;
         let work_start = state.work_start;
         let work_end = state.work_end;
         let bounds = self.ruler.clone();
         let mut rows = div().flex().flex_col().w_full();
+        let query = self.search.read(cx).value().trim().to_lowercase();
         for (index, layer) in comp.layers().iter().enumerate() {
+            if !layer.name().to_lowercase().contains(&query) {
+                continue;
+            }
             let id = layer.id();
             let selected_row = selected == Some(id);
             let control_id = |suffix: &str| SharedString::from(format!("layer-{id}-{suffix}"));
@@ -346,7 +329,7 @@ impl Render for Timeline {
                     .border_color(rgb(0x151515))
                     .bg(rgb(if selected_row { 0x343434 } else { ui::BG }))
                     .child(controls)
-                    .child(time_area),
+                    .when(!graph_open, |s| s.child(time_area)),
             );
             if selected_row && expanded {
                 rows = rows.child(
@@ -476,7 +459,26 @@ impl Render for Timeline {
                                         !track.keys().is_empty(),
                                     ))
                                     .child(
-                                        div().flex_1().text_size(px(11.0)).child(property.label()),
+                                        ui::text_button(
+                                            prop_id("graph-property"),
+                                            property.label(),
+                                        )
+                                        .flex_1()
+                                        .justify_start()
+                                        .text_size(px(11.0))
+                                        .when(graph_open && graph_property == property, |s| {
+                                            s.text_color(rgb(ui::BLUE))
+                                        })
+                                        .on_click({
+                                            let state = self.state.clone();
+                                            move |_, _, cx| {
+                                                state.update(cx, |s, cx| {
+                                                    s.graph_property = property;
+                                                    s.graph_key = None;
+                                                    cx.notify();
+                                                })
+                                            }
+                                        }),
                                     )
                                     .child(
                                         div()
@@ -498,7 +500,7 @@ impl Render for Timeline {
                                         track.keys().contains_key(&frame),
                                     )),
                             )
-                            .child(keys),
+                            .when(!graph_open, |s| s.child(keys)),
                     );
                 }
             }
@@ -565,19 +567,19 @@ impl Render for Timeline {
             .child(
                 div()
                     .flex()
-                    .h(px(45.0))
+                    .h(px(32.0))
                     .flex_none()
                     .items_center()
                     .px_3()
                     .gap_2()
                     .child(
                         div()
-                            .w(px(140.0))
+                            .w(px(105.0))
                             .flex()
                             .flex_col()
                             .child(
                                 div()
-                                    .text_size(px(18.0))
+                                    .text_size(px(14.0))
                                     .text_color(rgb(ui::BLUE))
                                     .child(timecode(frame, comp.fps())),
                             )
@@ -588,38 +590,15 @@ impl Render for Timeline {
                                     .child(format!("{frame:05}  ({} fps)", comp.fps())),
                             ),
                     )
-                    .child(ui::action_tool(
-                        "start",
-                        "arrow-left",
-                        "Go to start (Home)",
-                        &self.state,
-                        Action::Seek(0),
-                        false,
-                    ))
-                    .child(ui::action_tool(
-                        "previous",
-                        "arrow-left",
-                        "Previous frame (Page Up)",
-                        &self.state,
-                        Action::Step(-1),
-                        false,
-                    ))
-                    .child(ui::action_tool(
-                        "play",
-                        if playing { "pause" } else { "play" },
-                        "Play / Pause (Space)",
-                        &self.state,
-                        Action::Play,
-                        playing,
-                    ))
-                    .child(ui::action_tool(
-                        "next",
-                        "chevron-right",
-                        "Next frame (Page Down)",
-                        &self.state,
-                        Action::Step(1),
-                        false,
-                    ))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .w(px(165.0))
+                            .child(ui::icon("magnifier"))
+                            .child(div().flex_1().child(self.search.clone())),
+                    )
                     .child(ui::text_button("all-properties", "All").on_click({
                         let state = self.state.clone();
                         move |_, window, cx| {
@@ -642,14 +621,14 @@ impl Render for Timeline {
                             }
                         }),
                     )
-                    .child(ui::text_button("open-graph", "Graph Editor").on_click({
-                        let state = self.state.clone();
-                        move |_, window, cx| {
-                            state.update(cx, |state, cx| {
-                                state.dispatch(&Action::ToggleGraph, window, cx)
-                            })
-                        }
-                    }))
+                    .child(ui::action_tool(
+                        "open-graph",
+                        "chart-line",
+                        "Graph Editor (Shift+F3)",
+                        &self.state,
+                        Action::ToggleGraph,
+                        graph_open,
+                    ))
                     .child(div().flex_1())
                     .child(ui::action_tool(
                         "timeline-minus",
@@ -672,7 +651,7 @@ impl Render for Timeline {
             .child(
                 div()
                     .flex()
-                    .h(px(42.0))
+                    .h(px(29.0))
                     .flex_none()
                     .bg(rgb(0x262626))
                     .child(
@@ -731,8 +710,8 @@ impl Render for Timeline {
                                 div()
                                     .absolute()
                                     .left(relative(tick as f32 / 10.0))
-                                    .top(px(14.0))
-                                    .h(px(26.0))
+                                    .top(px(10.0))
+                                    .h(px(19.0))
                                     .border_l_1()
                                     .border_color(rgb(0x777777))
                                     .pl_1()
@@ -761,11 +740,23 @@ impl Render for Timeline {
             )
             .child(
                 div()
-                    .id("timeline-rows")
+                    .flex()
                     .flex_1()
                     .min_h_0()
-                    .overflow_y_scroll()
-                    .child(rows),
+                    .child(
+                        div()
+                            .id("timeline-rows")
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .when(graph_open, |s| {
+                                s.w(px(LEFT)).flex_none().overflow_x_hidden()
+                            })
+                            .when(!graph_open, |s| s.flex_1())
+                            .child(rows),
+                    )
+                    .when(graph_open, |s| {
+                        s.child(div().flex_1().min_w_0().min_h_0().child(self.graph.clone()))
+                    }),
             )
             .child(
                 div()

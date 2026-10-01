@@ -1,7 +1,7 @@
 use crate::{
     components::{Orientation, ResizablePanelGroup, TextField},
     editor::{Action, EditorState, PropertyFilter, Tool},
-    panels::{Browser, Inspector, Preview, Timeline},
+    panels::{Align, Browser, Preview, Sidebar, Timeline},
     ui,
 };
 use gpui::{Context, Entity, FocusHandle, KeyDownEvent, Window, div, prelude::*, px, rgb};
@@ -12,6 +12,7 @@ pub(crate) struct Shell {
     layout: Entity<ResizablePanelGroup>,
     middle: Entity<ResizablePanelGroup>,
     upper: Entity<ResizablePanelGroup>,
+    right: Entity<ResizablePanelGroup>,
     focus: FocusHandle,
     initialized: bool,
     menu: Option<&'static str>,
@@ -27,28 +28,35 @@ impl Shell {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
         let browser = cx.new(|cx| Browser::new(state.clone(), cx));
         let preview = cx.new(|cx| Preview::new(state.clone(), cx));
-        let inspector = cx.new(|cx| Inspector::new(state.clone(), cx));
+        let sidebar = cx.new(|cx| Sidebar::new(state.clone(), cx));
+        let align = cx.new(|cx| Align::new(state.clone(), cx));
         let timeline = cx.new(|cx| Timeline::new(state.clone(), cx));
-        let middle = cx.new(|_| {
-            ResizablePanelGroup::new(Orientation::Horizontal, preview, inspector)
-                .initial_fraction(0.76)
-                .minimum_fraction(0.18)
-        });
         let upper = cx.new(|_| {
-            ResizablePanelGroup::new(Orientation::Horizontal, browser, middle.clone())
-                .initial_fraction(0.19)
+            ResizablePanelGroup::new(Orientation::Horizontal, browser, preview)
+                .initial_fraction(0.20)
                 .minimum_fraction(0.12)
         });
-        let layout = cx.new(|_| {
+        let middle = cx.new(|_| {
             ResizablePanelGroup::new(Orientation::Vertical, upper.clone(), timeline)
-                .initial_fraction(0.64)
+                .initial_fraction(0.615)
                 .minimum_fraction(0.22)
+        });
+        let right = cx.new(|_| {
+            ResizablePanelGroup::new(Orientation::Vertical, sidebar, align)
+                .initial_fraction(0.615)
+                .minimum_fraction(0.2)
+        });
+        let layout = cx.new(|_| {
+            ResizablePanelGroup::new(Orientation::Horizontal, middle.clone(), right.clone())
+                .initial_fraction(0.84)
+                .minimum_fraction(0.12)
         });
         Self {
             state,
             layout,
             middle,
             upper,
+            right,
             focus: cx.focus_handle(),
             initialized: false,
             menu: None,
@@ -68,6 +76,7 @@ impl Shell {
         self.layout.update(cx, |p, cx| p.reset(cx));
         self.upper.update(cx, |p, cx| p.reset(cx));
         self.middle.update(cx, |p, cx| p.reset(cx));
+        self.right.update(cx, |p, cx| p.reset(cx));
     }
     fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let comp = self.state.read(cx).editor.project().composition();

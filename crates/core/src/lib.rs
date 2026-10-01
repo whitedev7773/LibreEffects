@@ -9,6 +9,16 @@ pub type LayerId = u64;
 mod geometry;
 pub use geometry::{Affine, Bezier};
 
+#[derive(Clone, Copy, Debug)]
+pub enum Alignment {
+    Left,
+    HorizontalCenter,
+    Right,
+    Top,
+    VerticalCenter,
+    Bottom,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum Interpolation {
     #[default]
@@ -423,6 +433,11 @@ impl Project {
 #[derive(Clone, Debug)]
 pub enum Command {
     AddRectangle,
+    AlignLayer {
+        id: LayerId,
+        frame: Frame,
+        alignment: Alignment,
+    },
     SetParent {
         id: LayerId,
         parent: Option<LayerId>,
@@ -587,6 +602,44 @@ impl Editor {
 }
 
 fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
+    if let Command::AlignLayer {
+        id,
+        frame,
+        alignment,
+    } = command
+    {
+        let comp = &state.project.composition;
+        let layer = comp.layer(id).ok_or("Layer not found")?;
+        let corners = comp
+            .corners_at(id, frame)
+            .ok_or("Invalid layer transform")?;
+        let min_x = corners.iter().map(|p| p[0]).fold(f64::INFINITY, f64::min);
+        let max_x = corners
+            .iter()
+            .map(|p| p[0])
+            .fold(f64::NEG_INFINITY, f64::max);
+        let min_y = corners.iter().map(|p| p[1]).fold(f64::INFINITY, f64::min);
+        let max_y = corners
+            .iter()
+            .map(|p| p[1])
+            .fold(f64::NEG_INFINITY, f64::max);
+        let delta = match alignment {
+            Alignment::Left => [-min_x, 0.0],
+            Alignment::HorizontalCenter => [(comp.width as f64 - min_x - max_x) / 2.0, 0.0],
+            Alignment::Right => [comp.width as f64 - max_x, 0.0],
+            Alignment::Top => [0.0, -min_y],
+            Alignment::VerticalCenter => [0.0, (comp.height as f64 - min_y - max_y) / 2.0],
+            Alignment::Bottom => [0.0, comp.height as f64 - max_y],
+        };
+        let delta = comp
+            .position_space(id, frame)
+            .and_then(Affine::inverse)
+            .ok_or("Cannot align through a zero-scale parent")?
+            .vector(delta);
+        let x = layer.property(Property::PositionX).value_at(frame) + delta[0];
+        let y = layer.property(Property::PositionY).value_at(frame) + delta[1];
+        return apply(state, Command::SetPosition { id, frame, x, y });
+    }
     if let Command::EditKeyframe {
         id,
         property,
@@ -755,7 +808,8 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
         | Command::SetValue { id, .. }
         | Command::ToggleKeyframe { id, .. }
         | Command::SetInterpolation { id, .. } => *id,
-        Command::SetParent { .. }
+        Command::AlignLayer { .. }
+        | Command::SetParent { .. }
         | Command::EditKeyframe { .. }
         | Command::AddRectangle
         | Command::ConfigureComposition { .. }
@@ -928,7 +982,8 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
                 .ok_or("Select a frame containing a keyframe")?;
             key.interpolation = interpolation;
         }
-        Command::SetParent { .. }
+        Command::AlignLayer { .. }
+        | Command::SetParent { .. }
         | Command::EditKeyframe { .. }
         | Command::AddRectangle
         | Command::ConfigureComposition { .. }

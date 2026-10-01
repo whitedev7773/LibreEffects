@@ -1,6 +1,71 @@
 use super::*;
 
 #[test]
+fn alignment_uses_world_bounds_with_parenting_and_one_undo_step() {
+    let mut editor = editor_with_layer();
+    editor.execute(Command::AddRectangle).unwrap();
+    editor
+        .execute(Command::SetParent {
+            id: 2,
+            parent: Some(1),
+            frame: 0,
+        })
+        .unwrap();
+    set_property(&mut editor, 1, Property::Rotation, 35.0);
+    set_property(&mut editor, 1, Property::ScaleX, 150.0);
+    set_property(&mut editor, 2, Property::Rotation, 18.0);
+    set_property(&mut editor, 2, Property::PositionX, 700.0);
+    set_property(&mut editor, 2, Property::PositionY, 420.0);
+    let before = editor.project().clone();
+    for alignment in [
+        Alignment::Left,
+        Alignment::HorizontalCenter,
+        Alignment::Right,
+        Alignment::Top,
+        Alignment::VerticalCenter,
+        Alignment::Bottom,
+    ] {
+        editor
+            .execute(Command::AlignLayer {
+                id: 2,
+                frame: 0,
+                alignment,
+            })
+            .unwrap();
+        let corners = editor.project().composition().corners_at(2, 0).unwrap();
+        let xs = corners.map(|p| p[0]);
+        let ys = corners.map(|p| p[1]);
+        let min_x = xs.into_iter().fold(f64::INFINITY, f64::min);
+        let max_x = xs.into_iter().fold(f64::NEG_INFINITY, f64::max);
+        let min_y = ys.into_iter().fold(f64::INFINITY, f64::min);
+        let max_y = ys.into_iter().fold(f64::NEG_INFINITY, f64::max);
+        let (actual, expected) = match alignment {
+            Alignment::Left => (min_x, 0.0),
+            Alignment::HorizontalCenter => ((min_x + max_x) / 2.0, 960.0),
+            Alignment::Right => (max_x, 1920.0),
+            Alignment::Top => (min_y, 0.0),
+            Alignment::VerticalCenter => ((min_y + max_y) / 2.0, 540.0),
+            Alignment::Bottom => (max_y, 1080.0),
+        };
+        assert!((actual - expected).abs() < 1e-7);
+        editor.undo();
+        assert_eq!(*editor.project(), before);
+    }
+    editor.execute(Command::ToggleLocked(2)).unwrap();
+    let locked = editor.project().clone();
+    assert!(
+        editor
+            .execute(Command::AlignLayer {
+                id: 2,
+                frame: 0,
+                alignment: Alignment::Left
+            })
+            .is_err()
+    );
+    assert_eq!(*editor.project(), locked);
+}
+
+#[test]
 fn bundled_curve_parent_study_roundtrips_and_inherits_motion() {
     let project = Project::from_json(include_str!(
         "../../../examples/curve-parent-study.lfe.json"
