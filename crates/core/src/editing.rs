@@ -36,6 +36,15 @@ pub enum Content {
     Image {
         png: std::sync::Arc<str>,
     },
+    ImageSequence {
+        frames: std::sync::Arc<Vec<String>>,
+        fps: FrameRate,
+        #[serde(default)]
+        missing: MissingFramePolicy,
+        start_frame: i64,
+        #[serde(default, skip_serializing_if = "VideoPlayback::is_default")]
+        playback: VideoPlayback,
+    },
     Composition {
         composition: CompositionId,
         /// Parent frame at which source frame zero occurs. Trimming does not shift it.
@@ -55,11 +64,16 @@ impl Content {
     /// Unquantized source seconds, including times outside the source's range.
     pub fn video_source_time(&self, frame: Frame, fps: impl Into<FrameRate>) -> Option<f64> {
         let fps = fps.into();
-        let Self::Video {
+        let (Self::Video {
             start_frame,
             playback,
             ..
-        } = self
+        }
+        | Self::ImageSequence {
+            start_frame,
+            playback,
+            ..
+        }) = self
         else {
             return None;
         };
@@ -147,6 +161,27 @@ pub(super) fn validate_content(
                 && png
                     .bytes()
                     .all(|b| b.is_ascii_alphanumeric() || b"+/=".contains(&b))
+        }
+        Content::ImageSequence {
+            frames,
+            fps,
+            start_frame,
+            playback,
+            ..
+        } => {
+            !frames.is_empty()
+                && frames.len() <= 100_000
+                && fps.valid()
+                && frames.len() as f64 / fps.as_f64() <= 86400.0
+                && frames
+                    .iter()
+                    .all(|p| !p.is_empty() && p.len() <= 32768 && !p.contains('\0'))
+                && frames.iter().map(String::len).sum::<usize>() <= 8 * 1024 * 1024
+                && start_frame.abs_diff(0) <= 100_000_000
+                && playback.source_in.is_finite()
+                && playback.source_in.abs() <= 8_640_000.0
+                && playback.speed.is_finite()
+                && (playback.speed == 0.0 || (0.01..=100.0).contains(&playback.speed.abs()))
         }
         Content::Video {
             path,
@@ -327,8 +362,10 @@ pub(super) fn apply_extended(
                     );
                 }
                 let end = layer.out_frame(duration);
-                let Content::Video { playback, .. } = layer.content else {
-                    return Err("Select a video layer first".into());
+                let (Content::Video { playback, .. } | Content::ImageSequence { playback, .. }) =
+                    layer.content
+                else {
+                    return Err("Select a footage layer first".into());
                 };
                 let mut next = playback;
                 let source_duration = layer
@@ -350,7 +387,7 @@ pub(super) fn apply_extended(
                     }
                     Command::SetVideoSourceIn { seconds, .. } => {
                         if !seconds.is_finite() || *seconds < 0.0 || *seconds >= source_duration {
-                            return Err("Source In must be inside the video, in seconds".into());
+                            return Err("Source In must be inside the footage, in seconds".into());
                         }
                         next.source_in = *seconds;
                     }
@@ -369,7 +406,7 @@ pub(super) fn apply_extended(
                     Command::FreezeVideo { frame, .. } => {
                         if *frame < start || *frame >= end {
                             return Err(
-                                "Place the playhead inside the video layer to freeze".into()
+                                "Place the playhead inside the footage layer to freeze".into()
                             );
                         }
                         next.source_in = layer
@@ -379,11 +416,16 @@ pub(super) fn apply_extended(
                     }
                     _ => unreachable!(),
                 }
-                let Content::Video {
+                let (Content::Video {
                     start_frame,
                     playback,
                     ..
-                } = &mut layer.content
+                }
+                | Content::ImageSequence {
+                    start_frame,
+                    playback,
+                    ..
+                }) = &mut layer.content
                 else {
                     unreachable!()
                 };
@@ -604,16 +646,12 @@ pub(super) fn apply_extended(
                 l.color = 0xffffff;
                 l.properties.get_mut(&Property::AnchorX).unwrap().value = width / 2.0;
                 l.properties.get_mut(&Property::AnchorY).unwrap().value = height / 2.0;
-                if let Content::Video {
-                    duration: seconds,
-                    start_frame,
-                    ..
-                } = content
-                {
-                    if *start_frame < 0 || *start_frame >= duration as i64 {
+                if let Some((seconds, _)) = content.footage_timing() {
+                    let start_frame = content.footage_origin().unwrap();
+                    if start_frame < 0 || start_frame >= duration as i64 {
                         return Err("Import video inside the composition".into());
                     }
-                    l.in_frame = *start_frame as u32;
+                    l.in_frame = start_frame as u32;
                     l.out_frame = Some(
                         (l.in_frame as u64 + (seconds * fps.as_f64()).ceil() as u64)
                             .min(duration as u64) as u32,
@@ -639,6 +677,7 @@ pub(super) fn apply_extended(
                 l.in_frame = shifted(l.in_frame, *delta, duration, false)?;
                 l.out_frame = Some(shifted(end, *delta, duration, true)?);
                 if let Content::Video { start_frame, .. }
+                | Content::ImageSequence { start_frame, .. }
                 | Content::Composition { start_frame, .. } = &mut l.content
                 {
                     *start_frame = start_frame

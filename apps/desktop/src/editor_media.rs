@@ -44,7 +44,7 @@ impl EditorState {
             multiple: false,
             prompt: Some(
                 if source.is_some() {
-                    "Locate the replacement video"
+                    "Locate the replacement media file"
                 } else {
                     "Find missing footage in this folder"
                 }
@@ -82,7 +82,8 @@ impl EditorState {
                     };
                     let mut replacements = Vec::new();
                     for (source, path) in candidates {
-                        match crate::media_io::replacement(source.clone(), &path) {
+                        match crate::media_io::replacement_for_project(&copy, source.clone(), &path)
+                        {
                             Ok(replacement) => replacements.push(replacement),
                             Err(error) => issues.push(format!("{source}: {error}")),
                         }

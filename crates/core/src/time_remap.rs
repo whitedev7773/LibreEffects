@@ -14,7 +14,7 @@ impl Layer {
     pub fn can_time_remap(&self) -> bool {
         matches!(
             self.content,
-            Content::Video { .. } | Content::Composition { .. }
+            Content::Video { .. } | Content::ImageSequence { .. } | Content::Composition { .. }
         )
     }
     pub fn time_remap(&self) -> Option<&AnimatedProperty> {
@@ -37,14 +37,7 @@ impl Layer {
         }
     }
     pub fn video_time(&self, frame: Frame, fps: impl Into<FrameRate>) -> Option<f64> {
-        let Content::Video {
-            duration,
-            source_fps,
-            ..
-        } = self.content
-        else {
-            return None;
-        };
+        let (duration, source_fps) = self.content.footage_timing()?;
         let seconds = nonnegative(self.source_time(frame, fps)?);
         let (duration, source_fps) = match self.footage_interpretation.fps {
             Some(fps) => (duration * source_fps / fps.as_f64(), fps.as_f64()),
@@ -114,7 +107,7 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
         let (fps, duration) = (comp.fps, comp.duration);
         let layer = comp.layer(id).ok_or("Layer not found")?;
         if layer.locked || !layer.can_time_remap() {
-            return Err("Select an unlocked video or precomposition layer".into());
+            return Err("Select an unlocked footage or precomposition layer".into());
         }
         match command {
             Command::SetTimeRemap { enabled, .. } => {
@@ -147,7 +140,9 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                     return Err("Place the playhead inside the layer to freeze".into());
                 }
                 let seconds = match layer.content {
-                    Content::Video { .. } => layer.video_time(*frame, fps),
+                    Content::Video { .. } | Content::ImageSequence { .. } => {
+                        layer.video_time(*frame, fps)
+                    }
                     Content::Composition { composition, .. } => {
                         let source = state
                             .project

@@ -267,7 +267,7 @@ cargo run -p libre-effects-core --example make_animation_study -- examples/curve
 | Ctrl+Z / Ctrl+Shift+Z | Undo / Redo |
 | Ctrl+Y / Ctrl+Alt+Y / Ctrl+D | Add solid / Add adjustment layer / Duplicate selection |
 | Ctrl+K | Composition settings |
-| Ctrl+Alt+T | Enable / disable selected video or precomposition Time Remap |
+| Ctrl+Alt+T | Enable / disable selected footage or precomposition Time Remap |
 | V / H / W / Y | Selection / Hand / Rotation / Anchor Point tool |
 | Ctrl+Shift+D | Split selected layers at the playhead |
 | Alt+[ / Alt+] | Trim selected layers' In / Out to the playhead |
@@ -555,7 +555,7 @@ directory. Neither tool is downloaded automatically.
 
 ### Animated Time Remap
 
-Layer → Enable Time Remapping (Ctrl+Alt+T) adds a source-seconds track to video
+Layer → Enable Time Remapping (Ctrl+Alt+T) adds a source-seconds track to video, image sequences
 and precomposition layers. The first and last visible frames become keys, keeping
 the current trim, shifted origin and base speed unchanged on activation. Edit the
 Time Remap row in the Timeline, the Properties source-time field, or its value
@@ -617,8 +617,7 @@ Version 22 persists asset IDs, folders and source metadata. Older projects acqui
 asset IDs when read without changing layer sampling or pixels. Embedded PNG data
 is still written once and shared through history. Limits are 1,000 media assets,
 1,000 folders, 32 folder levels, and 128 MiB of unique encoded images. Importing
-videos remains visual-only; audio and image sequence import are pending in
-A08/H01–H04.
+videos remains visual-only; audio is pending in H01–H04.
 
 Select footage and open Interpret footage… to override a video's source FPS
 (including rational rates such as `30000/1001`). Enter `Source` to restore the
@@ -648,6 +647,46 @@ composition, and checked creation and alpha interpretation with Undo/Redo and
 save/reopen. The saved image composition rendered a PNG pixel of
 `[199,100,50,128]`, an alpha MOV pixel of `[199,100,50,129]`, and a black-background
 MP4 pixel of `[100,49,25,255]`; both videos contained 15 frames at 15 fps.
+
+### Image sequences
+
+File > Import image sequence… reads numbered PNG/JPEG files as one linked source.
+Choose the first frame to include. Matching files in the same folder use the same
+prefix, extension and number padding (with natural growth beyond that width).
+For example, `shot_0001.png` and `shot_0003.png` form a three-frame sequence with
+a missing second frame. Existing frames must all decode at the same dimensions;
+an invalid frame rejects the entire import. The initial rate is the current
+composition's FPS; Interpret footage… changes its assumed FPS and alpha settings.
+
+Missing frames defaults to Error, which stops preview/output at the missing
+sample. Hold repeats the preceding available source frame; if none precedes it,
+the result is transparent. Transparent leaves the missing sample empty. The
+policy is shared by every instance and supports Undo/Redo. Refresh footage rereads
+files changed externally. Speed, reverse, freeze and Time Remap use the same source
+clock as video. New comp from source uses the sequence dimensions, rate and span.
+
+Relink sequence folder… validates matching filenames and dimensions in another
+folder before updating every instance. Individual missing frames can also be
+relinked through Manage project media. Relative paths, Save As, Collect Files and
+source overwrite protection include every expected frame, even a missing one.
+Collect Files preserves allowed gaps and writes a portable manifest; existing
+files are copied once. Version 24 stores shared frame manifests once, while
+Undo/history share their memory. PNG/MP4/alpha MOV sample the same files as preview.
+
+Limits: 100,000 expected frames and directory entries, 8 MiB of paths per manifest,
+8 MiB per image, 4096 pixels per image axis, 1–240 fps and 24 hours. Linked pixels
+are decoded on demand; continuous decoding/cache tuning remains in J01–J03.
+TIFF/EXR, directory watching, automatic extension of the imported range and custom
+filename patterns are not implemented. A frame restored at an expected path requires
+Refresh footage; extending the range requires importing the sequence again.
+
+Native sequence validation covered import Undo/Redo, a 2 fps / three-frame source
+composition, Error/Hold/Transparent gaps, folder relink Undo/Redo, and save/reopen.
+The saved version-24 project rendered green/transparent/orange PNG frames. Its
+320×180 MP4 and alpha MOV both contained three frames at 2 fps / 1.5 seconds;
+pixel checks confirmed black-background MP4 flattening and preserved MOV alpha.
+Automated coverage also includes timing edits, shared manifests, source protection,
+portable collection with gaps, and remapped nested-source preflight.
 
 Open `examples/asset-library-study.lfe.json` to inspect two compositions sharing
 one embedded image in a folder tree. Native validation covered source rename,

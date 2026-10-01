@@ -1,13 +1,65 @@
 use super::*;
 
 impl EditorState {
-    pub(super) fn import_assets(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn relink_sequence(&mut self, asset: u64, cx: &mut Context<Self>) {
+        if self.importing_video {
+            return;
+        }
+        let snapshot = self.editor.project().clone();
+        let Some(a) = snapshot.asset_library().assets().get(&asset) else {
+            return;
+        };
+        let (content, width, height) = (a.content().clone(), a.width() as u32, a.height() as u32);
+        self.stop();
+        self.importing_video = true;
+        let prompt = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Locate the folder containing the sequence frames".into()),
+        });
+        cx.spawn(async move |entity, cx| {
+            let selected = prompt
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .flatten()
+                .and_then(|p| p.into_iter().next());
+            let result = if let Some(folder) = selected {
+                cx.background_executor()
+                    .spawn(async move {
+                        crate::image_sequence::relocate(asset, &content, width, height, &folder)
+                    })
+                    .await
+            } else {
+                Err("Sequence relink canceled".into())
+            };
+            let _ = entity.update(cx, |s, cx| {
+                s.importing_video = false;
+                s.status = match result.and_then(|command| {
+                    if !s.editor.project().same_document(&snapshot) {
+                        return Err("Project changed during relink; retry".into());
+                    }
+                    s.editor.execute(command)
+                }) {
+                    Ok(()) => "Sequence relinked in all compositions".into(),
+                    Err(e) => e,
+                };
+                s.preview_revision = s.preview_revision.wrapping_add(1);
+                s.normalize();
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+    pub(super) fn import_assets(&mut self, sequence: bool, cx: &mut Context<Self>) {
         if self.importing_video {
             return;
         }
         self.stop();
         self.importing_video = true;
         let revision = self.document_revision;
+        let fps = self.editor.project().composition().fps();
         let folder = match self.project_item {
             Some(libre_effects_core::ProjectItem::Folder(id)) => Some(id),
             Some(libre_effects_core::ProjectItem::Asset(id)) => self
@@ -22,8 +74,15 @@ impl EditorState {
         let prompt = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
-            multiple: true,
-            prompt: Some("Import images or video footage".into()),
+            multiple: !sequence,
+            prompt: Some(
+                if sequence {
+                    "Choose the first numbered PNG/JPEG frame"
+                } else {
+                    "Import images or video footage"
+                }
+                .into(),
+            ),
         });
         self.status = "Choose footage for the Project panel".into();
         cx.spawn(async move |entity, cx| {
@@ -39,7 +98,7 @@ impl EditorState {
             let count = paths.len();
             let result = cx
                 .background_executor()
-                .spawn(async move { read_assets(&paths, folder) })
+                .spawn(async move { if sequence { crate::image_sequence::discover(&paths[0], fps, folder).map(|command| vec![command]) } else { read_assets(&paths, folder) } })
                 .await;
             let _ = entity.update(cx, |s, cx| {
                 s.importing_video = false;
@@ -50,7 +109,7 @@ impl EditorState {
                     s.editor.execute(Command::Batch(commands))
                 }) {
                     Ok(()) => {
-                        format!("Imported {count} file(s) · select footage and Add to composition")
+                        if sequence { "Imported sequence · Interpret footage sets FPS and missing-frame policy".into() } else { format!("Imported {count} file(s) · select footage and Add to composition") }
                     }
                     Err(error) => format!("Import failed; no files added: {error}"),
                 };

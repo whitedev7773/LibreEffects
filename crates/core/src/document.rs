@@ -6,6 +6,7 @@ const MAX_METADATA_BYTES: usize = 16 * 1024 * 1024;
 
 pub(super) fn encode(project: &Project) -> Result<String, String> {
     let mut compact = project.clone();
+    let sequences = super::image_sequence::compact(&mut compact);
     let mut assets: BTreeMap<String, Arc<str>> = BTreeMap::new();
     let mut ids = BTreeMap::new();
     for asset in compact.asset_library.assets.values_mut() {
@@ -47,6 +48,22 @@ pub(super) fn encode(project: &Project) -> Result<String, String> {
             Ok(())
         })?;
     }
+    if !sequences.is_empty() {
+        each_source(&mut value, |_, source| {
+            if let Some(sequence) = source
+                .get_mut("content")
+                .and_then(|c| c.get_mut("ImageSequence"))
+                .and_then(|s| s.as_object_mut())
+            {
+                let frames = sequence
+                    .remove("frames")
+                    .ok_or("Missing sequence manifest")?;
+                sequence.insert("manifest".into(), frames[0].clone());
+            }
+            Ok(())
+        })?;
+        value["sequence_assets"] = serde_json::to_value(sequences).map_err(|e| e.to_string())?;
+    }
     if serde_json::to_vec(&value).map_err(|e| e.to_string())?.len() > MAX_METADATA_BYTES {
         return Err("Project metadata exceeds 16 MiB".into());
     }
@@ -62,7 +79,7 @@ pub(super) fn decode(json: &str) -> Result<Project, String> {
         .as_object_mut()
         .ok_or("Project must be an object")?
         .remove("image_assets");
-    if assets_value.is_some() && !matches!(value["version"].as_u64(), Some(7..=23)) {
+    if assets_value.is_some() && !matches!(value["version"].as_u64(), Some(7..=24)) {
         return Err("Image assets require project version 7".into());
     }
     let assets: BTreeMap<String, Arc<str>> = assets_value
@@ -73,8 +90,44 @@ pub(super) fn decode(json: &str) -> Result<Project, String> {
     if assets.len() > 1000 || assets.values().map(|s| s.len()).sum::<usize>() > MAX_IMAGE_BYTES {
         return Err("Embedded images exceed 128 MiB".into());
     }
+    let sequences_value = value.as_object_mut().unwrap().remove("sequence_assets");
+    if sequences_value.is_some() && value["version"].as_u64() != Some(24) {
+        return Err("Sequence manifests require version 24".into());
+    }
+    let sequences: BTreeMap<String, Arc<Vec<String>>> = sequences_value
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|e| e.to_string())?
+        .unwrap_or_default();
+    if sequences.len() > 1000
+        || sequences
+            .values()
+            .map(|f| f.iter().map(String::len).sum::<usize>())
+            .sum::<usize>()
+            > MAX_METADATA_BYTES
+    {
+        return Err("Sequence manifests exceed project metadata limits".into());
+    }
+    let mut sequence_refs = BTreeMap::new();
     let mut refs = BTreeMap::new();
     each_source(&mut value, |source_id, layer| {
+        if let Some(sequence) = layer
+            .get_mut("content")
+            .and_then(|c| c.get_mut("ImageSequence"))
+            .and_then(|s| s.as_object_mut())
+        {
+            if let Some(reference) = sequence.remove("manifest") {
+                let id = reference
+                    .as_str()
+                    .ok_or("Invalid sequence manifest reference")?
+                    .to_owned();
+                if sequence.contains_key("frames") || !sequences.contains_key(&id) {
+                    return Err("Missing or ambiguous sequence manifest".into());
+                }
+                sequence_refs.insert(source_id.clone(), id);
+                sequence.insert("frames".into(), serde_json::json!([]));
+            }
+        }
         if let Some(image) = layer
             .get_mut("content")
             .and_then(|v| v.get_mut("Image"))
@@ -98,6 +151,11 @@ pub(super) fn decode(json: &str) -> Result<Project, String> {
     // Legacy inline images are accepted and interned as well.
     let mut intern: BTreeMap<Arc<str>, Arc<str>> = BTreeMap::new();
     for (id, asset) in &mut project.asset_library.assets {
+        if let Content::ImageSequence { frames, .. } = &mut asset.content {
+            if let Some(id) = sequence_refs.get(&format!("asset-{id}")) {
+                *frames = sequences[id].clone();
+            }
+        }
         if let Content::Image { png } = &mut asset.content {
             if let Some(id) = refs.get(&format!("asset-{id}")) {
                 *png = assets[id].clone();
@@ -112,6 +170,11 @@ pub(super) fn decode(json: &str) -> Result<Project, String> {
         .compositions_mut()
         .flat_map(|comp| comp.layers.iter_mut())
     {
+        if let Content::ImageSequence { frames, .. } = &mut layer.content {
+            if let Some(id) = sequence_refs.get(&format!("layer-{}", layer.id)) {
+                *frames = sequences[id].clone();
+            }
+        }
         if let Content::Image { png } = &mut layer.content {
             if let Some(id) = refs.get(&format!("layer-{}", layer.id)) {
                 *png = assets[id].clone();

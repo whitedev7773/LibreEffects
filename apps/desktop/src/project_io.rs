@@ -8,6 +8,27 @@ use libre_effects_core::{Content, FrameRounding, Project};
 const MAX_BYTES: u64 = 256 * 1024 * 1024;
 
 pub(crate) fn protect_source(destination: &Path, source: &Path) -> Result<(), String> {
+    // Expected-but-missing sequence frames are sources too: exporting there would
+    // silently replace a gap and change subsequent previews or renders.
+    fn identity(path: &Path) -> Result<String, String> {
+        let absolute = crate::media_io::clean_absolute(path)?;
+        let normalized = std::fs::canonicalize(&absolute)
+            .or_else(|_| {
+                std::fs::canonicalize(absolute.parent().unwrap_or(Path::new(".")))
+                    .map(|parent| parent.join(absolute.file_name().unwrap_or_default()))
+            })
+            .unwrap_or(absolute);
+        let value = crate::media_io::path_string(&normalized)?;
+        #[cfg(windows)]
+        let value = value.to_lowercase();
+        Ok(value)
+    }
+    if identity(destination)? == identity(source)? {
+        return Err(format!(
+            "Output would replace a source path: {}. Choose another destination.",
+            source.display()
+        ));
+    }
     if destination.exists() && source.exists() {
         if same_file::is_same_file(destination, source).map_err(|e| e.to_string())? {
             return Err(format!(
@@ -97,6 +118,18 @@ fn validate_sources(
                     comp.name()
                 ));
             }
+            Content::ImageSequence {
+                frames, missing, ..
+            } => {
+                let mut sampled = std::collections::BTreeSet::new();
+                for frame in start..end {
+                    if let Some(index) = layer.sequence_frame(frame, comp.fps()) {
+                        if sampled.insert(index) {
+                            crate::image_sequence::resolve_frame(frames, index, *missing)?;
+                        }
+                    }
+                }
+            }
             Content::Composition {
                 composition,
                 start_frame,
@@ -104,6 +137,27 @@ fn validate_sources(
                 let source = project
                     .composition_by_id(*composition)
                     .ok_or("Missing source composition")?;
+                if layer.time_remap().is_some() {
+                    let sampled: std::collections::BTreeSet<_> = (start..end)
+                        .filter_map(|frame| layer.composition_frame(frame, comp.fps(), source))
+                        .collect();
+                    let mut interval: Option<std::ops::Range<u32>> = None;
+                    for frame in sampled {
+                        match &mut interval {
+                            Some(r) if r.end == frame => r.end += 1,
+                            _ => {
+                                if let Some(r) = interval.take() {
+                                    validate_sources(project, *composition, r, seen)?;
+                                }
+                                interval = Some(frame..frame + 1);
+                            }
+                        }
+                    }
+                    if let Some(r) = interval {
+                        validate_sources(project, *composition, r, seen)?;
+                    }
+                    continue;
+                }
                 let last = i64::from(end - 1)
                     .checked_sub(*start_frame)
                     .ok_or("Nested source time overflow")?;

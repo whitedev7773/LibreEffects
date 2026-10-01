@@ -29,52 +29,42 @@ pub(super) fn relink(
         }
     }
     let mut found = BTreeSet::new();
-    for asset in state.project.asset_library.assets.values_mut() {
-        let (width, height) = (asset.width(), asset.height());
-        let Content::Video {
+    let mut update = |content: &mut Content, width: f64, height: f64| -> Result<(), String> {
+        for path in content.linked_paths() {
+            if let Some(source) = sources.get(path) {
+                if width != f64::from(source.width) || height != f64::from(source.height) {
+                    return Err("Relink requires matching dimensions in every instance".into());
+                }
+                found.insert(source.original.clone());
+            }
+        }
+        if let Content::Video {
             path,
             duration,
             source_fps,
             ..
-        } = &mut asset.content
-        else {
-            continue;
-        };
-        if let Some(source) = sources.get(path) {
-            if width != f64::from(source.width) || height != f64::from(source.height) {
-                return Err("Relink requires matching asset dimensions".into());
+        } = content
+        {
+            if let Some(source) = sources.get(path) {
+                *path = source.path.clone();
+                *duration = source.duration;
+                *source_fps = source.fps;
             }
-            found.insert(source.original.clone());
-            *path = source.path.clone();
-            *duration = source.duration;
-            *source_fps = source.fps;
+        } else {
+            for path in content.linked_paths_mut() {
+                if let Some(source) = sources.get(path) {
+                    *path = source.path.clone();
+                }
+            }
         }
+        Ok(())
+    };
+    for a in state.project.asset_library.assets.values_mut() {
+        let (width, height) = (a.width(), a.height());
+        update(&mut a.content, width, height)?;
     }
-    for comp in state.project.compositions_mut() {
-        for layer in &mut comp.layers {
-            let Content::Video {
-                path,
-                duration,
-                source_fps,
-                ..
-            } = &mut layer.content
-            else {
-                continue;
-            };
-            let Some(source) = sources.get(path) else {
-                continue;
-            };
-            if layer.width != f64::from(source.width) || layer.height != f64::from(source.height) {
-                return Err(format!(
-                    "Relink needs the same dimensions in every instance: {}",
-                    source.original
-                ));
-            }
-            found.insert(source.original.clone());
-            *path = source.path.clone();
-            *duration = source.duration;
-            *source_fps = source.fps;
-        }
+    for l in state.project.compositions_mut().flat_map(|c| &mut c.layers) {
+        update(&mut l.content, l.width, l.height)?;
     }
     if found.len() != sources.len() {
         return Err("A source to relink is no longer in this project".into());
@@ -83,7 +73,7 @@ pub(super) fn relink(
 }
 
 impl Project {
-    /// Return a validated copy with each distinct video path mapped once.
+    /// Return a validated copy with each distinct linked media path mapped once.
     /// Used by the host to resolve project-relative files or collect dependencies.
     /// The live editor/history must retain absolute paths so Save As is reversible.
     pub fn with_video_paths(
@@ -92,8 +82,32 @@ impl Project {
     ) -> Result<Self, String> {
         let mut copy = self.clone();
         let mut paths: BTreeMap<String, String> = BTreeMap::new();
-        for asset in copy.asset_library.assets.values_mut() {
-            if let Content::Video { path, .. } = &mut asset.content {
+        let mut manifests = BTreeMap::<usize, std::sync::Arc<Vec<String>>>::new();
+        let mut rewrite = |content: &mut Content| -> Result<(), String> {
+            if let Content::ImageSequence { frames, .. } = content {
+                let pointer = std::sync::Arc::as_ptr(frames) as usize;
+                if let Some(mapped) = manifests.get(&pointer) {
+                    *frames = mapped.clone();
+                    return Ok(());
+                }
+                let mut mapped = Vec::with_capacity(frames.len());
+                for path in frames.iter() {
+                    let value = if let Some(value) = paths.get(path) {
+                        value.clone()
+                    } else {
+                        let value = map(path)?;
+                        paths.insert(path.clone(), value.clone());
+                        value
+                    };
+                    mapped.push(value);
+                }
+                let mapped = std::sync::Arc::new(mapped);
+                manifests.insert(pointer, mapped.clone());
+                *frames = mapped;
+                return Ok(());
+            }
+
+            for path in content.linked_paths_mut() {
                 let value = if let Some(value) = paths.get(path) {
                     value.clone()
                 } else {
@@ -103,20 +117,13 @@ impl Project {
                 };
                 *path = value;
             }
+            Ok(())
+        };
+        for asset in copy.asset_library.assets.values_mut() {
+            rewrite(&mut asset.content)?;
         }
-        for comp in copy.compositions_mut() {
-            for layer in &mut comp.layers {
-                if let Content::Video { path, .. } = &mut layer.content {
-                    let replacement = match paths.get(path) {
-                        Some(value) => value,
-                        None => {
-                            let value = map(path)?;
-                            paths.entry(path.clone()).or_insert(value)
-                        }
-                    };
-                    *path = replacement.clone();
-                }
-            }
+        for layer in copy.compositions_mut().flat_map(|c| &mut c.layers) {
+            rewrite(&mut layer.content)?;
         }
         if paths.iter().any(|(old, new)| old != new) {
             copy.version = copy.version.max(15);

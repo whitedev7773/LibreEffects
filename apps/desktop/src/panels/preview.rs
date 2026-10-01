@@ -753,6 +753,7 @@ impl Render for Preview {
                 matches!(
                     l.content(),
                     libre_effects_core::Content::Video { .. }
+                        | libre_effects_core::Content::ImageSequence { .. }
                         | libre_effects_core::Content::Composition { .. }
                 )
             });

@@ -654,6 +654,11 @@ impl Render for Shell {
                             .then_some(Action::CancelCollection),
                     ),
                     ("Import footage…", "Ctrl+I", Some(Action::ImportImage)),
+                    (
+                        "Import image sequence…",
+                        "",
+                        Some(Action::ImportImageSequence),
+                    ),
                     ("Import video…", "Ctrl+Shift+I", Some(Action::ImportVideo)),
                     ("Manage project media…", "", Some(Action::ManageMedia)),
                     ("Relink selected video…", "", Some(Action::RelinkVideo)),

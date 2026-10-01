@@ -302,6 +302,19 @@ impl Renderer {
                     }
                 }
             }
+            Content::ImageSequence { .. } => {
+                if let Some(index) = l.sequence_frame(frame, c.fps()) {
+                    if let Some(png) = crate::image_sequence::frame_png(
+                        l.content(),
+                        index,
+                        l.width() as u32,
+                        l.height() as u32,
+                        l.footage_interpretation(),
+                    )? {
+                        svg.push_str(&format!("<image width='{}' height='{}' xlink:href='data:image/png;base64,{png}'/>", l.width(), l.height()));
+                    }
+                }
+            }
             Content::Video { path, .. } => {
                 if let Some(seconds) = l.video_decode_time(frame, c.fps()) {
                     let png = crate::footage::interpreted_frame_png(

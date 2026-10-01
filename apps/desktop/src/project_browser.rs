@@ -32,10 +32,10 @@ pub(crate) fn rows(
         .chain(library.assets().iter().map(|(id, a)| Row {
             item: ProjectItem::Asset(*id),
             name: a.name().into(),
-            kind: if matches!(a.content(), Content::Video { .. }) {
-                "Video"
-            } else {
-                "Image"
+            kind: match a.content() {
+                Content::Video { .. } => "Video",
+                Content::ImageSequence { .. } => "Sequence",
+                _ => "Image",
             },
             folder: a.folder(),
             depth: 0,
@@ -119,6 +119,14 @@ pub(crate) fn thumbnail(project: &Project, item: ProjectItem) -> Result<image::R
                 Content::Image { png } => {
                     crate::source_render::alpha_png(png, asset.interpretation())?.into_owned()
                 }
+                Content::ImageSequence { .. } => crate::image_sequence::frame_png(
+                    asset.content(),
+                    0,
+                    asset.width() as u32,
+                    asset.height() as u32,
+                    asset.interpretation(),
+                )?
+                .ok_or("First sequence frame is transparent")?,
                 Content::Video { path, .. } => crate::footage::interpreted_frame_png(
                     path,
                     0.0,

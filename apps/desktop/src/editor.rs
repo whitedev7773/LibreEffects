@@ -60,6 +60,8 @@ pub(crate) enum Action {
     RelinkSource(String),
     RelinkMissing,
     ImportImage,
+    ImportImageSequence,
+    RelinkSequence(u64),
     ImportVideo,
     RelinkVideo,
     RefreshFootage,
@@ -411,6 +413,8 @@ impl EditorState {
                 | Action::CollectFiles
                 | Action::RelinkSource(_)
                 | Action::RelinkMissing
+                | Action::ImportImageSequence
+                | Action::RelinkSequence(_)
                 | Action::ImportImage
                 | Action::ImportVideo
                 | Action::RelinkVideo
@@ -835,7 +839,9 @@ impl EditorState {
                 window,
                 cx,
             ),
-            Action::ImportImage => self.import_assets(cx),
+            Action::ImportImage => self.import_assets(false, cx),
+            Action::ImportImageSequence => self.import_assets(true, cx),
+            Action::RelinkSequence(id) => self.relink_sequence(*id, cx),
             Action::ImportVideo => self.import_video(false, cx),
             Action::RelinkVideo => self.import_video(true, cx),
             Action::ManageMedia => {

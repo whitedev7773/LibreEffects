@@ -195,8 +195,9 @@ fn paste(state: &mut Snapshot, clipboard: &LayerClipboard) -> Result<(), String>
             }
             track.keys = keys;
         }
-        if let Content::Video { start_frame, .. } | Content::Composition { start_frame, .. } =
-            &mut layer.content
+        if let Content::Video { start_frame, .. }
+        | Content::ImageSequence { start_frame, .. }
+        | Content::Composition { start_frame, .. } = &mut layer.content
         {
             *start_frame = clipboard
                 .fps

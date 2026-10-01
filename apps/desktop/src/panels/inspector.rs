@@ -403,6 +403,7 @@ impl Render for Inspector {
             layer.content(),
             Content::Image { .. }
                 | Content::Video { .. }
+                | Content::ImageSequence { .. }
                 | Content::Composition { .. }
                 | Content::Adjustment
         ) {
@@ -536,18 +537,28 @@ impl Render for Inspector {
                     );
             }
         }
-        if let Content::Video { path, playback, .. } = layer.content() {
+        if let Content::Video { playback, .. } | Content::ImageSequence { playback, .. } =
+            layer.content()
+        {
+            let path = layer.content().linked_paths()[0].clone();
+            let relink = if matches!(layer.content(), Content::ImageSequence { .. }) {
+                Action::RelinkSequence(layer.asset_id().unwrap())
+            } else {
+                Action::RelinkVideo
+            };
             let duration = layer
                 .footage_interpretation()
                 .duration(layer.content())
                 .unwrap();
             contents = contents
-                .child(
-                    div()
-                        .text_size(px(11.0))
-                        .text_color(rgb(ui::MUTED))
-                        .child(format!("Linked video · {duration:.2}s · no audio")),
-                )
+                .child(div().text_size(px(11.0)).text_color(rgb(ui::MUTED)).child(
+                    match layer.content() {
+                        Content::ImageSequence { frames, .. } => {
+                            format!("Image sequence · {} frames · {duration:.2}s", frames.len())
+                        }
+                        _ => format!("Linked video · {duration:.2}s · no audio"),
+                    },
+                ))
                 .child(
                     div()
                         .text_size(px(11.0))
@@ -558,7 +569,7 @@ impl Render for Inspector {
                 .child(ui::text_button("relink-video", "Relink source…").on_click({
                     let state = self.state.clone();
                     move |_, window, cx| {
-                        state.update(cx, |s, cx| s.dispatch(&Action::RelinkVideo, window, cx));
+                        state.update(cx, |s, cx| s.dispatch(&relink, window, cx));
                     }
                 }));
             if layer.time_remap().is_none() {

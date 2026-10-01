@@ -118,7 +118,12 @@ impl Render for Interpretation {
             return div();
         };
         let interpretation = a.interpretation();
-        let video = matches!(a.content(), Content::Video { .. });
+        let video = a.content().footage_timing().is_some();
+        let missing = if let Content::ImageSequence { missing, .. } = a.content() {
+            Some(*missing)
+        } else {
+            None
+        };
         let key = format!("{}-{}", self.state.read(cx).document_revision, self.asset);
         self.fps.update(cx, |f, _| {
             f.sync(
@@ -152,6 +157,41 @@ impl Render for Interpretation {
                     .child(div().w(px(110.0)).child("Assume FPS"))
                     .child(div().flex_1().child(self.fps.clone())),
             );
+        }
+        if let Some(missing) = missing {
+            let mut row = div().flex().gap_1();
+            for (index, label, policy) in [
+                (
+                    0usize,
+                    "Error",
+                    libre_effects_core::MissingFramePolicy::Error,
+                ),
+                (1, "Hold", libre_effects_core::MissingFramePolicy::Hold),
+                (
+                    2,
+                    "Transparent",
+                    libre_effects_core::MissingFramePolicy::Transparent,
+                ),
+            ] {
+                row = row.child(
+                    ui::text_button(("sequence-missing", index), label)
+                        .flex_1()
+                        .when(missing == policy, |d| d.bg(rgb(ui::BLUE)))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.state.update(cx, |s, cx| {
+                                s.dispatch(
+                                    &Action::Edit(Command::SetSequenceMissing {
+                                        asset: this.asset,
+                                        missing: policy,
+                                    }),
+                                    window,
+                                    cx,
+                                )
+                            });
+                        })),
+                );
+            }
+            panel = panel.child("Missing frames").child(row);
         }
         let mut alpha = div().flex().gap_1();
         for (index, label, mode) in [

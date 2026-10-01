@@ -284,7 +284,7 @@ impl Render for Browser {
             ProjectItem::Asset(id) => {
                 let a = &project.asset_library().assets()[&id];
                 let source = match a.content() {
-                    Content::Video { .. } => format!(
+                    Content::Video { .. } | Content::ImageSequence { .. } => format!(
                         "{} fps · {:.2} s",
                         a.interpretation().frame_rate(a.content()).unwrap().label(),
                         a.interpretation().duration(a.content()).unwrap()
@@ -527,6 +527,21 @@ impl Render for Browser {
                     ));
                 }
                 panel = panel.child(self.interpretation.as_ref().unwrap().1.clone());
+            }
+            if matches!(
+                project.asset_library().assets()[&id].content(),
+                Content::ImageSequence { .. }
+            ) {
+                panel = panel.child(
+                    ui::text_button("relink-sequence", "Relink sequence folder…").on_click({
+                        let state = self.state.clone();
+                        move |_, window, cx| {
+                            state.update(cx, |s, cx| {
+                                s.dispatch(&Action::RelinkSequence(id), window, cx)
+                            });
+                        }
+                    }),
+                );
             }
             if let Content::Video { path, .. } = project.asset_library().assets()[&id].content() {
                 panel = panel.child(

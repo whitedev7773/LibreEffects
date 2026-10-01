@@ -33,7 +33,9 @@ mod selection_transform;
 pub use selection_transform::AlignTarget;
 mod assets;
 mod footage_interpretation;
+mod image_sequence;
 pub use footage_interpretation::{AlphaInterpretation, FootageInterpretation};
+pub use image_sequence::MissingFramePolicy;
 mod time;
 mod time_remap;
 pub use assets::{AssetId, AssetLibrary, FolderId, MediaAsset, ProjectFolder, ProjectItem};
@@ -531,7 +533,7 @@ impl Project {
     }
 
     fn validate(&self) -> Result<(), String> {
-        if !(1..=23).contains(&self.version) {
+        if !(1..=24).contains(&self.version) {
             return Err("Unsupported project version".into());
         }
         if self.version < 9
@@ -695,6 +697,14 @@ impl Project {
 /// The future scripting bridge and native controls both dispatch these commands.
 #[derive(Clone, Debug)]
 pub enum Command {
+    SetSequenceMissing {
+        asset: AssetId,
+        missing: MissingFramePolicy,
+    },
+    RelinkSequence {
+        asset: AssetId,
+        frames: std::sync::Arc<Vec<String>>,
+    },
     InterpretAsset {
         asset: AssetId,
         interpretation: FootageInterpretation,
@@ -1203,6 +1213,9 @@ impl Editor {
 }
 
 fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
+    if let Some(result) = image_sequence::apply(state, &command) {
+        return result;
+    }
     if let Some(result) = footage_interpretation::apply(state, &command) {
         return result;
     }

@@ -159,6 +159,18 @@ pub(super) fn source(content: &Content) -> Option<Content> {
             start_frame: 0,
             playback: Default::default(),
         },
+        Content::ImageSequence {
+            frames,
+            fps,
+            missing,
+            ..
+        } => Content::ImageSequence {
+            frames: frames.clone(),
+            fps: *fps,
+            missing: *missing,
+            start_frame: 0,
+            playback: Default::default(),
+        },
         _ => return None,
     })
 }
@@ -208,6 +220,13 @@ impl Project {
         {
             self.version = 23;
         }
+        if library
+            .assets
+            .values()
+            .any(|a| matches!(a.content, Content::ImageSequence { .. }))
+        {
+            self.version = 24;
+        }
         Ok(())
     }
 }
@@ -232,6 +251,9 @@ pub(super) fn validate(project: &Project) -> Result<(), String> {
     let valid_folder = |id: Option<FolderId>| id.is_none_or(|id| library.folders.contains_key(&id));
     let valid_id = |id: u64| id > 0 && id < library.next_id;
     for (id, asset) in &library.assets {
+        if project.version < 24 && matches!(asset.content, Content::ImageSequence { .. }) {
+            return Err("Image sequences require version 24".into());
+        }
         asset.interpretation.validate(&asset.content)?;
         if project.version < 23 && !asset.interpretation.is_default() {
             return Err("Footage interpretation requires version 23".into());
@@ -278,6 +300,9 @@ pub(super) fn validate(project: &Project) -> Result<(), String> {
     }
     for (_, comp) in project.compositions() {
         for layer in &comp.layers {
+            if project.version < 24 && matches!(layer.content, Content::ImageSequence { .. }) {
+                return Err("Image sequences require version 24".into());
+            }
             layer.footage_interpretation.validate(&layer.content)?;
             if project.version < 23 && !layer.footage_interpretation.is_default() {
                 return Err("Footage interpretation requires version 23".into());
@@ -462,7 +487,9 @@ fn add_layer(state: &mut Snapshot, asset: AssetId, frame: Frame) -> Result<(), S
         .clone();
     let mut content = a.content;
     let interpreted_duration = a.interpretation.duration(&content);
-    if let Content::Video { start_frame, .. } = &mut content {
+    if let Content::Video { start_frame, .. } | Content::ImageSequence { start_frame, .. } =
+        &mut content
+    {
         *start_frame = i64::from(frame);
     }
     super::apply(

@@ -26,10 +26,12 @@ impl FootageInterpretation {
     pub(super) fn validate(self, content: &Content) -> Result<(), String> {
         if self
             .fps
-            .is_some_and(|fps| !fps.valid() || !matches!(content, Content::Video { .. }))
+            .is_some_and(|fps| !fps.valid() || content.footage_timing().is_none())
             || matches!(self.alpha, AlphaInterpretation::Premultiplied { matte } if matte > 0xffffff)
-            || (!matches!(content, Content::Image { .. } | Content::Video { .. })
-                && !self.is_default())
+            || (!matches!(
+                content,
+                Content::Image { .. } | Content::Video { .. } | Content::ImageSequence { .. }
+            ) && !self.is_default())
         {
             return Err("Invalid footage interpretation".into());
         }
@@ -39,23 +41,17 @@ impl FootageInterpretation {
         Ok(())
     }
     pub fn frame_rate(self, content: &Content) -> Option<FrameRate> {
-        let Content::Video { source_fps, .. } = content else {
-            return None;
-        };
-        self.fps.or_else(|| native_rate(*source_fps))
+        match content {
+            Content::Video { source_fps, .. } => self.fps.or_else(|| native_rate(*source_fps)),
+            Content::ImageSequence { fps, .. } => Some(self.fps.unwrap_or(*fps)),
+            _ => None,
+        }
     }
     pub fn duration(self, content: &Content) -> Option<f64> {
-        let Content::Video {
-            duration,
-            source_fps,
-            ..
-        } = content
-        else {
-            return None;
-        };
+        let (duration, source_fps) = content.footage_timing()?;
         Some(match self.fps {
             Some(fps) => duration * source_fps / fps.as_f64(),
-            None => *duration,
+            None => duration,
         })
     }
 }

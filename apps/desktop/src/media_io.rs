@@ -7,25 +7,21 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
+/// Includes every expected image-sequence frame, even an offline frame.
 pub(crate) fn video_paths(project: &Project) -> BTreeSet<String> {
     project
         .compositions()
         .into_iter()
         .flat_map(|(_, c)| c.layers())
-        .filter_map(|l| {
-            if let Content::Video { path, .. } = l.content() {
-                Some(path.clone())
-            } else {
-                None
-            }
-        })
-        .chain(project.asset_library().assets().values().filter_map(|a| {
-            if let Content::Video { path, .. } = a.content() {
-                Some(path.clone())
-            } else {
-                None
-            }
-        }))
+        .map(|l| l.content())
+        .chain(
+            project
+                .asset_library()
+                .assets()
+                .values()
+                .map(|a| a.content()),
+        )
+        .flat_map(|c| c.linked_paths().iter().cloned())
         .collect()
 }
 
@@ -49,7 +45,7 @@ fn directory(project_path: &Path) -> Result<PathBuf, String> {
     Ok(PathBuf::from(path_string(&canonical)?))
 }
 
-fn clean_absolute(path: &Path) -> Result<PathBuf, String> {
+pub(crate) fn clean_absolute(path: &Path) -> Result<PathBuf, String> {
     let absolute = std::path::absolute(path).map_err(|e| e.to_string())?;
     let mut clean = PathBuf::new();
     for part in absolute.components() {
@@ -116,7 +112,7 @@ pub(crate) fn entries(project: &Project) -> Vec<MediaEntry> {
     }
     for (_, comp) in project.compositions() {
         for layer in comp.layers() {
-            if let Content::Video { path, .. } = layer.content() {
+            for path in layer.content().linked_paths() {
                 *entries.entry(path.clone()).or_default() += 1;
             }
         }
@@ -129,6 +125,27 @@ pub(crate) fn entries(project: &Project) -> Vec<MediaEntry> {
             references,
         })
         .collect()
+}
+
+pub(crate) fn replacement_for_project(
+    project: &Project,
+    original: String,
+    path: &Path,
+) -> Result<libre_effects_core::MediaReplacement, String> {
+    let sequence = project.asset_library().assets().values().any(|a| matches!(a.content(), Content::ImageSequence { frames, .. } if frames.contains(&original)));
+    if !sequence {
+        return replacement(original, path);
+    }
+    let (_, width, height) = crate::rendering::import_image(path)?;
+    let absolute = std::fs::canonicalize(path).map_err(|e| e.to_string())?;
+    Ok(libre_effects_core::MediaReplacement {
+        original,
+        path: path_string(&absolute)?,
+        width,
+        height,
+        duration: 1.0,
+        fps: 1.0,
+    })
 }
 
 pub(crate) fn replacement(
@@ -234,6 +251,30 @@ pub(crate) fn collect(
     mut progress: impl FnMut(usize, usize) -> Result<(), String>,
 ) -> Result<Collection, String> {
     let sources = video_paths(project);
+    let required: BTreeSet<_> = project
+        .compositions()
+        .into_iter()
+        .flat_map(|(_, c)| c.layers())
+        .map(|l| l.content())
+        .chain(
+            project
+                .asset_library()
+                .assets()
+                .values()
+                .map(|a| a.content()),
+        )
+        .filter(|c| {
+            !matches!(
+                c,
+                Content::ImageSequence {
+                    missing: libre_effects_core::MissingFramePolicy::Hold
+                        | libre_effects_core::MissingFramePolicy::Transparent,
+                    ..
+                }
+            )
+        })
+        .flat_map(|c| c.linked_paths().iter().cloned())
+        .collect();
     progress(0, sources.len())?;
     // The new folder belongs only to this operation. TempDir rolls it back on
     // any error, including a failed copy or project write; existing files stay intact.
@@ -247,8 +288,19 @@ pub(crate) fn collect(
     let mut copied = std::collections::BTreeMap::<PathBuf, String>::new();
     let mut total_bytes = 0u64;
     for (index, source) in sources.iter().enumerate() {
-        let canonical =
-            std::fs::canonicalize(source).map_err(|e| format!("Cannot collect {source}: {e}"))?;
+        let canonical = match std::fs::canonicalize(source) {
+            Ok(path) => path,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && !required.contains(source) => {
+                let name = Path::new(source)
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .ok_or("Invalid missing-frame filename")?;
+                mappings.insert(source.clone(), format!("Media/missing-{index:06}-{name}"));
+                progress(index + 1, sources.len())?;
+                continue;
+            }
+            Err(e) => return Err(format!("Cannot collect {source}: {e}")),
+        };
         let relative = if let Some(existing) = copied.get(&canonical) {
             existing.clone()
         } else {
