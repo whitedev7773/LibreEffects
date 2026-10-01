@@ -242,14 +242,21 @@ fn queue_v1_migrates_defaults_without_losing_jobs_presets_or_results() {
     drop(q);
     let q = Queue::load(root.clone()).unwrap();
     assert_eq!(q.data.jobs[0].outputs[0].status, Status::Completed);
-    assert_eq!(q.data.jobs[0].outputs[0].spec, Format::Mp4.into());
+    let legacy = |format| Spec {
+        format,
+        settings: Settings {
+            audio: AudioOutput::Off,
+            ..Default::default()
+        },
+    };
+    assert_eq!(q.data.jobs[0].outputs[0].spec, legacy(Format::Mp4));
     assert_eq!(
         q.data.presets[0].specs,
-        vec![Format::Mp4.into(), Format::MovAlpha.into()]
+        vec![legacy(Format::Mp4), legacy(Format::MovAlpha)]
     );
     let saved: serde_json::Value =
         serde_json::from_slice(&std::fs::read(root.join("queue.json")).unwrap()).unwrap();
-    assert_eq!(saved["version"], 2);
+    assert_eq!(saved["version"], 3);
 }
 
 fn command(exe: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
@@ -260,6 +267,84 @@ fn command(exe: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
         c.creation_flags(0x08000000);
     }
     c
+}
+
+#[test]
+fn audio_queue_settings_undo_restart_and_v2_silent_migration() {
+    use crate::render_queue::{Preset, Queue};
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("queue");
+    let mut q = Queue::load(root.clone()).unwrap();
+    q.enqueue(
+        scene().project(),
+        None,
+        0..3,
+        &[Format::Mp4.into()],
+        dir.path(),
+    )
+    .unwrap();
+    q.edit(|data| {
+        data.jobs[0].outputs[0]
+            .spec
+            .settings
+            .change(Field::Audio, "off")?;
+        data.presets.push(Preset {
+            name: "Silent".into(),
+            specs: vec![data.jobs[0].outputs[0].spec.clone()],
+        });
+        Ok(())
+    })
+    .unwrap();
+    q.history(false).unwrap();
+    assert_eq!(
+        q.data.jobs[0].outputs[0].spec.settings.audio,
+        AudioOutput::Auto
+    );
+    q.history(true).unwrap();
+    drop(q);
+    let q = Queue::load(root.clone()).unwrap();
+    assert_eq!(
+        q.data.jobs[0].outputs[0].spec.settings.audio,
+        AudioOutput::Off
+    );
+    assert_eq!(q.data.presets[0].specs[0].settings.audio, AudioOutput::Off);
+    let mut data = serde_json::to_value(&q.data).unwrap();
+    data["version"] = 2.into();
+    data["jobs"][0]["outputs"][0]["settings"]
+        .as_object_mut()
+        .unwrap()
+        .remove("audio");
+    data["presets"][0]["specs"][0]["settings"]
+        .as_object_mut()
+        .unwrap()
+        .remove("audio");
+    drop(q);
+    std::fs::write(root.join("queue.json"), serde_json::to_vec(&data).unwrap()).unwrap();
+    let q = Queue::load(root).unwrap();
+    assert_eq!(
+        q.data.jobs[0].outputs[0].spec.settings.audio,
+        AudioOutput::Off
+    );
+    assert_eq!(q.data.presets[0].specs[0].settings.audio, AudioOutput::Off);
+    assert!(Settings::default().change(Field::Audio, "garbage").is_err());
+}
+#[test]
+fn malformed_legacy_queue_is_rejected_without_overwriting_it() {
+    use crate::render_queue::Queue;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("queue.json");
+    for value in [
+        serde_json::json!({"version":1,"jobs":[{"outputs":[false]}],"presets":[]}),
+        serde_json::json!({"version":2,"jobs":[{"outputs":[{"settings":false}]}],"presets":[]}),
+        serde_json::json!({"version":2,"jobs":[],"presets":[{"specs":[{"settings":"bad"}]}]}),
+        serde_json::json!({"version":2,"jobs":[false],"presets":[]}),
+        serde_json::json!({"version":2,"jobs":[],"presets":[false]}),
+    ] {
+        let original = serde_json::to_vec(&value).unwrap();
+        std::fs::write(&path, &original).unwrap();
+        assert!(Queue::load(dir.path().to_path_buf()).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+    }
 }
 #[test]
 #[ignore = "requires FFmpeg; validates output size, rational clock, rate control and channel pixels"]
@@ -291,6 +376,7 @@ fn configured_video_streams_match_size_rate_codec_channels_and_quality() {
             channels,
             rate_control: quality,
             encoder_speed: quality.map(|_| "fast".into()),
+            audio: Default::default(),
         };
         let path = dir
             .path()

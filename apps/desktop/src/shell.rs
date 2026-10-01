@@ -590,16 +590,22 @@ impl Render for Shell {
                                 .items_center()
                                 .gap_3()
                                 .child(div().flex_1().child(format!("Render · {}", job.label)))
-                                .child(format!(
-                                    "{} / {} frames{}",
-                                    job.progress,
-                                    job.total,
-                                    if exporting && job.progress == job.total {
-                                        " · Finalizing…"
-                                    } else {
-                                        ""
-                                    }
-                                ))
+                                .child(
+                                    crate::audio_mix::progress_label(job.progress).unwrap_or_else(
+                                        || {
+                                            format!(
+                                                "{} / {} frames{}",
+                                                job.progress,
+                                                job.total,
+                                                if exporting && job.progress == job.total {
+                                                    " · Finalizing…"
+                                                } else {
+                                                    ""
+                                                }
+                                            )
+                                        },
+                                    ),
+                                )
                                 .child(
                                     ui::text_button(
                                         "render-job-action",

@@ -85,7 +85,7 @@ pub(crate) struct Data {
 impl Default for Data {
     fn default() -> Self {
         Self {
-            version: 2,
+            version: 3,
             jobs: Vec::new(),
             presets: Vec::new(),
             stop_on_error: true,
@@ -129,17 +129,31 @@ impl Queue {
                     let mut value: serde_json::Value = serde_json::from_slice(&bytes)
                         .map_err(|e| format!("Cannot read saved render queue: {e}"))?;
                     if value["version"] == 1 {
-                        if let Some(jobs) = value["jobs"].as_array_mut() {
+                        if let Some(jobs) = value
+                            .get_mut("jobs")
+                            .and_then(serde_json::Value::as_array_mut)
+                        {
                             for job in jobs {
-                                if let Some(outputs) = job["outputs"].as_array_mut() {
+                                if let Some(outputs) = job
+                                    .get_mut("outputs")
+                                    .and_then(serde_json::Value::as_array_mut)
+                                {
                                     for output in outputs {
-                                        output["settings"] =
-                                            serde_json::to_value(Settings::default()).unwrap();
+                                        output
+                                            .as_object_mut()
+                                            .ok_or("Invalid legacy output")?
+                                            .insert(
+                                                "settings".into(),
+                                                serde_json::to_value(Settings::default()).unwrap(),
+                                            );
                                     }
                                 }
                             }
                         }
-                        if let Some(presets) = value["presets"].as_array_mut() {
+                        if let Some(presets) = value
+                            .get_mut("presets")
+                            .and_then(serde_json::Value::as_array_mut)
+                        {
                             for preset in presets {
                                 let formats = preset["formats"]
                                     .as_array()
@@ -150,6 +164,48 @@ impl Queue {
                             }
                         }
                         value["version"] = 2.into();
+                    }
+                    if value["version"] == 2 {
+                        // Old saved jobs and presets were silent. Preserve that intent;
+                        // newly created output modules use automatic audio.
+                        if let Some(jobs) = value
+                            .get_mut("jobs")
+                            .and_then(serde_json::Value::as_array_mut)
+                        {
+                            for job in jobs {
+                                if let Some(outputs) = job
+                                    .get_mut("outputs")
+                                    .and_then(serde_json::Value::as_array_mut)
+                                {
+                                    for output in outputs {
+                                        output
+                                            .get_mut("settings")
+                                            .and_then(serde_json::Value::as_object_mut)
+                                            .ok_or("Invalid legacy output settings")?
+                                            .insert("audio".into(), "Off".into());
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(presets) = value
+                            .get_mut("presets")
+                            .and_then(serde_json::Value::as_array_mut)
+                        {
+                            for preset in presets {
+                                if let Some(specs) = preset
+                                    .get_mut("specs")
+                                    .and_then(serde_json::Value::as_array_mut)
+                                {
+                                    for spec in specs {
+                                        spec.get_mut("settings")
+                                            .and_then(serde_json::Value::as_object_mut)
+                                            .ok_or("Invalid legacy preset settings")?
+                                            .insert("audio".into(), "Off".into());
+                                    }
+                                }
+                            }
+                        }
+                        value["version"] = 3.into();
                     }
                     serde_json::from_value(value)
                         .map_err(|e| format!("Cannot read saved render queue: {e}"))?
@@ -408,7 +464,7 @@ impl Queue {
     }
 }
 fn validate(data: &Data) -> Result<(), String> {
-    if data.version != 2 || data.jobs.len() > 100 || data.presets.len() > 32 {
+    if data.version != 3 || data.jobs.len() > 100 || data.presets.len() > 32 {
         return Err("Unsupported or oversized render queue".into());
     }
     let mut ids = BTreeSet::new();

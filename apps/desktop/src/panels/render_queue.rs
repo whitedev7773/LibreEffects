@@ -261,7 +261,8 @@ impl Render for RenderDock {
                 );
             for (index, output) in job.outputs.iter().enumerate() {
                 let message = if active == Some((id, index)) {
-                    format!("{progress} output frames rendered")
+                    crate::audio_mix::progress_label(progress)
+                        .unwrap_or_else(|| format!("{progress} output frames rendered"))
                 } else {
                     output.message.clone()
                 };
@@ -378,7 +379,7 @@ impl Render for RenderDock {
                         "Reset settings",
                         QueueAction::ResetSettings(id, index),
                     ));
-                    row=row.child(controls).child(div().pl_6().text_color(rgb(ui::MUTED)).child("Size: comp / 1920x1080 · FPS: comp / 29.97 · Channels: auto / rgb / rgba / alpha · Quality: auto / crf:18 / kbps:8000 · Encoder: auto / fast / medium / slow"));
+                    row=row.child(controls).child(div().pl_6().text_color(rgb(ui::MUTED)).child("Size: comp / 1920x1080 · FPS: comp / 29.97 · Channels: auto / rgb / rgba / alpha · Quality: auto / crf:18 / kbps:8000 · Encoder: auto / fast / medium / slow · Audio: auto / off"));
                 }
             }
             list = list.child(row);

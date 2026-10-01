@@ -74,7 +74,7 @@ impl EditorState {
                         crate::footage::clear_cache();
                         s.preview_revision = s.preview_revision.wrapping_add(1);
                         s.selected_layers.clear();
-                        "Video linked · audio metadata imported · playback and export remain silent".into()
+                        "Video linked · audio included in exports · preview playback remains silent".into()
                     },
                     Err(e) => format!("Video import failed: {e}"),
                 };

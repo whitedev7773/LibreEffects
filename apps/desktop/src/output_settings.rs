@@ -72,8 +72,24 @@ pub(crate) enum RateControl {
     Crf(u8),
     Bitrate(u32),
 }
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum AudioOutput {
+    #[default]
+    Auto,
+    Off,
+}
+impl AudioOutput {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Off => "off",
+        }
+    }
+}
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Settings {
+    #[serde(default)]
+    pub audio: AudioOutput,
     /// None follows composition size/rate. Size is the exact output raster, stretched.
     pub size: Option<[u32; 2]>,
     pub fps: Option<FrameRate>,
@@ -96,6 +112,7 @@ impl From<Format> for Spec {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Field {
+    Audio,
     Size,
     Fps,
     Channels,
@@ -103,15 +120,17 @@ pub(crate) enum Field {
     Speed,
 }
 impl Field {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Size,
         Self::Fps,
         Self::Channels,
         Self::Quality,
         Self::Speed,
+        Self::Audio,
     ];
     pub fn label(self) -> &'static str {
         match self {
+            Self::Audio => "Audio",
             Self::Size => "Size",
             Self::Fps => "FPS",
             Self::Channels => "Channels",
@@ -146,10 +165,18 @@ impl Settings {
         } else {
             String::new()
         };
-        format!("{size} · {fps} · {channels}{encoding}")
+        let audio = if format.sequence() || self.audio == AudioOutput::Off {
+            " · No audio"
+        } else if format == Format::Mp4 {
+            " · Auto AAC · 48 kHz stereo"
+        } else {
+            " · Auto PCM · 48 kHz stereo"
+        };
+        format!("{size} · {fps} · {channels}{encoding}{audio}")
     }
     pub fn value(&self, field: Field) -> String {
         match field {
+            Field::Audio => self.audio.label().into(),
             Field::Size => self.size.map_or("comp".into(), |[w, h]| format!("{w}x{h}")),
             Field::Fps => self.fps.map_or("comp".into(), |f| f.to_string()),
             Field::Channels => self.channels.label().into(),
@@ -164,6 +191,17 @@ impl Settings {
     pub fn change(&mut self, field: Field, value: &str) -> Result<(), String> {
         let value = value.trim().to_ascii_lowercase();
         match field {
+            Field::Audio => {
+                self.audio = match value.as_str() {
+                    "auto" => AudioOutput::Auto,
+                    "off" => AudioOutput::Off,
+                    _ => {
+                        return Err(
+                            "Audio: auto or off (AAC in MP4, PCM in MOV; 48 kHz stereo)".into()
+                        );
+                    }
+                }
+            }
             Field::Size => {
                 self.size = if value == "comp" {
                     None

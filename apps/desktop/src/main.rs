@@ -10,6 +10,7 @@ use gpui::{
 
 mod adjustment_render;
 mod audio;
+mod audio_mix;
 mod blend_render;
 mod cli;
 mod components;

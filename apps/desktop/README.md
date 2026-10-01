@@ -389,7 +389,8 @@ Odd dimensions are padded using the same color by one pixel on the
 right/bottom for H.264 compatibility. Render work area — MOV with alpha exports
 ProRes 4444 with transparency and the exact composition dimensions. Both use the
 composition frame rate and the B/N work area; the first output frame is the work
-area's first frame. These presets currently export silent video.
+area's first frame. Imported audio is mixed into AAC (MP4) or PCM (MOV); output
+modules can disable sound with Audio: off.
 Exact fractional clocks are passed directly to FFmpeg. When a nonzero start
 timecode is set, MP4/MOV include its NDF timecode plus the work-area offset.
 PNG sequence manifests record the exact rate, first-frame timecode and NDF format.
@@ -494,7 +495,7 @@ controls to put footage below a title, then save the project and render MP4/MOV.
   decoded on demand and real-time playback is not guaranteed. Output renders every
   frame. Frame decoding times out after 15 seconds; cancellation can wait for the
   current source-frame decode. Preview resolution does not reduce output quality.
-- Audio sources and waveforms are imported; sound is not yet played or exported.
+- Audio sources and waveforms are imported and mixed in video exports; device playback is pending.
   Color processing is 8-bit RGBA and is
   not an HDR/color-managed workflow. Source files must stay unchanged during export;
   project snapshots preserve edits, not the external file bytes.
@@ -619,8 +620,8 @@ Version 22 persists asset IDs, folders and source metadata. Older projects acqui
 asset IDs when read without changing layer sampling or pixels. Embedded PNG data
 is still written once and shared through history. Limits are 1,000 media assets,
 1,000 folders, 32 folder levels, and 128 MiB of unique encoded images. Importing
-videos includes first-stream audio metadata and waveforms; playback and mixing
-remain pending in H02–H04.
+videos includes first-stream audio metadata and waveforms. Offline mixing and
+AAC/PCM output are available; device playback and level controls remain pending.
 
 Select footage and open Interpret footage… to override a video's source FPS
 (including rational rates such as `30000/1001`). Enter `Source` to restore the
@@ -876,10 +877,12 @@ one-pixel padding for odd dimensions. Output size is limited to 16384 per axis
 and 32 megapixels, FPS to 1–240. Reset settings returns to composition defaults.
 Changing settings requeues only that output and participates in queue Undo/Redo.
 Named presets now include each module's size, FPS, channels, quality and speed;
-version 1 queue data migrates to version 2 while preserving results and presets.
+version 1/2 queue data migrates to version 3 while preserving results and presets.
+Existing saved jobs/presets retain silent audio; new modules default to automatic audio.
 PNG sequences with a changed FPS number from zero and record source_range, output
 FPS and frame count in sequence.json. Unchanged FPS retains composition numbering.
-Audio output is not yet implemented; audio mixing and additional codec profiles remain I03/H02–H04.
+Audio auto/off selects 48 kHz stereo AAC (MP4) or 24-bit PCM (MOV). Additional
+sample-rate/channel/codec options and device playback remain I03/H02–H04.
 Snapshots and queue data are local to this user, not embedded in project files.
 
 The CLI shares these settings: `--size 1280x720 --fps 30000/1001 --channels rgb
@@ -892,8 +895,8 @@ menu's quick exports retain their defaults; use Render Queue for configured outp
 See [the development backlog](DEVELOPMENT_BACKLOG.md) for the current capability
 audit, priorities, dependencies and proposed acceptance criteria.
 
-Still pending: frame blending/optical flow, audio footage,
-audio output, freeform/animated masks, additional effects and reusable presets,
+Still pending: frame blending/optical flow, audio-device playback and level controls,
+freeform/animated masks, additional effects and reusable presets,
 rich text layout, 3D, JSX, ExtendScript and expressions. PNG sequences can be
 assembled in an external video tool.
 There is no claim of AEP or Adobe script compatibility.
@@ -1096,16 +1099,73 @@ are 8–384 kHz, 1–32 channels and 24 hours, subject to installed FFmpeg decod
 Only the first audio stream is selected; stream selection and full-duration coarse
 overviews remain future extensions.
 
-**Preview and exported MP4/MOV files are still silent.** Audio device playback,
-scrubbing, A/V synchronization, levels, mute/solo, pan, fades, meters, nested mixing
-and AAC/PCM encoding remain H02–H04. A visible frozen/reversed waveform does not yet
-imply audible retiming; mixing policy and sample-accurate output will be verified
-with those features. Existing PNG/video rendering behavior remains unchanged.
+**Preview device playback is still unavailable.** MP4/MOV now include the offline
+mix described below. Scrubbing, device-clock synchronization, per-layer audio
+switches, level/pan/fade animation and visible meters remain H02/H03. Existing
+visual rendering and PNG output remain unchanged.
 
-Validation includes 216 ordinary tests plus 20 FFmpeg integration tests. Audio
+Validation includes 222 ordinary tests plus 23 FFmpeg integration tests. Audio
 coverage includes opposite-phase stereo, silence, chunk boundaries, delayed video
 sound, WAV/FLAC/MP3/AAC imports, mixed version-25 document serialization, timing and
 shared relinking. Native QA covered mixed import, audio-source composition creation,
 split/undo/redo, move/trim, relink/undo/redo and save/reopen. The saved QA project's
-CLI PNG is byte-identical to its visual-only counterpart; its 30-frame MP4 remains
-explicitly silent. No audio-device synchronization or mixing claim is made here.
+CLI PNG is byte-identical to its visual-only counterpart. The initial H01-only
+MP4 was silent; audio-output validation is described below.
+
+## Offline audio mixing and video output
+
+New MP4/MOV output modules and File quick exports automatically mix imported audio.
+Render Queue exposes Audio `auto` / `off`; CLI accepts `--audio auto|off`. With no
+reachable audio layer, auto writes only video. PNG remains image-only. MP4 uses
+192 kbps AAC, MOV uses signed 24-bit PCM; both are 48 kHz stereo. Mono/multichannel
+sources use FFmpeg's stereo downmix. Existing version 1/2 queue jobs/presets migrate
+to version 3 with Audio off, preserving their earlier silent-output intent.
+
+The shared mixer samples continuous source clocks, independently of visual FPS.
+It applies in/out points, movement, split, source-in/speed, reverse, source-FPS
+interpretation and nested composition Time Remap. Speed changes also change pitch;
+there is no pitch-preserving stretch yet. Hold/freeze and out-of-source times are
+silent. Solo applies within each composition; exported/nested Guide audio is
+excluded. The eye switch, opacity, visual transforms, effects and mattes do not
+mute sound. Independent audio enable and gain/pan/fade controls are still H03.
+Streams sum in floating point and master samples clamp to [-1, 1]; automatic gain
+normalization and limiting are not applied. Internal pre-clamp peak/clipping
+counts are available for the future meters.
+
+Audio starts exactly at the selected source range. Its sample count is the ceiling
+of output-video duration times 48,000, using rational arithmetic. Any final video
+frame added by output FPS rounding gets a silent audio tail after the work-area
+end. MP4/MOV movie clocks use 48 kHz to avoid millisecond rounding of audio edit
+lists. AAC codec padding may appear in a raw decode; presentation duration is
+trimmed by the container. PCM output is sample-exact within quantization.
+
+The worker caches at most 128 one-second stereo chunks (46.875 MiB PCM), with one
+second of decoder/resampler preroll for compressed seeks and cancellation checks.
+The first AAC packet is allowed to prime the decoder before time zero. Source
+size/modification changes between new chunks abort the job. Prepared mixed audio
+uses an automatically removed temporary file, up to 384,000 bytes per second of
+output (about 33.2 GB for 24 hours); disk/write failures leave the destination
+unchanged. The UI shows mixing progress before video frames. This is not yet the
+persistent decoder/RAM preview cache planned in H02/J01–J03.
+
+Current arbitrary-time sampling uses linear interpolation between 48 kHz PCM
+samples. High-speed retiming can alias: band-limited variable-rate resampling and
+pitch-preserving stretching remain follow-up quality work. No real-time playback
+or device drift guarantee is made.
+
+Tests compare block-size-independent sample output, nested remaps, split/history/
+save round-trips, guide/solo/visibility behavior, opposite-phase channel sums,
+clipping and work-area tails. FFmpeg checks AAC/PCM metadata/duration and decoded
+sample error, 44.1 kHz WAV/FLAC/MP3/AAC seek chunks against continuous decoding,
+0.5-second delayed video sound, explicit audio off, missing sources and cancellation
+without overwriting existing files. Other video/alpha regression tests also pass.
+
+Native QA changed Audio auto/off with Undo/Redo, saved the Audio delivery QA
+preset, restarted the editor and rendered its persisted snapshot from an empty
+project. The resulting 320×180, 30 fps, 90-frame MP4 reached Done; all decoded
+video pixels and audio samples matched the equivalent CLI output. Its audio
+presentation duration is 144,000 samples at 48 kHz. A separate PCM MOV matched
+an independently calculated mix within 1.20e-7 per sample; AAC is lossy (this
+clipping test mix had MSE 0.000261, correlation 0.999684). Audio off produced no
+audio stream. Malformed legacy queue settings return an error without changing
+the saved queue.

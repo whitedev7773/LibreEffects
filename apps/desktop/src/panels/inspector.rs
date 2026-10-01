@@ -661,12 +661,10 @@ impl Render for Inspector {
                     ));
             }
             if layer.content().audio().is_some() {
-                contents = contents.child(
-                    div()
-                        .text_size(px(11.0))
-                        .text_color(rgb(ui::MUTED))
-                        .child("Audio waveform only · playback and exports are silent"),
-                );
+                contents =
+                    contents.child(div().text_size(px(11.0)).text_color(rgb(ui::MUTED)).child(
+                        "Audio exports as 48 kHz stereo · preview playback is not yet available",
+                    ));
             }
             let source_status =
                 if frame < layer.in_frame() || frame >= layer.out_frame(comp.duration()) {

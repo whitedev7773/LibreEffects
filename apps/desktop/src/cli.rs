@@ -3,7 +3,7 @@ use crate::output_settings::{Field, Format, Settings};
 use std::{ffi::OsString, path::PathBuf};
 
 const HELP: &str = "Libre Effects file renderer\n\
-    --render PROJECT.lfe.json --output FILE.mp4|mov|png [--composition ID] [--start FRAME] [--end FRAME] [--png-background] [--size WIDTHxHEIGHT] [--fps RATE] [--channels auto|rgb|rgba|alpha] [--crf 0..51 | --bitrate KBPS] [--encoder SPEED]\n\
+    --render PROJECT.lfe.json --output FILE.mp4|mov|png [--composition ID] [--start FRAME] [--end FRAME] [--png-background] [--size WIDTHxHEIGHT] [--fps RATE] [--channels auto|rgb|rgba|alpha] [--crf 0..51 | --bitrate KBPS] [--encoder SPEED] [--audio auto|off]\n\
     Frame range is [start, end). Videos default to the entire composition; PNG defaults to one frame.\n\
     MP4 uses the composition background. MOV and PNG preserve alpha; --png-background makes PNG opaque.";
 
@@ -32,12 +32,13 @@ fn parse(args: Vec<OsString>) -> Result<Options, String> {
             continue;
         }
         match flag {
-            "--size" | "--fps" | "--channels" | "--crf" | "--bitrate" | "--encoder" => {
+            "--size" | "--fps" | "--channels" | "--crf" | "--bitrate" | "--encoder" | "--audio" => {
                 let field = match flag {
                     "--size" => Field::Size,
                     "--fps" => Field::Fps,
                     "--channels" => Field::Channels,
                     "--encoder" => Field::Speed,
+                    "--audio" => Field::Audio,
                     _ => Field::Quality,
                 };
                 if !seen.insert(field) {

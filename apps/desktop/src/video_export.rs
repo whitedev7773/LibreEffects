@@ -545,6 +545,11 @@ fn encode_with_settings(
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
     let output = tempfile::NamedTempFile::new_in(directory).map_err(|e| e.to_string())?;
+    let audio = if settings.audio == crate::output_settings::AudioOutput::Auto {
+        crate::audio_mix::prepare(project, &plan, directory, &cancel, &progress)?
+    } else {
+        None
+    };
     let mut log = tempfile::tempfile().map_err(|e| e.to_string())?;
     let mut cmd = command(executable);
     cmd.args([
@@ -560,10 +565,31 @@ fn encode_with_settings(
         "-video_size",
     ])
     .arg(format!("{}x{}", plan.width, plan.height))
-    .args(["-framerate", &plan.fps.to_string(), "-i", "pipe:0", "-an"])
+    .args(["-framerate", &plan.fps.to_string(), "-i", "pipe:0"]);
+    if let Some(audio) = &audio {
+        // The default 1 kHz movie clock rounds AAC edit-list duration to a
+        // millisecond. Use the mix clock so its final sample remains representable.
+        cmd.args(["-f", "f32le", "-ar", "48000", "-ac", "2", "-i"])
+            .arg(audio.path())
+            .args([
+                "-map",
+                "0:v:0",
+                "-map",
+                "1:a:0",
+                "-movie_timescale",
+                "48000",
+            ]);
+        if preset == VideoPreset::H264 {
+            cmd.args(["-c:a", "aac", "-b:a", "192k"]);
+        } else {
+            cmd.args(["-c:a", "pcm_s24le"]);
+        }
+    } else {
+        cmd.args(["-map", "0:v:0", "-an"]);
+    }
     // Working pixels are nonlinear sRGB. Preserve that transfer function, explicitly
     // encode a BT.709 YCbCr matrix at limited range, and tag both the stream/container.
-    .args([
+    cmd.args([
         "-color_primaries",
         "bt709",
         "-color_trc",

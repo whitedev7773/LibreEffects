@@ -109,7 +109,7 @@ impl EditorState {
                     s.editor.execute(Command::Batch(commands))
                 }) {
                     Ok(()) => {
-                        if sequence { "Imported sequence · Interpret footage sets FPS and missing-frame policy".into() } else { format!("Imported {count} file(s) · Add to composition · audio waveform only (playback/export silent)") }
+                        if sequence { "Imported sequence · Interpret footage sets FPS and missing-frame policy".into() } else { format!("Imported {count} file(s) · Add to composition · audio waveform and output ready (preview silent)") }
                     }
                     Err(error) => format!("Import failed; no files added: {error}"),
                 };

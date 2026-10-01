@@ -43,7 +43,17 @@ pub(crate) fn probe_path() -> PathBuf {
     }
 }
 // File-backed pipes avoid deadlocks and unbounded memory on malformed media.
-pub(crate) fn output(mut cmd: Command, limit: u64) -> Result<Vec<u8>, String> {
+pub(crate) fn output(cmd: Command, limit: u64) -> Result<Vec<u8>, String> {
+    output_cancellable(cmd, limit, &std::sync::atomic::AtomicBool::new(false))
+}
+pub(crate) fn output_cancellable(
+    mut cmd: Command,
+    limit: u64,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Result<Vec<u8>, String> {
+    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err("Audio processing canceled".into());
+    }
     let mut stdout = tempfile::tempfile().map_err(|e| e.to_string())?;
     let mut stderr = tempfile::tempfile().map_err(|e| e.to_string())?;
     cmd.stdin(Stdio::null())
@@ -54,6 +64,11 @@ pub(crate) fn output(mut cmd: Command, limit: u64) -> Result<Vec<u8>, String> {
     })?;
     let started = Instant::now();
     let status = loop {
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("Audio processing canceled".into());
+        }
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) => {}
