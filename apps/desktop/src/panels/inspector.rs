@@ -536,13 +536,11 @@ impl Render for Inspector {
                     );
             }
         }
-        if let Content::Video {
-            path,
-            duration,
-            playback,
-            ..
-        } = layer.content()
-        {
+        if let Content::Video { path, playback, .. } = layer.content() {
+            let duration = layer
+                .footage_interpretation()
+                .duration(layer.content())
+                .unwrap();
             contents = contents
                 .child(
                     div()

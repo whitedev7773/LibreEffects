@@ -16,6 +16,8 @@ pub enum ProjectItem {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MediaAsset {
+    #[serde(default, skip_serializing_if = "FootageInterpretation::is_default")]
+    pub(super) interpretation: FootageInterpretation,
     name: String,
     folder: Option<FolderId>,
     width: f64,
@@ -23,6 +25,9 @@ pub struct MediaAsset {
     pub(super) content: Content,
 }
 impl MediaAsset {
+    pub fn interpretation(&self) -> FootageInterpretation {
+        self.interpretation
+    }
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -97,23 +102,26 @@ impl AssetLibrary {
         height: f64,
         name: String,
         folder: Option<FolderId>,
+        interpretation: FootageInterpretation,
     ) -> Result<AssetId, String> {
         let content =
             source(&content).ok_or("Only image and video footage can be imported as assets")?;
         if folder.is_some_and(|id| !self.folders.contains_key(&id)) {
             return Err("Destination folder no longer exists".into());
         }
-        if let Some((id, _)) = self
-            .assets
-            .iter()
-            .find(|(_, a)| a.content == content && a.width == width && a.height == height)
-        {
+        if let Some((id, _)) = self.assets.iter().find(|(_, a)| {
+            a.content == content
+                && a.width == width
+                && a.height == height
+                && a.interpretation == interpretation
+        }) {
             return Ok(*id);
         }
         let id = self.allocate()?;
         self.assets.insert(
             id,
             MediaAsset {
+                interpretation,
                 name: if name.trim().is_empty() {
                     "Untitled footage".into()
                 } else {
@@ -182,6 +190,7 @@ impl Project {
                     layer.height,
                     layer.name.clone(),
                     None,
+                    layer.footage_interpretation,
                 )?;
                 layer.asset = Some(id);
                 if let Content::Image { png } = &library.assets[&id].content {
@@ -191,6 +200,13 @@ impl Project {
         }
         if !library.is_default() {
             self.version = 22;
+        }
+        if library
+            .assets
+            .values()
+            .any(|a| !a.interpretation.is_default())
+        {
+            self.version = 23;
         }
         Ok(())
     }
@@ -216,6 +232,10 @@ pub(super) fn validate(project: &Project) -> Result<(), String> {
     let valid_folder = |id: Option<FolderId>| id.is_none_or(|id| library.folders.contains_key(&id));
     let valid_id = |id: u64| id > 0 && id < library.next_id;
     for (id, asset) in &library.assets {
+        asset.interpretation.validate(&asset.content)?;
+        if project.version < 23 && !asset.interpretation.is_default() {
+            return Err("Footage interpretation requires version 23".into());
+        }
         if !valid_id(*id)
             || library.folders.contains_key(id)
             || asset.name.trim().is_empty()
@@ -258,11 +278,16 @@ pub(super) fn validate(project: &Project) -> Result<(), String> {
     }
     for (_, comp) in project.compositions() {
         for layer in &comp.layers {
+            layer.footage_interpretation.validate(&layer.content)?;
+            if project.version < 23 && !layer.footage_interpretation.is_default() {
+                return Err("Footage interpretation requires version 23".into());
+            }
             if let Some(id) = layer.asset {
                 let a = library.assets.get(&id).ok_or("Missing layer asset")?;
                 if source(&layer.content).as_ref() != Some(&a.content)
                     || layer.width != a.width
                     || layer.height != a.height
+                    || layer.footage_interpretation != a.interpretation
                 {
                     return Err("Layer source does not match its shared asset".into());
                 }
@@ -301,6 +326,7 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                     *height,
                     name.clone(),
                     *folder,
+                    Default::default(),
                 )?;
                 if let Some(frame) = frame {
                     add_layer(state, id, *frame)?;
@@ -435,6 +461,7 @@ fn add_layer(state: &mut Snapshot, asset: AssetId, frame: Frame) -> Result<(), S
         .ok_or("Asset no longer exists")?
         .clone();
     let mut content = a.content;
+    let interpreted_duration = a.interpretation.duration(&content);
     if let Content::Video { start_frame, .. } = &mut content {
         *start_frame = i64::from(frame);
     }
@@ -455,6 +482,20 @@ fn add_layer(state: &mut Snapshot, asset: AssetId, frame: Frame) -> Result<(), S
         .find(|l| Some(l.id) == state.selected)
         .unwrap();
     layer.asset = Some(asset);
+    layer.footage_interpretation = a.interpretation;
     layer.in_frame = frame;
+    if let Some(seconds) = interpreted_duration {
+        let comp = &state.project.composition;
+        let end = (u64::from(frame) + (seconds * comp.fps.as_f64() - 1e-7).ceil().max(1.0) as u64)
+            .min(u64::from(comp.duration)) as Frame;
+        state
+            .project
+            .composition
+            .layers
+            .iter_mut()
+            .find(|l| Some(l.id) == state.selected)
+            .unwrap()
+            .out_frame = Some(end);
+    }
     Ok(())
 }

@@ -617,8 +617,37 @@ Version 22 persists asset IDs, folders and source metadata. Older projects acqui
 asset IDs when read without changing layer sampling or pixels. Embedded PNG data
 is still written once and shared through history. Limits are 1,000 media assets,
 1,000 folders, 32 folder levels, and 128 MiB of unique encoded images. Importing
-videos remains visual-only; audio, image sequence interpretation, source FPS/alpha
-overrides and composition creation from footage are pending in A08/H01–H04.
+videos remains visual-only; audio and image sequence import are pending in
+A08/H01–H04.
+
+Select footage and open Interpret footage… to override a video's source FPS
+(including rational rates such as `30000/1001`). Enter `Source` to restore the
+original rate. This changes the source clock and duration for every instance;
+existing layer trims, animation keys and Time Remap values stay fixed. For example,
+30 fps footage lasting six seconds becomes twelve seconds at an assumed 15 fps.
+Preview and export decode the corresponding original source frame.
+
+Images and videos support Straight, Ignore and Premultiplied alpha interpretation.
+Premultiplied accepts a six-digit RGB matte color and removes that color before
+scaling and effects. Invert alpha works with Straight and Premultiplied; Ignore
+keeps the stored RGB and makes it opaque. Reset restores the source defaults.
+Interpretation updates thumbnails, all layers and exports, with Undo/Redo and
+version 23 save/reopen. This is 8-bit sRGB interpretation; automatic guessing,
+field order, pixel aspect and ICC interpretation are not implemented.
+
+New comp from source creates a composition and one source layer in a single
+undoable operation. Video uses the source dimensions, interpreted FPS and full
+duration. A still uses its dimensions and the current composition's FPS/duration.
+The new composition uses a black background, starts at frame zero and shares the
+source's folder. Source limits of 1–240 fps and a 24-hour duration apply.
+
+Interpretation regression tests cover shared/locked instances, relinking,
+retiming, invalid input, rational FPS, alpha/matte pixels and MP4/MOV output.
+Native validation conformed 30 fps footage to 15 fps, created a 180-frame source
+composition, and checked creation and alpha interpretation with Undo/Redo and
+save/reopen. The saved image composition rendered a PNG pixel of
+`[199,100,50,128]`, an alpha MOV pixel of `[199,100,50,129]`, and a black-background
+MP4 pixel of `[100,49,25,255]`; both videos contained 15 frames at 15 fps.
 
 Open `examples/asset-library-study.lfe.json` to inspect two compositions sharing
 one embedded image in a folder tree. Native validation covered source rename,

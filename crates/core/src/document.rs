@@ -62,7 +62,7 @@ pub(super) fn decode(json: &str) -> Result<Project, String> {
         .as_object_mut()
         .ok_or("Project must be an object")?
         .remove("image_assets");
-    if assets_value.is_some() && !matches!(value["version"].as_u64(), Some(7..=22)) {
+    if assets_value.is_some() && !matches!(value["version"].as_u64(), Some(7..=23)) {
         return Err("Image assets require project version 7".into());
     }
     let assets: BTreeMap<String, Arc<str>> = assets_value

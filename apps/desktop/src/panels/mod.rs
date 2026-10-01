@@ -2,6 +2,7 @@ mod blend;
 mod browser;
 mod color_curve;
 mod effects;
+mod footage_interpretation;
 mod graph;
 mod inspector;
 mod markers;

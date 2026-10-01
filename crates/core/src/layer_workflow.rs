@@ -152,6 +152,7 @@ fn paste(state: &mut Snapshot, clipboard: &LayerClipboard) -> Result<(), String>
                 assets::source(&layer.content).as_ref() != Some(&a.content)
                     || a.width() != layer.width
                     || a.height() != layer.height
+                    || a.interpretation() != layer.footage_interpretation
             })
         }) {
             layer.asset = None;

@@ -32,6 +32,8 @@ pub use guides::{Guide, GuideAxis};
 mod selection_transform;
 pub use selection_transform::AlignTarget;
 mod assets;
+mod footage_interpretation;
+pub use footage_interpretation::{AlphaInterpretation, FootageInterpretation};
 mod time;
 mod time_remap;
 pub use assets::{AssetId, AssetLibrary, FolderId, MediaAsset, ProjectFolder, ProjectItem};
@@ -192,6 +194,8 @@ impl AnimatedProperty {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Layer {
+    #[serde(default, skip_serializing_if = "FootageInterpretation::is_default")]
+    footage_interpretation: FootageInterpretation,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     asset: Option<AssetId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -527,7 +531,7 @@ impl Project {
     }
 
     fn validate(&self) -> Result<(), String> {
-        if !(1..=22).contains(&self.version) {
+        if !(1..=23).contains(&self.version) {
             return Err("Unsupported project version".into());
         }
         if self.version < 9
@@ -691,6 +695,11 @@ impl Project {
 /// The future scripting bridge and native controls both dispatch these commands.
 #[derive(Clone, Debug)]
 pub enum Command {
+    InterpretAsset {
+        asset: AssetId,
+        interpretation: FootageInterpretation,
+    },
+    CompositionFromAsset(AssetId),
     ImportAsset {
         content: Content,
         width: f64,
@@ -1194,6 +1203,9 @@ impl Editor {
 }
 
 fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
+    if let Some(result) = footage_interpretation::apply(state, &command) {
+        return result;
+    }
     if let Some(result) = assets::apply(state, &command) {
         return result;
     }
@@ -1442,6 +1454,7 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
         comp.layers.insert(
             0,
             Layer {
+                footage_interpretation: Default::default(),
                 asset: None,
                 time_remap: None,
                 track_matte: None,

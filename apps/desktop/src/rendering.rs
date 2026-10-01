@@ -57,7 +57,7 @@ pub(crate) fn validate_images(project: &Project) -> Result<(), String> {
     }
     Ok(())
 }
-fn image_limits() -> image::Limits {
+pub(crate) fn image_limits() -> image::Limits {
     let mut limits = image::Limits::default();
     limits.max_image_width = Some(4096);
     limits.max_image_height = Some(4096);
@@ -264,11 +264,14 @@ impl Renderer {
             Content::Text { text, font_size } => {
                 svg.push_str(&text_svg(text, *font_size, &color));
             }
-            Content::Image { png } => svg.push_str(&format!(
-                "<image width='{}' height='{}' xlink:href='data:image/png;base64,{png}'/>",
-                l.width(),
-                l.height()
-            )),
+            Content::Image { png } => {
+                let png = crate::source_render::alpha_png(png, l.footage_interpretation())?;
+                svg.push_str(&format!(
+                    "<image width='{}' height='{}' xlink:href='data:image/png;base64,{png}'/>",
+                    l.width(),
+                    l.height()
+                ));
+            }
             Content::Composition { composition, .. } => {
                 let source = project
                     .composition_by_id(*composition)
@@ -300,13 +303,14 @@ impl Renderer {
                 }
             }
             Content::Video { path, .. } => {
-                if let Some(seconds) = l.video_time(frame, c.fps()) {
-                    let png = crate::footage::frame_png(
+                if let Some(seconds) = l.video_decode_time(frame, c.fps()) {
+                    let png = crate::footage::interpreted_frame_png(
                         path,
                         seconds,
                         l.width() as u32,
                         l.height() as u32,
                         max_dimension,
+                        l.footage_interpretation(),
                     )?;
                     svg.push_str(&format!(
                         "<image width='{}' height='{}' xlink:href='data:image/png;base64,{png}'/>",

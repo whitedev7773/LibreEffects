@@ -46,6 +46,10 @@ impl Layer {
             return None;
         };
         let seconds = nonnegative(self.source_time(frame, fps)?);
+        let (duration, source_fps) = match self.footage_interpretation.fps {
+            Some(fps) => (duration * source_fps / fps.as_f64(), fps.as_f64()),
+            None => (duration, source_fps),
+        };
         (seconds >= 0.0 && seconds < duration)
             .then(|| ((seconds * source_fps + 1e-7).floor() / source_fps).max(0.0))
     }

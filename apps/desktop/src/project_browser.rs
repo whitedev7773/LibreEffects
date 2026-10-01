@@ -116,13 +116,16 @@ pub(crate) fn thumbnail(project: &Project, item: ProjectItem) -> Result<image::R
                 .get(&id)
                 .ok_or("Asset no longer exists")?;
             let png = match asset.content() {
-                Content::Image { png } => png.to_string(),
-                Content::Video { path, .. } => crate::footage::frame_png(
+                Content::Image { png } => {
+                    crate::source_render::alpha_png(png, asset.interpretation())?.into_owned()
+                }
+                Content::Video { path, .. } => crate::footage::interpreted_frame_png(
                     path,
                     0.0,
                     asset.width() as u32,
                     asset.height() as u32,
                     160,
+                    asset.interpretation(),
                 )?,
                 _ => return Err("Unsupported source".into()),
             };

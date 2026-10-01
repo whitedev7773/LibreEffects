@@ -327,15 +327,14 @@ pub(super) fn apply_extended(
                     );
                 }
                 let end = layer.out_frame(duration);
-                let Content::Video {
-                    playback,
-                    duration: source_duration,
-                    ..
-                } = layer.content
-                else {
+                let Content::Video { playback, .. } = layer.content else {
                     return Err("Select a video layer first".into());
                 };
                 let mut next = playback;
+                let source_duration = layer
+                    .footage_interpretation
+                    .duration(&layer.content)
+                    .unwrap();
                 next.source_in = layer.content.video_source_time(start, fps).unwrap();
                 match command {
                     Command::SetVideoSpeed { speed, .. } => {
@@ -356,8 +355,8 @@ pub(super) fn apply_extended(
                         next.source_in = *seconds;
                     }
                     Command::ReverseVideo { .. } => {
-                        if layer.content.video_time(start, fps).is_none()
-                            || layer.content.video_time(end - 1, fps).is_none()
+                        if layer.video_time(start, fps).is_none()
+                            || layer.video_time(end - 1, fps).is_none()
                         {
                             return Err(
                                 "Trim the layer to valid source frames before reversing".into()
@@ -374,7 +373,6 @@ pub(super) fn apply_extended(
                             );
                         }
                         next.source_in = layer
-                            .content
                             .video_time(*frame, fps)
                             .ok_or("There is no source frame at the playhead")?;
                         next.speed = 0.0;
@@ -629,6 +627,7 @@ pub(super) fn apply_extended(
                 let layer = editable(state, *id)?;
                 layer.content = content.clone();
                 layer.asset = None;
+                layer.footage_interpretation = Default::default();
             }
             Command::SetEffects { id, effects } => editable(state, *id)?.effects = *effects,
             Command::SetMask { id, mask } => editable(state, *id)?.mask = *mask,

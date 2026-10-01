@@ -428,6 +428,30 @@ mod tests {
         }
     }
 }
+pub(crate) fn interpreted_frame_png(
+    path: &str,
+    seconds: f64,
+    width: u32,
+    height: u32,
+    max_dimension: u32,
+    interpretation: libre_effects_core::FootageInterpretation,
+) -> Result<String, String> {
+    let alpha_changed = interpretation.alpha != libre_effects_core::AlphaInterpretation::Straight
+        || interpretation.invert_alpha;
+    // Interpret before scaling so matte fringes and hidden colors use source pixels.
+    let png = frame_png(
+        path,
+        seconds,
+        width,
+        height,
+        if alpha_changed {
+            width.max(height)
+        } else {
+            max_dimension
+        },
+    )?;
+    Ok(crate::source_render::alpha_png(&png, interpretation)?.into_owned())
+}
 pub(crate) fn frame_png(
     path: &str,
     seconds: f64,

@@ -17,6 +17,8 @@ pub(crate) struct Browser {
     by_type: bool,
     descending: bool,
     move_open: bool,
+    interpretation_open: bool,
+    interpretation: Option<(u64, Entity<super::footage_interpretation::Interpretation>)>,
     thumbnail: Option<Arc<gpui::RenderImage>>,
     thumbnail_key: Option<(ProjectItem, Project, u64)>,
     thumbnail_pending: bool,
@@ -54,6 +56,8 @@ impl Browser {
             by_type: false,
             descending: false,
             move_open: false,
+            interpretation_open: false,
+            interpretation: None,
             thumbnail: None,
             thumbnail_key: None,
             thumbnail_pending: false,
@@ -280,11 +284,11 @@ impl Render for Browser {
             ProjectItem::Asset(id) => {
                 let a = &project.asset_library().assets()[&id];
                 let source = match a.content() {
-                    Content::Video {
-                        duration,
-                        source_fps,
-                        ..
-                    } => format!("{source_fps:.3} fps · {duration:.2} s"),
+                    Content::Video { .. } => format!(
+                        "{} fps · {:.2} s",
+                        a.interpretation().frame_rate(a.content()).unwrap().label(),
+                        a.interpretation().duration(a.content()).unwrap()
+                    ),
                     _ => "Still image · embedded".into(),
                 };
                 vec![
@@ -477,6 +481,53 @@ impl Render for Browser {
             );
         }
         if let ProjectItem::Asset(id) = selected {
+            panel = panel.child(
+                div()
+                    .flex()
+                    .px_2()
+                    .gap_1()
+                    .child(
+                        ui::text_button("interpret-footage", "Interpret footage…")
+                            .flex_1()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.interpretation_open = !this.interpretation_open;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        ui::text_button("comp-from-footage", "New comp from source").on_click({
+                            let state = self.state.clone();
+                            move |_, window, cx| {
+                                state.update(cx, |s, cx| {
+                                    s.dispatch(
+                                        &Action::Edit(Command::CompositionFromAsset(id)),
+                                        window,
+                                        cx,
+                                    )
+                                });
+                            }
+                        }),
+                    ),
+            );
+            if self.interpretation_open {
+                if self
+                    .interpretation
+                    .as_ref()
+                    .is_none_or(|(owner, _)| *owner != id)
+                {
+                    self.interpretation = Some((
+                        id,
+                        cx.new(|cx| {
+                            super::footage_interpretation::Interpretation::new(
+                                self.state.clone(),
+                                id,
+                                cx,
+                            )
+                        }),
+                    ));
+                }
+                panel = panel.child(self.interpretation.as_ref().unwrap().1.clone());
+            }
             if let Content::Video { path, .. } = project.asset_library().assets()[&id].content() {
                 panel = panel.child(
                     ui::text_button("project-relink", "Relink source…").on_click({
