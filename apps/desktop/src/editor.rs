@@ -11,13 +11,15 @@ use libre_effects_core::{
 };
 
 use crate::components::{Button, ButtonSize, ButtonVariant};
-use crate::project_io::{read_project, write_project};
+use crate::project_io::write_project;
 #[path = "editor_footage.rs"]
 mod footage;
 #[path = "editor_io.rs"]
 mod io;
 #[path = "editor_video.rs"]
 mod video;
+#[path = "editor_view.rs"]
+mod view;
 #[derive(Clone)]
 pub(crate) struct VideoJob {
     pub label: String,
@@ -123,6 +125,10 @@ impl PropertyFilter {
 }
 
 pub(crate) struct EditorState {
+    composition_views:
+        std::collections::BTreeMap<CompositionId, crate::view_state::CompositionView>,
+    pub workspace: crate::view_state::WorkspaceView,
+    pub preview_pan: [f32; 2],
     pub snapping: bool,
     pub marker_selection: Option<(
         CompositionId,
@@ -173,6 +179,9 @@ pub(crate) struct EditorState {
 impl Default for EditorState {
     fn default() -> Self {
         Self {
+            composition_views: Default::default(),
+            workspace: Default::default(),
+            preview_pan: [0.0; 2],
             snapping: true,
             marker_selection: None,
             selected_layers: BTreeSet::new(),
@@ -318,6 +327,7 @@ impl EditorState {
 
     fn step_history(&mut self, redo: bool) {
         self.stop();
+        self.remember_view();
         let previous = self.editor.project().active_composition_id();
         if redo {
             self.editor.redo();
@@ -337,8 +347,7 @@ impl EditorState {
 
     fn composition_changed(&mut self) {
         self.stop();
-        self.frame = 0;
-        self.timeline_start = 0;
+        self.restore_composition_view();
         self.selected_layers.clear();
         self.selected_keys.clear();
         self.graph_key = None;
@@ -780,7 +789,10 @@ impl EditorState {
                 self.preview_zoom =
                     Some((self.preview_zoom.unwrap_or(0.5) * factor).clamp(0.0625, 8.0))
             }
-            Action::FitPreview => self.preview_zoom = None,
+            Action::FitPreview => {
+                self.preview_zoom = None;
+                self.preview_pan = [0.0; 2];
+            }
             Action::CyclePreviewResolution => {
                 self.preview_resolution = if self.preview_resolution == 4 {
                     1
@@ -844,6 +856,7 @@ impl EditorState {
             }
             Action::Edit(command) => {
                 self.stop();
+                self.remember_view();
                 let before = self.editor.selected();
                 let composition = self.editor.project().active_composition_id();
                 self.status = match self.editor.execute(command.clone()) {
@@ -870,6 +883,7 @@ impl EditorState {
             }
             Action::ActivateComposition(id) => {
                 if *id != self.editor.project().active_composition_id() {
+                    self.remember_view();
                     match self.editor.activate_composition(*id) {
                         Ok(()) => {
                             self.composition_changed();
@@ -931,6 +945,7 @@ impl EditorState {
                         self.work_start = 0;
                         self.work_end = 150;
                         self.timeline_start = 0;
+                        self.load_views(Default::default());
                         self.status = "New composition".into();
                     }
                     Err(error) => self.status = error,

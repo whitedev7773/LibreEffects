@@ -58,6 +58,19 @@ impl Shell {
         let fields: Vec<_> = (0..6)
             .map(|_| cx.new(|cx| TextField::new(cx, |_, _, _| {})))
             .collect();
+        for (index, panel) in [&layout, &upper, &middle, &right].into_iter().enumerate() {
+            let state = state.clone();
+            cx.observe(panel, move |_, panel, cx| {
+                let fraction = panel.read(cx).fraction();
+                if state.read(cx).workspace.fractions[index] != fraction {
+                    state.update(cx, |s, cx| {
+                        s.workspace.fractions[index] = fraction;
+                        cx.notify();
+                    });
+                }
+            })
+            .detach();
+        }
         cx.observe(&fields[5], |_, _, cx| cx.notify()).detach();
         Self {
             state,
@@ -99,6 +112,12 @@ impl Shell {
             .update(cx, |state, cx| state.dispatch(&action, window, cx));
     }
     fn reset_layout(&mut self, cx: &mut Context<Self>) {
+        self.state.update(cx, |s, cx| {
+            s.workspace = Default::default();
+            s.effect_controls_open = false;
+            s.snapping = true;
+            cx.notify();
+        });
         self.layout.update(cx, |p, cx| p.reset(cx));
         self.upper.update(cx, |p, cx| p.reset(cx));
         self.middle.update(cx, |p, cx| p.reset(cx));
@@ -294,6 +313,13 @@ impl Shell {
 
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let fractions = self.state.read(cx).workspace.fractions;
+        for (index, panel) in [&self.layout, &self.upper, &self.middle, &self.right]
+            .into_iter()
+            .enumerate()
+        {
+            panel.update(cx, |p, cx| p.set_fraction(fractions[index], cx));
+        }
         if !self.initialized {
             self.state.update(cx, |s, cx| s.start_recovery(cx));
             let weak = cx.entity().downgrade();

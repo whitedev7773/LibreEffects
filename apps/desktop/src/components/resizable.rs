@@ -57,6 +57,20 @@ impl ResizablePanelGroup {
         self.resizing = false;
         cx.notify();
     }
+    pub(crate) fn fraction(&self) -> f32 {
+        self.fraction
+    }
+    pub(crate) fn set_fraction(&mut self, fraction: f32, cx: &mut Context<Self>) {
+        if !fraction.is_finite() {
+            return;
+        }
+        let fraction = clamp_fraction(fraction, self.minimum_fraction);
+        if fraction != self.fraction {
+            self.fraction = fraction;
+            self.resizing = false;
+            cx.notify();
+        }
+    }
     fn moving(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
         if !self.resizing || event.pressed_button != Some(MouseButton::Left) {
             return;

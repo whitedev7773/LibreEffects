@@ -92,6 +92,10 @@ impl Timeline {
         }
         if self.resizing {
             self.left = f32::from(event.position.x).clamp(380.0, 800.0);
+            self.state.update(cx, |s, cx| {
+                s.workspace.timeline_left = self.left;
+                cx.notify();
+            });
             cx.notify();
             return;
         }
@@ -361,6 +365,7 @@ fn grid(start: u32, visible: u32, frame: u32) -> impl IntoElement {
 }
 impl Render for Timeline {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.left = self.state.read(cx).workspace.timeline_left;
         self.hit_keys.borrow_mut().clear();
         self.hit_layers.borrow_mut().clear();
         let left = self.left;

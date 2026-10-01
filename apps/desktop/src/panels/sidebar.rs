@@ -10,7 +10,6 @@ pub(crate) struct Sidebar {
     state: Entity<EditorState>,
     inspector: Entity<Inspector>,
     catalog: Entity<super::effects::EffectCatalog>,
-    expanded: [bool; 4],
 }
 impl Sidebar {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
@@ -19,7 +18,6 @@ impl Sidebar {
             inspector: cx.new(|cx| Inspector::new(state.clone(), cx)),
             catalog: cx.new(|cx| super::effects::EffectCatalog::new(state.clone(), cx)),
             state,
-            expanded: [true, false, false, false],
         }
     }
 }
@@ -37,6 +35,7 @@ impl Render for Sidebar {
             comp.layers().len()
         );
         let playing = state.playing;
+        let expanded = state.workspace.sidebar_expanded;
         let work = format!("Work area: {}–{}f", state.work_start, state.work_end);
         let mut panel = div()
             .size_full()
@@ -48,7 +47,7 @@ impl Render for Sidebar {
             .into_iter()
             .enumerate()
         {
-            let active = self.expanded[index];
+            let active = expanded[index];
             panel = panel.child(
                 ui::text_button(gpui::SharedString::from(format!("dock-{label}")), label)
                     .h(px(27.0))
@@ -58,8 +57,11 @@ impl Render for Sidebar {
                     .border_color(rgb(ui::BORDER))
                     .when(active, |s| s.text_color(rgb(ui::BLUE)))
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.expanded[index] = !this.expanded[index];
-                        cx.notify();
+                        this.state.update(cx, |s, cx| {
+                            s.workspace.sidebar_expanded[index] =
+                                !s.workspace.sidebar_expanded[index];
+                            cx.notify();
+                        });
                     })),
             );
             if active {

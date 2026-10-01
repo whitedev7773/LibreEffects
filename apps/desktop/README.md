@@ -17,6 +17,14 @@ editor, not a complete After Effects replacement or an AEP-compatible applicatio
 - Preview controls live in the right dock; Info shows the current composition and time.
 - Drag panel dividers to resize; double-click a divider or choose Window → Reset
   default workspace to restore the layout.
+- Save (Ctrl+S) also records panel proportions, the timeline column width, right
+  dock sections, Effect Controls tab and Snap preference in optional `editor_view`
+  metadata. Each composition remembers its playhead, timeline zoom/position,
+  preview zoom/pan/resolution, checkerboard and graph visibility.
+  View changes do not add Undo steps or mark the render document dirty; save
+  explicitly to preserve them across reopening. New documents and recovery
+  checkpoints start with default views. Older files without this metadata open
+  normally; invalid/future view metadata is ignored and unsafe ranges are clamped.
 - The Timeline has compact layer rows, grouped X/Y transform values, a Parent & Link
   column, and a draggable boundary between its layer list and time area.
 - Wanted Sans and Gravity Icons are embedded in the executable, with their licenses
@@ -136,8 +144,8 @@ a diamond to change its timing.
   inverts time before evaluating progress. Preview opacity is clamped to 0–100%.
 - Drag the ruler to scrub. Timeline zoom and pan keep frame mapping consistent.
 - B/N set the beginning/end of the playback work area. Playback loops within it.
-  Work area is saved with the composition and supports Undo/Redo. Viewport position,
-  selection and panel layout remain session state.
+  Work area is saved with the composition and supports Undo/Redo. View state is
+  saved separately from render settings; selections remain session state.
 
 ### Timeline markers and snapping
 
@@ -157,7 +165,7 @@ layer annotations into the source and keeps composition markers in the parent.
 **Snap** aligns ruler scrubbing, dragged keys and layer moves/trims with the
 playhead, work area, layer boundaries, keys and marker endpoints within eight
 logical pixels. Hold Alt to bypass it. Selected keys move with one shared offset;
-hidden Shy layers are excluded. Snapping is a session preference.
+hidden Shy layers are excluded. Save records the Snap preference with workspace metadata.
 
 ## Graph Editor
 
@@ -449,8 +457,8 @@ layers and B/N work area. Ctrl+K edits the active composition's settings and nam
 The project supports up to 100 compositions and 1,000 total layers. Duplicate
 assigns new layer IDs and reconnects parent links within the copy. Create,
 duplicate and delete support Undo/Redo; the last composition cannot be deleted.
-Switching tabs does not create an edit or mark a saved document dirty. Selection
-and playhead reset on switching; view state persistence is still pending.
+Switching tabs does not create an edit or mark a saved document dirty. Key selections
+reset; the playhead and view settings restore independently for each composition.
 The active composition is captured at save/export time. All compositions and
 their shared image assets are saved together.
 

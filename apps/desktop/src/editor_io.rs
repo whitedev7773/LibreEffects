@@ -34,6 +34,7 @@ impl EditorState {
             let _ = self.editor.replace_project(candidate.project);
             self.clear_clipboard();
             self.editor.clear_history();
+            self.load_views(Default::default());
             self.path = None;
             self.work_end = self.editor.project().composition().duration();
             self.status = "Recovered checkpoint. Save as to keep it. Other backups remain available at next startup.".into();
@@ -160,11 +161,11 @@ impl EditorState {
             let source = path.clone();
             let result = cx
                 .background_executor()
-                .spawn(async move { read_project(&source) })
+                .spawn(async move { crate::project_io::read_editor_project(&source) })
                 .await;
             let _ = entity.update(cx, |s, cx| {
                 match result {
-                    Ok(project) => {
+                    Ok((project, views)) => {
                         s.reset_recovery(false);
                         s.document_revision = s.document_revision.wrapping_add(1);
                         s.saved = project.clone();
@@ -176,6 +177,7 @@ impl EditorState {
                         s.work_start = 0;
                         s.work_end = s.editor.project().composition().duration();
                         s.timeline_start = 0;
+                        s.load_views(views);
                         s.selected_layers.clear();
                         s.selected_keys.clear();
                         s.status = "Project opened".into();
@@ -199,8 +201,9 @@ impl EditorState {
             return;
         }
         self.stop();
+        let views = self.capture_views();
         let snapshot = self.editor.project().clone();
-        let json = match snapshot.to_json() {
+        let json = match views.write(&snapshot) {
             Ok(s) => s,
             Err(e) => {
                 self.status = e;

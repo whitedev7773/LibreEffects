@@ -21,6 +21,7 @@ mod shell;
 mod theme;
 mod ui;
 mod video_export;
+mod view_state;
 
 use shell::Shell;
 

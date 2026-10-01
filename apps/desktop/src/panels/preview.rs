@@ -59,7 +59,6 @@ fn move_command(g: &MoveGesture) -> Command {
 pub(crate) struct Preview {
     state: Entity<EditorState>,
     bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
-    pan: Point<Pixels>,
     gesture: Option<MoveGesture>,
     focus: FocusHandle,
     renderer: crate::rendering::Renderer,
@@ -118,7 +117,6 @@ impl Preview {
         Self {
             state,
             bounds: Rc::new(Cell::new(None)),
-            pan: point(px(0.0), px(0.0)),
             gesture: None,
             focus: cx.focus_handle(),
             renderer: crate::rendering::Renderer::new(),
@@ -137,13 +135,8 @@ impl Preview {
         let state = self.state.read(cx);
         let comp = state.editor.project().composition();
         let frame = state.frame;
-        let (zoom, origin) = geometry(
-            bounds,
-            comp.width(),
-            comp.height(),
-            state.preview_zoom,
-            self.pan,
-        );
+        let pan = point(px(state.preview_pan[0]), px(state.preview_pan[1]));
+        let (zoom, origin) = geometry(bounds, comp.width(), comp.height(), state.preview_zoom, pan);
         let p = [
             f32::from(event.position.x - origin.x) as f64 / zoom as f64,
             f32::from(event.position.y - origin.y) as f64 / zoom as f64,
@@ -265,7 +258,7 @@ impl Preview {
                 targets,
                 frame,
                 zoom,
-                pan: self.pan,
+                pan,
                 pointer: p,
                 transform,
                 constrained: event.modifiers.shift,
@@ -292,7 +285,11 @@ impl Preview {
                 ]);
             }
             if gesture.layer.is_none() {
-                self.pan = gesture.pan + gesture.delta;
+                let pan = gesture.pan + gesture.delta;
+                self.state.update(cx, |s, cx| {
+                    s.preview_pan = [f32::from(pan.x), f32::from(pan.y)];
+                    cx.notify();
+                });
             }
             cx.notify();
         }
@@ -310,7 +307,11 @@ impl Preview {
                 ]);
             }
             if gesture.layer.is_none() {
-                self.pan = gesture.pan + gesture.delta;
+                let pan = gesture.pan + gesture.delta;
+                self.state.update(cx, |s, cx| {
+                    s.preview_pan = [f32::from(pan.x), f32::from(pan.y)];
+                    cx.notify();
+                });
             }
             if gesture.layer.is_some() && gesture.moved {
                 let command = move_command(&gesture);
@@ -343,7 +344,7 @@ impl Render for Preview {
             .map(|(id, comp)| (id, comp.name().to_string()))
             .collect();
         let time = timecode(frame, comp.fps());
-        let pan = self.pan;
+        let pan = point(px(state.preview_pan[0]), px(state.preview_pan[1]));
         let gesture = self.gesture.clone();
         let mut render_project = state.editor.project().clone();
         if let Some(g) = &gesture
@@ -548,7 +549,11 @@ impl Render for Preview {
                         if event.keystroke.key == "escape"
                             && let Some(gesture) = this.gesture.take()
                         {
-                            this.pan = gesture.pan;
+                            this.state.update(cx, |s, cx| {
+                                s.preview_pan =
+                                    [f32::from(gesture.pan.x), f32::from(gesture.pan.y)];
+                                cx.notify();
+                            });
                             cx.stop_propagation();
                             cx.notify();
                         }
@@ -751,7 +756,6 @@ impl Render for Preview {
                             zoom.map_or("Fit".into(), |z| format!("{:.0}%", z * 100.0)),
                         )
                         .on_click(cx.listener(|this, _, window, cx| {
-                            this.pan = point(px(0.0), px(0.0));
                             this.state.update(cx, |state, cx| {
                                 state.dispatch(&Action::FitPreview, window, cx)
                             });

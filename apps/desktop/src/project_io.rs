@@ -109,6 +109,23 @@ fn validate_sources(
 }
 
 pub(crate) fn read_project(path: &Path) -> Result<Project, String> {
+    let json = read_json(path)?;
+    parse_project(&json)
+}
+pub(crate) fn read_editor_project(
+    path: &Path,
+) -> Result<(Project, crate::view_state::ProjectViews), String> {
+    let json = read_json(path)?;
+    let project = parse_project(&json)?;
+    let views = crate::view_state::ProjectViews::read(&json, &project);
+    Ok((project, views))
+}
+fn parse_project(json: &str) -> Result<Project, String> {
+    let project = Project::from_json(json)?;
+    crate::rendering::validate_images(&project)?;
+    Ok(project)
+}
+fn read_json(path: &Path) -> Result<String, String> {
     let mut json = String::new();
     std::fs::File::open(path)
         .map_err(|error| error.to_string())?
@@ -118,9 +135,7 @@ pub(crate) fn read_project(path: &Path) -> Result<Project, String> {
     if json.len() as u64 > MAX_BYTES {
         return Err("Project exceeds 256 MiB".into());
     }
-    let project = Project::from_json(&json)?;
-    crate::rendering::validate_images(&project)?;
-    Ok(project)
+    Ok(json)
 }
 
 pub(crate) fn write_project(path: &Path, json: &str) -> Result<(), String> {
