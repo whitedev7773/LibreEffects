@@ -189,6 +189,72 @@ mod tests {
         assert_eq!(std::fs::read(&path).unwrap(), b"keep me");
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     }
+
+    #[test]
+    #[ignore = "requires FFmpeg; checks colored mattes, translucent edges and odd-size padding"]
+    fn composition_background_is_baked_into_mp4_but_not_alpha_mov() {
+        let dir = tempfile::tempdir().unwrap();
+        for (preset, color, expected_center) in [
+            (VideoPreset::H264, 0x2060a0, [144_u8, 48, 80]),
+            (VideoPreset::H264, 0xffffff, [255, 127, 127]),
+            (VideoPreset::ProResAlpha, 0x2060a0, [255, 0, 0]),
+        ] {
+            let mut e = Editor::default();
+            e.replace_project(scene()).unwrap();
+            e.execute(Edit::SetCompositionBackground(color)).unwrap();
+            let project = Project::from_json(&e.project().to_json().unwrap()).unwrap();
+            let path = dir
+                .path()
+                .join(format!("matte-{color:06x}.{}", preset.extension()));
+            export_video(
+                &project,
+                2..5,
+                preset,
+                &path,
+                Default::default(),
+                Default::default(),
+            )
+            .unwrap();
+            let decoded = command(&ffmpeg_path())
+                .args(["-v", "error", "-i"])
+                .arg(&path)
+                .args(["-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"])
+                .output()
+                .unwrap();
+            assert!(decoded.status.success());
+            let (width, height) = if preset == VideoPreset::H264 {
+                (102, 100)
+            } else {
+                (101, 99)
+            };
+            assert_eq!(decoded.stdout.len(), width * height * 4 * 3);
+            let pixel = |x, y| &decoded.stdout[(y * width + x) * 4..][..4];
+            let center = pixel(50, 49);
+            for channel in 0..3 {
+                assert!(
+                    (center[channel] as i32 - expected_center[channel] as i32).abs() < 9,
+                    "{preset:?} center: {center:?}"
+                );
+            }
+            if preset == VideoPreset::H264 {
+                let expected = [(color >> 16) as u8, (color >> 8) as u8, color as u8];
+                // Includes the added right and bottom rows, which must not become black seams.
+                for (x, y) in [(0, 0), (101, 0), (0, 99), (101, 99)] {
+                    let p = pixel(x, y);
+                    for channel in 0..3 {
+                        assert!(
+                            (p[channel] as i32 - expected[channel] as i32).abs() < 5,
+                            "{x},{y}: {p:?}"
+                        );
+                    }
+                    assert_eq!(p[3], 255);
+                }
+            } else {
+                assert!((center[3] as i32 - 128).abs() < 3);
+                assert_eq!(pixel(0, 0)[3], 0);
+            }
+        }
+    }
 }
 impl VideoPreset {
     pub fn label(self) -> &'static str {
@@ -292,22 +358,25 @@ fn encode(
     .args(["-framerate", &comp.fps().to_string(), "-i", "pipe:0", "-an"]);
     match preset {
         VideoPreset::H264 => {
-            cmd.args([
-                "-vf",
-                "pad=ceil(iw/2)*2:ceil(ih/2)*2",
-                "-c:v",
-                "libx264",
-                "-preset",
-                "medium",
-                "-crf",
-                "18",
-                "-pix_fmt",
-                "yuv420p",
-                "-movflags",
-                "+faststart",
-                "-f",
-                "mp4",
-            ]);
+            cmd.arg("-vf")
+                .arg(format!(
+                    "pad=ceil(iw/2)*2:ceil(ih/2)*2:color=0x{:06x}",
+                    comp.background_color()
+                ))
+                .args([
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "medium",
+                    "-crf",
+                    "18",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-movflags",
+                    "+faststart",
+                    "-f",
+                    "mp4",
+                ]);
         }
         VideoPreset::ProResAlpha => {
             cmd.args([
@@ -372,15 +441,7 @@ fn encode(
             }
             let mut pixels = renderer.render(project, frame, u32::MAX)?;
             if preset == VideoPreset::H264 {
-                // MP4 has no alpha. Composite against black instead of just dropping
-                // alpha, which would turn half-transparent elements fully opaque.
-                for p in pixels.pixels_mut() {
-                    let alpha = p[3] as u16;
-                    for channel in &mut p.0[..3] {
-                        *channel = ((*channel as u16 * alpha + 127) / 255) as u8;
-                    }
-                    p[3] = 255;
-                }
+                crate::rendering::composite_background(&mut pixels, comp.background_color());
             }
             input
                 .write_all(pixels.as_raw())

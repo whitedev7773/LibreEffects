@@ -254,7 +254,7 @@ impl EditorState {
         })
         .detach();
     }
-    pub(super) fn export(&mut self, sequence: bool, cx: &mut Context<Self>) {
+    pub(super) fn export(&mut self, sequence: bool, background: bool, cx: &mut Context<Self>) {
         if self.exporting {
             return;
         }
@@ -338,7 +338,10 @@ impl EditorState {
                 let result = cx
                     .background_executor()
                     .spawn(async move {
-                        let pixels = renderer.render(&project, frame, u32::MAX)?;
+                        let mut pixels = renderer.render(&project, frame, u32::MAX)?;
+                        if background {
+                            crate::rendering::composite_background(&mut pixels, project.composition().background_color());
+                        }
                         let mut data = std::io::Cursor::new(Vec::new());
                         pixels
                             .write_to(&mut data, image::ImageFormat::Png)
@@ -371,6 +374,8 @@ impl EditorState {
                     "rendered_frames": completed,
                     "requested_frames": count,
                     "complete": completed == count && error.is_none(),
+                    "alpha": !background,
+                    "background_color": if background { Some(format!("#{:06X}", project.composition().background_color())) } else { None },
                     "pattern": "frame-%06d.png"
                 });
                 if let Err(e) = crate::project_io::write_bytes(

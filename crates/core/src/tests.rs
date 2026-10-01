@@ -1293,7 +1293,7 @@ fn serialized_project_roundtrips_animation_and_preserves_ids() {
 fn corrupt_and_future_projects_are_rejected() {
     let editor = editor_with_layer();
     let mut project = editor.project().clone();
-    project.version = 6;
+    project.version = 7;
     assert!(Project::from_json(&project.to_json().unwrap()).is_err());
     project.version = 1;
     project.composition.fps = 0;
@@ -1362,6 +1362,83 @@ fn invalid_project_replacement_preserves_current_work_and_history() {
     assert_eq!(editor.project(), &previous);
     editor.undo();
     assert!(editor.project().composition().layers().is_empty());
+}
+
+#[test]
+fn composition_background_is_undoable_serialized_and_backward_compatible() {
+    let mut e = editor_with_layer();
+    let original = e.project().clone();
+    e.execute(Command::SetCompositionBackground(0x26384a))
+        .unwrap();
+    assert_eq!(e.project().composition().background_color(), 0x26384a);
+    assert_eq!(
+        e.project().composition().layers(),
+        original.composition().layers()
+    );
+    let saved = e.project().to_json().unwrap();
+    assert!(saved.contains("\"version\": 6"));
+    assert_eq!(Project::from_json(&saved).unwrap(), *e.project());
+    e.undo();
+    assert_eq!(e.project(), &original);
+    e.redo();
+    let current = e.project().clone();
+    assert!(
+        e.execute(Command::SetCompositionBackground(0x1000000))
+            .is_err()
+    );
+    assert_eq!(e.project(), &current);
+    assert!(
+        e.execute(Command::Batch(vec![
+            Command::SetCompositionBackground(0xffffff),
+            Command::ConfigureComposition {
+                name: "Invalid".into(),
+                width: 0,
+                height: 100,
+                fps: 30,
+                duration: 150
+            },
+        ]))
+        .is_err()
+    );
+    assert_eq!(e.project(), &current);
+    let mut legacy = serde_json::to_value(&original).unwrap();
+    legacy["composition"]
+        .as_object_mut()
+        .unwrap()
+        .remove("background_color");
+    assert_eq!(
+        Project::from_json(&legacy.to_string())
+            .unwrap()
+            .composition()
+            .background_color(),
+        0
+    );
+    legacy["composition"]["background_color"] = serde_json::json!(0x1000000);
+    assert!(Project::from_json(&legacy.to_string()).is_err());
+}
+
+#[test]
+fn background_solid_fills_composition_below_existing_layers_in_one_undo() {
+    let mut e = editor_with_layer();
+    e.execute(Command::SetCompositionBackground(0x26384a))
+        .unwrap();
+    let original = e.project().clone();
+    e.execute(Command::AddBackgroundSolid).unwrap();
+    let comp = e.project().composition();
+    assert_eq!(comp.layers()[0], original.composition().layers()[0]);
+    let layer = comp.layers().last().unwrap();
+    assert_eq!(layer.color(), 0x26384a);
+    assert_eq!(
+        (layer.in_frame(), layer.out_frame(comp.duration())),
+        (0, comp.duration())
+    );
+    assert_eq!(
+        comp.corners_at(layer.id(), 0).unwrap(),
+        [[0.0, 0.0], [1920.0, 0.0], [1920.0, 1080.0], [0.0, 1080.0]]
+    );
+    assert_eq!(e.selected(), Some(layer.id()));
+    e.undo();
+    assert_eq!(e.project(), &original);
 }
 #[test]
 fn video_timing_survives_trim_move_split_and_serialization() {

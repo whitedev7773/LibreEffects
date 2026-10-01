@@ -50,13 +50,21 @@ impl EditorState {
             }
             let output = path.display().to_string();
             let label = format!(
-                "{} · {} × {} · {} fps · frames {}–{}",
+                "{} · {} × {} · {} fps · frames {}–{} · {}",
                 preset.label(),
                 snapshot.composition().width(),
                 snapshot.composition().height(),
                 snapshot.composition().fps(),
                 range.start,
-                range.end - 1
+                range.end - 1,
+                if preset == VideoPreset::H264 {
+                    format!(
+                        "Background #{:06X}",
+                        snapshot.composition().background_color()
+                    )
+                } else {
+                    "Transparent".into()
+                }
             );
             let _ = entity.update(cx, |s, cx| {
                 s.video_job = Some(VideoJob {

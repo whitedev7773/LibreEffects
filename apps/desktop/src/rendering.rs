@@ -13,6 +13,17 @@ fn xml(s: &str) -> String {
 pub(crate) struct Renderer {
     options: resvg::usvg::Options<'static>,
 }
+/// Flatten straight RGBA over a solid RGB matte, including partially transparent edges.
+pub(crate) fn composite_background(pixels: &mut image::RgbaImage, color: u32) {
+    let background = [(color >> 16) & 255, (color >> 8) & 255, color & 255];
+    for pixel in pixels.pixels_mut() {
+        let alpha = pixel[3] as u32;
+        for (channel, matte) in pixel.0[..3].iter_mut().zip(background) {
+            *channel = ((*channel as u32 * alpha + matte * (255 - alpha) + 127) / 255) as u8;
+        }
+        pixel[3] = 255;
+    }
+}
 pub(crate) fn validate_images(project: &Project) -> Result<(), String> {
     for layer in project.composition().layers() {
         if let Content::Image { png } = layer.content() {
@@ -198,6 +209,53 @@ pub(crate) fn import_image(path: &Path) -> Result<(Content, u32, u32), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn opaque_background_composites_straight_alpha_without_changing_alpha_exports() {
+        let mut e = scene();
+        e.execute(Command::SetCompositionBackground(0x2060a0))
+            .unwrap();
+        e.execute(Command::AddContent {
+            content: Content::Rectangle,
+            width: 40.0,
+            height: 40.0,
+            name: "Red".into(),
+        })
+        .unwrap();
+        e.execute(Command::SetColor {
+            id: 1,
+            color: 0xff0000,
+        })
+        .unwrap();
+        e.execute(Command::SetValue {
+            id: 1,
+            property: Property::Opacity,
+            frame: 0,
+            value: 50.0,
+        })
+        .unwrap();
+        let rgba = Renderer::new().render(e.project(), 0, 100).unwrap();
+        assert_eq!(rgba.get_pixel(0, 0)[3], 0);
+        assert_eq!(rgba.get_pixel(50, 50).0, [255, 0, 0, 128]);
+        let mut opaque = rgba.clone();
+        composite_background(&mut opaque, e.project().composition().background_color());
+        assert_eq!(opaque.get_pixel(0, 0).0, [32, 96, 160, 255]);
+        assert_eq!(opaque.get_pixel(50, 50).0, [144, 48, 80, 255]);
+        // Verify PNG storage retains the chosen alpha policy as well as RGB.
+        for image in [&rgba, &opaque] {
+            let mut png = Cursor::new(Vec::new());
+            image.write_to(&mut png, image::ImageFormat::Png).unwrap();
+            assert_eq!(
+                &image::load_from_memory(png.get_ref()).unwrap().to_rgba8(),
+                image
+            );
+        }
+        e.execute(Command::AddBackgroundSolid).unwrap();
+        let solid = Renderer::new().render(e.project(), 0, 100).unwrap();
+        assert_eq!(solid, opaque);
+        let mut transparent_rgb = image::RgbaImage::from_pixel(1, 1, image::Rgba([255, 0, 255, 0]));
+        composite_background(&mut transparent_rgb, 0xffffff);
+        assert_eq!(transparent_rgb.get_pixel(0, 0).0, [255; 4]);
+    }
     #[test]
     fn lower_third_template_enters_and_exits_on_transparent_frames() {
         let project =

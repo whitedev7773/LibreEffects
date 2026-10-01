@@ -21,8 +21,9 @@ editor, not a complete After Effects replacement or an AEP-compatible applicatio
   column, and a draggable boundary between its layer list and time area.
 - Wanted Sans and Gravity Icons are embedded in the executable, with their licenses
   under assets/. No system font installation or runtime download is required.
-- Composition settings (Ctrl+K): name, dimensions, integer frame rate and duration
-  in frames. Settings are undoable; shortening across existing keys or layer ranges
+- Composition settings (Ctrl+K): name, dimensions, integer frame rate, duration
+  and RGB background color, with a live swatch and Black/White/Slate/Navy presets.
+  Duration is in frames. Settings are undoable; shortening across existing keys or layer ranges
   is rejected rather than silently discarding edits.
 
 ## Editing
@@ -183,7 +184,7 @@ brightness and grayscale. Mask and effect values are currently static. The same
 resvg compositor renders both the composition preview and exported frames,
 including text, images, parenting, interpolation, layer timing and alpha.
 
-File → Export current frame writes a full-resolution RGBA PNG. Render work area
+File → Export current frame (PNG, alpha) writes a full-resolution RGBA PNG. Render work area
 writes a PNG sequence to a new subfolder of the chosen directory, with frame rate,
 dimensions, frame range and completion status in `sequence.json`. Cancel render
 stops after the current frame and keeps completed files. Export uses a project
@@ -194,11 +195,33 @@ for faster interaction. This changes only the preview; every output uses the ful
 composition resolution.
 
 File → Render work area — MP4 exports H.264 (CRF 18, yuv420p, fast-start). Transparent
-pixels are composited over black. Odd dimensions are padded by one pixel on the
+pixels are composited over the composition background color (black by default).
+Odd dimensions are padded using the same color by one pixel on the
 right/bottom for H.264 compatibility. Render work area — MOV with alpha exports
 ProRes 4444 with transparency and the exact composition dimensions. Both use the
 composition frame rate and the B/N work area; the first output frame is the work
 area's first frame. These presets currently export silent video.
+
+### Composition background and transparent output
+
+Ctrl+K → Background (RGB) accepts six-digit hex colors, such as `#26384A`. The
+color is saved in the project, supports undo/redo, and changes neither the layers
+nor their alpha. Existing projects default to black.
+
+- With the transparency grid off, the composition viewer displays the background
+  behind transparent and partly transparent pixels. The grid reveals alpha and is
+  only a viewing aid; it is never exported.
+- MP4 always composites against the background color captured when rendering
+  starts. Translucent text/shape edges are blended before alpha is removed. The
+  render strip names the background color, and any H.264 padding uses that color.
+- PNG and PNG sequence menus offer **alpha** and **background** variants. Alpha
+  preserves transparency; background writes opaque RGBA pixels matching the matte
+  shown in the viewer. Sequence manifests record the chosen alpha/background policy.
+- MOV with alpha retains transparency regardless of the composition background.
+  To make the background part of every format, choose **Layer → New background
+  solid**. It adds an editable, full-composition rectangle beneath existing layers
+  using the current background color, in one undo step. Its size and color are
+  copied at creation; later composition changes do not resize or recolor it.
 
 Video export requires FFmpeg with `libx264` and `prores_ks` on PATH. Alternatively,
 set `LIBRE_EFFECTS_FFMPEG` to the full executable path before launching the app.
@@ -305,7 +328,7 @@ is unchanged; playback controls appear only for video layers.
 - The current source time, or an outside-source message, appears under the controls.
   These edits preserve layer In/Out, transform keys, parenting, masks and effects.
   Faster or slipped footage can run out before Out; those frames are transparent
-  (black in MP4). Extend/trim the layer explicitly when changing its duration.
+  (the composition background in MP4). Extend/trim the layer explicitly when changing its duration.
 - Every operation supports undo/redo and survives saving, relinking, moving and
   splitting. Preview, PNG sequences and MP4/MOV use the same source-time mapping.
   This is constant-speed footage playback, not animated time remapping, automatic
@@ -321,7 +344,7 @@ Versioned .lfe.json files contain the composition, layer ranges, transforms and
 keyframes. Files from the initial rectangle editor remain readable. Bezier or
 parenting edits upgrade the project to version 2; text, images, masks or effects
 upgrade it to version 3; linked videos require version 4, and altered video playback
-requires version 5. Older applications reject
+requires version 5. Nonblack composition backgrounds require version 6. Older applications reject
 unsupported versions. Save writes
 the snapshot captured when clicked using a temporary file before replacement.
 The size limit is 16 MiB. Undo history is capped at 100 edits and is reset at a
@@ -337,6 +360,29 @@ Changed unsaved projects are checkpointed every five seconds under
 startup offers Restore or Discard. Restoring creates an unsaved document so the
 original file is not overwritten. This is one recovery slot for one running app
 instance, not a versioned backup system. A normal save/discard close clears it.
+
+## Render from the command line
+
+Use `--render PROJECT --output FILE` to render a saved project without opening
+the editor or changing its recovery slot. The output extension selects MP4/H.264,
+MOV/ProRes with alpha, or a single PNG. MP4 uses the composition background; PNG
+preserves transparency unless `--png-background` is supplied.
+
+`--start FRAME` is inclusive and `--end FRAME` is exclusive. Video defaults to
+the whole composition; PNG defaults to one frame starting at frame zero.
+Invalid ranges fail before replacing the output. Successful renders replace the
+destination atomically. Exit status is zero on success and one on failure.
+
+On Windows, wait explicitly for the GUI-subsystem executable and redirect its
+messages when running in a script:
+
+~~~powershell
+$job = Start-Process -FilePath '.\target\release\libre-effects.exe' -ArgumentList '--render examples/lower-third.lfe.json --output title.mp4 --start 0 --end 150' -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput render.log -RedirectStandardError render-error.log
+$job.ExitCode
+~~~
+
+Quote paths containing spaces inside the argument string. For an opaque still,
+use `--output title.png --start 30 --png-background`. Use `--help` for syntax.
 
 ## Remaining limitations
 
@@ -365,11 +411,13 @@ timing and alpha, and cancel an active encoder while preserving the destination:
 cargo test -p libre-effects-desktop -- --ignored
 ~~~
 
-These five tests are explicitly ignored in the default suite when FFmpeg/FFprobe
+These six tests are explicitly ignored in the default suite when FFmpeg/FFprobe
 are not declared test dependencies. They also check footage import, different
 frame rates, the final source frame, missing media, and composited video output.
 Retiming checks compare preview pixels and encoded frames for reverse, slow-motion,
 freeze and slipped footage after a project-file round trip.
+Background checks encode colored/white mattes with semitransparent layers, verify
+odd-dimension padding, and ensure ProRes alpha remains transparent.
 
 When Moon is unavailable, the corresponding local commands are:
 

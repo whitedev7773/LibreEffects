@@ -55,6 +55,10 @@ impl Shell {
                 .initial_fraction(0.84)
                 .minimum_fraction(0.12)
         });
+        let fields: Vec<_> = (0..6)
+            .map(|_| cx.new(|cx| TextField::new(cx, |_, _, _| {})))
+            .collect();
+        cx.observe(&fields[5], |_, _, cx| cx.notify()).detach();
         Self {
             state,
             layout,
@@ -66,9 +70,7 @@ impl Shell {
             menu: None,
             settings: false,
             settings_error: String::new(),
-            fields: (0..5)
-                .map(|_| cx.new(|cx| TextField::new(cx, |_, _, _| {})))
-                .collect(),
+            fields,
             help: false,
             closing: false,
             pending_document: None,
@@ -110,6 +112,7 @@ impl Shell {
             comp.height().to_string(),
             comp.fps().to_string(),
             comp.duration().to_string(),
+            format!("#{:06X}", comp.background_color()),
         ];
         for (field, value) in self.fields.iter().zip(values) {
             field.update(cx, |field, _| {
@@ -123,7 +126,7 @@ impl Shell {
     }
     fn apply_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let name = self.fields[0].read(cx).value().to_string();
-        let numbers: Result<Vec<u32>, _> = self.fields[1..]
+        let numbers: Result<Vec<u32>, _> = self.fields[1..5]
             .iter()
             .map(|field| field.read(cx).value().parse::<u32>())
             .collect();
@@ -132,14 +135,25 @@ impl Shell {
             cx.notify();
             return;
         };
+        let background = match ui::parse_hex_color(self.fields[5].read(cx).value()) {
+            Ok(color) => color,
+            Err(error) => {
+                self.settings_error = error.into();
+                cx.notify();
+                return;
+            }
+        };
         self.dispatch(
-            Action::Edit(Command::ConfigureComposition {
-                name,
-                width: n[0],
-                height: n[1],
-                fps: n[2],
-                duration: n[3],
-            }),
+            Action::Edit(Command::Batch(vec![
+                Command::ConfigureComposition {
+                    name,
+                    width: n[0],
+                    height: n[1],
+                    fps: n[2],
+                    duration: n[3],
+                },
+                Command::SetCompositionBackground(background),
+            ])),
             window,
             cx,
         );
@@ -565,11 +579,25 @@ impl Render for Shell {
                     ("Import video…", "Ctrl+Shift+I", Some(Action::ImportVideo)),
                     ("Relink selected video…", "", Some(Action::RelinkVideo)),
                     ("Refresh footage", "", Some(Action::RefreshFootage)),
-                    ("Export current frame (PNG)…", "", Some(Action::ExportFrame)),
                     (
-                        "Render work area (PNG sequence)…",
+                        "Export current frame (PNG, alpha)…",
+                        "",
+                        Some(Action::ExportFrame),
+                    ),
+                    (
+                        "Export current frame (PNG, background)…",
+                        "",
+                        Some(Action::ExportFrameBackground),
+                    ),
+                    (
+                        "Render work area (PNG sequence, alpha)…",
                         "",
                         Some(Action::ExportSequence),
+                    ),
+                    (
+                        "Render work area (PNG sequence, background)…",
+                        "",
+                        Some(Action::ExportSequenceBackground),
                     ),
                     ("Cancel render", "", Some(Action::CancelExport)),
                 ],
@@ -602,6 +630,11 @@ impl Render for Shell {
                         selected.map(|_| Action::TrimSelection(false)),
                     ),
                     ("New text", "", Some(Action::AddText)),
+                    (
+                        "New background solid",
+                        "",
+                        Some(Action::Edit(Command::AddBackgroundSolid)),
+                    ),
                     (
                         "New rectangle",
                         "Ctrl+Y",
@@ -744,6 +777,7 @@ impl Render for Shell {
                     "Height (px)",
                     "Frame rate (fps)",
                     "Duration (frames)",
+                    "Background (RGB)",
                 ]
                 .into_iter()
                 .enumerate()
@@ -757,6 +791,45 @@ impl Render for Shell {
                             .child(div().flex_1().child(self.fields[index].clone())),
                     );
                 }
+                let color = ui::parse_hex_color(self.fields[5].read(cx).value()).ok();
+                let mut palette = div().flex().items_center().gap_2().child(
+                    div()
+                        .w(px(24.0))
+                        .h(px(24.0))
+                        .border_1()
+                        .border_color(rgb(ui::MUTED))
+                        .bg(rgb(color.unwrap_or(0)))
+                        .child(if color.is_some() { "" } else { "?" }),
+                );
+                for (label, color) in [
+                    ("Black", 0x000000),
+                    ("White", 0xffffff),
+                    ("Slate", 0x26384a),
+                    ("Navy", 0x102040),
+                ] {
+                    palette = palette.child(
+                        ui::text_button(
+                            gpui::SharedString::from(format!("background-{label}")),
+                            label,
+                        )
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                window.focus(&this.focus);
+                                this.fields[5].update(cx, |field, _| {
+                                    field.sync(
+                                        "composition-settings".into(),
+                                        format!("#{color:06X}"),
+                                        window,
+                                    )
+                                });
+                                this.settings_error.clear();
+                                cx.notify();
+                            },
+                        )),
+                    );
+                }
+                dialog = dialog.child(palette).child(div().text_size(px(11.0)).text_color(rgb(ui::MUTED))
+                    .child("Used in the preview and MP4. Transparency grid and alpha exports keep transparency."));
                 dialog = dialog
                     .child(
                         div()

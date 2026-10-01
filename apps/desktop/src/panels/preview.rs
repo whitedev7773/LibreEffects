@@ -535,7 +535,7 @@ impl Render for Preview {
                                     ),
                                 );
                                 window.with_content_mask(Some(ContentMask { bounds }), |window| {
-                                    window.paint_quad(fill(stage, rgb(0x000000)));
+                                    window.paint_quad(fill(stage, rgb(comp.background_color())));
                                     window.with_content_mask(
                                         Some(ContentMask {
                                             bounds: stage.intersect(&bounds),

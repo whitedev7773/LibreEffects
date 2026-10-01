@@ -276,6 +276,9 @@ pub struct Composition {
     height: u32,
     fps: u32,
     duration: Frame,
+    /// Preview and opaque-output matte; does not change the composition's alpha.
+    #[serde(default)]
+    background_color: u32,
     layers: Vec<Layer>,
 }
 
@@ -348,6 +351,9 @@ impl Composition {
     pub fn duration(&self) -> Frame {
         self.duration
     }
+    pub fn background_color(&self) -> u32 {
+        self.background_color
+    }
     pub fn layers(&self) -> &[Layer] {
         &self.layers
     }
@@ -374,6 +380,7 @@ impl Default for Project {
                 height: 1080,
                 fps: 30,
                 duration: 150,
+                background_color: 0x000000,
                 layers: Vec::new(),
             },
         }
@@ -397,7 +404,7 @@ impl Project {
 
     fn validate(&self) -> Result<(), String> {
         let comp = &self.composition;
-        if !(1..=5).contains(&self.version) {
+        if !(1..=6).contains(&self.version) {
             return Err("Unsupported project version".into());
         }
         if !(1..=16_384).contains(&comp.width)
@@ -407,6 +414,7 @@ impl Project {
             || comp.duration > comp.fps * 86_400
             || comp.layers.len() > 1_000
             || comp.name.len() > 1024
+            || comp.background_color > 0xffffff
         {
             return Err("Invalid composition settings".into());
         }
@@ -457,6 +465,8 @@ impl Project {
 #[derive(Clone, Debug)]
 pub enum Command {
     Batch(Vec<Command>),
+    SetCompositionBackground(u32),
+    AddBackgroundSolid,
     TrimLayers {
         ids: Vec<LayerId>,
         frame: Frame,
@@ -717,6 +727,9 @@ impl Editor {
         }) {
             next.project.version = 5;
         }
+        if next.project.composition.background_color != 0 {
+            next.project.version = 6;
+        }
         next.project.validate()?;
         if next != self.current {
             let previous = std::mem::replace(&mut self.current, next);
@@ -727,6 +740,13 @@ impl Editor {
 }
 
 fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
+    if let Command::SetCompositionBackground(color) = command {
+        if color > 0xffffff {
+            return Err("Background color must be a 24-bit RGB color".into());
+        }
+        state.project.composition.background_color = color;
+        return Ok(());
+    }
     if let Some(result) = editing::apply_extended(state, &command) {
         return result;
     }

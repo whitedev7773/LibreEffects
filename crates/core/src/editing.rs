@@ -197,6 +197,7 @@ pub(super) fn apply_extended(
     if !matches!(
         command,
         Command::Batch(_)
+            | Command::AddBackgroundSolid
             | Command::TrimLayers { .. }
             | Command::NudgeLayers { .. }
             | Command::DuplicateLayers(_)
@@ -220,6 +221,24 @@ pub(super) fn apply_extended(
     }
     Some((|| {
         match command {
+            Command::AddBackgroundSolid => {
+                let comp = &state.project.composition;
+                let (width, height, color) =
+                    (comp.width as f64, comp.height as f64, comp.background_color);
+                apply(
+                    state,
+                    Command::AddContent {
+                        content: Content::Rectangle,
+                        width,
+                        height,
+                        name: "Background".into(),
+                    },
+                )?;
+                let id = state.selected.unwrap();
+                apply(state, Command::SetColor { id, color })?;
+                let index = state.project.composition.layers.len() - 1;
+                apply(state, Command::MoveLayer { id, index })?;
+            }
             Command::SetVideoSpeed { id, .. }
             | Command::SetVideoSourceIn { id, .. }
             | Command::ReverseVideo { id }

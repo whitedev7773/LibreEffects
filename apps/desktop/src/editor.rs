@@ -45,7 +45,9 @@ pub(crate) enum Action {
     RefreshFootage,
     AddText,
     ExportFrame,
+    ExportFrameBackground,
     ExportSequence,
+    ExportSequenceBackground,
     ExportVideo(crate::video_export::VideoPreset),
     DismissRender,
     CancelExport,
@@ -253,7 +255,9 @@ impl EditorState {
                 | Action::ImportVideo
                 | Action::RelinkVideo
                 | Action::ExportFrame
+                | Action::ExportFrameBackground
                 | Action::ExportSequence
+                | Action::ExportSequenceBackground
                 | Action::ExportVideo(_)
         ) {
             // GPUI activates focused buttons on Enter key-up. A native file dialog
@@ -422,7 +426,8 @@ impl EditorState {
                 crate::footage::clear_cache();
                 self.preview_revision = self.preview_revision.wrapping_add(1);
             }
-            Action::ExportFrame => self.export(false, cx),
+            Action::ExportFrame => self.export(false, false, cx),
+            Action::ExportFrameBackground => self.export(false, true, cx),
             Action::TrimSelection(start) => self.dispatch(
                 &Action::Edit(Command::TrimLayers {
                     ids: self.selected_layers.iter().copied().collect(),
@@ -441,7 +446,8 @@ impl EditorState {
                 window,
                 cx,
             ),
-            Action::ExportSequence => self.export(true, cx),
+            Action::ExportSequence => self.export(true, false, cx),
+            Action::ExportSequenceBackground => self.export(true, true, cx),
             Action::ExportVideo(preset) => self.export_video(*preset, cx),
             Action::DismissRender => {
                 if !self.exporting {

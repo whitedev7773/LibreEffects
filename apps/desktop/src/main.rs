@@ -8,6 +8,7 @@ use gpui::{
     WindowOptions, px, size,
 };
 
+mod cli;
 mod components;
 mod editor;
 mod footage;
@@ -38,6 +39,15 @@ fn main() {
             unsafe {
                 std::env::remove_var("WAYLAND_DISPLAY");
             }
+        }
+    }
+
+    match cli::run() {
+        Ok(true) => return,
+        Ok(false) => {}
+        Err(error) => {
+            eprintln!("Render failed: {error}");
+            std::process::exit(1);
         }
     }
 

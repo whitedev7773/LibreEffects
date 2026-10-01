@@ -12,6 +12,27 @@ pub const TEXT: u32 = 0xc9c9c9;
 pub const MUTED: u32 = 0x969696;
 pub const BLUE: u32 = 0x4da6ff;
 
+pub(crate) fn parse_hex_color(text: &str) -> Result<u32, &'static str> {
+    let value = text.trim().strip_prefix('#').unwrap_or(text.trim());
+    if value.len() != 6 || !value.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("Enter a six-digit RGB color, for example #26384A");
+    }
+    u32::from_str_radix(value, 16).map_err(|_| "Invalid RGB color")
+}
+
+#[cfg(test)]
+mod color_tests {
+    use super::parse_hex_color;
+    #[test]
+    fn rgb_input_accepts_six_hex_digits_and_rejects_alpha_or_partial_values() {
+        assert_eq!(parse_hex_color(" #aBcD09 "), Ok(0xabcd09));
+        assert_eq!(parse_hex_color("000000"), Ok(0));
+        for value in ["#fff", "#12345678", "", "0x1234", "+12345", "GG1122"] {
+            assert!(parse_hex_color(value).is_err(), "{value}");
+        }
+    }
+}
+
 pub struct Assets;
 impl AssetSource for Assets {
     fn load(&self, path: &str) -> anyhow::Result<Option<Cow<'static, [u8]>>> {
