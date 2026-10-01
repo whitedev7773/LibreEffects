@@ -94,11 +94,7 @@ pub(crate) fn probe(path: &Path) -> Result<VideoInfo, String> {
         return Err("Choose an existing local video file".into());
     }
     let absolute = std::fs::canonicalize(path).map_err(|e| e.to_string())?;
-    let path = absolute
-        .to_str()
-        .ok_or("Video path must be Unicode")?
-        .trim_start_matches("\\\\?\\")
-        .to_owned();
+    let path = crate::media_io::path_string(&absolute)?;
     let mut cmd = command(&probe_path());
     cmd.args(["-v", "error", "-protocol_whitelist", "file,pipe", "-select_streams", "v:0", "-show_entries", "stream=width,height,duration,sample_aspect_ratio,avg_frame_rate,r_frame_rate:stream_tags=DURATION:stream_side_data=rotation:format=duration", "-of", "json"]).arg(&path);
     let json: serde_json::Value =

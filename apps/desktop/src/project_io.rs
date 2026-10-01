@@ -121,13 +121,13 @@ fn validate_sources(
 
 pub(crate) fn read_project(path: &Path) -> Result<Project, String> {
     let json = read_json(path)?;
-    parse_project(&json)
+    crate::media_io::resolve(&parse_project(&json)?, path)
 }
 pub(crate) fn read_editor_project(
     path: &Path,
 ) -> Result<(Project, crate::view_state::ProjectViews), String> {
     let json = read_json(path)?;
-    let project = parse_project(&json)?;
+    let project = crate::media_io::resolve(&parse_project(&json)?, path)?;
     let views = crate::view_state::ProjectViews::read(&json, &project);
     Ok((project, views))
 }

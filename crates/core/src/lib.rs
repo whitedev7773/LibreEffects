@@ -18,6 +18,8 @@ mod geometry;
 mod layer_workflow;
 pub use layer_workflow::{LayerClipboard, LayerSwitch};
 mod markers;
+mod media;
+pub use media::MediaReplacement;
 mod precompositions;
 mod time;
 mod tracks;
@@ -493,7 +495,7 @@ impl Project {
     }
 
     fn validate(&self) -> Result<(), String> {
-        if !(1..=14).contains(&self.version) {
+        if !(1..=15).contains(&self.version) {
             return Err("Unsupported project version".into());
         }
         if self.version < 9
@@ -617,6 +619,7 @@ impl Project {
 /// The future scripting bridge and native controls both dispatch these commands.
 #[derive(Clone, Debug)]
 pub enum Command {
+    RelinkMedia(Vec<MediaReplacement>),
     Marker {
         target: MarkerTarget,
         edit: MarkerEdit,
@@ -992,6 +995,9 @@ impl Editor {
 }
 
 fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
+    if let Command::RelinkMedia(replacements) = command {
+        return media::relink(state, replacements);
+    }
     if let Command::ConfigureComposition {
         name,
         width,

@@ -62,8 +62,8 @@ impl EditorState {
                         let current = s.editor.project().composition().layer(old.id()).ok_or("Layer was deleted during relink")?;
                         if current.content() != old.content() { return Err("Video source changed during relink".into()); }
                         if info.width as f64 != old.width() || info.height as f64 != old.height() { return Err("Relink requires the same source dimensions; import this file as a new layer".into()); }
-                        let Content::Video { start_frame, playback, .. } = old.content() else { unreachable!() };
-                        Command::SetContent { id: old.id(), content: Content::Video { path: info.path, duration: info.duration, source_fps: info.source_fps, start_frame: *start_frame, playback: *playback } }
+                        let Content::Video { path: original, .. } = old.content() else { unreachable!() };
+                        Command::RelinkMedia(vec![libre_effects_core::MediaReplacement { original: original.clone(), path: info.path, duration: info.duration, fps: info.source_fps, width: info.width, height: info.height }])
                     } else {
                         Command::AddContent { content: Content::Video { path: info.path, duration: info.duration, source_fps: info.source_fps, start_frame: frame as i64, playback: Default::default() }, width: info.width as f64, height: info.height as f64, name }
                     };

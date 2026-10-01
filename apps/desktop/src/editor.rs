@@ -11,11 +11,12 @@ use libre_effects_core::{
 };
 
 use crate::components::{Button, ButtonSize, ButtonVariant};
-use crate::project_io::write_project;
 #[path = "editor_footage.rs"]
 mod footage;
 #[path = "editor_io.rs"]
 mod io;
+#[path = "editor_media.rs"]
+mod media;
 #[path = "editor_video.rs"]
 mod video;
 #[path = "editor_view.rs"]
@@ -51,6 +52,12 @@ pub(crate) enum Action {
     RequestOpen,
     SaveAs,
     Save,
+    CollectFiles,
+    CancelCollection,
+    ManageMedia,
+    RefreshMedia,
+    RelinkSource(String),
+    RelinkMissing,
     ImportImage,
     ImportVideo,
     RelinkVideo,
@@ -142,6 +149,12 @@ pub(crate) struct EditorState {
     pub path: Option<PathBuf>,
     saved: Project,
     pub saving: bool,
+    pub collecting: bool,
+    pub media_open: bool,
+    pub scanning_media: bool,
+    pub media_entries: Vec<crate::media_io::MediaEntry>,
+    pub media_message: String,
+    collection_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub request_open: bool,
     pub close_after_save: bool,
     pub recovery: Option<crate::recovery::Candidate>,
@@ -191,6 +204,12 @@ impl Default for EditorState {
             path: None,
             saved: Project::default(),
             saving: false,
+            collecting: false,
+            media_open: false,
+            scanning_media: false,
+            media_entries: Vec::new(),
+            media_message: String::new(),
+            collection_cancel: Default::default(),
             request_open: false,
             close_after_save: false,
             recovery: None,
@@ -249,6 +268,9 @@ impl EditorState {
         ))
     }
     fn clear_clipboard(&mut self) {
+        self.media_open = false;
+        self.media_entries.clear();
+        self.media_message.clear();
         self.marker_selection = None;
         self.clipboard.clear();
         self.layer_clipboard = None;
@@ -361,6 +383,9 @@ impl EditorState {
             Action::Open
                 | Action::Save
                 | Action::SaveAs
+                | Action::CollectFiles
+                | Action::RelinkSource(_)
+                | Action::RelinkMissing
                 | Action::ImportImage
                 | Action::ImportVideo
                 | Action::RelinkVideo
@@ -741,6 +766,13 @@ impl EditorState {
             Action::ImportImage => self.import(cx),
             Action::ImportVideo => self.import_video(false, cx),
             Action::RelinkVideo => self.import_video(true, cx),
+            Action::ManageMedia => {
+                self.media_open = true;
+                self.refresh_media(cx);
+            }
+            Action::RefreshMedia => self.refresh_media(cx),
+            Action::RelinkSource(path) => self.relink_media(Some(path.clone()), cx),
+            Action::RelinkMissing => self.relink_media(None, cx),
             Action::RefreshFootage => {
                 crate::footage::clear_cache();
                 self.preview_revision = self.preview_revision.wrapping_add(1);
@@ -955,6 +987,10 @@ impl EditorState {
             Action::RequestOpen => self.request_open = true,
             Action::SaveAs => self.save_as(cx),
             Action::Save => self.save(cx),
+            Action::CollectFiles => self.collect_files(cx),
+            Action::CancelCollection => self
+                .collection_cancel
+                .store(true, std::sync::atomic::Ordering::Relaxed),
         }
         self.normalize();
         cx.notify();

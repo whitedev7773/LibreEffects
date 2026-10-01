@@ -401,8 +401,10 @@ controls to put footage below a title, then save the project and render MP4/MOV.
   and 24 hours. MP4/MOV/MKV/WebM support depends on the installed FFmpeg codecs.
   Convert variable-frame-rate, anamorphic or HDR footage to SDR CFR first. Source
   frame-rate metadata is checked, but this is not a full VFR timestamp scan.
-- Video remains linked to an absolute local path; it is not embedded or copied.
-  Keep source files with your project when moving work between computers.
+- Video stays linked while editing. Save records sources beneath the destination
+  project folder as relative paths; sources outside it remain absolute. Reopening
+  resolves relative paths against the project file, including offline sources.
+  Save As does not change live source paths, Undo history or the original footage.
 - Scrubbing samples the preceding source frame at composition time. Different
   source/composition rates duplicate or drop frames; there is no frame blending.
   Trim changes visibility without slipping the source. Moving a clip shifts its
@@ -412,7 +414,8 @@ controls to put footage below a title, then save the project and render MP4/MOV.
 - Missing sources produce an explicit preview error and fail output without
   replacing an existing destination. Select the video and use Relink source in
   Properties or File → Relink selected video. Relink is undoable and retains layer
-  timing/framing; replacement dimensions must match. A shorter replacement is
+  timing/framing; it updates all references to that source across compositions,
+  including locked instances. Replacement dimensions must match every instance. A shorter replacement is
   transparent beyond its duration. File → Refresh footage retries after restoring
   or replacing a file at the same path.
 - Preview decoding runs in the background with one request in flight and a bounded
@@ -423,6 +426,27 @@ controls to put footage below a title, then save the project and render MP4/MOV.
 - Audio is not imported, played or exported. Color processing is 8-bit RGBA and is
   not an HDR/color-managed workflow. Source files must stay unchanged during export;
   project snapshots preserve edits, not the external file bytes.
+
+### Portable projects and missing media
+
+File → Manage project media lists unique linked videos, their layer reference
+counts and Online/Missing status across all compositions. Refresh rechecks disk.
+Locate selects one replacement; Relink missing from folder searches a chosen
+folder and its children, verifies the codec/first frame, and applies the resolved
+sources as one undoable edit. Ambiguous filenames are left unresolved with a
+report. Search skips symbolic links and is limited to 10,000 entries / 16 levels.
+If a checked replacement has incompatible dimensions, the entire edit is rejected.
+
+File → Collect project files creates a new `LibreEffects-collected-*` directory
+inside the chosen parent, with `project.lfe.json` and a `Media` folder. Linked
+videos are copied once per canonical source with unique numbered filenames;
+embedded images and editor views stay in the JSON. The current project and source
+files remain unchanged. Move the complete new folder to relocate the project.
+Copy errors, changed source files and cancellation remove the incomplete new
+collection. File → Cancel file collection stops copying between 1 MiB chunks.
+The completion path or error also remains in the Project Media dialog.
+Collected projects contain local file bytes, not external fonts, FFmpeg binaries
+or a package installer. Existing embedded-image limits still apply.
 
 ### Video speed, reverse and freeze
 
@@ -507,7 +531,7 @@ Versioned .lfe.json files contain compositions, layer ranges, transforms and
 keyframes. Files from the initial rectangle editor remain readable. Bezier or
 parenting edits upgrade the project to version 2; text, images, masks or effects
 upgrade it to version 3; linked videos require version 4, and altered video playback
-requires version 5. Nonblack composition backgrounds require version 6; shared embedded image assets require version 7, saved work areas require version 8, multiple compositions require version 9, nested layers require version 10, Null/Solo/Shy/Guide require version 11, ordered animated effects require version 12, timeline markers require version 13, and rational FPS/nonzero start timecode require version 14. Integer FPS files remain readable; fractional rates serialize as `{numerator, denominator}`. Older applications reject
+requires version 5. Nonblack composition backgrounds require version 6; shared embedded image assets require version 7, saved work areas require version 8, multiple compositions require version 9, nested layers require version 10, Null/Solo/Shy/Guide require version 11, ordered animated effects require version 12, timeline markers require version 13, rational FPS/nonzero start timecode require version 14, and portable source-path rewrites use version 15. Integer FPS files remain readable; fractional rates serialize as `{numerator, denominator}`. Older applications reject
 unsupported versions. Save writes
 the snapshot captured when clicked using a temporary file before replacement.
 Files are limited to 256 MiB, with up to 128 MiB of unique base64 image data and

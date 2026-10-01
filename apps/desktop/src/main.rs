@@ -13,6 +13,7 @@ mod components;
 mod editor;
 mod effect_render;
 mod footage;
+mod media_io;
 mod panels;
 mod project_io;
 mod recovery;

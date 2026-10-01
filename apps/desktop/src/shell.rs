@@ -6,6 +6,8 @@ use crate::{
 };
 use gpui::{Context, Entity, FocusHandle, KeyDownEvent, Window, div, prelude::*, px, rgb};
 use libre_effects_core::{Command, FrameRate};
+#[path = "shell_media.rs"]
+mod media;
 
 pub(crate) struct Shell {
     state: Entity<EditorState>,
@@ -220,6 +222,7 @@ impl Shell {
             self.state.update(cx, |s, _| {
                 s.close_after_save = false;
                 s.marker_selection = None;
+                s.media_open = false;
             });
             self.menu = None;
             self.settings = false;
@@ -230,6 +233,7 @@ impl Shell {
         }
         if self.settings
             || self.help
+            || self.state.read(cx).media_open
             || self.closing
             || self.pending_document.is_some()
             || self.state.read(cx).recovery.is_some()
@@ -635,8 +639,18 @@ impl Render for Shell {
                     ("Open project…", "Ctrl+O", Some(Action::Open)),
                     ("Save", "Ctrl+S", Some(Action::Save)),
                     ("Save as…", "Ctrl+Shift+S", Some(Action::SaveAs)),
+                    ("Collect project files…", "", Some(Action::CollectFiles)),
+                    (
+                        "Cancel file collection",
+                        "",
+                        self.state
+                            .read(cx)
+                            .collecting
+                            .then_some(Action::CancelCollection),
+                    ),
                     ("Import image…", "Ctrl+I", Some(Action::ImportImage)),
                     ("Import video…", "Ctrl+Shift+I", Some(Action::ImportVideo)),
+                    ("Manage project media…", "", Some(Action::ManageMedia)),
                     ("Relink selected video…", "", Some(Action::RelinkVideo)),
                     ("Refresh footage", "", Some(Action::RefreshFootage)),
                     (
@@ -1094,6 +1108,22 @@ impl Render for Shell {
                         .bg(gpui::rgba(0x00000080))
                         .occlude()
                         .child(dialog),
+                )
+                .with_priority(3),
+            );
+        }
+        if self.state.read(cx).media_open {
+            root = root.child(
+                gpui::deferred(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(gpui::rgba(0x00000080))
+                        .occlude()
+                        .child(self.media_dialog(cx)),
                 )
                 .with_priority(3),
             );

@@ -203,13 +203,6 @@ impl EditorState {
         self.stop();
         let views = self.capture_views();
         let snapshot = self.editor.project().clone();
-        let json = match views.write(&snapshot) {
-            Ok(s) => s,
-            Err(e) => {
-                self.status = e;
-                return;
-            }
-        };
         let path = if choose { None } else { self.path.clone() };
         let directory = self
             .path
@@ -238,9 +231,10 @@ impl EditorState {
                 path.unwrap()
             };
             let destination = path.clone();
+            let copy = snapshot.clone();
             let result = cx
                 .background_executor()
-                .spawn(async move { write_project(&destination, &json) })
+                .spawn(async move { crate::media_io::save(&copy, &views, &destination) })
                 .await;
             let _ = entity.update(cx, |s, cx| {
                 s.saving = false;
