@@ -11,6 +11,29 @@ pub enum Content {
     Image {
         png: String,
     },
+    Video {
+        path: String,
+        duration: f64,
+        source_fps: f64,
+        /// Composition frame at which source time zero occurs; trimming never changes it.
+        start_frame: i64,
+    },
+}
+impl Content {
+    pub fn video_time(&self, frame: Frame, fps: u32) -> Option<f64> {
+        let Self::Video {
+            duration,
+            start_frame,
+            source_fps,
+            ..
+        } = self
+        else {
+            return None;
+        };
+        let seconds = (frame as i64 - start_frame) as f64 / fps as f64;
+        (seconds >= 0.0 && seconds < *duration)
+            .then(|| ((seconds * source_fps + 1e-7).floor() / source_fps).max(0.0))
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Effects {
@@ -63,6 +86,22 @@ pub(super) fn validate_content(
                 && png
                     .bytes()
                     .all(|b| b.is_ascii_alphanumeric() || b"+/=".contains(&b))
+        }
+        Content::Video {
+            path,
+            duration,
+            start_frame,
+            source_fps,
+        } => {
+            !path.is_empty()
+                && source_fps.is_finite()
+                && (1.0..=240.0).contains(source_fps)
+                && path.len() <= 32768
+                && !path.contains('\0')
+                && duration.is_finite()
+                && (0.0..=86400.0).contains(duration)
+                && *duration > 0.0
+                && start_frame.abs_diff(0) <= 100_000_000
         }
     };
     if !valid
@@ -301,6 +340,8 @@ pub(super) fn apply_extended(
             } => {
                 validate_content(content, Effects::default(), None)?;
                 apply(state, Command::AddRectangle)?;
+                let comp = &state.project.composition;
+                let (fps, duration, cw, ch) = (comp.fps, comp.duration, comp.width, comp.height);
                 let l = editable(state, state.selected.unwrap())?;
                 l.content = content.clone();
                 l.width = *width;
@@ -309,6 +350,24 @@ pub(super) fn apply_extended(
                 l.color = 0xffffff;
                 l.properties.get_mut(&Property::AnchorX).unwrap().value = width / 2.0;
                 l.properties.get_mut(&Property::AnchorY).unwrap().value = height / 2.0;
+                if let Content::Video {
+                    duration: seconds,
+                    start_frame,
+                    ..
+                } = content
+                {
+                    if *start_frame < 0 || *start_frame >= duration as i64 {
+                        return Err("Import video inside the composition".into());
+                    }
+                    l.in_frame = *start_frame as u32;
+                    l.out_frame = Some(
+                        (l.in_frame as u64 + (seconds * fps as f64).ceil() as u64)
+                            .min(duration as u64) as u32,
+                    );
+                    let scale = (cw as f64 / width).min(ch as f64 / height).min(1.0) * 100.0;
+                    l.properties.get_mut(&Property::ScaleX).unwrap().value = scale;
+                    l.properties.get_mut(&Property::ScaleY).unwrap().value = scale;
+                }
             }
             Command::SetContent { id, content } => editable(state, *id)?.content = content.clone(),
             Command::SetEffects { id, effects } => editable(state, *id)?.effects = *effects,
@@ -320,6 +379,11 @@ pub(super) fn apply_extended(
                 let end = l.out_frame(duration);
                 l.in_frame = shifted(l.in_frame, *delta, duration, false)?;
                 l.out_frame = Some(shifted(end, *delta, duration, true)?);
+                if let Content::Video { start_frame, .. } = &mut l.content {
+                    *start_frame = start_frame
+                        .checked_add(*delta)
+                        .ok_or("Video timing overflow")?;
+                }
                 for track in l.properties.values_mut() {
                     track.keys = track
                         .keys

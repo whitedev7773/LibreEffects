@@ -306,7 +306,10 @@ impl Render for Inspector {
             entries.insert(0, (0, "Text", text.clone()));
             entries.insert(1, (1, "Font size", font_size.to_string()));
         }
-        if matches!(layer.content(), Content::Image { .. }) {
+        if matches!(
+            layer.content(),
+            Content::Image { .. } | Content::Video { .. }
+        ) {
             entries.retain(|(index, _, _)| *index != 2);
         }
         contents = contents.child(
@@ -317,6 +320,28 @@ impl Render for Inspector {
                 .border_color(rgb(ui::BORDER))
                 .child("Content & Effects"),
         );
+        if let Content::Video { path, duration, .. } = layer.content() {
+            contents = contents
+                .child(
+                    div()
+                        .text_size(px(11.0))
+                        .text_color(rgb(ui::MUTED))
+                        .child(format!("Linked video · {duration:.2}s · no audio")),
+                )
+                .child(
+                    div()
+                        .text_size(px(11.0))
+                        .max_h(px(48.0))
+                        .overflow_hidden()
+                        .child(path.clone()),
+                )
+                .child(ui::text_button("relink-video", "Relink source…").on_click({
+                    let state = self.state.clone();
+                    move |_, window, cx| {
+                        state.update(cx, |s, cx| s.dispatch(&Action::RelinkVideo, window, cx));
+                    }
+                }));
+        }
         for (index, label, value) in entries {
             self.extra[index].update(cx, |field, _| {
                 if index != 0 && index != 2 {

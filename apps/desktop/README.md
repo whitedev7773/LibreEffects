@@ -32,6 +32,8 @@ editor, not a complete After Effects replacement or an AEP-compatible applicatio
   Properties edits the text, font size and hexadecimal fill color.
 - Ctrl+I imports PNG/JPEG images (up to 8 MiB and 4096 × 4096 pixels). Images are
   re-encoded as PNG and stored inside the project, so moving the original is safe.
+- Ctrl+Shift+I imports a local video as a linked layer at the playhead. See
+  Video footage below for source requirements and relinking.
 - Position, anchor, scale, rotation and opacity; X and Y remain separate animation
   channels but share one row. Click X or Y to select the Graph Editor channel.
 - Click a numeric field, type a value, press Enter to apply or Escape to cancel.
@@ -133,6 +135,7 @@ cargo run -p libre-effects-core --example make_animation_study -- examples/curve
 | --- | --- |
 | Ctrl+N / Ctrl+O / Ctrl+S | New / Open / Save |
 | Ctrl+Shift+S / Ctrl+I | Save as / Import image |
+| Ctrl+Shift+I | Import video footage |
 | Ctrl+C / Ctrl+V | Copy / Paste selected keys |
 | Ctrl+Z / Ctrl+Shift+Z | Undo / Redo |
 | Ctrl+Y / Ctrl+D | Add rectangle / Duplicate selected layer |
@@ -221,8 +224,8 @@ is stopped. Wait for completion or cancel before closing the application.
 5. Choose the MP4 preset for viewing/sharing, or MOV with alpha for another compositor.
    Dismiss the completed render strip to recover the full editing workspace.
 
-This workflow supports short 2D titles, animated graphics and transparent overlays.
-It does not yet provide footage editing, audio mixing or the full AE workflow.
+This workflow supports short 2D titles, animated graphics, linked video footage
+and transparent overlays. Audio mixing and the full AE workflow remain pending.
 
 `examples/lower-third.lfe.json` is a 1920×1080, 30 fps, five-second transparent
 name/title overlay with entry/exit animation. Edit the Name and Role layers, then
@@ -240,12 +243,54 @@ cargo run -p libre-effects-core --example make_lower_third -- examples/lower-thi
 Open `examples/content-study.lfe.json` for a text/mask/effects sample.
 Regenerate it with `cargo run -p libre-effects-core --example make_content_study -- examples/content-study.lfe.json`.
 
+## Video footage
+
+![Linked video and an animated title rendered to 1080p MP4](screenshots/footage-composite.png)
+
+File → Import video (Ctrl+Shift+I) reads a local video through FFprobe and FFmpeg,
+verifies its first frame, and adds a layer at the playhead. Its Out point is the
+source duration or composition end, whichever comes first. Oversized footage is
+scaled down to fit; smaller footage retains its native dimensions. Use layer order
+controls to put footage below a title, then save the project and render MP4/MOV.
+
+- Supports square-pixel, constant-frame-rate video at 1–240 fps, up to 4096 × 4096
+  and 24 hours. MP4/MOV/MKV/WebM support depends on the installed FFmpeg codecs.
+  Convert variable-frame-rate, anamorphic or HDR footage to SDR CFR first. Source
+  frame-rate metadata is checked, but this is not a full VFR timestamp scan.
+- Video remains linked to an absolute local path; it is not embedded or copied.
+  Keep source files with your project when moving work between computers.
+- Scrubbing samples the preceding source frame at composition time. Different
+  source/composition rates duplicate or drop frames; there is no frame blending.
+  Trim changes visibility without slipping the source. Moving a clip shifts its
+  source origin and keys; splitting retains source continuity in both halves.
+- Transforms, parenting, opacity, rectangular masks and effects apply to footage
+  through the same compositor used for preview, PNG and video output.
+- Missing sources produce an explicit preview error and fail output without
+  replacing an existing destination. Select the video and use Relink source in
+  Properties or File → Relink selected video. Relink is undoable and retains layer
+  timing/framing; replacement dimensions must match. A shorter replacement is
+  transparent beyond its duration. File → Refresh footage retries after restoring
+  or replacing a file at the same path.
+- Preview decoding runs in the background with one request in flight and a bounded
+  32 MiB / 24-frame PNG cache. Playback may skip preview frames; uncached frames are
+  decoded on demand and real-time playback is not guaranteed. Output renders every
+  frame. Frame decoding times out after 15 seconds; cancellation can wait for the
+  current source-frame decode. Preview resolution does not reduce output quality.
+- Audio is not imported, played or exported. Color processing is 8-bit RGBA and is
+  not an HDR/color-managed workflow. Source files must stay unchanged during export;
+  project snapshots preserve edits, not the external file bytes.
+
+FFprobe must be on PATH alongside FFmpeg. `LIBRE_EFFECTS_FFPROBE` overrides its
+executable; when `LIBRE_EFFECTS_FFMPEG` is absolute, FFprobe defaults to that same
+directory. Neither tool is downloaded automatically.
+
 ## Project files and recovery
 
 Versioned .lfe.json files contain the composition, layer ranges, transforms and
 keyframes. Files from the initial rectangle editor remain readable. Bezier or
 parenting edits upgrade the project to version 2; text, images, masks or effects
-upgrade it to version 3. Older applications reject unsupported versions. Save writes
+upgrade it to version 3; linked videos require version 4. Older applications reject
+unsupported versions. Save writes
 the snapshot captured when clicked using a temporary file before replacement.
 The size limit is 16 MiB. Undo history is capped at 100 edits and is reset at a
 New/Open document boundary. Failed saves leave the edited project intact.
@@ -263,7 +308,7 @@ instance, not a versioned backup system. A normal save/discard close clears it.
 
 ## Remaining limitations
 
-Still pending: multiple compositions and precompositions, audio/video footage,
+Still pending: multiple compositions and precompositions, audio footage,
 audio output, freeform/animated masks, an effect stack and animated effects,
 rich text layout, 3D, JSX, ExtendScript and expressions. PNG sequences can be
 assembled in an external video tool.
@@ -285,11 +330,12 @@ Optional FFmpeg integration checks encode and decode MP4/ProRes, check work-area
 timing and alpha, and cancel an active encoder while preserving the destination:
 
 ~~~sh
-cargo test -p libre-effects-desktop video_export::tests -- --ignored
+cargo test -p libre-effects-desktop -- --ignored
 ~~~
 
-These two tests are explicitly ignored in the default suite when FFmpeg is not a
-declared test dependency; run them separately when validating video export.
+These four tests are explicitly ignored in the default suite when FFmpeg/FFprobe
+are not declared test dependencies. They also check footage import, different
+frame rates, the final source frame, missing media, and composited video output.
 
 When Moon is unavailable, the corresponding local commands are:
 

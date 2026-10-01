@@ -16,6 +16,7 @@ impl EditorState {
     pub fn recover(&mut self, restore: bool, cx: &mut Context<Self>) {
         if let Some(project) = self.recovery.take() {
             if restore {
+                self.document_revision = self.document_revision.wrapping_add(1);
                 let _ = self.editor.replace_project(project);
                 self.path = None;
                 self.work_end = self.editor.project().composition().duration();
@@ -121,6 +122,7 @@ impl EditorState {
             let _ = entity.update(cx, |s, cx| {
                 match result {
                     Ok(project) => {
+                        s.document_revision = s.document_revision.wrapping_add(1);
                         s.saved = project.clone();
                         let _ = s.editor.replace_project(project);
                         s.editor.clear_history();

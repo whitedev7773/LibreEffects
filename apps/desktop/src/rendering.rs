@@ -135,6 +135,18 @@ impl Renderer {
                     l.width(),
                     l.height()
                 )),
+                Content::Video { path, .. } => {
+                    if let Some(seconds) = l.content().video_time(frame, c.fps()) {
+                        let png = crate::footage::frame_png(
+                            path,
+                            seconds,
+                            l.width() as u32,
+                            l.height() as u32,
+                            max_dimension,
+                        )?;
+                        svg.push_str(&format!("<image width='{}' height='{}' xlink:href='data:image/png;base64,{png}'/>", l.width(), l.height()));
+                    }
+                }
             }
             svg.push_str("</g></g>");
         }

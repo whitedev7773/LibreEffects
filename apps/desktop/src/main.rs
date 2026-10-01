@@ -10,6 +10,7 @@ use gpui::{
 
 mod components;
 mod editor;
+mod footage;
 mod panels;
 mod project_io;
 mod rendering;

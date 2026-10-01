@@ -184,7 +184,11 @@ impl Shell {
                 } else {
                     Action::Save
                 }),
-                "i" => Some(Action::ImportImage),
+                "i" => Some(if m.shift {
+                    Action::ImportVideo
+                } else {
+                    Action::ImportImage
+                }),
                 "c" => Some(Action::CopyKeys),
                 "v" => Some(Action::PasteKeys),
                 "z" => Some(if m.shift { Action::Redo } else { Action::Undo }),
@@ -558,6 +562,9 @@ impl Render for Shell {
                     ("Save", "Ctrl+S", Some(Action::Save)),
                     ("Save as…", "Ctrl+Shift+S", Some(Action::SaveAs)),
                     ("Import image…", "Ctrl+I", Some(Action::ImportImage)),
+                    ("Import video…", "Ctrl+Shift+I", Some(Action::ImportVideo)),
+                    ("Relink selected video…", "", Some(Action::RelinkVideo)),
+                    ("Refresh footage", "", Some(Action::RefreshFootage)),
                     ("Export current frame (PNG)…", "", Some(Action::ExportFrame)),
                     (
                         "Render work area (PNG sequence)…",

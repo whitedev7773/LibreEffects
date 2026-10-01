@@ -11,6 +11,8 @@ use libre_effects_core::{
 
 use crate::components::{Button, ButtonSize, ButtonVariant};
 use crate::project_io::{read_project, write_project};
+#[path = "editor_footage.rs"]
+mod footage;
 #[path = "editor_io.rs"]
 mod io;
 #[path = "editor_video.rs"]
@@ -38,6 +40,9 @@ pub(crate) enum Action {
     SaveAs,
     Save,
     ImportImage,
+    ImportVideo,
+    RelinkVideo,
+    RefreshFootage,
     AddText,
     ExportFrame,
     ExportSequence,
@@ -121,6 +126,9 @@ pub(crate) struct EditorState {
     pub timeline_start: Frame,
     pub preview_zoom: Option<f32>,
     pub preview_resolution: u32,
+    pub preview_revision: u64,
+    pub document_revision: u64,
+    pub importing_video: bool,
     pub checkerboard: bool,
     pub tool: Tool,
     pub work_start: Frame,
@@ -159,6 +167,9 @@ impl Default for EditorState {
             timeline_start: 0,
             preview_zoom: None,
             preview_resolution: 1,
+            preview_revision: 0,
+            document_revision: 0,
+            importing_video: false,
             checkerboard: false,
             tool: Tool::Select,
             work_start: 0,
@@ -389,6 +400,12 @@ impl EditorState {
                 cx,
             ),
             Action::ImportImage => self.import(cx),
+            Action::ImportVideo => self.import_video(false, cx),
+            Action::RelinkVideo => self.import_video(true, cx),
+            Action::RefreshFootage => {
+                crate::footage::clear_cache();
+                self.preview_revision = self.preview_revision.wrapping_add(1);
+            }
             Action::ExportFrame => self.export(false, cx),
             Action::TrimSelection(start) => self.dispatch(
                 &Action::Edit(Command::TrimLayers {
@@ -525,6 +542,7 @@ impl EditorState {
                 self.step_history(matches!(action, Action::Redo));
             }
             Action::New => {
+                self.document_revision = self.document_revision.wrapping_add(1);
                 self.stop();
                 match self.editor.replace_project(Project::default()) {
                     Ok(()) => {

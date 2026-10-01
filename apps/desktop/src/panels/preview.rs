@@ -63,6 +63,16 @@ pub(crate) struct Preview {
     gesture: Option<MoveGesture>,
     focus: FocusHandle,
     renderer: crate::rendering::Renderer,
+    pending: bool,
+    revision: u64,
+    ready: Option<(
+        libre_effects_core::Project,
+        u32,
+        u32,
+        u64,
+        Result<image::RgbaImage, String>,
+    )>,
+    failed: Option<(libre_effects_core::Project, u32, u32, String)>,
     cached: Option<(
         libre_effects_core::Project,
         u32,
@@ -112,6 +122,10 @@ impl Preview {
             gesture: None,
             focus: cx.focus_handle(),
             renderer: crate::rendering::Renderer::new(),
+            pending: false,
+            revision: 0,
+            ready: None,
+            failed: None,
             cached: None,
         }
     }
@@ -316,6 +330,8 @@ impl Render for Preview {
         let zoom = state.preview_zoom;
         let checker = state.checkerboard;
         let resolution = state.preview_resolution;
+        let revision = state.preview_revision;
+        let playing = state.playing;
         let max_dimension = (comp.width().max(comp.height()).min(1280) / resolution).max(1);
         let hand = state.tool == Tool::Hand;
         let title = format!("Composition   {}", comp.name());
@@ -332,26 +348,115 @@ impl Render for Preview {
             render_project = temporary.project().clone();
         }
         let comp = render_project.composition().clone();
-        if self.cached.as_ref().is_none_or(|(p, f, dimension, _)| {
-            p != &render_project || *f != frame || *dimension != max_dimension
-        }) {
+        if self.revision != revision {
+            self.revision = revision;
+            self.failed = None;
             if let Some((_, _, _, old)) = self.cached.take() {
                 let _ = window.drop_image(old);
             }
-            if let Ok(mut pixels) = self.renderer.render(&render_project, frame, max_dimension) {
-                for pixel in pixels.pixels_mut() {
-                    pixel.0.swap(0, 2);
+        }
+        if let Some((project, ready_frame, dimension, generation, result)) = self.ready.take() {
+            if project == render_project
+                && dimension == max_dimension
+                && generation == revision
+                && (playing || ready_frame == frame)
+            {
+                if let Some((_, _, _, old)) = self.cached.take() {
+                    let _ = window.drop_image(old);
                 }
-                self.cached = Some((
-                    render_project,
-                    frame,
-                    max_dimension,
-                    std::sync::Arc::new(gpui::RenderImage::new(vec![image::Frame::new(pixels)])),
-                ));
-            } else {
-                self.cached = None;
+                match result {
+                    Ok(mut pixels) => {
+                        for p in pixels.pixels_mut() {
+                            p.0.swap(0, 2);
+                        }
+                        self.cached = Some((
+                            project,
+                            ready_frame,
+                            dimension,
+                            std::sync::Arc::new(gpui::RenderImage::new(vec![image::Frame::new(
+                                pixels,
+                            )])),
+                        ));
+                        self.failed = None;
+                    }
+                    Err(e) => self.failed = Some((project, ready_frame, dimension, e)),
+                }
             }
         }
+        if self.cached.as_ref().is_none_or(|(p, f, dimension, _)| {
+            p != &render_project || *f != frame || *dimension != max_dimension
+        }) {
+            let has_video = comp
+                .layers()
+                .iter()
+                .any(|l| matches!(l.content(), libre_effects_core::Content::Video { .. }));
+            if has_video {
+                if self
+                    .cached
+                    .as_ref()
+                    .is_some_and(|(p, _, _, _)| p != &render_project)
+                {
+                    if let Some((_, _, _, old)) = self.cached.take() {
+                        let _ = window.drop_image(old);
+                    }
+                }
+                let failed = self.failed.as_ref().is_some_and(|(p, f, d, _)| {
+                    p == &render_project && *f == frame && *d == max_dimension
+                });
+                if !self.pending && !failed {
+                    self.pending = true;
+                    let project = render_project.clone();
+                    cx.spawn(async move |entity, cx| {
+                        let worker_project = project.clone();
+                        let result = cx
+                            .background_executor()
+                            .spawn(async move {
+                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                    crate::rendering::Renderer::new().render(
+                                        &worker_project,
+                                        frame,
+                                        max_dimension,
+                                    )
+                                }))
+                                .unwrap_or_else(|_| Err("Video preview failed".into()))
+                            })
+                            .await;
+                        let _ = entity.update(cx, |s, cx| {
+                            s.pending = false;
+                            s.ready = Some((project, frame, max_dimension, revision, result));
+                            cx.notify();
+                        });
+                    })
+                    .detach();
+                }
+            } else {
+                self.failed = None;
+                if let Some((_, _, _, old)) = self.cached.take() {
+                    let _ = window.drop_image(old);
+                }
+                if let Ok(mut pixels) = self.renderer.render(&render_project, frame, max_dimension)
+                {
+                    for pixel in pixels.pixels_mut() {
+                        pixel.0.swap(0, 2);
+                    }
+                    self.cached = Some((
+                        render_project.clone(),
+                        frame,
+                        max_dimension,
+                        std::sync::Arc::new(gpui::RenderImage::new(vec![image::Frame::new(
+                            pixels,
+                        )])),
+                    ));
+                } else {
+                    self.cached = None;
+                }
+            }
+        }
+        let error = self
+            .failed
+            .as_ref()
+            .filter(|(p, f, _, _)| p == &render_project && *f == frame)
+            .map(|(_, _, _, e)| e.clone());
         let rendered = self.cached.as_ref().map(|(_, _, _, image)| image.clone());
         let measured = self.bounds.clone();
         div()
@@ -362,6 +467,17 @@ impl Render for Preview {
             .min_h_0()
             .bg(rgb(ui::BG))
             .child(ui::panel_header(title))
+            .when_some(error, |s, error| {
+                s.child(
+                    div()
+                        .px_3()
+                        .py_2()
+                        .max_h(px(74.0))
+                        .overflow_hidden()
+                        .text_color(rgb(0xf0b5b5))
+                        .child(error),
+                )
+            })
             .child(
                 div()
                     .h(px(26.0))
@@ -371,7 +487,15 @@ impl Render for Preview {
                     .items_center()
                     .text_size(px(11.0))
                     .text_color(rgb(ui::MUTED))
-                    .child(format!("{}  ›  Active Camera", comp.name())),
+                    .child(format!(
+                        "{}  ›  Active Camera{}",
+                        comp.name(),
+                        if self.pending {
+                            "  ·  Decoding footage…"
+                        } else {
+                            ""
+                        }
+                    )),
             )
             .child(
                 div()

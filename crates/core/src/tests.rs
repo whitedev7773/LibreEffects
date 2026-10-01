@@ -1293,7 +1293,7 @@ fn serialized_project_roundtrips_animation_and_preserves_ids() {
 fn corrupt_and_future_projects_are_rejected() {
     let editor = editor_with_layer();
     let mut project = editor.project().clone();
-    project.version = 4;
+    project.version = 5;
     assert!(Project::from_json(&project.to_json().unwrap()).is_err());
     project.version = 1;
     project.composition.fps = 0;
@@ -1362,4 +1362,97 @@ fn invalid_project_replacement_preserves_current_work_and_history() {
     assert_eq!(editor.project(), &previous);
     editor.undo();
     assert!(editor.project().composition().layers().is_empty());
+}
+#[test]
+fn video_timing_survives_trim_move_split_and_serialization() {
+    let mut e = Editor::default();
+    e.execute(Command::AddContent {
+        content: Content::Video {
+            path: "C:/footage/clip.mp4".into(),
+            duration: 2.0,
+            source_fps: 24.0,
+            start_frame: 10,
+        },
+        width: 3840.0,
+        height: 2160.0,
+        name: "Footage".into(),
+    })
+    .unwrap();
+    let id = e.selected().unwrap();
+    let l = e.project().composition().layer(id).unwrap();
+    assert_eq!((l.in_frame(), l.out_frame(150)), (10, 70));
+    assert_eq!(l.property(Property::ScaleX).value_at(0), 50.0);
+    assert_eq!(l.content().video_time(40, 30), Some(1.0));
+    e.execute(Command::SetLayerRange {
+        id,
+        start: 25,
+        end: 60,
+    })
+    .unwrap();
+    e.execute(Command::ShiftLayer { id, delta: -20 }).unwrap();
+    let moved = e.project().composition().layer(id).unwrap();
+    assert_eq!((moved.in_frame(), moved.out_frame(150)), (5, 40));
+    assert_eq!(moved.content().video_time(20, 30), Some(1.0));
+    e.execute(Command::SplitLayers {
+        ids: vec![id],
+        frame: 20,
+    })
+    .unwrap();
+    assert_eq!(e.project().composition().layers().len(), 2);
+    for layer in e.project().composition().layers() {
+        assert_eq!(layer.content().video_time(20, 30), Some(1.0));
+    }
+    let json = e.project().to_json().unwrap();
+    assert!(json.contains("\"version\": 4"));
+    assert_eq!(&Project::from_json(&json).unwrap(), e.project());
+    e.undo();
+    assert_eq!(e.project().composition().layers().len(), 1);
+    e.undo();
+    assert_eq!(
+        e.project()
+            .composition()
+            .layer(id)
+            .unwrap()
+            .content()
+            .video_time(40, 30),
+        Some(1.0)
+    );
+}
+
+#[test]
+fn video_sampling_uses_preceding_source_frame_and_rejects_invalid_metadata() {
+    let video = Content::Video {
+        path: "clip.mov".into(),
+        duration: 1.0,
+        source_fps: 24.0,
+        start_frame: 10,
+    };
+    assert_eq!(video.video_time(9, 30), None);
+    assert_eq!(video.video_time(10, 30), Some(0.0));
+    assert_eq!(video.video_time(39, 30), Some(23.0 / 24.0));
+    assert_eq!(video.video_time(40, 30), None);
+    let mut e = Editor::default();
+    for (duration, source_fps, start_frame) in [
+        (f64::NAN, 24.0, 0),
+        (1.0, 0.0, 0),
+        (1.0, 24.0, i64::MIN),
+        (1.0, 24.0, 150),
+    ] {
+        let old = e.project().clone();
+        assert!(
+            e.execute(Command::AddContent {
+                content: Content::Video {
+                    path: "clip.mp4".into(),
+                    duration,
+                    source_fps,
+                    start_frame
+                },
+                width: 64.0,
+                height: 48.0,
+                name: "Invalid".into()
+            })
+            .is_err()
+        );
+        assert_eq!(e.project(), &old);
+    }
 }

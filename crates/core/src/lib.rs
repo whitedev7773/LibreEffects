@@ -397,7 +397,7 @@ impl Project {
 
     fn validate(&self) -> Result<(), String> {
         let comp = &self.composition;
-        if !(1..=3).contains(&self.version) {
+        if !(1..=4).contains(&self.version) {
             return Err("Unsupported project version".into());
         }
         if !(1..=16_384).contains(&comp.width)
@@ -686,6 +686,15 @@ impl Editor {
             l.content != Content::Rectangle || l.effects != Effects::default() || l.mask.is_some()
         }) {
             next.project.version = 3;
+        }
+        if next
+            .project
+            .composition
+            .layers
+            .iter()
+            .any(|l| matches!(l.content, Content::Video { .. }))
+        {
+            next.project.version = 4;
         }
         next.project.validate()?;
         if next != self.current {
