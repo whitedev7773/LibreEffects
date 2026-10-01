@@ -266,6 +266,7 @@ cargo run -p libre-effects-core --example make_animation_study -- examples/curve
 | Ctrl+Z / Ctrl+Shift+Z | Undo / Redo |
 | Ctrl+Y / Ctrl+Alt+Y / Ctrl+D | Add solid / Add adjustment layer / Duplicate selection |
 | Ctrl+K | Composition settings |
+| Ctrl+Alt+T | Enable / disable selected video or precomposition Time Remap |
 | V / H / W / Y | Selection / Hand / Rotation / Anchor Point tool |
 | Ctrl+Shift+D | Split selected layers at the playhead |
 | Alt+[ / Alt+] | Trim selected layers' In / Out to the playhead |
@@ -544,12 +545,45 @@ is unchanged; playback controls appear only for video layers.
   (the composition background in MP4). Extend/trim the layer explicitly when changing its duration.
 - Every operation supports undo/redo and survives saving, relinking, moving and
   splitting. Preview, PNG sequences and MP4/MOV use the same source-time mapping.
-  This is constant-speed footage playback, not animated time remapping, automatic
-  layer/keyframe stretching, optical flow or audio retiming.
+  These are the base constant-speed controls. Use Animated Time Remap below for
+  variable playback. Automatic layer/keyframe stretching and audio retiming remain pending.
 
 FFprobe must be on PATH alongside FFmpeg. `LIBRE_EFFECTS_FFPROBE` overrides its
 executable; when `LIBRE_EFFECTS_FFMPEG` is absolute, FFprobe defaults to that same
 directory. Neither tool is downloaded automatically.
+
+### Animated Time Remap
+
+Layer → Enable Time Remapping (Ctrl+Alt+T) adds a source-seconds track to video
+and precomposition layers. The first and last visible frames become keys, keeping
+the current trim, shifted origin and base speed unchanged on activation. Edit the
+Time Remap row in the Timeline, the Properties source-time field, or its value
+graph to accelerate, slow down, hold or reverse parts of the source. Keys support
+the same selection, copy/paste, movement, interpolation and Undo/Redo as effect keys.
+The stopwatch can remove animation while keeping the sampled source time constant.
+Disabling Time Remapping removes the track and restores the preserved base timing.
+Base video Speed/Source In controls are hidden while remapping is enabled.
+
+Freeze frame with Time Remap replaces its keys with one Hold key at the current
+displayed source frame. The playhead must be inside the layer and a valid source.
+Source times before zero or at/after the source duration produce transparency.
+Before the first and after the last key, the source time holds at the endpoint;
+extend the layer Out point to display this hold. Trimming keeps keys in place,
+moving a layer shifts its keys, and cross-FPS layer paste converts key positions
+without changing their values in seconds. Layer transforms/effects keep using
+composition time while the nested source evaluates at remapped time.
+
+Projects with remapping use version 21. Preview, PNG, MP4 and alpha MOV use the
+same preceding-source-frame sampling; frame blending, optical flow and audio
+retiming are not implemented. `examples/time-remap-study.lfe.json` compares four
+instances of one animated source: original, fast/slow, hold and reverse.
+
+Validation covers rational FPS, shifted/trimmed/reversed/frozen sources, out-of-range
+transparency, nested sampling, layer split/pre-compose, cross-FPS clipboard, invalid
+edits, and project round trips. Preview/PNG pixels and MP4/alpha MOV source colors,
+alpha, frame count and background composition are checked by regression tests.
+Native verification includes source-time editing, graph dragging, freezing,
+Undo/Redo, Ctrl+Alt+T and reopening the edited project with its source time intact.
 
 ## Project files and recovery
 
@@ -590,8 +624,8 @@ Changing a source canvas retains the existing instance's layer dimensions.
 Circular/missing references and deleting a referenced composition are rejected.
 Nesting is limited to 16 levels, 4,096 rendered layer instances and a 64 MiB SVG
 description per frame. Unsupported frames fail without replacing an export.
-Time remapping, collapse-transform controls and the alternative "leave attributes"
-pre-compose mode remain pending.
+Animated Time Remap can retime each instance independently. Collapse-transform
+controls and the alternative "leave attributes" pre-compose mode remain pending.
 Clear Solo switches and disable Guide on selected layers before pre-composing;
 otherwise moving the layers into a nested composition would change their visibility.
 
@@ -668,7 +702,7 @@ use `--output title.png --start 30 --png-background`. Use `--help` for syntax.
 See [the development backlog](DEVELOPMENT_BACKLOG.md) for the current capability
 audit, priorities, dependencies and proposed acceptance criteria.
 
-Still pending: advanced precomposition time remapping, audio footage,
+Still pending: frame blending/optical flow, audio footage,
 audio output, freeform/animated masks, additional effects and reusable presets,
 rich text layout, 3D, JSX, ExtendScript and expressions. PNG sequences can be
 assembled in an external video tool.

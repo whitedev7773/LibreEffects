@@ -335,11 +335,14 @@ impl Layer {
         &self.effect_stack
     }
     pub(super) fn all_tracks_mut(&mut self) -> impl Iterator<Item = &mut AnimatedProperty> {
-        self.properties.values_mut().chain(
-            self.effect_stack
-                .iter_mut()
-                .flat_map(|e| e.parameters.values_mut()),
-        )
+        self.properties
+            .values_mut()
+            .chain(self.time_remap.iter_mut())
+            .chain(
+                self.effect_stack
+                    .iter_mut()
+                    .flat_map(|e| e.parameters.values_mut()),
+            )
     }
 }
 pub(super) fn first_effect_id() -> EffectId {

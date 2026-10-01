@@ -32,6 +32,7 @@ pub use guides::{Guide, GuideAxis};
 mod selection_transform;
 pub use selection_transform::AlignTarget;
 mod time;
+mod time_remap;
 mod tracks;
 pub use editing::{Content, Effects, KeyCopy, KeyRef, Mask, VideoPlayback};
 pub use geometry::{Affine, Bezier};
@@ -189,6 +190,8 @@ impl AnimatedProperty {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Layer {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    time_remap: Option<AnimatedProperty>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     track_matte: Option<TrackMatte>,
     #[serde(default, skip_serializing_if = "BlendMode::is_normal")]
@@ -515,7 +518,7 @@ impl Project {
     }
 
     fn validate(&self) -> Result<(), String> {
-        if !(1..=20).contains(&self.version) {
+        if !(1..=21).contains(&self.version) {
             return Err("Unsupported project version".into());
         }
         if self.version < 9
@@ -608,6 +611,7 @@ impl Project {
                 return Err("Invalid composition settings".into());
             }
             for layer in &comp.layers {
+                time_remap::validate(layer, comp.duration, self.version)?;
                 layer.markers.validate(comp.duration)?;
                 effects::validate(layer, comp.duration)?;
                 if let Content::Image { png } = &layer.content {
@@ -667,6 +671,18 @@ impl Project {
 /// The future scripting bridge and native controls both dispatch these commands.
 #[derive(Clone, Debug)]
 pub enum Command {
+    SetTimeRemap {
+        id: LayerId,
+        enabled: bool,
+    },
+    FreezeTimeRemap {
+        id: LayerId,
+        frame: Frame,
+    },
+    EditTimeRemap {
+        id: LayerId,
+        edit: TrackEdit,
+    },
     SetGuides(Vec<Guide>),
     SetTrackMatte {
         id: LayerId,
@@ -1114,6 +1130,14 @@ impl Editor {
         {
             next.project.version = 20;
         }
+        if next
+            .project
+            .compositions()
+            .into_iter()
+            .any(|(_, c)| c.layers.iter().any(|l| l.time_remap.is_some()))
+        {
+            next.project.version = 21;
+        }
         next.project.validate()?;
         if next != self.current {
             let previous = std::mem::replace(&mut self.current, next);
@@ -1124,6 +1148,9 @@ impl Editor {
 }
 
 fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
+    if let Some(result) = time_remap::apply(state, &command) {
+        return result;
+    }
     if let Command::SetGuides(guides) = command {
         guides::validate(&guides)?;
         state.project.composition.guides = guides;
@@ -1366,6 +1393,7 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
         comp.layers.insert(
             0,
             Layer {
+                time_remap: None,
                 track_matte: None,
                 blend_mode: BlendMode::Normal,
                 markers: Default::default(),

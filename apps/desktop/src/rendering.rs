@@ -265,7 +265,7 @@ impl Renderer {
                 let source = project
                     .composition_by_id(*composition)
                     .ok_or("Missing source composition")?;
-                if let Some(source_frame) = l.content().composition_frame(frame, c.fps(), source) {
+                if let Some(source_frame) = l.composition_frame(frame, c.fps(), source) {
                     let inner = self.layers_svg(
                         project,
                         *composition,
@@ -292,7 +292,7 @@ impl Renderer {
                 }
             }
             Content::Video { path, .. } => {
-                if let Some(seconds) = l.content().video_time(frame, c.fps()) {
+                if let Some(seconds) = l.video_time(frame, c.fps()) {
                     let png = crate::footage::frame_png(
                         path,
                         seconds,

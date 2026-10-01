@@ -187,7 +187,7 @@ pub(super) fn validate_content(
     }
     Ok(())
 }
-fn editable(state: &mut Snapshot, id: LayerId) -> Result<&mut Layer, String> {
+pub(super) fn editable(state: &mut Snapshot, id: LayerId) -> Result<&mut Layer, String> {
     let l = state
         .project
         .composition
@@ -320,6 +320,12 @@ pub(super) fn apply_extended(
                 let (fps, duration) = (comp.fps, comp.duration);
                 let layer = editable(state, *id)?;
                 let start = layer.in_frame;
+                if layer.time_remap.is_some() {
+                    return Err(
+                        "Disable Time Remap before changing the base video speed or source in"
+                            .into(),
+                    );
+                }
                 let end = layer.out_frame(duration);
                 let Content::Video {
                     playback,

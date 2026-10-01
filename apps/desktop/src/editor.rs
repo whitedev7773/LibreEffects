@@ -101,6 +101,8 @@ pub(crate) enum Action {
     ToggleExpanded,
     Filter(Option<PropertyFilter>),
     ToggleGraph,
+    ToggleTimeRemap,
+    FreezeTimeRemap,
     GraphProperty(LayerId, PropertyPath),
 }
 
@@ -778,6 +780,45 @@ impl EditorState {
                         .filter(|id| !original.contains(id))
                         .collect();
                     self.selected_keys.clear();
+                }
+            }
+            Action::ToggleTimeRemap | Action::FreezeTimeRemap => {
+                let ids: Vec<_> = self.selected_layers.iter().copied().collect();
+                if ids.is_empty() {
+                    self.status = "Select a video or precomposition layer".into();
+                } else {
+                    let enabled = ids.iter().any(|id| {
+                        self.editor
+                            .project()
+                            .composition()
+                            .layer(*id)
+                            .is_some_and(|l| l.time_remap().is_none())
+                    });
+                    let freeze = matches!(action, Action::FreezeTimeRemap);
+                    self.dispatch(
+                        &Action::Edit(Command::Batch(
+                            ids.iter()
+                                .map(|id| {
+                                    if freeze {
+                                        Command::FreezeTimeRemap {
+                                            id: *id,
+                                            frame: self.frame,
+                                        }
+                                    } else {
+                                        Command::SetTimeRemap { id: *id, enabled }
+                                    }
+                                })
+                                .collect(),
+                        )),
+                        window,
+                        cx,
+                    );
+                    if self.status.starts_with("Edited") && (enabled || freeze) {
+                        self.graph_property = PropertyPath::TimeRemap;
+                        self.graph_key = None;
+                        self.expanded = true;
+                        self.property_filter = None;
+                    }
                 }
             }
             Action::AddText => self.dispatch(

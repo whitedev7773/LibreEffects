@@ -24,6 +24,8 @@ mod rendering;
 mod shell;
 mod single_instance;
 mod theme;
+#[cfg(test)]
+mod time_remap_render;
 mod ui;
 mod video_export;
 mod view_state;

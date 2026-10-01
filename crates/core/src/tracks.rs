@@ -3,6 +3,7 @@ use super::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PropertyPath {
+    TimeRemap,
     Transform(Property),
     Effect {
         effect: EffectId,
@@ -39,6 +40,7 @@ pub enum TrackEdit {
 impl Layer {
     pub fn track_label(&self, path: PropertyPath) -> Option<String> {
         Some(match path {
+            PropertyPath::TimeRemap => "Time Remap (s)".into(),
             PropertyPath::Transform(p) => p.label().to_string(),
             PropertyPath::Effect { effect, parameter } => {
                 let effect = self.effect_stack.iter().find(|e| e.id() == effect)?;
@@ -53,6 +55,7 @@ impl Layer {
     }
     pub fn track(&self, path: PropertyPath) -> Option<&AnimatedProperty> {
         match path {
+            PropertyPath::TimeRemap => self.time_remap.as_ref(),
             PropertyPath::Transform(p) => self.properties.get(&p),
             PropertyPath::Effect { effect, parameter } => self
                 .effect_stack
@@ -63,6 +66,7 @@ impl Layer {
     }
     pub fn track_value(&self, path: PropertyPath, frame: Frame) -> Option<f64> {
         Some(match path {
+            PropertyPath::TimeRemap => self.time_remap.as_ref()?.value_at(frame),
             PropertyPath::Transform(p) => self.property(p).value_at(frame),
             PropertyPath::Effect { effect, parameter } => {
                 let effect = self.effect_stack.iter().find(|e| e.id() == effect)?;
@@ -75,6 +79,7 @@ impl Layer {
         Property::ALL
             .into_iter()
             .map(PropertyPath::from)
+            .chain(self.time_remap.as_ref().map(|_| PropertyPath::TimeRemap))
             .chain(self.effect_stack.iter().flat_map(|e| {
                 e.kind()
                     .parameters()
@@ -89,7 +94,7 @@ impl Layer {
     pub fn copy_key(&self, property: PropertyPath, frame: Frame) -> Option<KeyCopy> {
         let data = self.track(property)?.keys().get(&frame)?.clone();
         let effect_kind = match property {
-            PropertyPath::Transform(_) => None,
+            PropertyPath::Transform(_) | PropertyPath::TimeRemap => None,
             PropertyPath::Effect { effect, .. } => {
                 Some(self.effect_stack.iter().find(|e| e.id() == effect)?.kind())
             }
@@ -109,6 +114,7 @@ impl Layer {
         path: PropertyPath,
     ) -> Result<&mut AnimatedProperty, String> {
         match path {
+            PropertyPath::TimeRemap => self.time_remap.as_mut(),
             PropertyPath::Transform(p) => self.properties.get_mut(&p),
             PropertyPath::Effect { effect, parameter } => self
                 .effect_stack
@@ -372,6 +378,7 @@ mod tests {
 
 pub(super) fn command(id: LayerId, property: PropertyPath, edit: TrackEdit) -> Command {
     match property {
+        PropertyPath::TimeRemap => Command::EditTimeRemap { id, edit },
         PropertyPath::Transform(property) => match edit {
             TrackEdit::Value { frame, value } => Command::SetValue {
                 id,

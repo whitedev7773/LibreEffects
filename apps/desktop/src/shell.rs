@@ -276,6 +276,7 @@ impl Shell {
                 "r" => Some(Action::ViewerOption(
                     crate::viewer_tools::ViewOption::Rulers,
                 )),
+                "t" if m.alt => Some(Action::ToggleTimeRemap),
                 "k" => {
                     self.open_settings(window, cx);
                     None
@@ -704,6 +705,32 @@ impl Render for Shell {
                     ),
                 ],
                 "Layer" => vec![
+                    (
+                        if state
+                            .editor
+                            .selected_layer()
+                            .is_some_and(|l| l.time_remap().is_some())
+                        {
+                            "Disable Time Remapping"
+                        } else {
+                            "Enable Time Remapping"
+                        },
+                        "Ctrl+Alt+T",
+                        state
+                            .editor
+                            .selected_layer()
+                            .filter(|l| l.can_time_remap() && !l.locked())
+                            .map(|_| Action::ToggleTimeRemap),
+                    ),
+                    (
+                        "Freeze frame with Time Remap",
+                        "",
+                        state
+                            .editor
+                            .selected_layer()
+                            .filter(|l| l.can_time_remap() && !l.locked())
+                            .map(|_| Action::FreezeTimeRemap),
+                    ),
                     (
                         "Pre-compose selection",
                         "Ctrl+Shift+C",

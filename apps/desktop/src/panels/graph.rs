@@ -903,7 +903,14 @@ impl Render for Graph {
             let key = &track.keys()[&frame];
             for (index, (label, value)) in [
                 ("Frame", frame.to_string()),
-                ("Value", format!("{:.3}", key.value)),
+                (
+                    "Value",
+                    if property == PropertyPath::TimeRemap {
+                        format!("{:.12}", key.value)
+                    } else {
+                        format!("{:.3}", key.value)
+                    },
+                ),
             ]
             .into_iter()
             .enumerate()

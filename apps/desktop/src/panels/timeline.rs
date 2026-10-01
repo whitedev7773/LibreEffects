@@ -880,6 +880,9 @@ impl Render for Timeline {
                     )
                 })
                 .collect();
+                if layer.time_remap().is_some() {
+                    groups.push(("Time Remap".into(), vec![PropertyPath::TimeRemap]));
+                }
                 for effect in layer.effect_stack() {
                     for param in effect.kind().parameters() {
                         groups.push((
@@ -897,7 +900,9 @@ impl Render for Timeline {
                         !properties.iter().any(|p| {
                             (match p {
                                 PropertyPath::Transform(p) => f.includes(*p),
-                                PropertyPath::Effect { .. } => f == PropertyFilter::Animated,
+                                PropertyPath::Effect { .. } | PropertyPath::TimeRemap => {
+                                    f == PropertyFilter::Animated
+                                }
                             }) && (f != PropertyFilter::Animated
                                 || !layer.track(*p).expect("visible property").keys().is_empty())
                         })
@@ -1033,13 +1038,17 @@ impl Render for Timeline {
                         input.update(cx, |field, _| {
                             field.sync(
                                 format!("{id}-{frame}"),
-                                format!(
-                                    "{:.2}",
-                                    layer
+                                {
+                                    let value = layer
                                         .track(property)
                                         .expect("visible property")
-                                        .value_at(frame)
-                                ),
+                                        .value_at(frame);
+                                    if property == PropertyPath::TimeRemap {
+                                        format!("{value:.12}")
+                                    } else {
+                                        format!("{value:.2}")
+                                    }
+                                },
                                 window,
                             )
                         });
@@ -1061,7 +1070,9 @@ impl Render for Timeline {
                                             "Y"
                                         }
                                     } else {
-                                        if property == Property::Opacity.into() {
+                                        if property == PropertyPath::TimeRemap {
+                                            "s"
+                                        } else if property == Property::Opacity.into() {
                                             "%"
                                         } else if property == Property::Rotation.into() {
                                             "°"

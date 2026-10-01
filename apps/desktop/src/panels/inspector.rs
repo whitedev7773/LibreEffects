@@ -4,7 +4,7 @@ use crate::{
     ui,
 };
 use gpui::{Context, Entity, Window, div, prelude::*, px, rgb};
-use libre_effects_core::{Command, Content, Mask, Property};
+use libre_effects_core::{Command, Content, Mask, Property, PropertyPath, TrackEdit};
 
 pub(crate) struct Inspector {
     matte: Option<(
@@ -102,7 +102,7 @@ impl Inspector {
                 })
             })
             .collect();
-        let playback = (0..2)
+        let playback = (0..3)
             .map(|index| {
                 let edit = state.clone();
                 cx.new(|cx| {
@@ -121,8 +121,17 @@ impl Inspector {
                                     id,
                                     speed: value / 100.0,
                                 }
-                            } else {
+                            } else if index == 1 {
                                 Command::SetVideoSourceIn { id, seconds: value }
+                            } else {
+                                Command::EditTrack {
+                                    id,
+                                    property: PropertyPath::TimeRemap,
+                                    edit: TrackEdit::Value {
+                                        frame: s.frame,
+                                        value,
+                                    },
+                                }
                             };
                             s.dispatch(&Action::Edit(command), window, cx);
                         });
@@ -435,6 +444,98 @@ impl Render for Inspector {
                 ),
             );
         }
+        if layer.can_time_remap() {
+            let remapped = layer.time_remap().is_some();
+            contents = contents.child(div().mt_2().child("Time")).child(
+                ui::text_button(
+                    "time-remap-enable",
+                    if remapped {
+                        "Disable Time Remapping"
+                    } else {
+                        "Enable Time Remapping"
+                    },
+                )
+                .when(!locked, |b| {
+                    b.on_click({
+                        let state = self.state.clone();
+                        move |_, window, cx| {
+                            state.update(cx, |s, cx| {
+                                s.dispatch(&Action::ToggleTimeRemap, window, cx)
+                            })
+                        }
+                    })
+                }),
+            );
+            if remapped {
+                let value = format!("{:.12}", layer.source_time(frame, comp.fps()).unwrap());
+                self.playback[2].update(cx, |f, _| {
+                    f.sync(format!("{id}-{frame}"), value.clone(), window)
+                });
+                contents = contents
+                    .child(
+                        div()
+                            .flex()
+                            .h(px(29.0))
+                            .items_center()
+                            .child(ui::action_tool(
+                                "time-remap-key",
+                                "diamond",
+                                "Add or remove source time key",
+                                &self.state,
+                                Action::Edit(Command::EditTrack {
+                                    id,
+                                    property: PropertyPath::TimeRemap,
+                                    edit: TrackEdit::ToggleKey { frame },
+                                }),
+                                layer.time_remap().unwrap().keys().contains_key(&frame),
+                            ))
+                            .child(div().w(px(88.0)).child("Source time (s)"))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .when(!locked, |d| d.child(self.playback[2].clone()))
+                                    .when(locked, |d| d.child(value)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .gap_1()
+                            .child(ui::text_button("time-remap-graph", "Edit graph").on_click({
+                                let state = self.state.clone();
+                                move |_, window, cx| {
+                                    state.update(cx, |s, cx| {
+                                        s.dispatch(
+                                            &Action::GraphProperty(id, PropertyPath::TimeRemap),
+                                            window,
+                                            cx,
+                                        )
+                                    })
+                                }
+                            }))
+                            .when(!locked, |d| {
+                                d.child(
+                                    ui::text_button("time-remap-freeze", "Freeze frame").on_click(
+                                        {
+                                            let state = self.state.clone();
+                                            move |_, window, cx| {
+                                                state.update(cx, |s, cx| {
+                                                    s.dispatch(&Action::FreezeTimeRemap, window, cx)
+                                                })
+                                            }
+                                        },
+                                    ),
+                                )
+                            }),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(10.0))
+                            .text_color(rgb(ui::MUTED))
+                            .child("Source seconds · out of range is transparent"),
+                    );
+            }
+        }
         if let Content::Video {
             path,
             duration,
@@ -462,71 +563,79 @@ impl Render for Inspector {
                         state.update(cx, |s, cx| s.dispatch(&Action::RelinkVideo, window, cx));
                     }
                 }));
-            for (index, label, value) in [
-                (0, "Speed (%)", format!("{:.2}", playback.speed * 100.0)),
-                (
-                    1,
-                    "Source In (s)",
-                    format!(
-                        "{:.6}",
-                        layer
-                            .content()
-                            .video_source_time(layer.in_frame(), comp.fps())
-                            .unwrap()
-                    ),
-                ),
-            ] {
-                self.playback[index].update(cx, |field, _| {
-                    field.sync(format!("{id}-{}", layer.in_frame()), value.clone(), window);
-                });
-                contents = contents.child(
-                    div()
-                        .flex()
-                        .h(px(29.0))
-                        .items_center()
-                        .child(div().w(px(105.0)).child(label))
-                        .child(
-                            div()
-                                .flex_1()
-                                .when(!locked, |s| s.child(self.playback[index].clone()))
-                                .when(locked, |s| s.child(value)),
+            if layer.time_remap().is_none() {
+                for (index, label, value) in [
+                    (0, "Speed (%)", format!("{:.2}", playback.speed * 100.0)),
+                    (
+                        1,
+                        "Source In (s)",
+                        format!(
+                            "{:.6}",
+                            layer
+                                .content()
+                                .video_source_time(layer.in_frame(), comp.fps())
+                                .unwrap()
                         ),
-                );
-            }
-            contents = contents
-                .child(div().flex().gap_1().when(!locked, |row| {
-                    row.child(ui::text_button("reverse-video", "Reverse").on_click({
-                        let state = self.state.clone();
-                        move |_, window, cx| {
-                            state.update(cx, |s, cx| {
-                                s.dispatch(&Action::Edit(Command::ReverseVideo { id }), window, cx)
-                            })
-                        }
-                    }))
-                    .child(
-                        ui::text_button("freeze-video", "Freeze at playhead").on_click({
+                    ),
+                ] {
+                    self.playback[index].update(cx, |field, _| {
+                        field.sync(format!("{id}-{}", layer.in_frame()), value.clone(), window);
+                    });
+                    contents = contents.child(
+                        div()
+                            .flex()
+                            .h(px(29.0))
+                            .items_center()
+                            .child(div().w(px(105.0)).child(label))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .when(!locked, |s| s.child(self.playback[index].clone()))
+                                    .when(locked, |s| s.child(value)),
+                            ),
+                    );
+                }
+                contents = contents
+                    .child(div().flex().gap_1().when(!locked, |row| {
+                        row.child(ui::text_button("reverse-video", "Reverse").on_click({
                             let state = self.state.clone();
                             move |_, window, cx| {
                                 state.update(cx, |s, cx| {
                                     s.dispatch(
-                                        &Action::Edit(Command::FreezeVideo { id, frame: s.frame }),
+                                        &Action::Edit(Command::ReverseVideo { id }),
                                         window,
                                         cx,
                                     )
                                 })
                             }
-                        }),
-                    )
-                }))
-                .child(div().text_size(px(10.0)).text_color(rgb(ui::MUTED)).child(
-                    "0% freezes · negative speed reverses. Layer range and keys stay fixed.",
-                ));
+                        }))
+                        .child(
+                            ui::text_button("freeze-video", "Freeze at playhead").on_click({
+                                let state = self.state.clone();
+                                move |_, window, cx| {
+                                    state.update(cx, |s, cx| {
+                                        s.dispatch(
+                                            &Action::Edit(Command::FreezeVideo {
+                                                id,
+                                                frame: s.frame,
+                                            }),
+                                            window,
+                                            cx,
+                                        )
+                                    })
+                                }
+                            }),
+                        )
+                    }))
+                    .child(div().text_size(px(10.0)).text_color(rgb(ui::MUTED)).child(
+                        "0% freezes · negative speed reverses. Layer range and keys stay fixed.",
+                    ));
+            }
             let source_status =
                 if frame < layer.in_frame() || frame >= layer.out_frame(comp.duration()) {
                     "Playhead is outside the layer".to_string()
                 } else {
                     layer
-                        .content()
                         .video_time(frame, comp.fps())
                         .map(|seconds| format!("Source now: {seconds:.3}s"))
                         .unwrap_or_else(|| "Outside source · transparent frame".into())
