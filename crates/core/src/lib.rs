@@ -6,13 +6,17 @@ use serde::{Deserialize, Serialize};
 pub type Frame = u32;
 pub type LayerId = u64;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+mod geometry;
+pub use geometry::{Affine, Bezier};
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum Interpolation {
     #[default]
     Linear,
     Hold,
     /// Smoothstep interpolation, not After Effects temporal Bezier compatibility.
     Smooth,
+    Bezier(Bezier),
 }
 
 impl Interpolation {
@@ -20,7 +24,23 @@ impl Interpolation {
         match self {
             Self::Linear => Self::Hold,
             Self::Hold => Self::Smooth,
-            Self::Smooth => Self::Linear,
+            Self::Smooth => Self::Bezier(Bezier::default()),
+            Self::Bezier(_) => Self::Linear,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Linear => "Linear",
+            Self::Hold => "Hold",
+            Self::Smooth => "Smoothstep",
+            Self::Bezier(_) => "Bezier",
+        }
+    }
+    fn valid(self) -> bool {
+        match self {
+            Self::Bezier(curve) => curve.valid(),
+            _ => true,
         }
     }
 }
@@ -98,15 +118,26 @@ impl AnimatedProperty {
     }
 
     pub fn value_at(&self, frame: Frame) -> f64 {
-        let left = self.keys.range(..=frame).next_back();
-        let right = self.keys.range(frame..).next();
+        self.sample(frame as f64)
+    }
+
+    /// Fractional frames are used by the value graph and future subframe rendering.
+    pub fn sample(&self, frame: f64) -> f64 {
+        let frame = if frame.is_finite() {
+            frame.max(0.0)
+        } else {
+            0.0
+        };
+        let left = self.keys.range(..=frame.floor() as Frame).next_back();
+        let right = self.keys.range(frame.ceil() as Frame..).next();
         match (left, right) {
             (Some((start, a)), Some((end, b))) if start != end => {
-                let t = (frame - start) as f64 / (end - start) as f64;
+                let t = (frame - *start as f64) / (end - start) as f64;
                 let t = match a.interpolation {
                     Interpolation::Linear => t,
                     Interpolation::Hold => 0.0,
                     Interpolation::Smooth => t * t * (3.0 - 2.0 * t),
+                    Interpolation::Bezier(curve) => curve.progress(t),
                 };
                 a.value + (b.value - a.value) * t
             }
@@ -130,9 +161,31 @@ pub struct Layer {
     in_frame: Frame,
     #[serde(default)]
     out_frame: Option<Frame>,
+    #[serde(default)]
+    parent: Option<LayerId>,
+    /// Compensation applied before local transforms, preserving pose on reparenting.
+    #[serde(default)]
+    transform_offset: Affine,
 }
 
 impl Layer {
+    pub fn parent(&self) -> Option<LayerId> {
+        self.parent
+    }
+    pub fn local_transform(&self, frame: Frame) -> Affine {
+        let v = |p| self.property(p).value_at(frame);
+        let (sin, cos) = v(Property::Rotation).to_radians().sin_cos();
+        let (sx, sy) = (v(Property::ScaleX) / 100.0, v(Property::ScaleY) / 100.0);
+        let (a, b, c, d) = (cos * sx, sin * sx, -sin * sy, cos * sy);
+        Affine([
+            a,
+            b,
+            c,
+            d,
+            v(Property::PositionX) - a * v(Property::AnchorX) - c * v(Property::AnchorY),
+            v(Property::PositionY) - b * v(Property::AnchorX) - d * v(Property::AnchorY),
+        ])
+    }
     pub fn in_frame(&self) -> Frame {
         self.in_frame
     }
@@ -161,7 +214,7 @@ impl Layer {
         &self.properties[&property]
     }
 
-    /// Composition-space corners, after anchor, scale, rotation, and position.
+    /// Unparented corners, ignoring compensation. Renderers should use Composition::corners_at.
     pub fn corners_at(&self, frame: Frame) -> [[f64; 2]; 4] {
         let value = |property| self.property(property).value_at(frame);
         let angle = value(Property::Rotation).to_radians();
@@ -194,6 +247,59 @@ pub struct Composition {
 }
 
 impl Composition {
+    pub fn world_transform(&self, id: LayerId, frame: Frame) -> Option<Affine> {
+        let mut current = Some(id);
+        let mut result = Affine::default();
+        for _ in 0..=self.layers.len() {
+            let Some(id) = current else {
+                return result.valid().then_some(result);
+            };
+            let layer = self.layer(id)?;
+            result = layer
+                .transform_offset
+                .compose(layer.local_transform(frame))
+                .compose(result);
+            current = layer.parent;
+        }
+        None
+    }
+    pub fn position_space(&self, id: LayerId, frame: Frame) -> Option<Affine> {
+        let layer = self.layer(id)?;
+        let parent = match layer.parent {
+            Some(parent) => self.world_transform(parent, frame)?,
+            None => Affine::default(),
+        };
+        Some(parent.compose(layer.transform_offset))
+    }
+    pub fn corners_at(&self, id: LayerId, frame: Frame) -> Option<[[f64; 2]; 4]> {
+        let layer = self.layer(id)?;
+        let world = self.world_transform(id, frame)?;
+        Some(
+            [
+                [0.0, 0.0],
+                [layer.width, 0.0],
+                [layer.width, layer.height],
+                [0.0, layer.height],
+            ]
+            .map(|p| world.point(p)),
+        )
+    }
+    pub fn can_parent(&self, child: LayerId, parent: Option<LayerId>) -> bool {
+        let mut current = parent;
+        for _ in 0..=self.layers.len() {
+            let Some(id) = current else {
+                return true;
+            };
+            if id == child {
+                return false;
+            }
+            let Some(layer) = self.layer(id) else {
+                return false;
+            };
+            current = layer.parent;
+        }
+        false
+    }
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -258,7 +364,7 @@ impl Project {
 
     fn validate(&self) -> Result<(), String> {
         let comp = &self.composition;
-        if self.version != 1 {
+        if !(1..=2).contains(&self.version) {
             return Err("Unsupported project version".into());
         }
         if !(1..=16_384).contains(&comp.width)
@@ -274,6 +380,8 @@ impl Project {
         let mut ids = BTreeSet::new();
         for layer in &comp.layers {
             if layer.id == 0
+                || !layer.transform_offset.valid()
+                || !comp.can_parent(layer.id, layer.parent)
                 || layer.in_frame >= layer.out_frame(comp.duration)
                 || layer.out_frame(comp.duration) > comp.duration
                 || layer.id >= self.next_layer_id
@@ -294,10 +402,11 @@ impl Project {
                     .get(&property)
                     .ok_or("Missing transform property")?;
                 if !property.accepts(track.value)
-                    || track
-                        .keys
-                        .iter()
-                        .any(|(frame, key)| *frame >= comp.duration || !property.accepts(key.value))
+                    || track.keys.iter().any(|(frame, key)| {
+                        *frame >= comp.duration
+                            || !property.accepts(key.value)
+                            || !key.interpolation.valid()
+                    })
                 {
                     return Err("Invalid property or keyframe".into());
                 }
@@ -314,6 +423,18 @@ impl Project {
 #[derive(Clone, Debug)]
 pub enum Command {
     AddRectangle,
+    SetParent {
+        id: LayerId,
+        parent: Option<LayerId>,
+        frame: Frame,
+    },
+    EditKeyframe {
+        id: LayerId,
+        property: Property,
+        from: Frame,
+        to: Frame,
+        value: f64,
+    },
     SetPosition {
         id: LayerId,
         frame: Frame,
@@ -444,6 +565,19 @@ impl Editor {
         // Apply to a candidate so invalid commands never partially mutate the project.
         let mut next = self.current.clone();
         apply(&mut next, command)?;
+        // Older applications must reject projects they cannot render faithfully.
+        if next.project.composition.layers.iter().any(|layer| {
+            layer.parent.is_some()
+                || layer.transform_offset != Affine::default()
+                || layer.properties.values().any(|track| {
+                    track
+                        .keys
+                        .values()
+                        .any(|key| matches!(key.interpolation, Interpolation::Bezier(_)))
+                })
+        }) {
+            next.project.version = 2;
+        }
         if next != self.current {
             let previous = std::mem::replace(&mut self.current, next);
             self.record(previous);
@@ -453,6 +587,33 @@ impl Editor {
 }
 
 fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
+    if let Command::EditKeyframe {
+        id,
+        property,
+        from,
+        to,
+        value,
+    } = command
+    {
+        apply(
+            state,
+            Command::MoveKeyframe {
+                id,
+                property,
+                from,
+                to,
+            },
+        )?;
+        return apply(
+            state,
+            Command::SetValue {
+                id,
+                property,
+                frame: to,
+                value,
+            },
+        );
+    }
     if let Command::SetPosition { id, frame, x, y } = command {
         apply(
             state,
@@ -474,6 +635,38 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
         );
     }
     let comp = &mut state.project.composition;
+    if let Command::SetParent { id, parent, frame } = command {
+        let layer = comp.layer(id).ok_or("Layer not found")?;
+        if layer.locked {
+            return Err("Unlock the layer before editing".into());
+        }
+        if frame >= comp.duration || !comp.can_parent(id, parent) {
+            return Err("Invalid parent: missing layer or circular hierarchy".into());
+        }
+        if layer.parent == parent {
+            return Ok(());
+        }
+        let old_space = comp
+            .position_space(id, frame)
+            .ok_or("Invalid parent transform")?;
+        let new_space = match parent {
+            Some(id) => comp
+                .world_transform(id, frame)
+                .ok_or("Invalid parent transform")?,
+            None => Affine::default(),
+        };
+        let offset = new_space
+            .inverse()
+            .ok_or("Cannot parent to a layer with zero scale")?
+            .compose(old_space);
+        if !offset.valid() {
+            return Err("Parent transform is outside supported range".into());
+        }
+        let layer = comp.layers.iter_mut().find(|l| l.id == id).unwrap();
+        layer.parent = parent;
+        layer.transform_offset = offset;
+        return Ok(());
+    }
     if let Command::ConfigureComposition {
         name,
         width,
@@ -528,6 +721,8 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
                 color: colors[((id - 1) % 4) as usize],
                 in_frame: 0,
                 out_frame: None,
+                parent: None,
+                transform_offset: Affine::default(),
                 properties: Property::ALL
                     .into_iter()
                     .map(|property| {
@@ -560,7 +755,9 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
         | Command::SetValue { id, .. }
         | Command::ToggleKeyframe { id, .. }
         | Command::SetInterpolation { id, .. } => *id,
-        Command::AddRectangle
+        Command::SetParent { .. }
+        | Command::EditKeyframe { .. }
+        | Command::AddRectangle
         | Command::ConfigureComposition { .. }
         | Command::SetPosition { .. } => unreachable!(),
     };
@@ -642,6 +839,9 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
             }
         }
         Command::RemoveLayer(_) => {
+            if comp.layers.iter().any(|l| l.parent == Some(id)) {
+                return Err("Unparent child layers before deleting this parent".into());
+            }
             comp.layers.remove(index);
             if state.selected == Some(id) {
                 state.selected = comp.layers.first().map(Layer::id);
@@ -718,6 +918,9 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
             interpolation,
             ..
         } => {
+            if !interpolation.valid() {
+                return Err("Invalid Bezier handles".into());
+            }
             let key = layer
                 .properties
                 .get_mut(&property)
@@ -725,7 +928,9 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
                 .ok_or("Select a frame containing a keyframe")?;
             key.interpolation = interpolation;
         }
-        Command::AddRectangle
+        Command::SetParent { .. }
+        | Command::EditKeyframe { .. }
+        | Command::AddRectangle
         | Command::ConfigureComposition { .. }
         | Command::SetPosition { .. } => unreachable!(),
     }

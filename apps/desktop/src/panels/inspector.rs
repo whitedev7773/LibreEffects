@@ -4,13 +4,15 @@ use crate::{
     ui,
 };
 use gpui::{Context, Entity, Window, div, prelude::*, px, rgb};
-use libre_effects_core::{Command, Interpolation, Property};
+use libre_effects_core::{Command, Property};
 
 pub(crate) struct Inspector {
     state: Entity<EditorState>,
     name: Entity<TextField>,
     fields: Vec<Entity<TextField>>,
     range: Vec<Entity<TextField>>,
+    parent_open: bool,
+    parent_owner: Option<u64>,
 }
 impl Inspector {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
@@ -97,6 +99,8 @@ impl Inspector {
             name,
             fields,
             range,
+            parent_open: false,
+            parent_owner: None,
         }
     }
 }
@@ -106,6 +110,7 @@ impl Render for Inspector {
         let frame = state.frame;
         let duration = state.editor.project().composition().duration();
         let selected = state.editor.selected_layer().cloned();
+        let comp = state.editor.project().composition().clone();
         let mut panel = div()
             .flex()
             .flex_col()
@@ -122,6 +127,10 @@ impl Render for Inspector {
             );
         };
         let id = layer.id();
+        if self.parent_owner != Some(id) {
+            self.parent_open = false;
+            self.parent_owner = Some(id);
+        }
         let locked = layer.locked();
         self.name.update(cx, |field, _| {
             field.sync(id.to_string(), layer.name().to_string(), window)
@@ -212,11 +221,7 @@ impl Render for Inspector {
             }
             contents = contents.child(row);
             if let Some(key) = key {
-                let label = match key.interpolation {
-                    Interpolation::Linear => "Linear",
-                    Interpolation::Hold => "Hold",
-                    Interpolation::Smooth => "Smooth (smoothstep)",
-                };
+                let label = key.interpolation.label();
                 contents = contents.child(
                     ui::text_button(
                         gpui::SharedString::from(format!("interpolation-{property:?}")),
@@ -245,6 +250,71 @@ impl Render for Inspector {
                 );
             }
         }
+        contents = contents.child(
+            div()
+                .mt_3()
+                .py_2()
+                .border_t_1()
+                .border_color(rgb(0x353535))
+                .child("Parent & Link"),
+        );
+        let parent_label = layer
+            .parent()
+            .and_then(|id| comp.layer(id))
+            .map_or("None".to_string(), |p| format!("{} · {}", p.id(), p.name()));
+        contents = contents.child(
+            ui::text_button("parent-picker", format!("{parent_label}  ▾"))
+                .justify_start()
+                .when(locked, |s| s.opacity(0.4))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if !locked {
+                        this.parent_open = !this.parent_open;
+                        cx.notify();
+                    }
+                })),
+        );
+        if self.parent_open && !locked {
+            let choices = std::iter::once((None, "None".to_string())).chain(
+                comp.layers()
+                    .iter()
+                    .filter(|l| comp.can_parent(id, Some(l.id())))
+                    .map(|l| (Some(l.id()), format!("{} · {}", l.id(), l.name()))),
+            );
+            let mut menu = div()
+                .id("parent-options")
+                .max_h(px(150.0))
+                .overflow_y_scroll()
+                .bg(rgb(ui::PANEL))
+                .border_1()
+                .border_color(rgb(0x454545));
+            for (parent, label) in choices {
+                menu = menu.child(
+                    ui::text_button(
+                        gpui::SharedString::from(format!("parent-{}", parent.unwrap_or(0))),
+                        label,
+                    )
+                    .justify_start()
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.parent_open = false;
+                        this.state.update(cx, |state, cx| {
+                            state.dispatch(
+                                &Action::Edit(Command::SetParent { id, parent, frame }),
+                                window,
+                                cx,
+                            )
+                        });
+                        cx.notify();
+                    })),
+                );
+            }
+            contents = contents.child(menu);
+        }
+        contents = contents.child(
+            div()
+                .text_size(px(10.0))
+                .text_color(rgb(ui::MUTED))
+                .child("Keeps current pose · opacity stays independent"),
+        );
         contents = contents.child(
             div()
                 .mt_3()

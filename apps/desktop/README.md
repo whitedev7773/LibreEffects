@@ -31,6 +31,20 @@ editor, not a complete After Effects replacement or an AEP-compatible applicatio
   6.25%–800%. The transparency grid can be toggled.
 - Layer In/Out fields trim visibility in whole frames; Out is exclusive.
 
+## Parenting
+
+Properties → Parent & Link selects a parent or None. Connecting, reparenting and
+disconnecting preserve the current frame's full 2D pose, including rotated,
+nonuniform and negative scales. Descendants follow parent transforms and remain
+independent in visibility, opacity and layer timing. Canvas dragging accounts for
+the parent's transform and commits one undo step.
+
+Parent relationships and compensation matrices are saved in the project. Numeric
+transform fields remain local to the layer's compensated coordinate system.
+Disconnecting an animated parent preserves only the current pose, not the parent's
+motion over the whole composition. Cycles and missing parents are rejected; zero
+scale parents cannot be assigned. Unparent children before deleting their parent.
+
 ## Animation
 
 Open `examples/motion-study.lfe.json` from the repository root for a three-layer
@@ -46,9 +60,40 @@ a diamond to change its timing.
 - Moving a key onto an occupied frame is rejected, preserving both keys.
 - Linear, Hold and Smooth interpolation. The interpolation belongs to the outgoing
   key. Smooth is smoothstep, not AE temporal Bezier or Easy Ease.
+- Temporal cubic Bezier interpolation, including overshoot. The curve solver
+  inverts time before evaluating progress. Preview opacity is clamped to 0–100%.
 - Drag the ruler to scrub. Timeline zoom and pan keep frame mapping consistent.
 - B/N set the beginning/end of the playback work area. Playback loops within it.
   Work area, viewport position, selection and panel layout are session state.
+
+## Graph Editor
+
+![Bezier value graph and outgoing segment controls](screenshots/graph-editor.png)
+
+Click Graph Editor in the timeline, use Animation → Toggle Graph Editor, or press
+Shift+F3. Select a transform channel at the left. The value graph shares timeline
+zoom and pan; its vertical range fits the visible curve.
+
+- Click a key to select it; drag to change both frame and value. Release commits
+  one undo step. Escape cancels; occupied frames and invalid values are rejected.
+- Frame and Value fields allow precise edits. Delete removes only the selected
+  graph key. The diamond adds/removes a key at the playhead.
+- Linear, Hold, Ease, Ease In and Ease Out presets affect the selected key's
+  outgoing segment. F9 applies Ease while the graph has focus.
+- Drag the two blue handles in the outgoing segment editor or enter X1/Y1/X2/Y2.
+  X is normalized time (0–1); Y is normalized progress (−2–3). Handles beyond the
+  small chart's vertical range remain accessible through numeric fields.
+- This is a single-channel value graph with normalized segment easing. AE's speed
+  graph, spatial Bezier paths, multi-key selection, and linked incoming/outgoing
+  velocity handles are not implemented. F9 is not full AE Easy Ease compatibility.
+
+Open `examples/curve-parent-study.lfe.json` for an overshooting Bezier animation
+with a child layer. The source generator is
+`crates/core/examples/make_animation_study.rs`:
+
+~~~sh
+cargo run -p libre-effects-core --example make_animation_study -- examples/curve-parent-study.lfe.json
+~~~
 
 ## Keyboard shortcuts
 
@@ -64,6 +109,8 @@ a diamond to change its timing.
 | Page Up / Page Down | Previous / Next frame (Shift: 10 frames) |
 | P / A / S / R / T | Position / Anchor / Scale / Rotation / Opacity |
 | U | Reveal animated properties |
+| Shift+F3 | Toggle Graph Editor |
+| F9 (graph focused) | Ease selected key's outgoing segment |
 | J / K | Previous / Next key on the selected layer |
 | B / N | Work area start / end |
 | + / − | Timeline zoom |
@@ -75,15 +122,17 @@ isolated from editor shortcuts. Buttons support Tab and Enter/Space.
 ## Project files and limitations
 
 Versioned .lfe.json files contain the composition, layer ranges, transforms and
-keyframes. Files from the initial rectangle editor remain readable. Save as writes
+keyframes. Files from the initial rectangle editor remain readable. Bezier or
+parenting edits upgrade the project to version 2 so older applications reject it
+instead of silently dropping the new behavior. Save as writes
 the snapshot captured when clicked using a temporary file before replacement.
 The size limit is 16 MiB. Undo history is capped at 100 edits; New/Open are undoable.
 
 Save before closing: autosave and unsaved-close protection are not implemented.
 Ctrl+S currently opens Save as, not a silent save to the last path.
 
-Still pending: multiple compositions and precompositions, layer parenting, Bezier
-graph editor, text/media/audio layers, masks, effects, 3D, rendering/export, JSX,
+Still pending: multiple compositions and precompositions, text/media/audio layers,
+masks, effects, 3D, rendering/export, JSX,
 ExtendScript and expressions. The preview currently renders rectangles only.
 There is no claim of AEP or Adobe script compatibility.
 

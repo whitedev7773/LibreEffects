@@ -1,4 +1,5 @@
 mod browser;
+mod graph;
 mod inspector;
 mod preview;
 mod timeline;

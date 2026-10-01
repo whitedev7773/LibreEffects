@@ -148,6 +148,8 @@ impl Shell {
                 }
                 _ => None,
             }
+        } else if m.shift && key == "f3" {
+            Some(Action::ToggleGraph)
         } else {
             match key {
                 "space" => Some(Action::Play),
@@ -374,6 +376,7 @@ impl Render for Shell {
                     ),
                 ],
                 "Animation" => vec![
+                    ("Toggle Graph Editor", "Shift+F3", Some(Action::ToggleGraph)),
                     ("Previous keyframe", "J", Some(Action::PreviousKey)),
                     ("Next keyframe", "K", Some(Action::NextKey)),
                     (
@@ -539,6 +542,7 @@ impl Render for Shell {
                     "Page Up / Down — Step frame (Shift: 10 frames)",
                     "P / A / S / R / T — Reveal transform property",
                     "U — Animated properties    J / K — Previous / Next key",
+                    "Shift+F3 — Graph Editor    F9 — Ease selected graph segment",
                     "B / N — Work area start / end    + / − — Timeline zoom",
                     "Enter — Commit field    Escape — Cancel field",
                     "Drag time ruler to scrub; drag diamonds to move keys.",

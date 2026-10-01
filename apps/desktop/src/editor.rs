@@ -1,7 +1,7 @@
 use std::{path::Path, time::Instant};
 
 use gpui::{Context, ElementId, Entity, PathPromptOptions, SharedString, Window};
-use libre_effects_core::{Command, Editor, Frame, LayerId, Project};
+use libre_effects_core::{Command, Editor, Frame, LayerId, Project, Property};
 
 use crate::components::{Button, ButtonSize, ButtonVariant};
 use crate::project_io::{read_project, write_project};
@@ -30,6 +30,7 @@ pub(crate) enum Action {
     NextKey,
     ToggleExpanded,
     Filter(Option<PropertyFilter>),
+    ToggleGraph,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -74,6 +75,9 @@ pub(crate) struct EditorState {
     pub work_end: Frame,
     pub expanded: bool,
     pub property_filter: Option<PropertyFilter>,
+    pub graph_open: bool,
+    pub graph_property: Property,
+    pub graph_key: Option<(LayerId, Frame)>,
     playback_origin: Option<(Instant, Frame)>,
     playback_generation: u64,
 }
@@ -94,6 +98,9 @@ impl Default for EditorState {
             work_end: 150,
             expanded: true,
             property_filter: None,
+            graph_open: false,
+            graph_property: Property::PositionX,
+            graph_key: None,
             playback_origin: None,
             playback_generation: 0,
         }
@@ -107,6 +114,17 @@ impl EditorState {
             .max(2)
     }
     fn normalize(&mut self) {
+        if self.graph_key.is_some_and(|(id, frame)| {
+            self.editor.selected() != Some(id)
+                || !self
+                    .editor
+                    .project()
+                    .composition()
+                    .layer(id)
+                    .is_some_and(|l| l.property(self.graph_property).keys().contains_key(&frame))
+        }) {
+            self.graph_key = None;
+        }
         let duration = self.editor.project().composition().duration();
         self.frame = self.frame.min(duration - 1);
         self.work_start = self.work_start.min(duration - 1);
@@ -123,6 +141,7 @@ impl EditorState {
 
     pub fn dispatch(&mut self, action: &Action, window: &mut Window, cx: &mut Context<Self>) {
         match action {
+            Action::ToggleGraph => self.graph_open = !self.graph_open,
             Action::ZoomTimeline(factor) => {
                 self.timeline_zoom = (self.timeline_zoom * factor).clamp(1.0, 64.0);
                 self.timeline_start = self.frame.saturating_sub(self.visible_frames() / 2);

@@ -18,6 +18,7 @@ struct KeyDrag {
     to: u32,
 }
 pub(crate) struct Timeline {
+    graph: Entity<super::graph::Graph>,
     state: Entity<EditorState>,
     ruler: Rc<Cell<Option<Bounds<Pixels>>>>,
     focus: FocusHandle,
@@ -33,6 +34,7 @@ impl Timeline {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
         Self {
+            graph: cx.new(|cx| super::graph::Graph::new(state.clone(), cx)),
             state,
             ruler: Rc::new(Cell::new(None)),
             focus: cx.focus_handle(),
@@ -140,6 +142,33 @@ fn grid(start: u32, visible: u32, frame: u32) -> impl IntoElement {
 }
 impl Render for Timeline {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.state.read(cx).graph_open {
+            return div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .min_h_0()
+                .child(
+                    div()
+                        .h(px(31.0))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .border_b_1()
+                        .border_color(rgb(ui::BORDER))
+                        .child(ui::text_button("back-to-layers", "Timeline").on_click({
+                            let state = self.state.clone();
+                            move |_, window, cx| {
+                                state.update(cx, |state, cx| {
+                                    state.dispatch(&Action::ToggleGraph, window, cx)
+                                })
+                            }
+                        }))
+                        .child(div().text_color(rgb(ui::BLUE)).px_3().child("Value Graph")),
+                )
+                .child(self.graph.clone())
+                .into_any_element();
+        }
         let state = self.state.read(cx);
         let comp = state.editor.project().composition().clone();
         let frame = state.frame;
@@ -234,6 +263,21 @@ impl Render for Timeline {
                             });
                         })),
                 );
+            if let Some(parent) = layer.parent() {
+                controls = controls.child(
+                    ui::text_button(control_id("parent"), format!("↳ {parent}"))
+                        .text_size(px(10.0))
+                        .text_color(rgb(ui::BLUE))
+                        .on_click({
+                            let state = self.state.clone();
+                            move |_, window, cx| {
+                                state.update(cx, |s, cx| {
+                                    s.dispatch(&Action::Select(parent), window, cx)
+                                })
+                            }
+                        }),
+                );
+            }
             controls = controls
                 .child(ui::action_tool(
                     control_id("up"),
@@ -397,6 +441,8 @@ impl Render for Timeline {
                                             });
                                         }
                                         this.state.update(cx, |state, cx| {
+                                            state.graph_property = property;
+                                            state.graph_key = Some((id, key_frame));
                                             state.dispatch(&Action::Seek(key_frame), window, cx)
                                         });
                                         cx.stop_propagation();
@@ -596,6 +642,14 @@ impl Render for Timeline {
                             }
                         }),
                     )
+                    .child(ui::text_button("open-graph", "Graph Editor").on_click({
+                        let state = self.state.clone();
+                        move |_, window, cx| {
+                            state.update(cx, |state, cx| {
+                                state.dispatch(&Action::ToggleGraph, window, cx)
+                            })
+                        }
+                    }))
                     .child(div().flex_1())
                     .child(ui::action_tool(
                         "timeline-minus",
@@ -773,6 +827,7 @@ impl Render for Timeline {
                             .child(format!("Work area: {work_start}–{work_end}f")),
                     ),
             )
+            .into_any_element()
     }
 }
 #[cfg(test)]

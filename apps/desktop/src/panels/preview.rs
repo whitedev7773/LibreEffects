@@ -7,7 +7,7 @@ use gpui::{
     MouseUpEvent, PathBuilder, Pixels, Point, Window, canvas, div, fill, point, prelude::*, px,
     rgb, size,
 };
-use libre_effects_core::{Command, LayerId, Property};
+use libre_effects_core::{Affine, Command, LayerId, Property};
 use std::{cell::Cell, rc::Rc};
 
 #[derive(Clone)]
@@ -19,6 +19,7 @@ struct MoveGesture {
     frame: u32,
     zoom: f32,
     pan: Point<Pixels>,
+    inverse_space: Affine,
 }
 pub(crate) struct Preview {
     state: Entity<EditorState>,
@@ -92,7 +93,9 @@ impl Preview {
         let hit = comp.layers().iter().find(|layer| {
             layer.active_at(frame, comp.duration())
                 && !layer.locked()
-                && point_in_quad(p, layer.corners_at(frame))
+                && comp
+                    .corners_at(layer.id(), frame)
+                    .is_some_and(|corners| point_in_quad(p, corners))
         });
         let (layer, position) = hit.map_or((None, [0.0, 0.0]), |layer| {
             (
@@ -104,6 +107,12 @@ impl Preview {
             )
         });
         let hand = state.tool == Tool::Hand;
+        let inverse_space = layer
+            .and_then(|id| comp.position_space(id, frame))
+            .and_then(Affine::inverse);
+        if !hand && inverse_space.is_none() {
+            return;
+        }
         if hand || layer.is_some() {
             self.gesture = Some(MoveGesture {
                 start: event.position,
@@ -113,6 +122,7 @@ impl Preview {
                 frame,
                 zoom,
                 pan: self.pan,
+                inverse_space: inverse_space.unwrap_or_default(),
             });
         }
         if !hand && let Some(id) = layer {
@@ -139,10 +149,12 @@ impl Preview {
             if let Some(id) = gesture.layer.filter(|_| {
                 f32::from(gesture.delta.x).abs() + f32::from(gesture.delta.y).abs() > 1.0
             }) {
-                let x =
-                    gesture.position[0] + f32::from(gesture.delta.x) as f64 / gesture.zoom as f64;
-                let y =
-                    gesture.position[1] + f32::from(gesture.delta.y) as f64 / gesture.zoom as f64;
+                let delta = gesture.inverse_space.vector([
+                    f32::from(gesture.delta.x) as f64 / gesture.zoom as f64,
+                    f32::from(gesture.delta.y) as f64 / gesture.zoom as f64,
+                ]);
+                let x = gesture.position[0] + delta[0];
+                let y = gesture.position[1] + delta[1];
                 self.state.update(cx, |state, cx| {
                     state.dispatch(
                         &Action::Edit(Command::SetPosition {
@@ -278,10 +290,17 @@ impl Render for Preview {
                                             {
                                                 let delta = gesture
                                                     .as_ref()
-                                                    .filter(|g| g.layer == Some(layer.id()))
+                                                    // Descendants move with a dragged parent, including hidden parents.
+                                                    .filter(|g| {
+                                                        g.layer.is_some_and(|id| {
+                                                            !comp.can_parent(id, Some(layer.id()))
+                                                        })
+                                                    })
                                                     .map_or(point(px(0.0), px(0.0)), |g| g.delta);
-                                                let corners =
-                                                    layer.corners_at(frame).map(|[x, y]| {
+                                                let corners = comp
+                                                    .corners_at(layer.id(), frame)
+                                                    .unwrap_or([[0.0; 2]; 4])
+                                                    .map(|[x, y]| {
                                                         point(
                                                             origin.x
                                                                 + px(x as f32 * zoom)
@@ -301,6 +320,7 @@ impl Render for Preview {
                                                 color.a = (layer
                                                     .property(Property::Opacity)
                                                     .value_at(frame)
+                                                    .clamp(0.0, 100.0)
                                                     / 100.0)
                                                     as f32;
                                                 if let Ok(path) = shape.build() {
@@ -325,20 +345,23 @@ impl Render for Preview {
                                                             rgb(ui::BLUE),
                                                         ));
                                                     }
+                                                    let anchor = comp
+                                                        .position_space(layer.id(), frame)
+                                                        .unwrap_or_default()
+                                                        .point([
+                                                            layer
+                                                                .property(Property::PositionX)
+                                                                .value_at(frame),
+                                                            layer
+                                                                .property(Property::PositionY)
+                                                                .value_at(frame),
+                                                        ]);
                                                     let anchor = point(
                                                         origin.x
-                                                            + px(layer
-                                                                .property(Property::PositionX)
-                                                                .value_at(frame)
-                                                                as f32
-                                                                * zoom)
+                                                            + px(anchor[0] as f32 * zoom)
                                                             + delta.x,
                                                         origin.y
-                                                            + px(layer
-                                                                .property(Property::PositionY)
-                                                                .value_at(frame)
-                                                                as f32
-                                                                * zoom)
+                                                            + px(anchor[1] as f32 * zoom)
                                                             + delta.y,
                                                     );
                                                     window.paint_quad(fill(

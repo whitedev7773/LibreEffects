@@ -1,6 +1,344 @@
 use super::*;
 
 #[test]
+fn bundled_curve_parent_study_roundtrips_and_inherits_motion() {
+    let project = Project::from_json(include_str!(
+        "../../../examples/curve-parent-study.lfe.json"
+    ))
+    .unwrap();
+    let comp = project.composition();
+    assert_eq!(comp.layer(2).unwrap().parent(), Some(1));
+    assert!(matches!(
+        comp.layer(1).unwrap().property(Property::PositionX).keys()[&0].interpolation,
+        Interpolation::Bezier(_)
+    ));
+    assert_ne!(comp.corners_at(2, 0), comp.corners_at(2, 60));
+    assert_eq!(
+        Project::from_json(&project.to_json().unwrap()).unwrap(),
+        project
+    );
+}
+
+#[test]
+fn temporal_bezier_solves_time_instead_of_using_parameter_as_time() {
+    let curve = Bezier {
+        x1: 0.42,
+        y1: 0.0,
+        x2: 1.0,
+        y2: 1.0,
+    };
+    assert!((curve.progress(0.5) - 0.3153568125).abs() < 1e-8);
+    assert_eq!(curve.progress(0.0), 0.0);
+    assert_eq!(curve.progress(1.0), 1.0);
+    let vertical = Bezier {
+        x1: 0.0,
+        y1: 0.0,
+        x2: 0.0,
+        y2: 1.0,
+    };
+    assert!((vertical.progress(0.125) - 0.5).abs() < 1e-9);
+    let mut editor = editor_with_layer();
+    set(&mut editor, 0, 0.0);
+    key(&mut editor, 0);
+    set(&mut editor, 100, 100.0);
+    editor
+        .execute(Command::SetInterpolation {
+            id: 1,
+            property: Property::PositionX,
+            frame: 0,
+            interpolation: Interpolation::Bezier(curve),
+        })
+        .unwrap();
+    let track = editor
+        .selected_layer()
+        .unwrap()
+        .property(Property::PositionX);
+    assert!((track.sample(50.0) - 31.53568125).abs() < 1e-6);
+    assert!(track.sample(50.5) > track.value_at(50));
+    assert_eq!(editor.project().version, 2);
+    assert_eq!(
+        Project::from_json(&editor.project().to_json().unwrap()).unwrap(),
+        *editor.project()
+    );
+}
+
+#[test]
+fn invalid_bezier_data_and_commands_are_rejected_without_mutation() {
+    let mut editor = editor_with_layer();
+    key(&mut editor, 0);
+    let before = editor.project().clone();
+    for curve in [
+        Bezier {
+            x1: -0.1,
+            ..Bezier::default()
+        },
+        Bezier {
+            y2: f64::NAN,
+            ..Bezier::default()
+        },
+        Bezier {
+            x2: 1.1,
+            ..Bezier::default()
+        },
+    ] {
+        assert!(
+            editor
+                .execute(Command::SetInterpolation {
+                    id: 1,
+                    property: Property::PositionX,
+                    frame: 0,
+                    interpolation: Interpolation::Bezier(curve)
+                })
+                .is_err()
+        );
+        assert_eq!(*editor.project(), before);
+    }
+    let mut json: serde_json::Value = serde_json::from_str(&before.to_json().unwrap()).unwrap();
+    json["composition"]["layers"][0]["properties"]["PositionX"]["keys"]["0"]["interpolation"] =
+        serde_json::json!({"Bezier":{"x1":2.0,"y1":0.0,"x2":0.5,"y2":1.0}});
+    assert!(Project::from_json(&json.to_string()).is_err());
+}
+
+#[test]
+fn graph_key_edit_is_one_undo_step_and_failures_are_atomic() {
+    let mut editor = editor_with_layer();
+    key(&mut editor, 0);
+    set(&mut editor, 30, 400.0);
+    let before = editor.project().clone();
+    for (to, value) in [(0, 12.0), (40, f64::NAN), (150, 20.0)] {
+        assert!(
+            editor
+                .execute(Command::EditKeyframe {
+                    id: 1,
+                    property: Property::PositionX,
+                    from: 30,
+                    to,
+                    value
+                })
+                .is_err()
+        );
+        assert_eq!(*editor.project(), before);
+    }
+    editor
+        .execute(Command::EditKeyframe {
+            id: 1,
+            property: Property::PositionX,
+            from: 30,
+            to: 45,
+            value: 525.0,
+        })
+        .unwrap();
+    assert_eq!(
+        editor
+            .selected_layer()
+            .unwrap()
+            .property(Property::PositionX)
+            .value_at(45),
+        525.0
+    );
+    editor.undo();
+    assert_eq!(*editor.project(), before);
+    editor.redo();
+    assert_eq!(
+        editor
+            .selected_layer()
+            .unwrap()
+            .property(Property::PositionX)
+            .value_at(45),
+        525.0
+    );
+}
+
+fn assert_corners_close(a: [[f64; 2]; 4], b: [[f64; 2]; 4]) {
+    for (a, b) in a.into_iter().flatten().zip(b.into_iter().flatten()) {
+        assert!((a - b).abs() < 1e-7, "{a} != {b}");
+    }
+}
+fn set_property(editor: &mut Editor, id: LayerId, property: Property, value: f64) {
+    editor
+        .execute(Command::SetValue {
+            id,
+            property,
+            frame: 0,
+            value,
+        })
+        .unwrap();
+}
+#[test]
+fn parenting_and_unparenting_preserve_pose_under_rotated_nonuniform_scale() {
+    let mut editor = editor_with_layer();
+    editor.execute(Command::AddRectangle).unwrap();
+    set_property(&mut editor, 1, Property::Rotation, 37.0);
+    set_property(&mut editor, 1, Property::ScaleX, 175.0);
+    set_property(&mut editor, 1, Property::ScaleY, -65.0);
+    set_property(&mut editor, 2, Property::PositionX, 300.0);
+    set_property(&mut editor, 2, Property::Rotation, -22.0);
+    let pose = editor.project().composition().corners_at(2, 0).unwrap();
+    editor
+        .execute(Command::SetParent {
+            id: 2,
+            parent: Some(1),
+            frame: 0,
+        })
+        .unwrap();
+    assert_corners_close(
+        editor.project().composition().corners_at(2, 0).unwrap(),
+        pose,
+    );
+    let bound = editor.project().clone();
+    set_property(&mut editor, 1, Property::PositionX, 1010.0);
+    let moved = pose.map(|[x, y]| [x + 50.0, y]);
+    assert_corners_close(
+        editor.project().composition().corners_at(2, 0).unwrap(),
+        moved,
+    );
+    editor
+        .execute(Command::SetParent {
+            id: 2,
+            parent: None,
+            frame: 0,
+        })
+        .unwrap();
+    assert_corners_close(
+        editor.project().composition().corners_at(2, 0).unwrap(),
+        moved,
+    );
+    assert_eq!(
+        editor.project().composition().layer(2).unwrap().parent(),
+        None
+    );
+    editor.undo();
+    editor.undo();
+    assert_eq!(*editor.project(), bound);
+    assert_eq!(
+        Project::from_json(&bound.to_json().unwrap()).unwrap(),
+        bound
+    );
+}
+#[test]
+fn parent_animation_affects_children_but_visibility_and_opacity_do_not() {
+    let mut editor = editor_with_layer();
+    editor.execute(Command::AddRectangle).unwrap();
+    editor
+        .execute(Command::SetParent {
+            id: 2,
+            parent: Some(1),
+            frame: 0,
+        })
+        .unwrap();
+    let pose = editor.project().composition().corners_at(2, 0).unwrap();
+    editor
+        .execute(Command::ToggleKeyframe {
+            id: 1,
+            property: Property::PositionX,
+            frame: 0,
+        })
+        .unwrap();
+    editor
+        .execute(Command::SetValue {
+            id: 1,
+            property: Property::PositionX,
+            frame: 30,
+            value: 1260.0,
+        })
+        .unwrap();
+    set_property(&mut editor, 1, Property::Opacity, 0.0);
+    editor.execute(Command::ToggleVisible(1)).unwrap();
+    let comp = editor.project().composition();
+    assert_corners_close(
+        comp.corners_at(2, 15).unwrap(),
+        pose.map(|[x, y]| [x + 150.0, y]),
+    );
+    assert!(comp.layer(2).unwrap().active_at(15, 150));
+    assert_eq!(
+        comp.layer(2)
+            .unwrap()
+            .property(Property::Opacity)
+            .value_at(15),
+        100.0
+    );
+    let local_delta = comp
+        .position_space(2, 15)
+        .unwrap()
+        .inverse()
+        .unwrap()
+        .vector([20.0, 10.0]);
+    assert!((local_delta[0] - 20.0).abs() < 1e-7);
+}
+#[test]
+fn parent_hierarchy_rejects_cycles_missing_targets_deletion_and_zero_scale() {
+    let mut editor = editor_with_layer();
+    editor.execute(Command::AddRectangle).unwrap();
+    editor.execute(Command::AddRectangle).unwrap();
+    editor
+        .execute(Command::SetParent {
+            id: 2,
+            parent: Some(1),
+            frame: 0,
+        })
+        .unwrap();
+    editor
+        .execute(Command::SetParent {
+            id: 3,
+            parent: Some(2),
+            frame: 0,
+        })
+        .unwrap();
+    let before = editor.project().clone();
+    for command in [
+        Command::SetParent {
+            id: 1,
+            parent: Some(3),
+            frame: 0,
+        },
+        Command::SetParent {
+            id: 1,
+            parent: Some(1),
+            frame: 0,
+        },
+        Command::SetParent {
+            id: 1,
+            parent: Some(99),
+            frame: 0,
+        },
+        Command::RemoveLayer(1),
+    ] {
+        assert!(editor.execute(command).is_err());
+        assert_eq!(*editor.project(), before);
+    }
+    let mut invalid = before.clone();
+    invalid
+        .composition
+        .layers
+        .iter_mut()
+        .find(|l| l.id == 1)
+        .unwrap()
+        .parent = Some(3);
+    assert!(Project::from_json(&invalid.to_json().unwrap()).is_err());
+    editor.execute(Command::AddRectangle).unwrap();
+    set_property(&mut editor, 4, Property::ScaleX, 0.0);
+    assert!(
+        editor
+            .execute(Command::SetParent {
+                id: 3,
+                parent: Some(4),
+                frame: 0
+            })
+            .is_err()
+    );
+    editor.execute(Command::ToggleLocked(3)).unwrap();
+    assert!(
+        editor
+            .execute(Command::SetParent {
+                id: 3,
+                parent: None,
+                frame: 0
+            })
+            .is_err()
+    );
+}
+
+#[test]
 fn bundled_motion_study_loads_and_animates() {
     let project =
         Project::from_json(include_str!("../../../examples/motion-study.lfe.json")).unwrap();
@@ -437,7 +775,7 @@ fn serialized_project_roundtrips_animation_and_preserves_ids() {
 fn corrupt_and_future_projects_are_rejected() {
     let editor = editor_with_layer();
     let mut project = editor.project().clone();
-    project.version = 2;
+    project.version = 3;
     assert!(Project::from_json(&project.to_json().unwrap()).is_err());
     project.version = 1;
     project.composition.fps = 0;

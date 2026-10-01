@@ -1,0 +1,1022 @@
+use crate::{
+    components::TextField,
+    editor::{Action, EditorState},
+    ui,
+};
+use gpui::{
+    Bounds, ContentMask, Context, Entity, FocusHandle, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, PathBuilder, Pixels, Point, SharedString, Window, canvas, div, fill, point,
+    prelude::*, px, relative, rgb, size,
+};
+use libre_effects_core::{AnimatedProperty, Bezier, Command, Interpolation, LayerId, Property};
+use std::{cell::Cell, rc::Rc};
+
+#[derive(Clone, Copy)]
+struct View {
+    start: f64,
+    span: f64,
+    low: f64,
+    high: f64,
+}
+impl View {
+    fn point(self, bounds: Bounds<Pixels>, frame: f64, value: f64) -> Point<Pixels> {
+        point(
+            bounds.left() + bounds.size.width * ((frame - self.start) / self.span) as f32,
+            bounds.bottom()
+                - bounds.size.height * ((value - self.low) / (self.high - self.low)) as f32,
+        )
+    }
+    fn value(self, bounds: Bounds<Pixels>, p: Point<Pixels>) -> (f64, f64) {
+        (
+            self.start
+                + f32::from(p.x - bounds.left()) as f64
+                    / f32::from(bounds.size.width).max(1.0) as f64
+                    * self.span,
+            self.low
+                + f32::from(bounds.bottom() - p.y) as f64
+                    / f32::from(bounds.size.height).max(1.0) as f64
+                    * (self.high - self.low),
+        )
+    }
+}
+fn view(track: &AnimatedProperty, start: u32, span: u32) -> View {
+    let mut low = f64::INFINITY;
+    let mut high = f64::NEG_INFINITY;
+    for i in 0..=512 {
+        let v = track.sample(start as f64 + span as f64 * i as f64 / 512.0);
+        low = low.min(v);
+        high = high.max(v);
+    }
+    for (_, key) in track.keys().range(start..=start.saturating_add(span)) {
+        low = low.min(key.value);
+        high = high.max(key.value);
+    }
+    let padding = ((high - low) * 0.18).max(1.0);
+    View {
+        start: start as f64,
+        span: span as f64,
+        low: low - padding,
+        high: high + padding,
+    }
+}
+const EASE_VIEW: View = View {
+    start: 0.0,
+    span: 1.0,
+    low: -0.3,
+    high: 1.3,
+};
+#[derive(Clone)]
+enum Drag {
+    Key {
+        id: LayerId,
+        property: Property,
+        from: u32,
+        to: u32,
+        value: f64,
+        view: View,
+        bounds: Bounds<Pixels>,
+        start: Point<Pixels>,
+        moved: bool,
+    },
+    Handle {
+        id: LayerId,
+        property: Property,
+        frame: u32,
+        index: usize,
+        curve: Bezier,
+        start: Point<Pixels>,
+        moved: bool,
+    },
+}
+pub(crate) struct Graph {
+    state: Entity<EditorState>,
+    plot: Rc<Cell<Option<Bounds<Pixels>>>>,
+    easing: Rc<Cell<Option<Bounds<Pixels>>>>,
+    focus: FocusHandle,
+    drag: Option<Drag>,
+    fields: Vec<Entity<TextField>>,
+}
+fn selected(state: &EditorState) -> Option<(LayerId, u32, Property)> {
+    let (id, frame) = state.graph_key?;
+    (state.editor.selected() == Some(id)
+        && state
+            .editor
+            .project()
+            .composition()
+            .layer(id)?
+            .property(state.graph_property)
+            .keys()
+            .contains_key(&frame))
+    .then_some((id, frame, state.graph_property))
+}
+fn curve_at(state: &EditorState) -> Option<Bezier> {
+    let (id, frame, property) = selected(state)?;
+    let track = state
+        .editor
+        .project()
+        .composition()
+        .layer(id)?
+        .property(property);
+    track.keys().range(frame + 1..).next()?;
+    Some(match track.keys()[&frame].interpolation {
+        Interpolation::Bezier(b) => b,
+        Interpolation::Linear => Bezier {
+            x1: 0.0,
+            y1: 0.0,
+            x2: 1.0,
+            y2: 1.0,
+        },
+        Interpolation::Smooth => Bezier::default(),
+        Interpolation::Hold => return None,
+    })
+}
+fn dispatch_key(
+    state: &mut EditorState,
+    command: Command,
+    id: LayerId,
+    to: u32,
+    window: &mut Window,
+    cx: &mut Context<EditorState>,
+) {
+    state.dispatch(&Action::Edit(command), window, cx);
+    if state.status.starts_with("Edited") {
+        state.graph_key = Some((id, to));
+        state.frame = to;
+        cx.notify();
+    }
+}
+impl Graph {
+    pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
+        cx.observe(&state, |this, _, cx| {
+            if this.drag.as_ref().is_some_and(|drag| {
+                let (id, p) = match drag {
+                    Drag::Key { id, property, .. } | Drag::Handle { id, property, .. } => {
+                        (*id, *property)
+                    }
+                };
+                let s = this.state.read(cx);
+                s.editor.selected() != Some(id) || s.graph_property != p
+            }) {
+                this.drag = None;
+            }
+            cx.notify();
+        })
+        .detach();
+        let fields = (0..6)
+            .map(|index| {
+                let edit = state.clone();
+                cx.new(|cx| {
+                    TextField::new(cx, move |text, window, cx| {
+                        edit.update(cx, |state, cx| {
+                            let Some((id, frame, property)) = selected(state) else {
+                                return;
+                            };
+                            let Ok(value) = text.trim().parse::<f64>() else {
+                                state.status = "Enter a finite number.".into();
+                                cx.notify();
+                                return;
+                            };
+                            if !value.is_finite() {
+                                state.status = "Enter a finite number.".into();
+                                cx.notify();
+                                return;
+                            }
+                            if index < 2 {
+                                if index == 0
+                                    && (value < 0.0
+                                        || value.fract() != 0.0
+                                        || value
+                                            >= state.editor.project().composition().duration()
+                                                as f64)
+                                {
+                                    state.status =
+                                        "Key time must be a whole frame inside the composition."
+                                            .into();
+                                    cx.notify();
+                                    return;
+                                }
+                                let track = state
+                                    .editor
+                                    .project()
+                                    .composition()
+                                    .layer(id)
+                                    .unwrap()
+                                    .property(property);
+                                let to = if index == 0 { value as u32 } else { frame };
+                                let value = if index == 1 {
+                                    value
+                                } else {
+                                    track.keys()[&frame].value
+                                };
+                                dispatch_key(
+                                    state,
+                                    Command::EditKeyframe {
+                                        id,
+                                        property,
+                                        from: frame,
+                                        to,
+                                        value,
+                                    },
+                                    id,
+                                    to,
+                                    window,
+                                    cx,
+                                );
+                            } else if let Some(mut curve) = curve_at(state) {
+                                match index {
+                                    2 => curve.x1 = value,
+                                    3 => curve.y1 = value,
+                                    4 => curve.x2 = value,
+                                    _ => curve.y2 = value,
+                                };
+                                state.dispatch(
+                                    &Action::Edit(Command::SetInterpolation {
+                                        id,
+                                        property,
+                                        frame,
+                                        interpolation: Interpolation::Bezier(curve),
+                                    }),
+                                    window,
+                                    cx,
+                                );
+                            }
+                        });
+                    })
+                })
+            })
+            .collect();
+        Self {
+            state,
+            plot: Rc::new(Cell::new(None)),
+            easing: Rc::new(Cell::new(None)),
+            focus: cx.focus_handle(),
+            drag: None,
+            fields,
+        }
+    }
+    fn preset(&self, interpolation: Interpolation, window: &mut Window, cx: &mut Context<Self>) {
+        self.state.update(cx, |state, cx| {
+            if let Some((id, frame, property)) = selected(state) {
+                state.dispatch(
+                    &Action::Edit(Command::SetInterpolation {
+                        id,
+                        property,
+                        frame,
+                        interpolation,
+                    }),
+                    window,
+                    cx,
+                );
+            }
+        });
+    }
+    fn down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        window.focus(&self.focus);
+        let Some(bounds) = self.plot.get() else {
+            return;
+        };
+        let state = self.state.read(cx);
+        let Some(layer) = state.editor.selected_layer() else {
+            return;
+        };
+        let id = layer.id();
+        let property = state.graph_property;
+        let track = layer.property(property);
+        let view = view(track, state.timeline_start, state.visible_frames());
+        let hit = track
+            .keys()
+            .iter()
+            .filter(|(f, _)| {
+                **f >= state.timeline_start && **f <= state.timeline_start + state.visible_frames()
+            })
+            .find(|(f, k)| {
+                let p = view.point(bounds, **f as f64, k.value);
+                f32::from(p.x - event.position.x).abs() < 9.0
+                    && f32::from(p.y - event.position.y).abs() < 9.0
+            })
+            .map(|(f, k)| (*f, k.value));
+        if let Some((frame, value)) = hit {
+            if !layer.locked() {
+                self.drag = Some(Drag::Key {
+                    id,
+                    property,
+                    from: frame,
+                    to: frame,
+                    value,
+                    view,
+                    bounds,
+                    start: event.position,
+                    moved: false,
+                });
+            }
+            self.state.update(cx, |s, cx| {
+                s.graph_key = Some((id, frame));
+                s.dispatch(&Action::Seek(frame), window, cx);
+            });
+        } else {
+            let (frame, _) = view.value(bounds, event.position);
+            self.state.update(cx, |s, cx| {
+                s.graph_key = None;
+                s.dispatch(&Action::Seek(frame.max(0.0).round() as u32), window, cx);
+            });
+        }
+        cx.notify();
+    }
+    fn handle_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        window.focus(&self.focus);
+        let state = self.state.read(cx);
+        let Some((id, frame, property)) = selected(state) else {
+            return;
+        };
+        if state.editor.selected_layer().is_none_or(|l| l.locked()) {
+            return;
+        }
+        let Some(curve) = curve_at(state) else {
+            return;
+        };
+        let Some(bounds) = self.easing.get() else {
+            return;
+        };
+        for (index, (x, y)) in [(curve.x1, curve.y1), (curve.x2, curve.y2)]
+            .into_iter()
+            .enumerate()
+        {
+            let p = EASE_VIEW.point(bounds, x, y);
+            if f32::from(p.x - event.position.x).abs() < 12.0
+                && f32::from(p.y - event.position.y).abs() < 12.0
+            {
+                self.drag = Some(Drag::Handle {
+                    id,
+                    property,
+                    frame,
+                    index,
+                    curve,
+                    start: event.position,
+                    moved: false,
+                });
+                break;
+            }
+        }
+        cx.notify();
+    }
+    fn moving(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if event.pressed_button != Some(MouseButton::Left) {
+            return;
+        }
+        match &mut self.drag {
+            Some(Drag::Key {
+                to,
+                value,
+                view,
+                bounds,
+                start,
+                moved,
+                ..
+            }) => {
+                if !*moved
+                    && f32::from(event.position.x - start.x).abs()
+                        + f32::from(event.position.y - start.y).abs()
+                        < 3.0
+                {
+                    return;
+                }
+                *moved = true;
+                let (f, v) = view.value(*bounds, event.position);
+                *to = f.round().clamp(
+                    0.0,
+                    (self
+                        .state
+                        .read(cx)
+                        .editor
+                        .project()
+                        .composition()
+                        .duration()
+                        - 1) as f64,
+                ) as u32;
+                *value = v;
+            }
+            Some(Drag::Handle {
+                index,
+                curve,
+                start,
+                moved,
+                ..
+            }) => {
+                if !*moved
+                    && f32::from(event.position.x - start.x).abs()
+                        + f32::from(event.position.y - start.y).abs()
+                        < 3.0
+                {
+                    return;
+                }
+                *moved = true;
+                if let Some(bounds) = self.easing.get() {
+                    let (x, y) = EASE_VIEW.value(bounds, event.position);
+                    let (x, y) = (x.clamp(0.0, 1.0), y.clamp(-2.0, 3.0));
+                    if *index == 0 {
+                        curve.x1 = x;
+                        curve.y1 = y;
+                    } else {
+                        curve.x2 = x;
+                        curve.y2 = y;
+                    }
+                }
+            }
+            None => return,
+        }
+        cx.notify();
+    }
+    fn up(&mut self, _: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(drag) = self.drag.take() {
+            if matches!(
+                &drag,
+                Drag::Key { moved: false, .. } | Drag::Handle { moved: false, .. }
+            ) {
+                cx.notify();
+                return;
+            }
+            self.state.update(cx, |state, cx| match drag {
+                Drag::Key {
+                    id,
+                    property,
+                    from,
+                    to,
+                    value,
+                    ..
+                } => dispatch_key(
+                    state,
+                    Command::EditKeyframe {
+                        id,
+                        property,
+                        from,
+                        to,
+                        value,
+                    },
+                    id,
+                    to,
+                    window,
+                    cx,
+                ),
+                Drag::Handle {
+                    id,
+                    property,
+                    frame,
+                    curve,
+                    ..
+                } => state.dispatch(
+                    &Action::Edit(Command::SetInterpolation {
+                        id,
+                        property,
+                        frame,
+                        interpolation: Interpolation::Bezier(curve),
+                    }),
+                    window,
+                    cx,
+                ),
+            });
+        }
+        cx.notify();
+    }
+}
+fn stroke(
+    window: &mut Window,
+    points: impl IntoIterator<Item = Point<Pixels>>,
+    color: u32,
+    width: f32,
+) {
+    let mut path = PathBuilder::stroke(px(width));
+    let mut points = points.into_iter();
+    if let Some(p) = points.next() {
+        path.move_to(p);
+    }
+    for p in points {
+        path.line_to(p);
+    }
+    if let Ok(path) = path.build() {
+        window.paint_path(path, rgb(color));
+    }
+}
+fn dot(window: &mut Window, p: Point<Pixels>, color: u32) {
+    window.paint_quad(fill(
+        Bounds::new(p - point(px(4.0), px(4.0)), size(px(8.0), px(8.0))),
+        rgb(color),
+    ));
+}
+impl Render for Graph {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let state = self.state.read(cx);
+        let property = state.graph_property;
+        let layer = state.editor.selected_layer().cloned();
+        let start = state.timeline_start;
+        let span = state.visible_frames();
+        let current = state.frame;
+        let selection = selected(state);
+        let curve = curve_at(state);
+        let locked = layer.as_ref().is_none_or(|l| l.locked());
+        let mut root = div()
+            .id("graph-editor")
+            .track_focus(&self.focus)
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .bg(rgb(ui::BG))
+            .on_mouse_move(cx.listener(Self::moving))
+            .on_mouse_up(MouseButton::Left, cx.listener(Self::up))
+            .on_mouse_up_out(MouseButton::Left, cx.listener(Self::up))
+            .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+                let key = event.keystroke.key.as_str();
+                if key == "escape" {
+                    this.drag = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+                if key == "f9" {
+                    this.preset(Interpolation::Bezier(Bezier::default()), window, cx);
+                    cx.stop_propagation();
+                }
+                if matches!(key, "delete" | "backspace") {
+                    this.state.update(cx, |state, cx| {
+                        if let Some((id, frame, property)) = selected(state) {
+                            state.dispatch(
+                                &Action::Edit(Command::ToggleKeyframe {
+                                    id,
+                                    property,
+                                    frame,
+                                }),
+                                window,
+                                cx,
+                            );
+                        }
+                    });
+                    cx.stop_propagation();
+                }
+            }));
+        let mut toolbar = div()
+            .h(px(30.0))
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap_1()
+            .px_2();
+        if let Some(layer) = &layer {
+            toolbar = toolbar.child(ui::action_tool(
+                "graph-add-key",
+                "diamond",
+                "Add / remove key at current frame",
+                &self.state,
+                Action::Edit(Command::ToggleKeyframe {
+                    id: layer.id(),
+                    property,
+                    frame: current,
+                }),
+                layer.property(property).keys().contains_key(&current),
+            ));
+        }
+        for (label, interpolation) in [
+            ("Linear", Interpolation::Linear),
+            ("Hold", Interpolation::Hold),
+            ("Ease (F9)", Interpolation::Bezier(Bezier::default())),
+            (
+                "Ease In",
+                Interpolation::Bezier(Bezier {
+                    x1: 0.42,
+                    y1: 0.0,
+                    x2: 1.0,
+                    y2: 1.0,
+                }),
+            ),
+            (
+                "Ease Out",
+                Interpolation::Bezier(Bezier {
+                    x1: 0.0,
+                    y1: 0.0,
+                    x2: 0.58,
+                    y2: 1.0,
+                }),
+            ),
+        ] {
+            toolbar = toolbar.child(
+                ui::text_button(SharedString::from(format!("preset-{label}")), label)
+                    .when(selection.is_none() || locked, |s| s.opacity(0.4))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.preset(interpolation, window, cx)
+                    })),
+            );
+        }
+        toolbar = toolbar
+            .child(div().flex_1())
+            .child(ui::action_tool(
+                "graph-zoom-out",
+                "minus",
+                "Zoom timeline out",
+                &self.state,
+                Action::ZoomTimeline(0.5),
+                false,
+            ))
+            .child(ui::action_tool(
+                "graph-zoom-in",
+                "plus",
+                "Zoom timeline in",
+                &self.state,
+                Action::ZoomTimeline(2.0),
+                false,
+            ));
+        root = root.child(toolbar);
+        let Some(layer) = layer else {
+            return root.child(
+                div()
+                    .p_4()
+                    .child("Select a layer in the timeline to edit its animation."),
+            );
+        };
+        let track = layer.property(property).clone();
+        let mut graph_view = view(&track, start, span);
+        if let Some(Drag::Key { view, .. }) = &self.drag {
+            graph_view = *view;
+        }
+        let mut properties = div()
+            .id("graph-properties")
+            .w(px(150.0))
+            .flex_none()
+            .overflow_y_scroll()
+            .border_r_1()
+            .border_color(rgb(ui::BORDER));
+        for p in Property::ALL {
+            let animated = !layer.property(p).keys().is_empty();
+            properties = properties.child(
+                ui::text_button(
+                    SharedString::from(format!("graph-{p:?}")),
+                    format!("{}{}", if animated { "• " } else { "" }, p.label()),
+                )
+                .justify_start()
+                .text_size(px(11.0))
+                .when(p == property, |s| {
+                    s.bg(rgb(0x164a7b)).text_color(rgb(ui::BLUE))
+                })
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.drag = None;
+                    this.state.update(cx, |s, cx| {
+                        s.graph_property = p;
+                        s.graph_key = None;
+                        cx.notify();
+                    });
+                })),
+            );
+        }
+        let measured = self.plot.clone();
+        let drag = self.drag.clone();
+        let plot_track = track.clone();
+        let chart = div()
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .h(px(20.0))
+                    .px_3()
+                    .text_size(px(10.0))
+                    .text_color(rgb(ui::MUTED))
+                    .child(format!(
+                        "{} · {}   |   {:.2} to {:.2}",
+                        layer.name(),
+                        property.label(),
+                        graph_view.low,
+                        graph_view.high
+                    )),
+            )
+            .child(
+                div()
+                    .id("value-graph-canvas")
+                    .mx_3()
+                    .flex_1()
+                    .min_h_0()
+                    .relative()
+                    .overflow_hidden()
+                    .cursor_crosshair()
+                    .on_mouse_down(MouseButton::Left, cx.listener(Self::down))
+                    .child(
+                        canvas(
+                            move |bounds, _, _| measured.set(Some(bounds)),
+                            move |bounds, _, window, _| {
+                                window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                                    for i in 0..=10 {
+                                        let x =
+                                            bounds.left() + bounds.size.width * (i as f32 / 10.0);
+                                        stroke(
+                                            window,
+                                            [point(x, bounds.top()), point(x, bounds.bottom())],
+                                            0x343434,
+                                            1.0,
+                                        );
+                                    }
+                                    for i in 0..=4 {
+                                        let y =
+                                            bounds.top() + bounds.size.height * (i as f32 / 4.0);
+                                        stroke(
+                                            window,
+                                            [point(bounds.left(), y), point(bounds.right(), y)],
+                                            0x343434,
+                                            1.0,
+                                        );
+                                    }
+                                    let zero = graph_view.point(bounds, graph_view.start, 0.0).y;
+                                    stroke(
+                                        window,
+                                        [point(bounds.left(), zero), point(bounds.right(), zero)],
+                                        0x555555,
+                                        1.0,
+                                    );
+                                    let evaluate = |frame: f64| {
+                                        if let Some(Drag::Handle {
+                                            frame: from, curve, ..
+                                        }) = &drag
+                                        {
+                                            if let Some((&end, b)) =
+                                                plot_track.keys().range(from + 1..).next()
+                                            {
+                                                if frame >= *from as f64 && frame <= end as f64 {
+                                                    let a = plot_track.keys()[from].value;
+                                                    return a
+                                                        + (b.value - a)
+                                                            * curve.progress(
+                                                                (frame - *from as f64)
+                                                                    / (end - *from) as f64,
+                                                            );
+                                                }
+                                            }
+                                        }
+                                        plot_track.sample(frame)
+                                    };
+                                    stroke(
+                                        window,
+                                        (0..=600).map(|i| {
+                                            let f = graph_view.start
+                                                + graph_view.span * i as f64 / 600.0;
+                                            graph_view.point(bounds, f, evaluate(f))
+                                        }),
+                                        0xffc66d,
+                                        1.5,
+                                    );
+                                    for (&f, k) in plot_track.keys() {
+                                        dot(
+                                            window,
+                                            graph_view.point(bounds, f as f64, k.value),
+                                            if selection.is_some_and(|(_, frame, _)| frame == f) {
+                                                ui::BLUE
+                                            } else {
+                                                0xffc66d
+                                            },
+                                        );
+                                    }
+                                    if let Some(Drag::Key { to, value, .. }) = &drag {
+                                        dot(
+                                            window,
+                                            graph_view.point(bounds, *to as f64, *value),
+                                            0xffffff,
+                                        );
+                                    }
+                                    let x = graph_view.point(bounds, current as f64, 0.0).x;
+                                    stroke(
+                                        window,
+                                        [point(x, bounds.top()), point(x, bounds.bottom())],
+                                        ui::BLUE,
+                                        1.0,
+                                    );
+                                });
+                            },
+                        )
+                        .size_full(),
+                    ),
+            )
+            .child(
+                div()
+                    .h(px(20.0))
+                    .relative()
+                    .mx_3()
+                    .children((0..=5).map(|i| {
+                        div()
+                            .absolute()
+                            .left(relative(i as f32 / 5.0 * 0.93))
+                            .text_size(px(10.0))
+                            .text_color(rgb(ui::MUTED))
+                            .child(format!("{}f", start + span * i / 5))
+                    })),
+            );
+        let mut easing = div()
+            .id("easing-controls")
+            .w(px(260.0))
+            .flex_none()
+            .overflow_y_scroll()
+            .border_l_1()
+            .border_color(rgb(ui::BORDER))
+            .px_2()
+            .child(
+                div()
+                    .h(px(20.0))
+                    .child("Outgoing segment · temporal Bezier"),
+            );
+        if let Some((id, frame, _)) = selection {
+            let key = &track.keys()[&frame];
+            for (index, (label, value)) in [
+                ("Frame", frame.to_string()),
+                ("Value", format!("{:.3}", key.value)),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                self.fields[index].update(cx, |field, _| {
+                    field.sync(format!("{id}-{property:?}-{frame}"), value, window)
+                });
+                easing = easing.child(
+                    div()
+                        .h(px(25.0))
+                        .flex()
+                        .items_center()
+                        .child(div().w(px(65.0)).child(label))
+                        .child(
+                            div()
+                                .flex_1()
+                                .when(!locked, |s| s.child(self.fields[index].clone()))
+                                .when(locked, |s| s.child("Locked")),
+                        ),
+                );
+            }
+            if let Some(mut curve) = curve {
+                if let Some(Drag::Handle { curve: preview, .. }) = &self.drag {
+                    curve = *preview;
+                }
+                let measured = self.easing.clone();
+                easing = easing.child(
+                    div()
+                        .id("bezier-handles")
+                        .h(px(110.0))
+                        .mx_3()
+                        .overflow_hidden()
+                        .on_mouse_down(MouseButton::Left, cx.listener(Self::handle_down))
+                        .child(
+                            canvas(
+                                move |b, _, _| measured.set(Some(b)),
+                                move |bounds, _, window, _| {
+                                    window.with_content_mask(
+                                        Some(ContentMask { bounds }),
+                                        |window| {
+                                            let p = |x, y| EASE_VIEW.point(bounds, x, y);
+                                            stroke(
+                                                window,
+                                                [
+                                                    p(0.0, 0.0),
+                                                    p(1.0, 0.0),
+                                                    p(1.0, 1.0),
+                                                    p(0.0, 1.0),
+                                                    p(0.0, 0.0),
+                                                ],
+                                                0x454545,
+                                                1.0,
+                                            );
+                                            stroke(
+                                                window,
+                                                [p(0.0, 0.0), p(curve.x1, curve.y1)],
+                                                ui::BLUE,
+                                                1.0,
+                                            );
+                                            stroke(
+                                                window,
+                                                [p(1.0, 1.0), p(curve.x2, curve.y2)],
+                                                ui::BLUE,
+                                                1.0,
+                                            );
+                                            stroke(
+                                                window,
+                                                (0..=100).map(|i| {
+                                                    let x = i as f64 / 100.0;
+                                                    p(x, curve.progress(x))
+                                                }),
+                                                0xffc66d,
+                                                1.5,
+                                            );
+                                            dot(window, p(curve.x1, curve.y1), ui::BLUE);
+                                            dot(window, p(curve.x2, curve.y2), ui::BLUE);
+                                        },
+                                    );
+                                },
+                            )
+                            .size_full(),
+                        ),
+                );
+                for row in 0..2 {
+                    let mut fields = div().flex().h(px(25.0)).gap_1();
+                    for column in 0..2 {
+                        let index = row * 2 + column;
+                        let value = [curve.x1, curve.y1, curve.x2, curve.y2][index];
+                        self.fields[index + 2].update(cx, |field, _| {
+                            field.sync(
+                                format!("{id}-{property:?}-{frame}"),
+                                format!("{value:.3}"),
+                                window,
+                            )
+                        });
+                        fields = fields
+                            .child(div().w(px(22.0)).child(["X1", "Y1", "X2", "Y2"][index]))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .when(!locked, |s| s.child(self.fields[index + 2].clone())),
+                            );
+                    }
+                    easing = easing.child(fields);
+                }
+                easing = easing.child(div().text_size(px(10.0)).text_color(rgb(ui::MUTED)).child(
+                    format!(
+                        "{} · drag handles or type coordinates",
+                        key.interpolation.label()
+                    ),
+                ));
+            } else {
+                easing = easing.child(div().py_3().text_color(rgb(ui::MUTED)).child(
+                    if track.keys().range(frame + 1..).next().is_none() {
+                        "Last key: no outgoing segment."
+                    } else {
+                        "Hold segment: choose an easing preset to enable handles."
+                    },
+                ));
+            }
+        } else {
+            easing = easing.child(
+                div()
+                    .py_3()
+                    .text_color(rgb(ui::MUTED))
+                    .child("Click a graph key to edit its time, value and outgoing curve."),
+            );
+        }
+        let info = match &self.drag {
+            Some(Drag::Key { to, value, .. }) => {
+                format!("Release to apply: {to}f / {value:.3} · Escape to cancel")
+            }
+            _ => {
+                "Drag keys: time + value · F9: ease outgoing segment · Delete: selected key".into()
+            }
+        };
+        root.child(
+            div()
+                .flex()
+                .flex_1()
+                .min_h_0()
+                .child(properties)
+                .child(chart)
+                .child(easing),
+        )
+        .child(
+            div()
+                .h(px(25.0))
+                .flex_none()
+                .flex()
+                .items_center()
+                .gap_2()
+                .px_2()
+                .border_t_1()
+                .border_color(rgb(ui::BORDER))
+                .child(ui::action_tool(
+                    "graph-pan-left",
+                    "arrow-left",
+                    "Pan timeline left",
+                    &self.state,
+                    Action::PanTimeline(-(span as i32 / 4).max(1)),
+                    false,
+                ))
+                .child(ui::action_tool(
+                    "graph-pan-right",
+                    "arrow-right",
+                    "Pan timeline right",
+                    &self.state,
+                    Action::PanTimeline((span as i32 / 4).max(1)),
+                    false,
+                ))
+                .child(
+                    div()
+                        .text_size(px(10.0))
+                        .text_color(rgb(ui::MUTED))
+                        .child(info),
+                ),
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn graph_coordinates_round_trip_with_negative_values_and_zoom() {
+        let view = View {
+            start: 40.0,
+            span: 30.0,
+            low: -50.0,
+            high: 150.0,
+        };
+        let bounds = Bounds::new(point(px(20.0), px(30.0)), size(px(600.0), px(200.0)));
+        let (f, v) = view.value(bounds, view.point(bounds, 55.0, -20.0));
+        assert!((f - 55.0).abs() < 1e-5);
+        assert!((v + 20.0).abs() < 1e-5);
+    }
+}
