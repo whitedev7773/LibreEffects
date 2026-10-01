@@ -120,6 +120,9 @@ fn precompose(state: &mut Snapshot, layers: &[LayerId], name: &str) -> Result<()
         return Err("Composition limit reached".into());
     }
     let parent = &state.project.composition;
+    if parent.layers.iter().any(|l| l.solo()) {
+        return Err("Clear Solo switches before pre-composing to preserve the composite".into());
+    }
     let positions: Vec<_> = parent
         .layers
         .iter()
@@ -138,6 +141,9 @@ fn precompose(state: &mut Snapshot, layers: &[LayerId], name: &str) -> Result<()
     }
     for layer in &parent.layers {
         let selected = ids.contains(&layer.id);
+        if selected && layer.guide() {
+            return Err("Turn off Guide on selected layers before pre-composing; nested guides are excluded".into());
+        }
         if selected && layer.locked {
             return Err("Unlock selected layers before pre-composing".into());
         }

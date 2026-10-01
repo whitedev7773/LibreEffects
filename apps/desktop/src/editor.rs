@@ -56,6 +56,12 @@ pub(crate) enum Action {
     CancelExport,
     CopyKeys,
     PasteKeys,
+    CopySelection,
+    CutSelection,
+    PasteSelection,
+    CopyLayers,
+    PasteLayers,
+    ToggleSelectedSwitch(libre_effects_core::LayerSwitch),
     DeleteSelection,
     DuplicateSelection,
     SplitSelection,
@@ -112,6 +118,7 @@ pub(crate) struct EditorState {
     pub selected_layers: BTreeSet<LayerId>,
     pub selected_keys: BTreeSet<KeyRef>,
     clipboard: Vec<KeyCopy>,
+    layer_clipboard: Option<libre_effects_core::LayerClipboard>,
     pub path: Option<PathBuf>,
     saved: Project,
     pub saving: bool,
@@ -154,6 +161,7 @@ impl Default for EditorState {
             selected_layers: BTreeSet::new(),
             selected_keys: BTreeSet::new(),
             clipboard: Vec::new(),
+            layer_clipboard: None,
             path: None,
             saved: Project::default(),
             saving: false,
@@ -193,6 +201,23 @@ impl Default for EditorState {
 }
 
 impl EditorState {
+    fn clear_clipboard(&mut self) {
+        self.clipboard.clear();
+        self.layer_clipboard = None;
+    }
+    fn copy_layers(&mut self) {
+        match self
+            .editor
+            .copy_layers(&self.selected_layers.iter().copied().collect::<Vec<_>>())
+        {
+            Ok(clipboard) => {
+                self.status = format!("Copied {} layers", clipboard.len());
+                self.clipboard.clear();
+                self.layer_clipboard = Some(clipboard);
+            }
+            Err(error) => self.status = error,
+        }
+    }
     pub fn visible_frames(&self) -> Frame {
         ((self.editor.project().composition().duration() as f32 / self.timeline_zoom).ceil()
             as Frame)
@@ -286,6 +311,32 @@ impl EditorState {
             window.blur();
         }
         match action {
+            Action::ToggleSelectedSwitch(switch) => {
+                let layers: Vec<_> = self
+                    .editor
+                    .project()
+                    .composition()
+                    .layers()
+                    .iter()
+                    .filter(|l| self.selected_layers.contains(&l.id()))
+                    .collect();
+                let enabled = !layers.iter().all(|l| match switch {
+                    libre_effects_core::LayerSwitch::Solo => l.solo(),
+                    libre_effects_core::LayerSwitch::Shy => l.shy(),
+                    libre_effects_core::LayerSwitch::Guide => l.guide(),
+                });
+                let command = Command::Batch(
+                    layers
+                        .iter()
+                        .map(|l| Command::SetLayerSwitch {
+                            id: l.id(),
+                            switch: *switch,
+                            enabled,
+                        })
+                        .collect(),
+                );
+                self.dispatch(&Action::Edit(command), window, cx);
+            }
             Action::SelectMany(id, toggle, range) => {
                 let comp = self.editor.project().composition();
                 if *range {
@@ -295,8 +346,12 @@ impl EditorState {
                         .position(|l| Some(l.id()) == self.editor.selected());
                     let b = comp.layers().iter().position(|l| l.id() == *id);
                     if let (Some(a), Some(b)) = (a, b) {
-                        self.selected_layers
-                            .extend(comp.layers()[a.min(b)..=a.max(b)].iter().map(|l| l.id()));
+                        self.selected_layers.extend(
+                            comp.layers()[a.min(b)..=a.max(b)]
+                                .iter()
+                                .filter(|l| !(comp.hide_shy() && l.shy()))
+                                .map(|l| l.id()),
+                        );
                     }
                 } else if *toggle {
                     if !self.selected_layers.remove(id) {
@@ -315,7 +370,65 @@ impl EditorState {
                 }
                 self.selected_keys.clear();
             }
+            Action::CopySelection => {
+                if self.selected_keys.is_empty() {
+                    self.copy_layers();
+                } else {
+                    self.dispatch(&Action::CopyKeys, window, cx);
+                }
+            }
+            Action::CopyLayers => self.copy_layers(),
+            Action::CutSelection => {
+                let previous = (self.clipboard.clone(), self.layer_clipboard.clone());
+                self.dispatch(&Action::CopySelection, window, cx);
+                if self.status.starts_with("Copied") {
+                    self.dispatch(&Action::DeleteSelection, window, cx);
+                    if !self.status.starts_with("Edited") {
+                        (self.clipboard, self.layer_clipboard) = previous;
+                    } else {
+                        self.status = "Cut selection".into();
+                    }
+                }
+            }
+            Action::PasteSelection => {
+                let action = if self.layer_clipboard.is_some() {
+                    Action::PasteLayers
+                } else {
+                    Action::PasteKeys
+                };
+                self.dispatch(&action, window, cx);
+            }
+            Action::PasteLayers => {
+                if let Some(clipboard) = &self.layer_clipboard {
+                    let command = Command::PasteLayers(clipboard.clone());
+                    let original: BTreeSet<_> = self
+                        .editor
+                        .project()
+                        .composition()
+                        .layers()
+                        .iter()
+                        .map(|l| l.id())
+                        .collect();
+                    self.dispatch(&Action::Edit(command), window, cx);
+                    if self.status.starts_with("Edited") {
+                        self.selected_keys.clear();
+                        self.selected_layers = self
+                            .editor
+                            .project()
+                            .composition()
+                            .layers()
+                            .iter()
+                            .map(|l| l.id())
+                            .filter(|id| !original.contains(id))
+                            .collect();
+                        self.status = format!("Pasted {} layers", self.selected_layers.len());
+                    }
+                } else {
+                    self.status = "Copy layers first".into();
+                }
+            }
             Action::CopyKeys => {
+                self.layer_clipboard = None;
                 self.clipboard = self
                     .selected_keys
                     .iter()
@@ -630,6 +743,7 @@ impl EditorState {
                 self.step_history(matches!(action, Action::Redo));
             }
             Action::New => {
+                self.clear_clipboard();
                 self.reset_recovery(false);
                 self.document_revision = self.document_revision.wrapping_add(1);
                 self.stop();

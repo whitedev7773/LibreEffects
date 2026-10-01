@@ -7,7 +7,7 @@ use gpui::{
     Bounds, Context, Entity, FocusHandle, MouseButton, MouseMoveEvent, MouseUpEvent, Pixels,
     SharedString, Window, canvas, div, fill, point, prelude::*, px, relative, rgb, size,
 };
-use libre_effects_core::{Command, KeyRef, LayerId, Property};
+use libre_effects_core::{Command, KeyRef, LayerId, LayerSwitch, Property};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::{cell::Cell, rc::Rc};
@@ -289,7 +289,7 @@ impl Render for Timeline {
         let mut rows = div().flex().flex_col().w_full();
         let query = self.search.read(cx).value().trim().to_lowercase();
         for (index, layer) in comp.layers().iter().enumerate() {
-            if !layer.name().to_lowercase().contains(&query) {
+            if !layer.name().to_lowercase().contains(&query) || (comp.hide_shy() && layer.shy()) {
                 continue;
             }
             let id = layer.id();
@@ -318,6 +318,48 @@ impl Render for Timeline {
                     Action::Edit(Command::ToggleLocked(id)),
                     layer.locked(),
                 ))
+                .children(
+                    [
+                        (
+                            "solo",
+                            "target",
+                            "Solo: isolate this layer in preview and output",
+                            LayerSwitch::Solo,
+                            layer.solo(),
+                        ),
+                        (
+                            "shy",
+                            "eye-slash",
+                            "Shy: hide this row when Hide Shy is enabled",
+                            LayerSwitch::Shy,
+                            layer.shy(),
+                        ),
+                        (
+                            "guide",
+                            "square-dashed",
+                            "Guide: preview only, excluded from output and nesting",
+                            LayerSwitch::Guide,
+                            layer.guide(),
+                        ),
+                    ]
+                    .into_iter()
+                    .map(|(key, icon, label, switch, enabled)| {
+                        ui::action_tool(
+                            control_id(key),
+                            icon,
+                            label,
+                            &self.state,
+                            Action::Edit(Command::SetLayerSwitch {
+                                id,
+                                switch,
+                                enabled: !enabled,
+                            }),
+                            enabled,
+                        )
+                        .w(px(22.0))
+                        .h(px(22.0))
+                    }),
+                )
                 .child(
                     ui::tool(
                         control_id("expand"),
@@ -595,7 +637,7 @@ impl Render for Timeline {
                             div()
                                 .w(px(left))
                                 .flex_none()
-                                .pl(px(62.0))
+                                .pl(px(128.0))
                                 .flex()
                                 .gap_2()
                                 .items_center()
@@ -650,7 +692,7 @@ impl Render for Timeline {
                         .items_center()
                         .w(px(left))
                         .flex_none()
-                        .pl(px(62.0))
+                        .pl(px(128.0))
                         .child(ui::action_tool(
                             prop_id("watch"),
                             "stopwatch",
@@ -942,8 +984,16 @@ impl Render for Timeline {
                                 .composition()
                                 .layers()
                                 .iter()
+                                .filter(|l| {
+                                    !(s.editor.project().composition().hide_shy() && l.shy())
+                                })
                                 .map(|l| l.id())
                                 .collect();
+                            if let Some(id) = s.selected_layers.first() {
+                                s.editor.select(*id);
+                            } else {
+                                s.editor.clear_selection();
+                            }
                         } else {
                             s.selected_keys = keys;
                         }
@@ -1023,6 +1073,25 @@ impl Render for Timeline {
                         Action::ToggleGraph,
                         graph_open,
                     ))
+                    .child(
+                        ui::text_button("hide-shy-layers", "Hide Shy")
+                            .when(comp.hide_shy(), |s| {
+                                s.bg(rgb(0x164a7b)).text_color(rgb(ui::BLUE))
+                            })
+                            .on_click({
+                                let state = self.state.clone();
+                                let hidden = comp.hide_shy();
+                                move |_, window, cx| {
+                                    state.update(cx, |s, cx| {
+                                        s.dispatch(
+                                            &Action::Edit(Command::SetHideShy(!hidden)),
+                                            window,
+                                            cx,
+                                        )
+                                    })
+                                }
+                            }),
+                    )
                     .child(div().flex_1())
                     .child(ui::action_tool(
                         "timeline-minus",
@@ -1058,7 +1127,7 @@ impl Render for Timeline {
                             .pb_1()
                             .text_size(px(10.0))
                             .text_color(rgb(ui::MUTED))
-                            .child(div().w(px(80.0)).child("Switches"))
+                            .child(div().w(px(178.0)).child("Switches"))
                             .child(div().flex_1().child("Source Name"))
                             .child(div().w(px(181.0)).child("Parent & Link       Order")),
                     )

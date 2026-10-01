@@ -32,6 +32,7 @@ impl EditorState {
         if restore {
             self.document_revision = self.document_revision.wrapping_add(1);
             let _ = self.editor.replace_project(candidate.project);
+            self.clear_clipboard();
             self.editor.clear_history();
             self.path = None;
             self.work_end = self.editor.project().composition().duration();
@@ -168,6 +169,7 @@ impl EditorState {
                         s.document_revision = s.document_revision.wrapping_add(1);
                         s.saved = project.clone();
                         let _ = s.editor.replace_project(project);
+                        s.clear_clipboard();
                         s.editor.clear_history();
                         s.path = Some(path);
                         s.frame = 0;

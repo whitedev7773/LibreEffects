@@ -69,17 +69,15 @@ impl Renderer {
         max_dimension: u32,
         prefix: &str,
         layer_count: &mut usize,
+        include_guides: bool,
     ) -> Result<String, String> {
         let c = project
             .composition_by_id(composition)
             .ok_or("Missing source composition")?;
         let mut svg = String::new();
-        for l in c
-            .layers()
-            .iter()
-            .rev()
-            .filter(|l| l.active_at(frame, c.duration()))
-        {
+        for l in c.layers().iter().rev().filter(|l| {
+            c.layer_active(l, frame, include_guides) && !matches!(l.content(), Content::Null)
+        }) {
             let Some(matrix) = c.world_transform(l.id(), frame) else {
                 continue;
             };
@@ -137,6 +135,7 @@ impl Renderer {
             ));
             let color = format!("#{:06x}", l.color());
             match l.content() {
+                Content::Null => {}
                 Content::Rectangle => svg.push_str(&format!(
                     "<rect width='{}' height='{}' fill='{color}'/>",
                     l.width(),
@@ -166,6 +165,7 @@ impl Renderer {
                             max_dimension,
                             &id,
                             layer_count,
+                            false,
                         )?;
                         // An unchanged full-canvas group already shares its parent's clip.
                         // Avoid a redundant clip pass, which can round antialiased edges again.
@@ -209,6 +209,23 @@ impl Renderer {
         frame: u32,
         max_dimension: u32,
     ) -> Result<image::RgbaImage, String> {
+        self.render_mode(project, frame, max_dimension, false)
+    }
+    pub fn render_preview(
+        &self,
+        project: &Project,
+        frame: u32,
+        max_dimension: u32,
+    ) -> Result<image::RgbaImage, String> {
+        self.render_mode(project, frame, max_dimension, true)
+    }
+    fn render_mode(
+        &self,
+        project: &Project,
+        frame: u32,
+        max_dimension: u32,
+        include_guides: bool,
+    ) -> Result<image::RgbaImage, String> {
         let c = project.composition();
         if frame >= c.duration() {
             return Err("Frame is outside the composition".into());
@@ -231,6 +248,7 @@ impl Renderer {
             max_dimension,
             "root",
             &mut 0,
+            include_guides,
         )?);
         svg.push_str("</svg>");
         let tree = resvg::usvg::Tree::from_str(&svg, &self.options).map_err(|e| e.to_string())?;
@@ -280,6 +298,118 @@ pub(crate) fn import_image(path: &Path) -> Result<(Content, u32, u32), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use libre_effects_core::LayerSwitch;
+    #[test]
+    fn guides_render_only_in_their_own_preview_and_never_in_nested_output() {
+        let mut e = scene();
+        e.execute(Command::AddContent {
+            content: Content::Rectangle,
+            width: 60.0,
+            height: 60.0,
+            name: "Guide".into(),
+        })
+        .unwrap();
+        e.execute(Command::SetLayerSwitch {
+            id: 1,
+            switch: LayerSwitch::Guide,
+            enabled: true,
+        })
+        .unwrap();
+        let r = Renderer::new();
+        assert_eq!(
+            r.render_preview(e.project(), 0, 100)
+                .unwrap()
+                .get_pixel(50, 50)[3],
+            255
+        );
+        assert!(
+            r.render(e.project(), 0, 100)
+                .unwrap()
+                .pixels()
+                .all(|p| p[3] == 0)
+        );
+        e.execute(Command::NewComposition).unwrap();
+        e.execute(Command::AddCompositionLayer {
+            composition: 1,
+            frame: 0,
+        })
+        .unwrap();
+        let saved = Project::from_json(&e.project().to_json().unwrap()).unwrap();
+        for image in [
+            r.render(&saved, 0, 100).unwrap(),
+            r.render_preview(&saved, 0, 100).unwrap(),
+        ] {
+            assert!(image.pixels().all(|p| p[3] == 0));
+        }
+    }
+    #[test]
+    fn shy_keeps_pixels_solo_filters_pixels_and_null_parents_keep_transforming() {
+        let mut e = scene();
+        e.execute(Command::AddNull).unwrap();
+        let r = Renderer::new();
+        assert!(
+            r.render(e.project(), 0, 100)
+                .unwrap()
+                .pixels()
+                .all(|p| p[3] == 0)
+        );
+        e.execute(Command::AddContent {
+            content: Content::Rectangle,
+            width: 10.0,
+            height: 10.0,
+            name: "Child".into(),
+        })
+        .unwrap();
+        e.execute(Command::SetParent {
+            id: 2,
+            parent: Some(1),
+            frame: 0,
+        })
+        .unwrap();
+        e.execute(Command::SetValue {
+            id: 1,
+            property: Property::PositionX,
+            frame: 0,
+            value: 70.0,
+        })
+        .unwrap();
+        e.execute(Command::ToggleVisible(1)).unwrap();
+        e.execute(Command::SetLayerSwitch {
+            id: 2,
+            switch: LayerSwitch::Shy,
+            enabled: true,
+        })
+        .unwrap();
+        e.execute(Command::SetHideShy(true)).unwrap();
+        e.execute(Command::AddContent {
+            content: Content::Rectangle,
+            width: 100.0,
+            height: 100.0,
+            name: "Cover".into(),
+        })
+        .unwrap();
+        e.execute(Command::SetColor {
+            id: 3,
+            color: 0xff0000,
+        })
+        .unwrap();
+        assert_eq!(
+            r.render(e.project(), 0, 100).unwrap().get_pixel(50, 50).0,
+            [255, 0, 0, 255]
+        );
+        e.execute(Command::SetLayerSwitch {
+            id: 2,
+            switch: LayerSwitch::Solo,
+            enabled: true,
+        })
+        .unwrap();
+        let saved = Project::from_json(&e.project().to_json().unwrap()).unwrap();
+        let export = r.render(&saved, 0, 100).unwrap();
+        let preview = r.render_preview(&saved, 0, 100).unwrap();
+        assert_eq!(export.get_pixel(50, 50)[3], 0);
+        assert_eq!(export.get_pixel(70, 50)[3], 255);
+        assert_eq!(export.as_raw(), preview.as_raw());
+    }
     #[test]
     fn precompose_and_split_preserve_animated_pixels_after_file_roundtrip() {
         let renderer = Renderer::new();

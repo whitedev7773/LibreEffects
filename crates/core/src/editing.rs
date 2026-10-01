@@ -24,6 +24,7 @@ impl VideoPlayback {
 pub enum Content {
     #[default]
     Rectangle,
+    Null,
     Text {
         text: String,
         font_size: f64,
@@ -125,7 +126,7 @@ pub(super) fn validate_content(
     mask: Option<Mask>,
 ) -> Result<(), String> {
     let valid = match content {
-        Content::Rectangle => true,
+        Content::Rectangle | Content::Null => true,
         Content::Composition {
             composition,
             start_frame,

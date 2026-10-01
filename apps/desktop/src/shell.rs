@@ -206,9 +206,10 @@ impl Shell {
                 "c" => Some(if m.shift {
                     Action::PrecomposeSelection
                 } else {
-                    Action::CopyKeys
+                    Action::CopySelection
                 }),
-                "v" => Some(Action::PasteKeys),
+                "x" => Some(Action::CutSelection),
+                "v" => Some(Action::PasteSelection),
                 "z" => Some(if m.shift { Action::Redo } else { Action::Undo }),
                 "y" => Some(Action::Edit(Command::AddRectangle)),
                 "d" => Some(if m.shift {
@@ -606,8 +607,11 @@ impl Render for Shell {
                     ("Cancel render", "", Some(Action::CancelExport)),
                 ],
                 "Edit" => vec![
-                    ("Copy keyframes", "Ctrl+C", Some(Action::CopyKeys)),
-                    ("Paste keyframes", "Ctrl+V", Some(Action::PasteKeys)),
+                    ("Copy selection", "Ctrl+C", Some(Action::CopySelection)),
+                    ("Cut selection", "Ctrl+X", Some(Action::CutSelection)),
+                    ("Paste", "Ctrl+V", Some(Action::PasteSelection)),
+                    ("Copy layers", "", Some(Action::CopyLayers)),
+                    ("Paste layers", "", Some(Action::PasteLayers)),
                     ("Undo", "Ctrl+Z", Some(Action::Undo)),
                     ("Redo", "Ctrl+Shift+Z", Some(Action::Redo)),
                     (
@@ -639,6 +643,28 @@ impl Render for Shell {
                         selected.map(|_| Action::TrimSelection(false)),
                     ),
                     ("New text", "", Some(Action::AddText)),
+                    ("New null object", "", Some(Action::Edit(Command::AddNull))),
+                    (
+                        "Solo selected layers",
+                        "",
+                        selected.map(|_| {
+                            Action::ToggleSelectedSwitch(libre_effects_core::LayerSwitch::Solo)
+                        }),
+                    ),
+                    (
+                        "Shy selected layers",
+                        "",
+                        selected.map(|_| {
+                            Action::ToggleSelectedSwitch(libre_effects_core::LayerSwitch::Shy)
+                        }),
+                    ),
+                    (
+                        "Guide selected layers",
+                        "",
+                        selected.map(|_| {
+                            Action::ToggleSelectedSwitch(libre_effects_core::LayerSwitch::Guide)
+                        }),
+                    ),
                     (
                         "New background solid",
                         "",
@@ -901,7 +927,7 @@ impl Render for Shell {
                     "Esc — Cancel canvas drag",
                     "Ctrl+Z / Ctrl+Shift+Z — Undo / Redo",
                     "Ctrl+S / Ctrl+Shift+S — Save / Save as",
-                    "Ctrl+I — Import image    Ctrl+C / Ctrl+V — Copy / Paste keys",
+                    "Ctrl+I — Import image    Ctrl+C / Ctrl+X / Ctrl+V — Copy / Cut / Paste selection",
                     "Ctrl / Shift click — Toggle / Range select layers",
                     "Drag empty time area — Box select keys or layers",
                     "Drag a number — Scrub value (Shift: faster, Alt: finer)",

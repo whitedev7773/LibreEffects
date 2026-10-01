@@ -324,6 +324,7 @@ impl Render for Inspector {
             }
             contents = contents.child(row);
         }
+        let is_null = matches!(layer.content(), Content::Null);
         let mut entries = vec![
             (2, "Fill (hex)", format!("{:06X}", layer.color())),
             (3, "Gaussian Blur", format!("{:.2}", layer.effects().blur)),
@@ -343,13 +344,20 @@ impl Render for Inspector {
         ) {
             entries.retain(|(index, _, _)| *index != 2);
         }
+        if is_null {
+            entries.clear();
+        }
         contents = contents.child(
             div()
                 .mt_3()
                 .py_2()
                 .border_t_1()
                 .border_color(rgb(ui::BORDER))
-                .child("Content & Effects"),
+                .child(if is_null {
+                    "Null object · transform controller"
+                } else {
+                    "Content & Effects"
+                }),
         );
         if let Content::Composition { composition, .. } = layer.content() {
             let source = *composition;
@@ -489,97 +497,16 @@ impl Render for Inspector {
                     ),
             );
         }
-        let mut effects = layer.effects();
-        effects.grayscale = !effects.grayscale;
-        contents = contents.child(
-            ui::text_button(
-                "grayscale",
-                if layer.effects().grayscale {
-                    "Grayscale: On"
-                } else {
-                    "Grayscale: Off"
-                },
-            )
-            .on_click({
-                let state = self.state.clone();
-                move |_, window, cx| {
-                    state.update(cx, |s, cx| {
-                        s.dispatch(
-                            &Action::Edit(Command::SetEffects { id, effects }),
-                            window,
-                            cx,
-                        )
-                    })
-                }
-            }),
-        );
-        let mask = if layer.mask().is_some() {
-            None
-        } else {
-            Some(Mask {
-                x: layer.width() * 0.25,
-                y: layer.height() * 0.25,
-                width: layer.width() * 0.5,
-                height: layer.height() * 0.5,
-                inverted: false,
-            })
-        };
-        contents = contents.child(
-            div()
-                .mt_3()
-                .border_t_1()
-                .border_color(rgb(ui::BORDER))
-                .child(
-                    ui::text_button(
-                        "mask-toggle",
-                        if layer.mask().is_some() {
-                            "Remove rectangle mask"
-                        } else {
-                            "Add rectangle mask"
-                        },
-                    )
-                    .on_click({
-                        let state = self.state.clone();
-                        move |_, window, cx| {
-                            state.update(cx, |s, cx| {
-                                s.dispatch(&Action::Edit(Command::SetMask { id, mask }), window, cx)
-                            })
-                        }
-                    }),
-                ),
-        );
-        if let Some(mut mask) = layer.mask() {
-            for (index, label, value) in [
-                (5, "Mask X", mask.x),
-                (6, "Mask Y", mask.y),
-                (7, "Mask Width", mask.width),
-                (8, "Mask Height", mask.height),
-            ] {
-                self.extra[index].update(cx, |f, _| {
-                    f.set_numeric();
-                    f.sync(id.to_string(), format!("{value:.2}"), window);
-                });
-                contents = contents.child(
-                    div()
-                        .flex()
-                        .h(px(29.0))
-                        .items_center()
-                        .child(div().flex_1().child(label))
-                        .child(
-                            div()
-                                .w(px(90.0))
-                                .when(!locked, |s| s.child(self.extra[index].clone())),
-                        ),
-                );
-            }
-            mask.inverted = !mask.inverted;
+        if !is_null {
+            let mut effects = layer.effects();
+            effects.grayscale = !effects.grayscale;
             contents = contents.child(
                 ui::text_button(
-                    "invert-mask",
-                    if mask.inverted {
-                        "Mask: Add"
+                    "grayscale",
+                    if layer.effects().grayscale {
+                        "Grayscale: On"
                     } else {
-                        "Mask: Subtract"
+                        "Grayscale: Off"
                     },
                 )
                 .on_click({
@@ -587,10 +514,7 @@ impl Render for Inspector {
                     move |_, window, cx| {
                         state.update(cx, |s, cx| {
                             s.dispatch(
-                                &Action::Edit(Command::SetMask {
-                                    id,
-                                    mask: Some(mask),
-                                }),
+                                &Action::Edit(Command::SetEffects { id, effects }),
                                 window,
                                 cx,
                             )
@@ -598,6 +522,96 @@ impl Render for Inspector {
                     }
                 }),
             );
+            let mask = if layer.mask().is_some() {
+                None
+            } else {
+                Some(Mask {
+                    x: layer.width() * 0.25,
+                    y: layer.height() * 0.25,
+                    width: layer.width() * 0.5,
+                    height: layer.height() * 0.5,
+                    inverted: false,
+                })
+            };
+            contents = contents.child(
+                div()
+                    .mt_3()
+                    .border_t_1()
+                    .border_color(rgb(ui::BORDER))
+                    .child(
+                        ui::text_button(
+                            "mask-toggle",
+                            if layer.mask().is_some() {
+                                "Remove rectangle mask"
+                            } else {
+                                "Add rectangle mask"
+                            },
+                        )
+                        .on_click({
+                            let state = self.state.clone();
+                            move |_, window, cx| {
+                                state.update(cx, |s, cx| {
+                                    s.dispatch(
+                                        &Action::Edit(Command::SetMask { id, mask }),
+                                        window,
+                                        cx,
+                                    )
+                                })
+                            }
+                        }),
+                    ),
+            );
+            if let Some(mut mask) = layer.mask() {
+                for (index, label, value) in [
+                    (5, "Mask X", mask.x),
+                    (6, "Mask Y", mask.y),
+                    (7, "Mask Width", mask.width),
+                    (8, "Mask Height", mask.height),
+                ] {
+                    self.extra[index].update(cx, |f, _| {
+                        f.set_numeric();
+                        f.sync(id.to_string(), format!("{value:.2}"), window);
+                    });
+                    contents = contents.child(
+                        div()
+                            .flex()
+                            .h(px(29.0))
+                            .items_center()
+                            .child(div().flex_1().child(label))
+                            .child(
+                                div()
+                                    .w(px(90.0))
+                                    .when(!locked, |s| s.child(self.extra[index].clone())),
+                            ),
+                    );
+                }
+                mask.inverted = !mask.inverted;
+                contents = contents.child(
+                    ui::text_button(
+                        "invert-mask",
+                        if mask.inverted {
+                            "Mask: Add"
+                        } else {
+                            "Mask: Subtract"
+                        },
+                    )
+                    .on_click({
+                        let state = self.state.clone();
+                        move |_, window, cx| {
+                            state.update(cx, |s, cx| {
+                                s.dispatch(
+                                    &Action::Edit(Command::SetMask {
+                                        id,
+                                        mask: Some(mask),
+                                    }),
+                                    window,
+                                    cx,
+                                )
+                            })
+                        }
+                    }),
+                );
+            }
         }
         contents = contents.child(
             div()

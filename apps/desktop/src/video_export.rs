@@ -103,6 +103,20 @@ mod tests {
                 })
                 .unwrap();
             }
+            // A full-frame preview guide must not change either encoded format.
+            e.execute(Edit::AddContent {
+                content: Content::Rectangle,
+                width: 101.0,
+                height: 99.0,
+                name: "Preview guide".into(),
+            })
+            .unwrap();
+            e.execute(Edit::SetLayerSwitch {
+                id: e.selected().unwrap(),
+                switch: libre_effects_core::LayerSwitch::Guide,
+                enabled: true,
+            })
+            .unwrap();
             for preset in [VideoPreset::H264, VideoPreset::ProResAlpha] {
                 let path = dir
                     .path()

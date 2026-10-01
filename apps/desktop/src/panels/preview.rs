@@ -154,7 +154,7 @@ impl Preview {
             .filter(|l| {
                 state.selected_layers.contains(&l.id())
                     && !l.locked()
-                    && l.active_at(frame, comp.duration())
+                    && comp.layer_active(l, frame, true)
             })
             .find_map(|l| {
                 let world = comp.world_transform(l.id(), frame)?;
@@ -176,7 +176,7 @@ impl Preview {
             });
         let hit = handle_hit.and_then(|(id, _)| comp.layer(id)).or_else(|| {
             comp.layers().iter().find(|layer| {
-                layer.active_at(frame, comp.duration())
+                comp.layer_active(layer, frame, true)
                     && !layer.locked()
                     && comp
                         .corners_at(layer.id(), frame)
@@ -422,7 +422,7 @@ impl Render for Preview {
                             .background_executor()
                             .spawn(async move {
                                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                    crate::rendering::Renderer::new().render(
+                                    crate::rendering::Renderer::new().render_preview(
                                         &worker_project,
                                         frame,
                                         max_dimension,
@@ -444,7 +444,9 @@ impl Render for Preview {
                 if let Some((_, _, _, old)) = self.cached.take() {
                     let _ = window.drop_image(old);
                 }
-                if let Ok(mut pixels) = self.renderer.render(&render_project, frame, max_dimension)
+                if let Ok(mut pixels) =
+                    self.renderer
+                        .render_preview(&render_project, frame, max_dimension)
                 {
                     for pixel in pixels.pixels_mut() {
                         pixel.0.swap(0, 2);
@@ -632,7 +634,7 @@ impl Render for Preview {
                                             }
                                             for layer in
                                                 comp.layers().iter().rev().filter(|layer| {
-                                                    layer.active_at(frame, comp.duration())
+                                                    comp.layer_active(layer, frame, true)
                                                 })
                                             {
                                                 let corners = comp
@@ -644,7 +646,12 @@ impl Render for Preview {
                                                             origin.y + px(y as f32 * zoom),
                                                         )
                                                     });
-                                                if selected.contains(&layer.id()) {
+                                                if selected.contains(&layer.id())
+                                                    || matches!(
+                                                        layer.content(),
+                                                        libre_effects_core::Content::Null
+                                                    )
+                                                {
                                                     let mut outline = PathBuilder::stroke(px(1.0));
                                                     outline.move_to(corners[0]);
                                                     for p in &corners[1..] {
@@ -652,7 +659,19 @@ impl Render for Preview {
                                                     }
                                                     outline.close();
                                                     if let Ok(path) = outline.build() {
-                                                        window.paint_path(path, rgb(ui::BLUE));
+                                                        window.paint_path(
+                                                            path,
+                                                            rgb(
+                                                                if selected.contains(&layer.id()) {
+                                                                    ui::BLUE
+                                                                } else {
+                                                                    layer.color()
+                                                                },
+                                                            ),
+                                                        );
+                                                    }
+                                                    if !selected.contains(&layer.id()) {
+                                                        continue;
                                                     }
                                                     let world = comp
                                                         .world_transform(layer.id(), frame)

@@ -11,6 +11,8 @@ mod compositions;
 mod document;
 mod editing;
 mod geometry;
+mod layer_workflow;
+pub use layer_workflow::{LayerClipboard, LayerSwitch};
 mod precompositions;
 pub use editing::{Content, Effects, KeyCopy, KeyRef, Mask, VideoPlayback};
 pub use geometry::{Affine, Bezier};
@@ -175,6 +177,12 @@ pub struct Layer {
     name: String,
     visible: bool,
     locked: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    solo: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    shy: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    guide: bool,
     width: f64,
     height: f64,
     color: u32,
@@ -191,6 +199,15 @@ pub struct Layer {
 }
 
 impl Layer {
+    pub fn solo(&self) -> bool {
+        self.solo
+    }
+    pub fn shy(&self) -> bool {
+        self.shy
+    }
+    pub fn guide(&self) -> bool {
+        self.guide
+    }
     pub fn content(&self) -> &Content {
         &self.content
     }
@@ -285,10 +302,23 @@ pub struct Composition {
     background_color: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     work_area: Option<[Frame; 2]>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    hide_shy: bool,
     layers: Vec<Layer>,
 }
 
 impl Composition {
+    pub fn hide_shy(&self) -> bool {
+        self.hide_shy
+    }
+    pub fn layer_enabled(&self, layer: &Layer, include_guides: bool) -> bool {
+        layer.visible
+            && (include_guides || !layer.guide)
+            && (layer.solo || !self.layers.iter().any(|l| l.solo))
+    }
+    pub fn layer_active(&self, layer: &Layer, frame: Frame, include_guides: bool) -> bool {
+        self.layer_enabled(layer, include_guides) && layer.active_at(frame, self.duration)
+    }
     pub fn world_transform(&self, id: LayerId, frame: Frame) -> Option<Affine> {
         let mut current = Some(id);
         let mut result = Affine::default();
@@ -387,6 +417,9 @@ pub struct Project {
 fn first_composition_id() -> CompositionId {
     1
 }
+fn is_false(value: &bool) -> bool {
+    !value
+}
 fn next_composition_id() -> CompositionId {
     2
 }
@@ -407,6 +440,7 @@ impl Default for Project {
                 duration: 150,
                 background_color: 0x000000,
                 work_area: None,
+                hide_shy: false,
                 layers: Vec::new(),
             },
         }
@@ -429,7 +463,7 @@ impl Project {
     }
 
     fn validate(&self) -> Result<(), String> {
-        if !(1..=10).contains(&self.version) {
+        if !(1..=11).contains(&self.version) {
             return Err("Unsupported project version".into());
         }
         if self.version < 9
@@ -455,6 +489,15 @@ impl Project {
         let mut images = BTreeSet::new();
         let mut image_bytes = 0usize;
         for (_, comp) in self.compositions() {
+            if self.version < 11
+                && (comp.hide_shy
+                    || comp
+                        .layers
+                        .iter()
+                        .any(|l| l.solo || l.shy || l.guide || matches!(l.content, Content::Null)))
+            {
+                return Err("Layer switches and null objects require project version 11".into());
+            }
             if !(1..=16_384).contains(&comp.width)
                 || !(1..=16_384).contains(&comp.height)
                 || !(1..=240).contains(&comp.fps)
@@ -527,6 +570,14 @@ impl Project {
 #[derive(Clone, Debug)]
 pub enum Command {
     Batch(Vec<Command>),
+    AddNull,
+    SetLayerSwitch {
+        id: LayerId,
+        switch: LayerSwitch,
+        enabled: bool,
+    },
+    SetHideShy(bool),
+    PasteLayers(LayerClipboard),
     NewComposition,
     DuplicateComposition,
     DeleteComposition,
@@ -832,6 +883,15 @@ impl Editor {
         }) {
             next.project.version = 10;
         }
+        if next.project.compositions().into_iter().any(|(_, comp)| {
+            comp.hide_shy
+                || comp
+                    .layers
+                    .iter()
+                    .any(|l| l.solo || l.shy || l.guide || matches!(l.content, Content::Null))
+        }) {
+            next.project.version = 11;
+        }
         next.project.validate()?;
         if next != self.current {
             let previous = std::mem::replace(&mut self.current, next);
@@ -842,6 +902,9 @@ impl Editor {
 }
 
 fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
+    if let Some(result) = layer_workflow::apply(state, &command) {
+        return result;
+    }
     if let Some(result) = precompositions::apply(state, &command) {
         return result;
     }
@@ -1042,6 +1105,9 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
                 name: format!("Rectangle {id}"),
                 visible: true,
                 locked: false,
+                solo: false,
+                shy: false,
+                guide: false,
                 width: 320.0,
                 height: 200.0,
                 color: colors[((id - 1) % 4) as usize],

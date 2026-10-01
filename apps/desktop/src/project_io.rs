@@ -65,7 +65,11 @@ fn validate_sources(
     let comp = project
         .composition_by_id(id)
         .ok_or("Missing source composition")?;
-    for layer in comp.layers().iter().filter(|l| l.visible()) {
+    for layer in comp
+        .layers()
+        .iter()
+        .filter(|l| comp.layer_enabled(l, false))
+    {
         let start = range.start.max(layer.in_frame());
         let end = range.end.min(layer.out_frame(comp.duration()));
         if start >= end {
@@ -152,6 +156,61 @@ pub(crate) fn write_bytes(path: &Path, data: &[u8]) -> Result<(), String> {
 mod tests {
     use super::*;
     use libre_effects_core::{Command, Editor};
+
+    #[test]
+    fn preflight_skips_guide_and_non_solo_media_but_still_protects_their_source() {
+        use libre_effects_core::LayerSwitch;
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("guide.mp4");
+        std::fs::write(&source, b"original").unwrap();
+        let mut e = Editor::default();
+        e.execute(Command::AddContent {
+            content: Content::Video {
+                path: source.to_string_lossy().into_owned(),
+                duration: 5.0,
+                source_fps: 30.0,
+                start_frame: 0,
+                playback: Default::default(),
+            },
+            width: 16.0,
+            height: 16.0,
+            name: "Guide video".into(),
+        })
+        .unwrap();
+        e.execute(Command::SetLayerSwitch {
+            id: 1,
+            switch: LayerSwitch::Guide,
+            enabled: true,
+        })
+        .unwrap();
+        assert!(
+            validate_render(e.project(), &source, &(0..5))
+                .unwrap_err()
+                .contains("replace a source")
+        );
+        std::fs::remove_file(&source).unwrap();
+        let output = dir.path().join("output.mp4");
+        validate_render(e.project(), &output, &(0..5)).unwrap();
+        e.execute(Command::SetLayerSwitch {
+            id: 1,
+            switch: LayerSwitch::Guide,
+            enabled: false,
+        })
+        .unwrap();
+        assert!(
+            validate_render(e.project(), &output, &(0..5))
+                .unwrap_err()
+                .contains("offline")
+        );
+        e.execute(Command::AddRectangle).unwrap();
+        e.execute(Command::SetLayerSwitch {
+            id: 2,
+            switch: LayerSwitch::Solo,
+            enabled: true,
+        })
+        .unwrap();
+        validate_render(e.project(), &output, &(0..5)).unwrap();
+    }
 
     #[test]
     fn render_preflight_protects_sources_including_hardlinks_and_missing_media() {

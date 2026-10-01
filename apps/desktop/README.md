@@ -60,6 +60,45 @@ editor, not a complete After Effects replacement or an AEP-compatible applicatio
 
 ## Parenting
 
+Layer > New null object creates an invisible 100 × 100 transform controller,
+with its anchor at the upper-left corner. Its outline is a viewer overlay and
+is never rendered into PNG/video or a nested composition. Assign children through
+Parent & Link; its animated transforms affect children even when the Null is hidden.
+
+### Layer switches and clipboard
+
+Open `examples/layer-workflow.lfe.json` to try a Shy Null moving a child panel
+under a full-width Guide line. Hide Shy removes only the controller's timeline row;
+export excludes the line while keeping the animated panel.
+
+- Timeline Solo isolates enabled solo layers in both preview and output. Visibility
+  and In/Out still apply; soloing a hidden, out-of-range or non-rendering layer can
+  leave an empty frame. Parent transforms continue to affect soloed children.
+- Mark layers Shy, then enable Hide Shy above the timeline to hide their rows.
+  Their rendered pixels remain unchanged. Timeline range selection and Ctrl+A skip
+  hidden Shy rows. Hide Shy and each switch are saved and support Undo/Redo.
+- Guide layers appear only in their own composition preview. PNG/MP4/MOV and
+  containing compositions exclude them. Solo and Guide remain independent switches.
+  Locked layers must be unlocked before changing their switches.
+- Ctrl+C / Ctrl+X / Ctrl+V copy, cut and paste selected keys when keys are selected,
+  otherwise layers. Edit > Copy layers / Paste layers explicitly selects layer mode.
+  Layer copies preserve stack order, properties, masks, effects, switches and shared
+  image assets; pasted IDs are new and copied parent links are reconnected.
+- Paste inserts above the selected layer and retains timeline times. Between
+  compositions in the same project, seconds are preserved to the nearest destination
+  frame, including video/nested source origins. Key collisions and too-short target
+  durations are rejected without changing the document. Copy the complete parent
+  hierarchy when pasting into another composition; local copies can retain an
+  existing external parent. Circular or missing composition references are rejected.
+- The editor clipboard is in memory and is cleared by New/Open/Recovery. Copying keys
+  replaces copied layers and vice versa. Cross-project/OS layer clipboard and
+  paste-at-playhead layer timing are not implemented.
+
+These switch semantics follow Adobe's [layer switches](https://helpx.adobe.com/after-effects/desktop/work-with-layers/manage-layers/layers.html)
+and [Null/Guide layer descriptions](https://helpx.adobe.com/after-effects/desktop/work-with-layers/layer-properties/layer-properties.html).
+
+### Parent links
+
 Timeline or Properties → Parent & Link selects a parent or None. Connecting, reparenting and
 disconnecting preserve the current frame's full 2D pose, including rotated,
 nonuniform and negative scales. Descendants follow parent transforms and remain
@@ -380,12 +419,14 @@ Nesting is limited to 16 levels, 4,096 rendered layer instances and a 64 MiB SVG
 description per frame. Unsupported frames fail without replacing an export.
 Time remapping, collapse-transform controls and the alternative "leave attributes"
 pre-compose mode remain pending.
+Clear Solo switches and disable Guide on selected layers before pre-composing;
+otherwise moving the layers into a nested composition would change their visibility.
 
 Versioned .lfe.json files contain compositions, layer ranges, transforms and
 keyframes. Files from the initial rectangle editor remain readable. Bezier or
 parenting edits upgrade the project to version 2; text, images, masks or effects
 upgrade it to version 3; linked videos require version 4, and altered video playback
-requires version 5. Nonblack composition backgrounds require version 6; shared embedded image assets require version 7, saved work areas require version 8, multiple compositions require version 9, and nested layers require version 10. Older applications reject
+requires version 5. Nonblack composition backgrounds require version 6; shared embedded image assets require version 7, saved work areas require version 8, multiple compositions require version 9, nested layers require version 10, and Null/Solo/Shy/Guide require version 11. Older applications reject
 unsupported versions. Save writes
 the snapshot captured when clicked using a temporary file before replacement.
 Files are limited to 256 MiB, with up to 128 MiB of unique base64 image data and
@@ -492,6 +533,8 @@ Retiming checks compare preview pixels and encoded frames for reverse, slow-moti
 freeze and slipped footage after a project-file round trip.
 Background checks encode colored/white mattes with semitransparent layers, verify
 odd-dimension padding, and ensure ProRes alpha remains transparent.
+The MP4/ProRes round-trip test also places a full-frame Guide above the scene and
+verifies that it is excluded from both encoded formats.
 
 When Moon is unavailable, the corresponding local commands are:
 

@@ -18,8 +18,11 @@
 | I04 | sRGB 전달 함수·BT.709 행렬/원색·제한 범위 출력 정책, MP4/MOV 태그·픽셀 왕복 검사 | ICC 입력·디스플레이 프로파일·HDR·선형 합성 |
 | L01 | Moon desktop 테스트/format 태스크, Windows 전체 테스트·FFmpeg·릴리스 빌드 CI 정의 | 원격 CI 실제 실행 및 DPI/UI 자동화 커버리지 |
 | A09 | B/N 워크 영역 저장·재열기·Undo/Redo·길이 변경 시 유효 범위 유지 | 재생 위치·줌·패널 상태 저장 |
+| C01 | Null 변형 컨트롤러·부모 연결·뷰어 전용 윤곽선, PNG/영상/중첩에서 픽셀 제외 | 독립 Solid 크기·소스 설정과 Adjustment 레이어 |
+| C02 | Solo·Shy·Guide 스위치, Hide Shy 목록 필터, 미리보기/중첩/출력별 Guide 처리, 저장·Undo/Redo | 레이블 편집·블렌딩 모드·품질 스위치 |
+| C03 | 레이어 Copy/Cut/Paste, 프로젝트 안 컴포지션 간 복사, 새 ID·부모 재연결·FPS 시간 변환, 충돌 시 원자적 거부 | 프로젝트 간/OS 클립보드, 플레이헤드 기준 레이어 붙여넣기 |
 
-현재 구현은 로컬에서 `cargo check --workspace`, `cargo fmt --all --check`, 기본 테스트 88개와 FFmpeg 통합 테스트 6개로 검증했다. 통합 테스트에는 단일/중첩 장면의 MP4·알파 MOV 왕복 검사가 포함된다. 기존 샘플의 프리컴포즈·분할·저장·재열기 후 렌더 픽셀 일치, 새 네이티브 앱의 생성·복제·소스 편집·부모 반영·저장도 확인했다. `examples/precomposition-study.lfe.json`은 중첩 타이틀 예제다. 원격 CI 실행과 AE 전체 기능 동등성은 아직 검증하지 않았다.
+현재 구현은 로컬에서 `cargo check --workspace`, `cargo fmt --all --check`, 기본 테스트 98개와 FFmpeg 통합 테스트 6개로 검증했다. 통합 테스트에는 단일/중첩 장면의 MP4·알파 MOV 왕복 검사가 포함된다. 기존 샘플의 프리컴포즈·분할·저장·재열기 후 렌더 픽셀 일치, 새 네이티브 앱의 생성·복제·소스 편집·부모 반영·저장도 확인했다. `examples/precomposition-study.lfe.json`은 중첩 타이틀 예제다. 이번 레이어 작업은 Null·스위치·클립보드·FPS 변환·저장 및 Guide 출력 제외 회귀 검사를 포함한다. 최종 릴리스로 `examples/layer-workflow.lfe.json`의 0/149프레임 PNG와 MP4를 출력하고, 부모 애니메이션·Guide 제외·MP4 배경색을 픽셀 값으로 확인했다. 네이티브 앱에서 Null 생성·속성 및 Guide 미리보기를 확인했지만, 컴퓨터 제어 도구의 창 활성화 오류로 추가 키보드 Copy/Cut/Paste UI 검증은 완료하지 못했다. 원격 CI 실행과 AE 전체 기능 동등성은 아직 검증하지 않았다.
 
 ## 현재 구현 범위
 
