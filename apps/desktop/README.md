@@ -219,8 +219,42 @@ group, while links to unselected parents keep their original targets.
 
 ## Masks, effects and rendering
 
-Properties provides a rectangular layer-space mask with inversion, Gaussian blur,
-brightness and grayscale. Mask and effect values are currently static. The same
+Properties provides a rectangular layer-space mask with inversion. The Effect menu
+or the right dock's Effects & Presets search adds an effect and opens the left
+Effect Controls tab. The stack supports rename, duplicate, reorder, bypass, reset
+and removal, with up to 64 instances per layer. Available effects are Gaussian
+Blur, Brightness, Grayscale, Fill, Tint, Hue/Saturation, Levels, Drop Shadow and Glow.
+
+Use a parameter's stopwatch to enable animation, its diamond to add/remove a key,
+and its arrow buttons to visit keys. Editing an animated value inserts a key at
+the playhead. The interpolation control cycles Linear/Hold/Smoothstep/Bezier for
+the outgoing segment. Disabling animation retains the sampled value; Reset removes
+that effect's keys. Undo restores each operation. Parameter ranges also clamp
+Bezier overshoot during sampling. Effect keys move, split, copy and convert FPS with
+their layer, and shortening a composition cannot discard them.
+
+Effects run top to bottom in layer coordinates, after the rectangular mask and
+before layer opacity, transforms and composition blending. New effects process
+sRGB channels; existing fixed effects retain their original linear-RGB evaluation.
+Effect Controls > Edit as ordered effects converts the old Blur → Grayscale →
+Brightness chain without changing its color space or adding intermediate rounding.
+Until converted, those existing effects run before newly added effects.
+
+Fill replaces RGB while preserving source alpha, multiplied by its opacity.
+Tint maps luminance between dark/light RGB values with an adjustable amount.
+Levels uses a 257-sample input-black/input-white/gamma table; equal endpoints make
+a threshold and reversed endpoints invert the range. Shadow is placed behind the
+source; Glow adds a blurred copy to source RGBA. Blur uses a four-radius padding
+budget. Cumulative effect regions over 32 megapixels fail with an error. Point text
+uses shaped glyph bounds so applying effects does not crop long or multiline text.
+
+Open `examples/effect-study.lfe.json` for animated blur, shadow and glow on point text.
+Regenerate it with `cargo run -p libre-effects-core --example make_effect_study -- examples/effect-study.lfe.json`.
+
+Mask values remain static. Effect parameter curves are edited in Effect Controls;
+the main timeline graph still shows transform channels. Preset saving, keyframe
+clipboard for effect parameters, Curves, Gradient and additional effect families
+remain in the backlog. The same
 resvg compositor renders both the composition preview and exported frames,
 including text, images, parenting, interpolation, layer timing and alpha.
 
@@ -347,7 +381,7 @@ controls to put footage below a title, then save the project and render MP4/MOV.
 
 ![Reverse playback in the existing Properties panel](screenshots/video-retiming.png)
 
-Select a video layer and use Properties → Content & Effects. The workspace layout
+Select a video layer and use Properties → Content. The workspace layout
 is unchanged; playback controls appear only for video layers.
 
 - **Speed (%)** changes how fast the source advances: 50 is half speed, 200 is
@@ -426,7 +460,7 @@ Versioned .lfe.json files contain compositions, layer ranges, transforms and
 keyframes. Files from the initial rectangle editor remain readable. Bezier or
 parenting edits upgrade the project to version 2; text, images, masks or effects
 upgrade it to version 3; linked videos require version 4, and altered video playback
-requires version 5. Nonblack composition backgrounds require version 6; shared embedded image assets require version 7, saved work areas require version 8, multiple compositions require version 9, nested layers require version 10, and Null/Solo/Shy/Guide require version 11. Older applications reject
+requires version 5. Nonblack composition backgrounds require version 6; shared embedded image assets require version 7, saved work areas require version 8, multiple compositions require version 9, nested layers require version 10, Null/Solo/Shy/Guide require version 11, and ordered animated effects require version 12. Older applications reject
 unsupported versions. Save writes
 the snapshot captured when clicked using a temporary file before replacement.
 Files are limited to 256 MiB, with up to 128 MiB of unique base64 image data and
@@ -496,7 +530,7 @@ See [the development backlog](DEVELOPMENT_BACKLOG.md) for the current capability
 audit, priorities, dependencies and proposed acceptance criteria.
 
 Still pending: advanced precomposition time remapping, audio footage,
-audio output, freeform/animated masks, an effect stack and animated effects,
+audio output, freeform/animated masks, additional effects and reusable presets,
 rich text layout, 3D, JSX, ExtendScript and expressions. PNG sequences can be
 assembled in an external video tool.
 There is no claim of AEP or Adobe script compatibility.

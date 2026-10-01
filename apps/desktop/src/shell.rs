@@ -382,6 +382,7 @@ impl Render for Shell {
                             "Edit",
                             "Composition",
                             "Layer",
+                            "Effect",
                             "Animation",
                             "View",
                             "Window",
@@ -691,6 +692,28 @@ impl Render for Shell {
                         selected.map(|id| Action::Edit(Command::ToggleLocked(id))),
                     ),
                 ],
+                "Effect" => libre_effects_core::EffectKind::ALL
+                    .into_iter()
+                    .map(|kind| {
+                        (
+                            kind.label(),
+                            "",
+                            state
+                                .editor
+                                .selected_layer()
+                                .filter(|l| {
+                                    !l.locked()
+                                        && !matches!(l.content(), libre_effects_core::Content::Null)
+                                })
+                                .map(|l| {
+                                    Action::Edit(Command::Effect {
+                                        id: l.id(),
+                                        edit: libre_effects_core::EffectEdit::Add(kind),
+                                    })
+                                }),
+                        )
+                    })
+                    .collect(),
                 "Animation" => vec![
                     ("Toggle Graph Editor", "Shift+F3", Some(Action::ToggleGraph)),
                     ("Previous keyframe", "J", Some(Action::PreviousKey)),
@@ -719,10 +742,11 @@ impl Render for Shell {
                     "Edit" => 40.0,
                     "Composition" => 78.0,
                     "Layer" => 180.0,
-                    "Animation" => 224.0,
-                    "View" => 302.0,
-                    "Window" => 344.0,
-                    _ => 413.0,
+                    "Effect" => 224.0,
+                    "Animation" => 271.0,
+                    "View" => 349.0,
+                    "Window" => 391.0,
+                    _ => 460.0,
                 }))
                 .w(px(285.0))
                 .p_1()

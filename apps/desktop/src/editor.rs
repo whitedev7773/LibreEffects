@@ -149,6 +149,7 @@ pub(crate) struct EditorState {
     pub expanded: bool,
     pub property_filter: Option<PropertyFilter>,
     pub graph_open: bool,
+    pub effect_controls_open: bool,
     pub graph_property: Property,
     pub graph_key: Option<(LayerId, Frame)>,
     playback_origin: Option<(Instant, Frame)>,
@@ -192,6 +193,7 @@ impl Default for EditorState {
             expanded: true,
             property_filter: None,
             graph_open: false,
+            effect_controls_open: false,
             graph_property: Property::PositionX,
             graph_key: None,
             playback_origin: None,
@@ -688,6 +690,17 @@ impl EditorState {
                     Ok(()) => "Edited".into(),
                     Err(error) => error,
                 };
+                if self.status == "Edited"
+                    && matches!(
+                        command,
+                        Command::Effect {
+                            edit: libre_effects_core::EffectEdit::Add(_),
+                            ..
+                        }
+                    )
+                {
+                    self.effect_controls_open = true;
+                }
                 if before != self.editor.selected() {
                     self.selected_layers.clear();
                 }

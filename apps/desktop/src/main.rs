@@ -11,6 +11,7 @@ use gpui::{
 mod cli;
 mod components;
 mod editor;
+mod effect_render;
 mod footage;
 mod panels;
 mod project_io;

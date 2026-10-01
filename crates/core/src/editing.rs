@@ -561,7 +561,7 @@ pub(super) fn apply_extended(
                         .checked_add(*delta)
                         .ok_or("Video timing overflow")?;
                 }
-                for track in l.properties.values_mut() {
+                for track in l.all_tracks_mut() {
                     track.keys = track
                         .keys
                         .iter()

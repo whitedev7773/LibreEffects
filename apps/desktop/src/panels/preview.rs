@@ -444,23 +444,27 @@ impl Render for Preview {
                 if let Some((_, _, _, old)) = self.cached.take() {
                     let _ = window.drop_image(old);
                 }
-                if let Ok(mut pixels) =
-                    self.renderer
-                        .render_preview(&render_project, frame, max_dimension)
+                match self
+                    .renderer
+                    .render_preview(&render_project, frame, max_dimension)
                 {
-                    for pixel in pixels.pixels_mut() {
-                        pixel.0.swap(0, 2);
+                    Ok(mut pixels) => {
+                        for pixel in pixels.pixels_mut() {
+                            pixel.0.swap(0, 2);
+                        }
+                        self.cached = Some((
+                            render_project.clone(),
+                            frame,
+                            max_dimension,
+                            std::sync::Arc::new(gpui::RenderImage::new(vec![image::Frame::new(
+                                pixels,
+                            )])),
+                        ));
                     }
-                    self.cached = Some((
-                        render_project.clone(),
-                        frame,
-                        max_dimension,
-                        std::sync::Arc::new(gpui::RenderImage::new(vec![image::Frame::new(
-                            pixels,
-                        )])),
-                    ));
-                } else {
-                    self.cached = None;
+                    Err(error) => {
+                        self.cached = None;
+                        self.failed = Some((render_project.clone(), frame, max_dimension, error));
+                    }
                 }
             }
         }

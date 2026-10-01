@@ -10,6 +10,10 @@ pub type CompositionId = u64;
 mod compositions;
 mod document;
 mod editing;
+mod effects;
+pub use effects::{
+    EffectColorSpace, EffectEdit, EffectId, EffectInstance, EffectKind, EffectParam, ParameterSpec,
+};
 mod geometry;
 mod layer_workflow;
 pub use layer_workflow::{LayerClipboard, LayerSwitch};
@@ -171,6 +175,10 @@ pub struct Layer {
     content: Content,
     #[serde(default)]
     effects: Effects,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    effect_stack: Vec<EffectInstance>,
+    #[serde(default = "effects::first_effect_id")]
+    next_effect_id: EffectId,
     #[serde(default)]
     mask: Option<Mask>,
     id: LayerId,
@@ -463,7 +471,7 @@ impl Project {
     }
 
     fn validate(&self) -> Result<(), String> {
-        if !(1..=11).contains(&self.version) {
+        if !(1..=12).contains(&self.version) {
             return Err("Unsupported project version".into());
         }
         if self.version < 9
@@ -489,6 +497,9 @@ impl Project {
         let mut images = BTreeSet::new();
         let mut image_bytes = 0usize;
         for (_, comp) in self.compositions() {
+            if self.version < 12 && comp.layers.iter().any(|l| !l.effect_stack.is_empty()) {
+                return Err("Effect stacks require project version 12".into());
+            }
             if self.version < 11
                 && (comp.hide_shy
                     || comp
@@ -512,6 +523,7 @@ impl Project {
                 return Err("Invalid composition settings".into());
             }
             for layer in &comp.layers {
+                effects::validate(layer, comp.duration)?;
                 if let Content::Image { png } = &layer.content {
                     if images.insert(png.as_ptr() as usize) {
                         image_bytes = image_bytes.saturating_add(png.len());
@@ -570,6 +582,10 @@ impl Project {
 #[derive(Clone, Debug)]
 pub enum Command {
     Batch(Vec<Command>),
+    Effect {
+        id: LayerId,
+        edit: EffectEdit,
+    },
     AddNull,
     SetLayerSwitch {
         id: LayerId,
@@ -892,6 +908,14 @@ impl Editor {
         }) {
             next.project.version = 11;
         }
+        if next
+            .project
+            .compositions()
+            .into_iter()
+            .any(|(_, c)| c.layers.iter().any(|l| !l.effect_stack.is_empty()))
+        {
+            next.project.version = 12;
+        }
         next.project.validate()?;
         if next != self.current {
             let previous = std::mem::replace(&mut self.current, next);
@@ -902,6 +926,9 @@ impl Editor {
 }
 
 fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
+    if let Command::Effect { id, edit } = command {
+        return effects::apply(state, id, edit);
+    }
     if let Some(result) = layer_workflow::apply(state, &command) {
         return result;
     }
@@ -1100,6 +1127,8 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
             Layer {
                 content: Content::default(),
                 effects: Effects::default(),
+                effect_stack: Vec::new(),
+                next_effect_id: 1,
                 mask: None,
                 id,
                 name: format!("Rectangle {id}"),

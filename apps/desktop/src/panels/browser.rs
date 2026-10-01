@@ -9,17 +9,63 @@ use libre_effects_core::Command;
 pub(crate) struct Browser {
     state: Entity<EditorState>,
     search: Entity<TextField>,
+    effects: Entity<super::effects::EffectControls>,
 }
 impl Browser {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
         let search = cx.new(|cx| TextField::new(cx, |_, _, _| {}));
         cx.observe(&search, |_, _, cx| cx.notify()).detach();
-        Self { state, search }
+        let effects = cx.new(|cx| super::effects::EffectControls::new(state.clone(), cx));
+        Self {
+            state,
+            search,
+            effects,
+        }
     }
 }
 impl Render for Browser {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let effects_open = self.state.read(cx).effect_controls_open;
+        let tabs = div()
+            .flex()
+            .h(px(27.0))
+            .flex_none()
+            .border_b_1()
+            .border_color(rgb(ui::BORDER))
+            .child(
+                ui::text_button("project-tab", "Project")
+                    .when(!effects_open, |s| s.text_color(rgb(ui::BLUE)))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.state.update(cx, |s, cx| {
+                            s.effect_controls_open = false;
+                            cx.notify();
+                        });
+                        cx.notify();
+                    })),
+            )
+            .child(
+                ui::text_button("effect-controls-tab", "Effect Controls")
+                    .when(effects_open, |s| s.text_color(rgb(ui::BLUE)))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.state.update(cx, |s, cx| {
+                            s.effect_controls_open = true;
+                            cx.notify();
+                        });
+                        cx.notify();
+                    })),
+            );
+        if effects_open {
+            return div()
+                .size_full()
+                .min_h_0()
+                .flex()
+                .flex_col()
+                .bg(rgb(ui::BG))
+                .child(tabs)
+                .child(div().flex_1().min_h_0().child(self.effects.clone()))
+                .into_any_element();
+        }
         let project = self.state.read(cx).editor.project();
         let comp = project.composition();
         let active = project.active_composition_id();
@@ -31,7 +77,7 @@ impl Render for Browser {
             .min_w_0()
             .bg(rgb(ui::BG))
             .overflow_hidden()
-            .child(ui::panel_header("Project"))
+            .child(tabs)
             .child(
                 div()
                     .flex()
@@ -186,5 +232,6 @@ impl Render for Browser {
                             .child("RGBA"),
                     ),
             )
+            .into_any_element()
     }
 }

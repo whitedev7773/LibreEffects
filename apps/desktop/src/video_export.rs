@@ -93,9 +93,29 @@ mod tests {
     #[ignore = "requires FFmpeg with libx264 and prores_ks; run explicitly for export validation"]
     fn ffmpeg_roundtrip_preserves_range_rate_alpha_and_black_matte() {
         let dir = tempfile::tempdir().unwrap();
-        for nested in [false, true] {
+        for (nested, stacked) in [(false, false), (true, false), (false, true), (true, true)] {
             let mut e = Editor::default();
             e.replace_project(scene()).unwrap();
+            if stacked {
+                use libre_effects_core::{EffectEdit, EffectKind, EffectParam};
+                e.execute(Edit::Effect {
+                    id: 1,
+                    edit: EffectEdit::Add(EffectKind::Fill),
+                })
+                .unwrap();
+                for parameter in [EffectParam::Red, EffectParam::Blue] {
+                    e.execute(Edit::Effect {
+                        id: 1,
+                        edit: EffectEdit::SetValue {
+                            effect: 1,
+                            parameter,
+                            frame: 0,
+                            value: 0.0,
+                        },
+                    })
+                    .unwrap();
+                }
+            }
             if nested {
                 e.execute(Edit::Precompose {
                     layers: vec![1],
@@ -175,12 +195,15 @@ mod tests {
                 let center = &decoded.stdout[(49 * w + 50) * 4..][..4];
                 let background = &decoded.stdout[..4];
                 if preset == VideoPreset::H264 {
-                    assert!((center[0] as i32 - 128).abs() < 8, "{center:?}");
-                    assert!(center[1] < 8 && center[2] < 8);
+                    assert!(
+                        (center[usize::from(stacked)] as i32 - 128).abs() < 8,
+                        "{center:?}"
+                    );
+                    assert!(center[usize::from(!stacked)] < 8 && center[2] < 8);
                     assert_eq!(background, [0, 0, 0, 255]);
                 } else {
                     assert!((center[3] as i32 - 128).abs() < 3, "{center:?}");
-                    assert!(center[0] > 245);
+                    assert!(center[usize::from(stacked)] > 245);
                     assert_eq!(background[3], 0);
                 }
                 // Decode at 24 fps; an incorrect encoded time base changes this count.

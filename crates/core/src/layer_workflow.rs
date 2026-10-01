@@ -152,7 +152,7 @@ fn paste(state: &mut Snapshot, clipboard: &LayerClipboard) -> Result<(), String>
             );
         }
         layer.out_frame = Some(end);
-        for track in layer.properties.values_mut() {
+        for track in layer.all_tracks_mut() {
             let mut keys = BTreeMap::new();
             for (frame, key) in &track.keys {
                 let frame = convert(*frame)?;

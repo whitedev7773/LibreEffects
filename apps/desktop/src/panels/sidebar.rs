@@ -9,15 +9,17 @@ use libre_effects_core::{Alignment, Command};
 pub(crate) struct Sidebar {
     state: Entity<EditorState>,
     inspector: Entity<Inspector>,
-    expanded: [bool; 3],
+    catalog: Entity<super::effects::EffectCatalog>,
+    expanded: [bool; 4],
 }
 impl Sidebar {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
         Self {
             inspector: cx.new(|cx| Inspector::new(state.clone(), cx)),
+            catalog: cx.new(|cx| super::effects::EffectCatalog::new(state.clone(), cx)),
             state,
-            expanded: [true, false, false],
+            expanded: [true, false, false, false],
         }
     }
 }
@@ -42,7 +44,10 @@ impl Render for Sidebar {
             .flex_col()
             .min_h_0()
             .bg(rgb(ui::BG));
-        for (index, label) in ["Properties", "Info", "Preview"].into_iter().enumerate() {
+        for (index, label) in ["Properties", "Info", "Preview", "Effects & Presets"]
+            .into_iter()
+            .enumerate()
+        {
             let active = self.expanded[index];
             panel = panel.child(
                 ui::text_button(gpui::SharedString::from(format!("dock-{label}")), label)
@@ -71,6 +76,10 @@ impl Render for Sidebar {
                         .gap_2()
                         .text_size(px(11.0))
                         .children(info.lines().map(|line| div().child(line.to_string())))
+                        .into_any_element(),
+                    3 => div()
+                        .flex_none()
+                        .child(self.catalog.clone())
                         .into_any_element(),
                     _ => div()
                         .p_3()

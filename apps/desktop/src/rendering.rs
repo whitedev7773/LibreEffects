@@ -13,6 +13,9 @@ fn xml(s: &str) -> String {
 pub(crate) struct Renderer {
     options: resvg::usvg::Options<'static>,
 }
+fn text_svg(text: &str, font_size: f64, color: &str) -> String {
+    text.lines().enumerate().map(|(line,s)| format!("<text x='0' y='{}' font-family='Wanted Sans' font-size='{font_size}' fill='{color}' xml:space='preserve'>{}</text>",font_size * (1.0 + 1.2 * line as f64),xml(s))).collect()
+}
 /// Flatten straight RGBA over a solid RGB matte, including partially transparent edges.
 pub(crate) fn composite_background(pixels: &mut image::RgbaImage, color: u32) {
     let background = [(color >> 16) & 255, (color >> 8) & 255, color & 255];
@@ -89,6 +92,33 @@ impl Renderer {
             }
             let id = format!("{prefix}-{}", l.id());
             let e = l.effects();
+            let mut effect_bounds = [0.0, 0.0, l.width(), l.height()];
+            if let Content::Text { text, font_size } = l.content()
+                && l.effect_stack().iter().any(|e| !e.bypassed())
+            {
+                // Point text can extend outside the layer's nominal size. Measure the
+                // same shaped glyph paths used by the compositor before filtering.
+                let source = format!(
+                    "<svg xmlns='http://www.w3.org/2000/svg' width='{}' height='{}'>{}</svg>",
+                    l.width(),
+                    l.height(),
+                    text_svg(text, *font_size, "white")
+                );
+                let measured = resvg::usvg::Tree::from_str(&source, &self.options)
+                    .map_err(|e| e.to_string())?;
+                let bounds = measured.root().bounding_box();
+                let left = f64::from(bounds.left()).min(0.0);
+                let top = f64::from(bounds.top()).min(0.0);
+                effect_bounds = [
+                    left,
+                    top,
+                    f64::from(bounds.right()).max(l.width()) - left,
+                    f64::from(bounds.bottom()).max(l.height()) - top,
+                ];
+            }
+            let (effect_defs, effect_open, effect_close) =
+                crate::effect_render::stack(l, frame, &id, effect_bounds)?;
+            svg.push_str(&effect_defs);
             svg.push_str(&format!(
                 "<defs><filter id='fx{id}' x='-100%' y='-100%' width='300%' height='300%'>"
             ));
@@ -111,7 +141,7 @@ impl Renderer {
             svg.push_str("</defs>");
             let a = matrix.0;
             svg.push_str(&format!(
-                "<g transform='matrix({} {} {} {} {} {})' opacity='{}' {}><g {}>",
+                "<g transform='matrix({} {} {} {} {} {})' opacity='{}'>{effect_open}<g {}><g {}>",
                 a[0],
                 a[1],
                 a[2],
@@ -142,9 +172,7 @@ impl Renderer {
                     l.height()
                 )),
                 Content::Text { text, font_size } => {
-                    for (line, s) in text.lines().enumerate() {
-                        svg.push_str(&format!("<text x='0' y='{}' font-family='Wanted Sans' font-size='{font_size}' fill='{color}' xml:space='preserve'>{}</text>",font_size * (1.0 + 1.2 * line as f64),xml(s)));
-                    }
+                    svg.push_str(&text_svg(text, *font_size, &color));
                 }
                 Content::Image { png } => svg.push_str(&format!(
                     "<image width='{}' height='{}' xlink:href='data:image/png;base64,{png}'/>",
@@ -196,7 +224,7 @@ impl Renderer {
                     }
                 }
             }
-            svg.push_str("</g></g>");
+            svg.push_str(&format!("</g></g>{effect_close}</g>"));
             if svg.len() > 64 * 1024 * 1024 {
                 return Err("Frame SVG exceeds 64 MiB; reduce embedded image instances".into());
             }

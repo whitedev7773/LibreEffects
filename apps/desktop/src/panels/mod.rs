@@ -1,4 +1,5 @@
 mod browser;
+mod effects;
 mod graph;
 mod inspector;
 mod preview;

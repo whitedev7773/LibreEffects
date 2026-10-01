@@ -325,15 +325,7 @@ impl Render for Inspector {
             contents = contents.child(row);
         }
         let is_null = matches!(layer.content(), Content::Null);
-        let mut entries = vec![
-            (2, "Fill (hex)", format!("{:06X}", layer.color())),
-            (3, "Gaussian Blur", format!("{:.2}", layer.effects().blur)),
-            (
-                4,
-                "Brightness",
-                format!("{:.2}", layer.effects().brightness),
-            ),
-        ];
+        let mut entries = vec![(2, "Fill (hex)", format!("{:06X}", layer.color()))];
         if let Content::Text { text, font_size } = layer.content() {
             entries.insert(0, (0, "Text", text.clone()));
             entries.insert(1, (1, "Font size", font_size.to_string()));
@@ -356,7 +348,7 @@ impl Render for Inspector {
                 .child(if is_null {
                     "Null object · transform controller"
                 } else {
-                    "Content & Effects"
+                    "Content"
                 }),
         );
         if let Content::Composition { composition, .. } = layer.content() {
@@ -498,29 +490,16 @@ impl Render for Inspector {
             );
         }
         if !is_null {
-            let mut effects = layer.effects();
-            effects.grayscale = !effects.grayscale;
+            let state = self.state.clone();
             contents = contents.child(
-                ui::text_button(
-                    "grayscale",
-                    if layer.effects().grayscale {
-                        "Grayscale: On"
-                    } else {
-                        "Grayscale: Off"
-                    },
-                )
-                .on_click({
-                    let state = self.state.clone();
-                    move |_, window, cx| {
+                ui::text_button("open-effects", "Open Effect Controls").on_click(
+                    move |_, _, cx| {
                         state.update(cx, |s, cx| {
-                            s.dispatch(
-                                &Action::Edit(Command::SetEffects { id, effects }),
-                                window,
-                                cx,
-                            )
-                        })
-                    }
-                }),
+                            s.effect_controls_open = true;
+                            cx.notify();
+                        });
+                    },
+                ),
             );
             let mask = if layer.mask().is_some() {
                 None

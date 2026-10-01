@@ -1,0 +1,170 @@
+{
+  "composition": {
+    "background_color": 1316899,
+    "duration": 90,
+    "fps": 30,
+    "height": 540,
+    "layers": [
+      {
+        "color": 12167167,
+        "content": {
+          "Text": {
+            "font_size": 100.0,
+            "text": "Libre Effects"
+          }
+        },
+        "effect_stack": [
+          {
+            "bypassed": false,
+            "color_space": "Srgb",
+            "id": 1,
+            "kind": "GaussianBlur",
+            "name": "Gaussian Blur",
+            "parameters": {
+              "Radius": {
+                "keys": {
+                  "0": {
+                    "interpolation": "Smooth",
+                    "value": 12.0
+                  },
+                  "45": {
+                    "interpolation": "Linear",
+                    "value": 0.0
+                  }
+                },
+                "value": 12.0
+              }
+            }
+          },
+          {
+            "bypassed": false,
+            "color_space": "Srgb",
+            "id": 2,
+            "kind": "DropShadow",
+            "name": "Drop Shadow",
+            "parameters": {
+              "Blue": {
+                "keys": {},
+                "value": 0.0
+              },
+              "Green": {
+                "keys": {},
+                "value": 0.0
+              },
+              "OffsetX": {
+                "keys": {},
+                "value": 12.0
+              },
+              "OffsetY": {
+                "keys": {},
+                "value": 12.0
+              },
+              "Opacity": {
+                "keys": {},
+                "value": 75.0
+              },
+              "Radius": {
+                "keys": {},
+                "value": 8.0
+              },
+              "Red": {
+                "keys": {},
+                "value": 0.0
+              }
+            }
+          },
+          {
+            "bypassed": false,
+            "color_space": "Srgb",
+            "id": 3,
+            "kind": "Glow",
+            "name": "Glow",
+            "parameters": {
+              "Amount": {
+                "keys": {},
+                "value": 0.35
+              },
+              "Radius": {
+                "keys": {},
+                "value": 5.0
+              }
+            }
+          }
+        ],
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "height": 140.0,
+        "id": 1,
+        "in_frame": 0,
+        "locked": false,
+        "mask": null,
+        "name": "Animated title",
+        "next_effect_id": 4,
+        "out_frame": null,
+        "parent": null,
+        "properties": {
+          "AnchorX": {
+            "keys": {},
+            "value": 310.0
+          },
+          "AnchorY": {
+            "keys": {},
+            "value": 70.0
+          },
+          "Opacity": {
+            "keys": {},
+            "value": 100.0
+          },
+          "PositionX": {
+            "keys": {},
+            "value": 480.0
+          },
+          "PositionY": {
+            "keys": {
+              "0": {
+                "interpolation": "Smooth",
+                "value": 290.0
+              },
+              "45": {
+                "interpolation": "Linear",
+                "value": 260.0
+              }
+            },
+            "value": 290.0
+          },
+          "Rotation": {
+            "keys": {},
+            "value": 0.0
+          },
+          "ScaleX": {
+            "keys": {},
+            "value": 100.0
+          },
+          "ScaleY": {
+            "keys": {},
+            "value": 100.0
+          }
+        },
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "visible": true,
+        "width": 620.0
+      }
+    ],
+    "name": "Animated Effect Study",
+    "width": 960
+  },
+  "composition_id": 1,
+  "next_composition_id": 2,
+  "next_layer_id": 2,
+  "version": 12
+}
