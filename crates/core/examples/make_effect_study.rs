@@ -1,6 +1,7 @@
 //! Editable animated effects on point text, with a transparent composition background.
 use libre_effects_core::{
-    Command, Content, Editor, EffectEdit, EffectKind, EffectParam, Interpolation, Property,
+    Command, Content, Editor, EffectEdit, EffectKind, EffectParam, Interpolation, MarkerEdit,
+    MarkerTarget, Property,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -107,6 +108,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         frame: 0,
         interpolation: Interpolation::Smooth,
     })?;
+    for (target, frame, duration, name, color) in [
+        (MarkerTarget::Composition, 0, 45, "Reveal", 0xe7bc6a),
+        (MarkerTarget::Composition, 45, 45, "Hold", 0x85bfff),
+        (MarkerTarget::Layer(id), 45, 0, "In focus", 0xb9a7ff),
+    ] {
+        e.execute(Command::Marker {
+            target,
+            edit: MarkerEdit::Add { frame },
+        })?;
+        let marker = e
+            .project()
+            .composition()
+            .marker_track(target)
+            .unwrap()
+            .iter()
+            .find(|m| m.frame() == frame)
+            .unwrap()
+            .id();
+        e.execute(Command::Marker {
+            target,
+            edit: MarkerEdit::Update {
+                id: marker,
+                frame,
+                duration,
+                name: name.into(),
+                color,
+            },
+        })?;
+    }
     std::fs::write(output, e.project().to_json()?)?;
     Ok(())
 }

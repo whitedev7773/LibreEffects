@@ -152,6 +152,7 @@ fn precompose(state: &mut Snapshot, layers: &[LayerId], name: &str) -> Result<()
         }
     }
     let mut source = parent.clone();
+    source.markers = Default::default();
     source.name = name.trim().into();
     source.layers = parent.layers[first..first + ids.len()].to_vec();
     let start = source.layers.iter().map(|l| l.in_frame).min().unwrap();

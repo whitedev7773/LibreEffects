@@ -139,6 +139,26 @@ a diamond to change its timing.
   Work area is saved with the composition and supports Undo/Redo. Viewport position,
   selection and panel layout remain session state.
 
+### Timeline markers and snapping
+
+Use **Comp Marker** or **Layer Marker** to add an annotation at the playhead.
+Click a flag to seek and edit its name, frame, duration and RGB hex color.
+Previous/Next traverses composition markers and the selected layer's markers.
+Markers support Undo/Redo and project-file round trips; they never render into
+the composition image or exports. `examples/effect-study.lfe.json` includes
+Reveal/Hold ranges and a layer cue at the end of its blur animation.
+
+Markers use composition frames. Moving a layer moves its markers; trimming keeps
+their times. Splitting clips a range into both halves. A split that would put two
+right-hand markers at the same frame is rejected. Clipboard FPS conversion also
+rejects merged starts or a nonzero duration rounded to zero. Pre-compose moves
+layer annotations into the source and keeps composition markers in the parent.
+
+**Snap** aligns ruler scrubbing, dragged keys and layer moves/trims with the
+playhead, work area, layer boundaries, keys and marker endpoints within eight
+logical pixels. Hold Alt to bypass it. Selected keys move with one shared offset;
+hidden Shy layers are excluded. Snapping is a session preference.
+
 ## Graph Editor
 
 ![Opacity value graph in the timeline](screenshots/graph-editor.png)
@@ -466,7 +486,7 @@ Versioned .lfe.json files contain compositions, layer ranges, transforms and
 keyframes. Files from the initial rectangle editor remain readable. Bezier or
 parenting edits upgrade the project to version 2; text, images, masks or effects
 upgrade it to version 3; linked videos require version 4, and altered video playback
-requires version 5. Nonblack composition backgrounds require version 6; shared embedded image assets require version 7, saved work areas require version 8, multiple compositions require version 9, nested layers require version 10, Null/Solo/Shy/Guide require version 11, and ordered animated effects require version 12. Older applications reject
+requires version 5. Nonblack composition backgrounds require version 6; shared embedded image assets require version 7, saved work areas require version 8, multiple compositions require version 9, nested layers require version 10, Null/Solo/Shy/Guide require version 11, ordered animated effects require version 12, and timeline markers require version 13. Older applications reject
 unsupported versions. Save writes
 the snapshot captured when clicked using a temporary file before replacement.
 Files are limited to 256 MiB, with up to 128 MiB of unique base64 image data and

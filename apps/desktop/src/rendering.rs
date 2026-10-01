@@ -645,6 +645,36 @@ mod tests {
         e
     }
     #[test]
+    fn composition_and_layer_markers_never_change_preview_or_export_pixels() {
+        use libre_effects_core::{MarkerEdit, MarkerTarget};
+        let mut e = scene();
+        e.execute(Command::AddRectangle).unwrap();
+        let renderer = Renderer::new();
+        let before = renderer.render(e.project(), 3, 100).unwrap();
+        for target in [MarkerTarget::Composition, MarkerTarget::Layer(1)] {
+            e.execute(Command::Marker {
+                target,
+                edit: MarkerEdit::Add { frame: 3 },
+            })
+            .unwrap();
+            e.execute(Command::Marker {
+                target,
+                edit: MarkerEdit::Update {
+                    id: 1,
+                    frame: 3,
+                    duration: 4,
+                    name: "No pixels".into(),
+                    color: 0xff0000,
+                },
+            })
+            .unwrap();
+        }
+        let restored =
+            libre_effects_core::Project::from_json(&e.project().to_json().unwrap()).unwrap();
+        assert_eq!(renderer.render(&restored, 3, 100).unwrap(), before);
+        assert_eq!(renderer.render_preview(&restored, 3, 100).unwrap(), before);
+    }
+    #[test]
     fn renderer_preserves_alpha_color_and_mask_with_effects() {
         let mut e = scene();
         e.execute(Command::AddContent {

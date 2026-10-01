@@ -17,10 +17,12 @@ pub use effects::{
 mod geometry;
 mod layer_workflow;
 pub use layer_workflow::{LayerClipboard, LayerSwitch};
+mod markers;
 mod precompositions;
 mod tracks;
 pub use editing::{Content, Effects, KeyCopy, KeyRef, Mask, VideoPlayback};
 pub use geometry::{Affine, Bezier};
+pub use markers::{Marker, MarkerEdit, MarkerId, MarkerTarget};
 pub use tracks::{PropertyPath, TrackEdit};
 
 #[derive(Clone, Copy, Debug)]
@@ -173,6 +175,8 @@ impl AnimatedProperty {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Layer {
+    #[serde(default, skip_serializing_if = "markers::Markers::is_default")]
+    markers: markers::Markers,
     #[serde(default)]
     content: Content,
     #[serde(default)]
@@ -302,6 +306,8 @@ impl Layer {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Composition {
+    #[serde(default, skip_serializing_if = "markers::Markers::is_default")]
+    markers: markers::Markers,
     name: String,
     width: u32,
     height: u32,
@@ -443,6 +449,7 @@ impl Default for Project {
             next_composition_id: 2,
             other_compositions: BTreeMap::new(),
             composition: Composition {
+                markers: Default::default(),
                 name: "Composition 01".into(),
                 width: 1920,
                 height: 1080,
@@ -473,7 +480,7 @@ impl Project {
     }
 
     fn validate(&self) -> Result<(), String> {
-        if !(1..=12).contains(&self.version) {
+        if !(1..=13).contains(&self.version) {
             return Err("Unsupported project version".into());
         }
         if self.version < 9
@@ -499,6 +506,13 @@ impl Project {
         let mut images = BTreeSet::new();
         let mut image_bytes = 0usize;
         for (_, comp) in self.compositions() {
+            comp.markers.validate(comp.duration)?;
+            if self.version < 13
+                && (!comp.markers.is_default()
+                    || comp.layers.iter().any(|l| !l.markers.is_default()))
+            {
+                return Err("Markers require project version 13".into());
+            }
             if self.version < 12 && comp.layers.iter().any(|l| !l.effect_stack.is_empty()) {
                 return Err("Effect stacks require project version 12".into());
             }
@@ -525,6 +539,7 @@ impl Project {
                 return Err("Invalid composition settings".into());
             }
             for layer in &comp.layers {
+                layer.markers.validate(comp.duration)?;
                 effects::validate(layer, comp.duration)?;
                 if let Content::Image { png } = &layer.content {
                     if images.insert(png.as_ptr() as usize) {
@@ -583,6 +598,10 @@ impl Project {
 /// The future scripting bridge and native controls both dispatch these commands.
 #[derive(Clone, Debug)]
 pub enum Command {
+    Marker {
+        target: MarkerTarget,
+        edit: MarkerEdit,
+    },
     EditTrack {
         id: LayerId,
         property: PropertyPath,
@@ -923,6 +942,11 @@ impl Editor {
         {
             next.project.version = 12;
         }
+        if next.project.compositions().into_iter().any(|(_, c)| {
+            !c.markers.is_default() || c.layers.iter().any(|l| !l.markers.is_default())
+        }) {
+            next.project.version = 13;
+        }
         next.project.validate()?;
         if next != self.current {
             let previous = std::mem::replace(&mut self.current, next);
@@ -933,6 +957,9 @@ impl Editor {
 }
 
 fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
+    if let Command::Marker { target, edit } = command {
+        return markers::apply(state, target, edit);
+    }
     if let Command::EditTrack { id, property, edit } = command {
         return apply(state, tracks::command(id, property, edit));
     }
@@ -1135,6 +1162,7 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
         comp.layers.insert(
             0,
             Layer {
+                markers: Default::default(),
                 content: Content::default(),
                 effects: Effects::default(),
                 effect_stack: Vec::new(),

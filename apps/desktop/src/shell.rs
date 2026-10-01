@@ -173,7 +173,10 @@ impl Shell {
             self.closing = false;
             self.pending_document = None;
             self.pending_save = false;
-            self.state.update(cx, |s, _| s.close_after_save = false);
+            self.state.update(cx, |s, _| {
+                s.close_after_save = false;
+                s.marker_selection = None;
+            });
             self.menu = None;
             self.settings = false;
             self.help = false;

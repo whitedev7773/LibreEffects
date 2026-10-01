@@ -25,23 +25,27 @@ pub(crate) struct Timeline {
     resizing: bool,
     fields: BTreeMap<(LayerId, PropertyPath), Entity<TextField>>,
     parent_open: Option<LayerId>,
-    bar_drag: Option<(Vec<LayerId>, i32, u32, i64)>,
+    bar_drag: Option<(Vec<LayerId>, i32, f64, i64)>,
     marquee: Option<(gpui::Point<Pixels>, gpui::Point<Pixels>)>,
     marquee_additive: bool,
     hit_keys: Rc<RefCell<Vec<(KeyRef, Bounds<Pixels>)>>>,
     hit_layers: Rc<RefCell<Vec<(LayerId, Bounds<Pixels>)>>>,
     search: Entity<TextField>,
     graph: Entity<super::graph::Graph>,
+    marker_editor: Entity<super::markers::MarkerEditor>,
     state: Entity<EditorState>,
     ruler: Rc<Cell<Option<Bounds<Pixels>>>>,
     focus: FocusHandle,
     scrubbing: bool,
+    snapped_to: Option<u32>,
     drag: Option<KeyDrag>,
     selected_key: Option<(LayerId, PropertyPath, u32)>,
 }
-fn frame_at(x: f32, left: f32, width: f32, start: u32, visible: u32, duration: u32) -> u32 {
-    (start + (((x - left) / width.max(1.0)).clamp(0.0, 1.0) * visible as f32).round() as u32)
-        .min(duration - 1)
+fn frame_at(x: f32, left: f32, width: f32, start: u32, visible: u32, duration: u32) -> f64 {
+    (f64::from(start)
+        + ((f64::from(x) - f64::from(left)) / f64::from(width.max(1.0))).clamp(0.0, 1.0)
+            * f64::from(visible))
+    .min(f64::from(duration - 1))
 }
 impl Timeline {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
@@ -60,15 +64,17 @@ impl Timeline {
             hit_layers: Default::default(),
             search,
             graph: cx.new(|cx| super::graph::Graph::new(state.clone(), cx)),
+            marker_editor: cx.new(|cx| super::markers::MarkerEditor::new(state.clone(), cx)),
             state,
             ruler: Rc::new(Cell::new(None)),
             focus: cx.focus_handle(),
             scrubbing: false,
+            snapped_to: None,
             drag: None,
             selected_key: None,
         }
     }
-    fn seek_x(&self, x: Pixels, cx: &Context<Self>) -> Option<u32> {
+    fn seek_position(&self, x: Pixels, cx: &Context<Self>) -> Option<f64> {
         let bounds = self.ruler.get()?;
         let state = self.state.read(cx);
         Some(frame_at(
@@ -94,26 +100,113 @@ impl Timeline {
             cx.notify();
             return;
         }
-        let Some(frame) = self.seek_x(event.position.x, cx) else {
+        let Some(position) = self.seek_position(event.position.x, cx) else {
             return;
         };
-        if let Some((_, _, origin, delta)) = &mut self.bar_drag {
-            *delta = frame as i64 - *origin as i64;
-            cx.notify();
-        }
-        if self.scrubbing {
-            self.state.update(cx, |state, cx| {
-                state.dispatch(&Action::Seek(frame), window, cx)
-            });
+        self.snapped_to = None;
+        let state = self.state.read(cx);
+        let comp = state.editor.project().composition();
+        let snapping = state.snapping && !event.modifiers.alt;
+        let width = self.ruler.get().map_or(0.0, |b| f32::from(b.size.width));
+        if let Some((ids, edge, origin, delta)) = &mut self.bar_drag {
+            let raw_delta = position - *origin;
+            *delta = raw_delta.round() as i64;
+            if snapping {
+                let anchors: Vec<_> = ids
+                    .iter()
+                    .filter_map(|id| comp.layer(*id))
+                    .flat_map(|l| {
+                        let a = i64::from(l.in_frame());
+                        let b = i64::from(l.out_frame(comp.duration()));
+                        match *edge {
+                            -1 => vec![a],
+                            1 => vec![b],
+                            _ => vec![a, b],
+                        }
+                    })
+                    .collect();
+                let min = anchors.iter().min().copied().unwrap_or(0);
+                let max = anchors.iter().max().copied().unwrap_or(0);
+                let moving = if *edge == 0 {
+                    ids.iter().copied().collect()
+                } else {
+                    BTreeSet::new()
+                };
+                let targets = super::timeline_snap::targets(
+                    comp,
+                    Some(state.frame),
+                    &moving,
+                    &BTreeSet::new(),
+                );
+                let (d, at) = super::timeline_snap::snap_delta(
+                    raw_delta,
+                    &anchors,
+                    &targets,
+                    state.visible_frames(),
+                    width,
+                    (-min, i64::from(comp.duration()) - max),
+                );
+                *delta = d;
+                self.snapped_to = at;
+            }
         }
         if let Some(drag) = &mut self.drag {
-            drag.to = frame;
-            cx.notify();
+            let delta = position - f64::from(drag.from);
+            let anchors: Vec<_> = state
+                .selected_keys
+                .iter()
+                .map(|k| i64::from(k.frame))
+                .collect();
+            let min = anchors.iter().min().copied().unwrap_or(0);
+            let max = anchors.iter().max().copied().unwrap_or(0);
+            let targets = super::timeline_snap::targets(
+                comp,
+                Some(state.frame),
+                &BTreeSet::new(),
+                &state.selected_keys,
+            );
+            let (delta, at) = if snapping && !anchors.is_empty() {
+                super::timeline_snap::snap_delta(
+                    delta,
+                    &anchors,
+                    &targets,
+                    state.visible_frames(),
+                    width,
+                    (-min, i64::from(comp.duration() - 1) - max),
+                )
+            } else {
+                (delta.round() as i64, None)
+            };
+            drag.to =
+                (i64::from(drag.from) + delta).clamp(0, i64::from(comp.duration() - 1)) as u32;
+            self.snapped_to = at;
         }
+        if self.scrubbing {
+            let targets =
+                super::timeline_snap::targets(comp, None, &BTreeSet::new(), &BTreeSet::new());
+            let (at, snap) = if snapping {
+                super::timeline_snap::snap_delta(
+                    position,
+                    &[0],
+                    &targets,
+                    state.visible_frames(),
+                    width,
+                    (0, i64::from(comp.duration() - 1)),
+                )
+            } else {
+                (position.round() as i64, None)
+            };
+            self.snapped_to = snap;
+            self.state
+                .update(cx, |s, cx| s.dispatch(&Action::Seek(at as u32), window, cx));
+        }
+        cx.notify();
     }
+
     fn up(&mut self, _: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
         self.scrubbing = false;
         self.resizing = false;
+        self.snapped_to = None;
         if let Some((a, b)) = self.marquee.take() {
             let area = Bounds::from_corners(
                 point(a.x.min(b.x), a.y.min(b.y)),
@@ -278,6 +371,8 @@ impl Render for Timeline {
         self.fields
             .retain(|(id, p), _| comp.layer(*id).is_some_and(|l| l.track(*p).is_some()));
         let graph_open = state.graph_open;
+        let marker_open = state.selected_marker().is_some();
+        let snapping = state.snapping;
         let graph_property = state.graph_property;
         let frame = state.frame;
         let start = state.timeline_start;
@@ -583,7 +678,8 @@ impl Render for Timeline {
                                     move |this, event: &gpui::MouseDownEvent, window, cx| {
                                         window.focus(&this.focus);
                                         cx.stop_propagation();
-                                        let Some(at) = this.seek_x(event.position.x, cx) else {
+                                        let Some(at) = this.seek_position(event.position.x, cx)
+                                        else {
                                             return;
                                         };
                                         let edge =
@@ -627,6 +723,21 @@ impl Render for Timeline {
                             ),
                     )
                 });
+            let time_area = time_area.children(
+                layer
+                    .markers()
+                    .iter()
+                    .filter(|m| m.frame() < start.saturating_add(visible) && m.end() >= start)
+                    .map(|m| {
+                        super::markers::marker_item(
+                            m,
+                            libre_effects_core::MarkerTarget::Layer(id),
+                            start,
+                            visible,
+                            &self.state,
+                        )
+                    }),
+            );
             rows = rows.child(
                 div()
                     .flex()
@@ -1211,6 +1322,53 @@ impl Render for Timeline {
                                 }
                             }),
                     )
+                    .child(ui::text_button("add-comp-marker", "Comp Marker").on_click({
+                        let state = self.state.clone();
+                        move |_, w, cx| {
+                            state.update(cx, |s, cx| {
+                                s.dispatch(
+                                    &Action::AddMarker(
+                                        libre_effects_core::MarkerTarget::Composition,
+                                    ),
+                                    w,
+                                    cx,
+                                )
+                            })
+                        }
+                    }))
+                    .child(
+                        ui::text_button("add-layer-marker", "Layer Marker")
+                            .when(selected.is_none(), |d| d.opacity(0.4))
+                            .on_click({
+                                let state = self.state.clone();
+                                move |_, w, cx| {
+                                    state.update(cx, |s, cx| {
+                                        if let Some(id) = s.editor.selected() {
+                                            s.dispatch(
+                                                &Action::AddMarker(
+                                                    libre_effects_core::MarkerTarget::Layer(id),
+                                                ),
+                                                w,
+                                                cx,
+                                            )
+                                        }
+                                    })
+                                }
+                            }),
+                    )
+                    .child(
+                        ui::text_button("timeline-snapping", "Snap")
+                            .when(snapping, |d| d.text_color(rgb(ui::BLUE)).bg(rgb(0x164a7b)))
+                            .on_click({
+                                let state = self.state.clone();
+                                move |_, _, cx| {
+                                    state.update(cx, |s, cx| {
+                                        s.snapping = !s.snapping;
+                                        cx.notify();
+                                    })
+                                }
+                            }),
+                    )
                     .child(div().flex_1())
                     .child(ui::action_tool(
                         "timeline-minus",
@@ -1229,6 +1387,47 @@ impl Render for Timeline {
                         Action::ZoomTimeline(2.0),
                         false,
                     )),
+            )
+            .child(
+                div()
+                    .flex()
+                    .h(px(22.0))
+                    .flex_none()
+                    .border_b_1()
+                    .border_color(rgb(ui::BORDER))
+                    .child(
+                        div()
+                            .w(px(left))
+                            .flex_none()
+                            .pl_2()
+                            .text_size(px(10.0))
+                            .text_color(rgb(ui::MUTED))
+                            .child("Composition markers"),
+                    )
+                    .child(
+                        div()
+                            .relative()
+                            .flex_1()
+                            .h_full()
+                            .overflow_hidden()
+                            .children(
+                                comp.markers()
+                                    .iter()
+                                    .filter(|m| {
+                                        m.frame() < start.saturating_add(visible)
+                                            && m.end() >= start
+                                    })
+                                    .map(|m| {
+                                        super::markers::marker_item(
+                                            m,
+                                            libre_effects_core::MarkerTarget::Composition,
+                                            start,
+                                            visible,
+                                            &self.state,
+                                        )
+                                    }),
+                            ),
+                    ),
             )
             .child(
                 div()
@@ -1264,9 +1463,34 @@ impl Render for Timeline {
                                     window.focus(&this.focus);
                                     this.selected_key = None;
                                     this.scrubbing = true;
-                                    if let Some(frame) = this.seek_x(event.position.x, cx) {
+                                    if let Some(position) = this.seek_position(event.position.x, cx)
+                                    {
+                                        let state = this.state.read(cx);
+                                        let comp = state.editor.project().composition();
+                                        let targets = super::timeline_snap::targets(
+                                            comp,
+                                            None,
+                                            &BTreeSet::new(),
+                                            &BTreeSet::new(),
+                                        );
+                                        let (frame, snap) =
+                                            if state.snapping && !event.modifiers.alt {
+                                                super::timeline_snap::snap_delta(
+                                                    position,
+                                                    &[0],
+                                                    &targets,
+                                                    state.visible_frames(),
+                                                    this.ruler
+                                                        .get()
+                                                        .map_or(0.0, |b| f32::from(b.size.width)),
+                                                    (0, i64::from(comp.duration() - 1)),
+                                                )
+                                            } else {
+                                                (position.round() as i64, None)
+                                            };
+                                        this.snapped_to = snap;
                                         this.state.update(cx, |state, cx| {
-                                            state.dispatch(&Action::Seek(frame), window, cx)
+                                            state.dispatch(&Action::Seek(frame as u32), window, cx)
                                         });
                                     }
                                 }),
@@ -1457,6 +1681,43 @@ impl Render for Timeline {
                     .size_full(),
                 )
             })
+            .when(self.snapped_to.is_some(), |d| {
+                let at = self.snapped_to.unwrap();
+                let ruler = self.ruler.get();
+                d.child(
+                    canvas(
+                        |_, _, _| (),
+                        move |bounds, _, window, _| {
+                            if let Some(r) = ruler {
+                                let x = r.left()
+                                    + r.size.width * ((at as f32 - start as f32) / visible as f32);
+                                window.paint_quad(fill(
+                                    Bounds::new(
+                                        point(x, bounds.top() + px(58.0)),
+                                        size(px(1.0), bounds.size.height - px(88.0)),
+                                    ),
+                                    rgb(0xe7bc6a),
+                                ));
+                            }
+                        },
+                    )
+                    .absolute()
+                    .size_full(),
+                )
+            })
+            .when(marker_open, |d| {
+                d.child(
+                    gpui::deferred(
+                        div()
+                            .absolute()
+                            .right(px(8.0))
+                            .bottom(px(30.0))
+                            .occlude()
+                            .child(self.marker_editor.clone()),
+                    )
+                    .with_priority(5),
+                )
+            })
             .into_any_element()
     }
 }
@@ -1465,8 +1726,8 @@ mod tests {
     use super::*;
     #[test]
     fn ruler_mapping_accounts_for_pan_zoom_and_edges() {
-        assert_eq!(frame_at(150.0, 100.0, 100.0, 30, 60, 150), 60);
-        assert_eq!(frame_at(-50.0, 100.0, 100.0, 30, 60, 150), 30);
-        assert_eq!(frame_at(500.0, 100.0, 100.0, 100, 60, 150), 149);
+        assert_eq!(frame_at(150.0, 100.0, 100.0, 30, 60, 150), 60.0);
+        assert_eq!(frame_at(-50.0, 100.0, 100.0, 30, 60, 150), 30.0);
+        assert_eq!(frame_at(500.0, 100.0, 100.0, 100, 60, 150), 149.0);
     }
 }

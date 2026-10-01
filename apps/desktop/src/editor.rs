@@ -28,6 +28,12 @@ pub(crate) struct VideoJob {
 
 #[derive(Clone)]
 pub(crate) enum Action {
+    AddMarker(libre_effects_core::MarkerTarget),
+    ShowMarker(
+        libre_effects_core::MarkerTarget,
+        libre_effects_core::MarkerId,
+    ),
+    NavigateMarker(bool),
     Edit(Command),
     ActivateComposition(CompositionId),
     AddComposition(CompositionId),
@@ -117,6 +123,12 @@ impl PropertyFilter {
 }
 
 pub(crate) struct EditorState {
+    pub snapping: bool,
+    pub marker_selection: Option<(
+        CompositionId,
+        libre_effects_core::MarkerTarget,
+        libre_effects_core::MarkerId,
+    )>,
     pub selected_layers: BTreeSet<LayerId>,
     pub selected_keys: BTreeSet<KeyRef>,
     clipboard: Vec<KeyCopy>,
@@ -161,6 +173,8 @@ pub(crate) struct EditorState {
 impl Default for EditorState {
     fn default() -> Self {
         Self {
+            snapping: true,
+            marker_selection: None,
             selected_layers: BTreeSet::new(),
             selected_keys: BTreeSet::new(),
             clipboard: Vec::new(),
@@ -205,7 +219,28 @@ impl Default for EditorState {
 }
 
 impl EditorState {
+    pub fn selected_marker(
+        &self,
+    ) -> Option<(
+        libre_effects_core::MarkerTarget,
+        &libre_effects_core::Marker,
+    )> {
+        let (composition, target, id) = self.marker_selection?;
+        if composition != self.editor.project().active_composition_id() {
+            return None;
+        }
+        Some((
+            target,
+            self.editor
+                .project()
+                .composition()
+                .marker_track(target)?
+                .iter()
+                .find(|m| m.id() == id)?,
+        ))
+    }
     fn clear_clipboard(&mut self) {
+        self.marker_selection = None;
         self.clipboard.clear();
         self.layer_clipboard = None;
     }
@@ -228,6 +263,9 @@ impl EditorState {
             .max(2)
     }
     fn normalize(&mut self) {
+        if self.selected_marker().is_none() {
+            self.marker_selection = None;
+        }
         let comp = self.editor.project().composition();
         self.selected_layers.retain(|id| comp.layer(*id).is_some());
         self.selected_keys.retain(|k| {
@@ -328,6 +366,99 @@ impl EditorState {
             window.blur();
         }
         match action {
+            Action::AddMarker(target) => {
+                let existing = self
+                    .editor
+                    .project()
+                    .composition()
+                    .marker_track(*target)
+                    .and_then(|t| t.iter().find(|m| m.frame() == self.frame))
+                    .map(|m| m.id());
+                if existing.is_none() {
+                    self.dispatch(
+                        &Action::Edit(Command::Marker {
+                            target: *target,
+                            edit: libre_effects_core::MarkerEdit::Add { frame: self.frame },
+                        }),
+                        window,
+                        cx,
+                    );
+                }
+                if let Some(id) = existing.or_else(|| {
+                    self.editor
+                        .project()
+                        .composition()
+                        .marker_track(*target)
+                        .and_then(|t| t.iter().find(|m| m.frame() == self.frame))
+                        .map(|m| m.id())
+                }) {
+                    self.dispatch(&Action::ShowMarker(*target, id), window, cx);
+                }
+            }
+            Action::ShowMarker(target, id) => {
+                if let Some(frame) = self
+                    .editor
+                    .project()
+                    .composition()
+                    .marker_track(*target)
+                    .and_then(|t| t.iter().find(|m| m.id() == *id))
+                    .map(|m| m.frame())
+                {
+                    self.stop();
+                    self.frame = frame;
+                    let visible = self.visible_frames();
+                    if frame < self.timeline_start
+                        || frame >= self.timeline_start.saturating_add(visible)
+                    {
+                        self.timeline_start = frame.saturating_sub(visible / 2);
+                    }
+                    if let libre_effects_core::MarkerTarget::Layer(id) = target {
+                        self.editor.select(*id);
+                        self.selected_layers = [*id].into();
+                        self.selected_keys.clear();
+                    }
+                    self.marker_selection =
+                        Some((self.editor.project().active_composition_id(), *target, *id));
+                }
+            }
+            Action::NavigateMarker(next) => {
+                let comp = self.editor.project().composition();
+                let mut markers: Vec<_> = comp
+                    .markers()
+                    .iter()
+                    .map(|m| {
+                        (
+                            m.frame(),
+                            libre_effects_core::MarkerTarget::Composition,
+                            m.id(),
+                        )
+                    })
+                    .chain(self.editor.selected_layer().into_iter().flat_map(|l| {
+                        l.markers().iter().map(move |m| {
+                            (
+                                m.frame(),
+                                libre_effects_core::MarkerTarget::Layer(l.id()),
+                                m.id(),
+                            )
+                        })
+                    }))
+                    .filter(|(f, _, _)| {
+                        if *next {
+                            *f > self.frame
+                        } else {
+                            *f < self.frame
+                        }
+                    })
+                    .collect();
+                markers.sort_by_key(|m| m.0);
+                if let Some((_, target, id)) = if *next {
+                    markers.first()
+                } else {
+                    markers.last()
+                } {
+                    self.dispatch(&Action::ShowMarker(*target, *id), window, cx);
+                }
+            }
             Action::GraphProperty(id, property) => {
                 if self
                     .editor

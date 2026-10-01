@@ -100,6 +100,18 @@
         "id": 1,
         "in_frame": 0,
         "locked": false,
+        "markers": {
+          "items": [
+            {
+              "color": 12167167,
+              "duration": 0,
+              "frame": 45,
+              "id": 1,
+              "name": "In focus"
+            }
+          ],
+          "next_id": 2
+        },
         "mask": null,
         "name": "Animated title",
         "next_effect_id": 4,
@@ -160,11 +172,30 @@
         "width": 620.0
       }
     ],
+    "markers": {
+      "items": [
+        {
+          "color": 15187050,
+          "duration": 45,
+          "frame": 0,
+          "id": 1,
+          "name": "Reveal"
+        },
+        {
+          "color": 8765439,
+          "duration": 45,
+          "frame": 45,
+          "id": 2,
+          "name": "Hold"
+        }
+      ],
+      "next_id": 3
+    },
     "name": "Animated Effect Study",
     "width": 960
   },
   "composition_id": 1,
   "next_composition_id": 2,
   "next_layer_id": 2,
-  "version": 12
+  "version": 13
 }

@@ -428,6 +428,9 @@ pub(super) fn apply_extended(
                         .unwrap();
                     copy.id = mapping[&copy.id];
                     if let Command::SplitLayers { frame, .. } = command {
+                        state.project.composition.layers[index]
+                            .markers
+                            .split(&mut copy.markers, *frame)?;
                         state.project.composition.layers[index].out_frame = Some(*frame);
                         copy.in_frame = *frame;
                     } else if copy.name.len() < 1000 {
@@ -562,6 +565,7 @@ pub(super) fn apply_extended(
                         .checked_add(*delta)
                         .ok_or("Video timing overflow")?;
                 }
+                l.markers.shift(*delta, duration)?;
                 for track in l.all_tracks_mut() {
                     track.keys = track
                         .keys
