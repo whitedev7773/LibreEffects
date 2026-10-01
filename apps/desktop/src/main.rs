@@ -22,6 +22,7 @@ mod panels;
 mod project_browser;
 mod project_io;
 mod recovery;
+mod render_queue;
 mod rendering;
 mod shell;
 mod single_instance;

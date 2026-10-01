@@ -18,3 +18,5 @@ pub(crate) use browser::Browser;
 pub(crate) use inspector::Inspector;
 pub(crate) use preview::Preview;
 pub(crate) use timeline::Timeline;
+
+pub(crate) mod render_queue;

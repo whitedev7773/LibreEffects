@@ -267,6 +267,7 @@ cargo run -p libre-effects-core --example make_animation_study -- examples/curve
 | Ctrl+Z / Ctrl+Shift+Z | Undo / Redo |
 | Ctrl+Y / Ctrl+Alt+Y / Ctrl+D | Add solid / Add adjustment layer / Duplicate selection |
 | Ctrl+K | Composition settings |
+| Ctrl+M | Add active composition/work area to the render queue |
 | Ctrl+Alt+T | Enable / disable selected footage or precomposition Time Remap |
 | V / H / W / Y | Selection / Hand / Rotation / Anchor Point tool |
 | Ctrl+Shift+D | Split selected layers at the playhead |
@@ -806,6 +807,52 @@ $job.ExitCode
 
 Quote paths containing spaces inside the argument string. For an opaque still,
 use `--output title.png --start 30 --png-background`. Use `--help` for syntax.
+
+## Render queue
+
+Composition > Add to Render Queue (Ctrl+M) captures the active composition, all
+its dependencies, and the current work area. Choose an output folder; the job
+receives unique numbered filenames. Render Queue opens in the existing timeline
+dock. Its Timeline tab returns to editing without moving the other panels.
+The toolbar and Window menu also open the queue.
+
+Each job has an enabled switch, order controls, editable Start/End composition
+frames (End is exclusive), and up to eight output modules. The preset menu selects
+H.264 MP4, ProRes 4444 alpha MOV, or PNG sequences with alpha/background. + Output
+adds the selected preset's first format; clicking an output path chooses another
+file or new PNG sequence directory. Enter a preset name and use Save preset on a
+job to reuse its output-format list when adding later jobs. Up/Down and Enter or
+Space work in the preset menu. Named presets can be removed and restored with Undo.
+
+Render processes enabled Queued outputs serially. Completed outputs are skipped.
+Stop cancels the current output and leaves subsequent outputs queued. Retry resets
+failed, canceled or interrupted modules; successful modules remain completed.
+On error: Stop/Continue controls whether other queued outputs proceed after a
+failure. PNG sequences are rendered into a temporary sibling directory and only
+published when complete; their destination must be new. MP4/MOV keep the existing
+atomic file replacement behavior. Failed/canceled exports preserve destinations.
+
+The queue and immutable project snapshots are saved separately in the per-user
+LibreEffects/render-queue directory. They restore after restarting the editor,
+including named presets, order, ranges and per-output results. An interrupted
+render is labeled Interrupted and requires Retry; startup never starts renders.
+Changing or opening a project after adding a job does not change that snapshot.
+Linked source files are still external dependencies; replacing their bytes changes
+future renders. Keep them available or collect the project before adding jobs.
+
+Queue configuration has 20 local Undo/Redo steps (Ctrl+Z/Ctrl+Shift+Z while the
+queue is open). Starting a render clears that history; Undo never deletes rendered
+files or undoes an execution. Queue changes do not dirty the open project. Removal
+retains snapshots for in-session Undo, and startup reclaims unreferenced snapshots.
+Limits are 100 jobs, eight outputs/job, 32 named presets, 1 MiB queue metadata and
+1 GiB snapshot storage. Metadata writes are atomic; storage failures stop the run.
+Source projects, linked media, queue files and duplicate destinations are protected.
+A damaged/missing snapshot must be removed before the queue can start.
+
+Queue formats currently use full composition resolution and FPS, H.264 CRF 18 and
+ProRes 4444 with alpha. Output resolution/FPS/bitrate controls remain I03; audio
+is not yet implemented. Presets currently store format lists, not codec settings.
+Snapshots and queue data are local to this user, not embedded in project files.
 
 ## Remaining limitations
 

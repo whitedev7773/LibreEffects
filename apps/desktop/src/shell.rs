@@ -37,13 +37,15 @@ impl Shell {
         let sidebar = cx.new(|cx| Sidebar::new(state.clone(), cx));
         let align = cx.new(|cx| Align::new(state.clone(), cx));
         let timeline = cx.new(|cx| Timeline::new(state.clone(), cx));
+        let render_dock =
+            cx.new(|cx| crate::panels::render_queue::RenderDock::new(state.clone(), timeline, cx));
         let upper = cx.new(|_| {
             ResizablePanelGroup::new(Orientation::Horizontal, browser, preview)
                 .initial_fraction(0.20)
                 .minimum_fraction(0.12)
         });
         let middle = cx.new(|_| {
-            ResizablePanelGroup::new(Orientation::Vertical, upper.clone(), timeline)
+            ResizablePanelGroup::new(Orientation::Vertical, upper.clone(), render_dock)
                 .initial_fraction(0.615)
                 .minimum_fraction(0.22)
         });
@@ -93,7 +95,14 @@ impl Shell {
             modal_active: false,
         }
     }
-    fn dispatch(&mut self, action: Action, window: &mut Window, cx: &mut Context<Self>) {
+    fn dispatch(&mut self, mut action: Action, window: &mut Window, cx: &mut Context<Self>) {
+        if self.state.read(cx).queue_open && matches!(action, Action::Undo | Action::Redo) {
+            action = Action::Queue(if matches!(action, Action::Redo) {
+                crate::editor::queue::QueueAction::Redo
+            } else {
+                crate::editor::queue::QueueAction::Undo
+            });
+        }
         if matches!(action, Action::New | Action::Open) {
             if self.state.read(cx).saving {
                 self.state.update(cx, |s, cx| {
@@ -263,6 +272,7 @@ impl Shell {
                 "x" => Some(Action::CutSelection),
                 "v" => Some(Action::PasteSelection),
                 "z" => Some(if m.shift { Action::Redo } else { Action::Undo }),
+                "m" => Some(Action::Queue(crate::editor::queue::QueueAction::Add)),
                 "y" => Some(Action::Edit(if m.alt {
                     Command::AddAdjustment
                 } else {
@@ -359,7 +369,10 @@ impl Render for Shell {
             panel.update(cx, |p, cx| p.set_fraction(fractions[index], cx));
         }
         if !self.initialized {
-            self.state.update(cx, |s, cx| s.start_recovery(cx));
+            self.state.update(cx, |s, cx| {
+                s.start_recovery(cx);
+                s.load_queue(cx);
+            });
             let weak = cx.entity().downgrade();
             window.on_window_should_close(cx, move |window, cx| {
                 TextField::commit_active(window, cx);
@@ -544,6 +557,17 @@ impl Render for Shell {
                         false,
                     ))
                     .child(div().flex_1())
+                    .child(
+                        ui::text_button("show-render-queue", "Render Queue").on_click(cx.listener(
+                            |this, _, window, cx| {
+                                this.dispatch(
+                                    Action::Queue(crate::editor::queue::QueueAction::Show(true)),
+                                    window,
+                                    cx,
+                                )
+                            },
+                        )),
+                    )
                     .child(div().text_color(rgb(ui::BLUE)).mr_4().child("Default"))
                     .child(
                         ui::text_button("reset-workspace", "Reset workspace")
@@ -824,6 +848,11 @@ impl Render for Shell {
                         )
                     })
                     .collect(),
+                "Window" => vec![(
+                    "Render Queue",
+                    "",
+                    Some(Action::Queue(crate::editor::queue::QueueAction::Show(true))),
+                )],
                 "Animation" => vec![
                     ("Toggle Graph Editor", "Shift+F3", Some(Action::ToggleGraph)),
                     ("Previous keyframe", "J", Some(Action::PreviousKey)),
@@ -945,6 +974,18 @@ impl Render for Shell {
                 );
             }
             if menu == "Composition" {
+                dropdown = dropdown.child(
+                    ui::text_button("queue-comp", "Add to Render Queue    Ctrl+M").on_click(
+                        cx.listener(|this, _, window, cx| {
+                            this.menu = None;
+                            this.dispatch(
+                                Action::Queue(crate::editor::queue::QueueAction::Add),
+                                window,
+                                cx,
+                            )
+                        }),
+                    ),
+                );
                 for (id, label, command) in [
                     (
                         "composition-new",

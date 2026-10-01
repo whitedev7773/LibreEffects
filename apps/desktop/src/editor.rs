@@ -19,6 +19,8 @@ mod footage;
 mod io;
 #[path = "editor_media.rs"]
 mod media;
+#[path = "editor_queue.rs"]
+pub(crate) mod queue;
 #[path = "editor_video.rs"]
 mod video;
 #[path = "editor_view.rs"]
@@ -33,6 +35,7 @@ pub(crate) struct VideoJob {
 
 #[derive(Clone)]
 pub(crate) enum Action {
+    Queue(queue::QueueAction),
     AddMarker(libre_effects_core::MarkerTarget),
     ShowMarker(
         libre_effects_core::MarkerTarget,
@@ -140,6 +143,11 @@ impl PropertyFilter {
 }
 
 pub(crate) struct EditorState {
+    pub queue: Option<std::sync::Arc<std::sync::Mutex<crate::render_queue::Queue>>>,
+    pub queue_open: bool,
+    pub queue_busy: bool,
+    pub queue_message: String,
+    pub queue_formats: Vec<crate::render_queue::Format>,
     pub project_item: Option<libre_effects_core::ProjectItem>,
     composition_views:
         std::collections::BTreeMap<CompositionId, crate::view_state::CompositionView>,
@@ -202,6 +210,11 @@ pub(crate) struct EditorState {
 impl Default for EditorState {
     fn default() -> Self {
         Self {
+            queue: None,
+            queue_open: false,
+            queue_busy: false,
+            queue_message: "Loading render queue…".into(),
+            queue_formats: vec![crate::render_queue::Format::Mp4],
             project_item: None,
             composition_views: Default::default(),
             workspace: Default::default(),
@@ -429,6 +442,7 @@ impl EditorState {
             window.blur();
         }
         match action {
+            Action::Queue(action) => self.queue_action(action, window, cx),
             Action::AddMarker(target) => {
                 let existing = self
                     .editor
