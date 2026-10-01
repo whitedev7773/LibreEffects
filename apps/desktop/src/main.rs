@@ -22,6 +22,7 @@ mod project_io;
 mod recovery;
 mod rendering;
 mod shell;
+mod single_instance;
 mod theme;
 mod ui;
 mod video_export;
@@ -59,36 +60,67 @@ fn main() {
         }
     }
 
+    let mut instance = match single_instance::Instance::acquire() {
+        Ok(Some(instance)) => instance,
+        Ok(None) => return,
+        Err(error) => {
+            eprintln!("Cannot start Libre Effects: {error}");
+            std::process::exit(1);
+        }
+    };
+
     Application::new()
         .with_assets(ui::Assets)
-        .run(|cx: &mut App| {
+        .run(move |cx: &mut App| {
             cx.text_system()
                 .add_fonts(vec![std::borrow::Cow::Borrowed(include_bytes!(
                     "../assets/fonts/WantedSans-Regular.ttf"
                 ))])
                 .expect("load bundled Wanted Sans");
             let bounds = Bounds::centered(None, size(px(1440.), px(900.)), cx);
-            cx.open_window(
-                WindowOptions {
-                    titlebar: Some(TitlebarOptions {
-                        title: Some(SharedString::from("Libre Effects")),
+            let window = cx
+                .open_window(
+                    WindowOptions {
+                        titlebar: Some(TitlebarOptions {
+                            title: Some(SharedString::from("Libre Effects")),
+                            ..Default::default()
+                        }),
+                        window_bounds: Some(WindowBounds::Maximized(bounds)),
+                        window_min_size: Some(size(px(1100.), px(700.))),
                         ..Default::default()
-                    }),
-                    window_bounds: Some(WindowBounds::Maximized(bounds)),
-                    window_min_size: Some(size(px(1100.), px(700.))),
-                    ..Default::default()
-                },
-                |window, cx| {
-                    cx.new(|cx| {
-                        cx.observe_window_appearance(window, |_, window, _| {
-                            window.refresh();
-                        })
-                        .detach();
+                    },
+                    |window, cx| {
+                        cx.new(|cx| {
+                            cx.observe_window_appearance(window, |_, window, _| {
+                                window.refresh();
+                            })
+                            .detach();
 
-                        Shell::new(cx)
-                    })
-                },
-            )
-            .expect("failed to open the main window");
+                            Shell::new(cx)
+                        })
+                    },
+                )
+                .expect("failed to open the main window");
+            cx.spawn(async move |cx| {
+                loop {
+                    gpui::Timer::after(std::time::Duration::from_millis(250)).await;
+                    let (next, activate) = cx
+                        .background_executor()
+                        .spawn(async move {
+                            let activate = instance.take_activation();
+                            (instance, activate)
+                        })
+                        .await;
+                    instance = next;
+                    if activate
+                        && window
+                            .update(cx, |_, window, _| single_instance::activate_window(window))
+                            .is_err()
+                    {
+                        break;
+                    }
+                }
+            })
+            .detach();
         });
 }

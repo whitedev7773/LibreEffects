@@ -2942,11 +2942,13 @@ dependencies = [
  "gpui",
  "image",
  "libre-effects-core",
+ "raw-window-handle",
  "resvg",
  "same-file",
  "serde",
  "serde_json",
  "tempfile",
+ "windows 0.61.3",
 ]
 
 [[package]]

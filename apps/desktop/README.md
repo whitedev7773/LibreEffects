@@ -4,6 +4,12 @@ A Windows-first motion graphics editor built with Rust and GPUI. Its workspace
 and basic editing workflow follow After Effects conventions. It is an early 2D
 editor, not a complete After Effects replacement or an AEP-compatible application.
 
+Only one editor runs per user, including builds launched from different folders
+or executable names. Launching again requests activation of the existing window
+and exits before GPUI, media caches or recovery start. The OS releases ownership
+after a crash; do not delete `LibreEffects/editor.lock` in the user data directory.
+Command-line renders remain independent of the interactive editor.
+
 ![Libre Effects workspace with the Content and Motion Study sample](screenshots/workspace.png)
 
 ## Workspace
