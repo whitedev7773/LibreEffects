@@ -24,6 +24,10 @@ impl VideoPlayback {
 pub enum Content {
     #[default]
     Rectangle,
+    /// An independent, fixed-size color source, unaffected by composition resizing.
+    Solid,
+    /// Filters the composite below this layer; contributes no source pixels.
+    Adjustment,
     Null,
     Text {
         text: String,
@@ -129,7 +133,7 @@ pub(super) fn validate_content(
     mask: Option<Mask>,
 ) -> Result<(), String> {
     let valid = match content {
-        Content::Rectangle | Content::Null => true,
+        Content::Rectangle | Content::Solid | Content::Adjustment | Content::Null => true,
         Content::Composition {
             composition,
             start_frame,
@@ -210,6 +214,9 @@ pub(super) fn apply_extended(
     if !matches!(
         command,
         Command::Batch(_)
+            | Command::AddSolid
+            | Command::AddAdjustment
+            | Command::ConfigureSolid { .. }
             | Command::AddBackgroundSolid
             | Command::TrimLayers { .. }
             | Command::NudgeLayers { .. }
@@ -234,6 +241,51 @@ pub(super) fn apply_extended(
     }
     Some((|| {
         match command {
+            Command::AddSolid | Command::AddAdjustment => {
+                let comp = &state.project.composition;
+                let adjustment = matches!(command, Command::AddAdjustment);
+                apply(
+                    state,
+                    Command::AddContent {
+                        content: if adjustment {
+                            Content::Adjustment
+                        } else {
+                            Content::Solid
+                        },
+                        width: comp.width as f64,
+                        height: comp.height as f64,
+                        name: if adjustment {
+                            "Adjustment Layer"
+                        } else {
+                            "White Solid"
+                        }
+                        .into(),
+                    },
+                )?;
+            }
+            Command::ConfigureSolid {
+                id,
+                width,
+                height,
+                color,
+            } => {
+                if !(1..=16384).contains(width)
+                    || !(1..=16384).contains(height)
+                    || *color > 0xffffff
+                {
+                    return Err(
+                        "Solid size must be 1–16384 pixels and color must be RGB hex".into(),
+                    );
+                }
+                let layer = editable(state, *id)?;
+                if !matches!(layer.content, Content::Solid | Content::Adjustment) {
+                    return Err("Select a solid or adjustment layer".into());
+                }
+                // Source edits preserve the local origin, transform tracks and masks.
+                layer.width = f64::from(*width);
+                layer.height = f64::from(*height);
+                layer.color = *color;
+            }
             Command::AddBackgroundSolid => {
                 let comp = &state.project.composition;
                 let (width, height, color) =
@@ -241,7 +293,7 @@ pub(super) fn apply_extended(
                 apply(
                     state,
                     Command::AddContent {
-                        content: Content::Rectangle,
+                        content: Content::Solid,
                         width,
                         height,
                         name: "Background".into(),

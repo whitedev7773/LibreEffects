@@ -11,7 +11,7 @@ fn xml(s: &str) -> String {
         .replace('\'', "&apos;")
 }
 pub(crate) struct Renderer {
-    options: resvg::usvg::Options<'static>,
+    pub(crate) options: resvg::usvg::Options<'static>,
 }
 fn text_svg(text: &str, font_size: f64, color: &str) -> String {
     text.lines().enumerate().map(|(line,s)| format!("<text x='0' y='{}' font-family='Wanted Sans' font-size='{font_size}' fill='{color}' xml:space='preserve'>{}</text>",font_size * (1.0 + 1.2 * line as f64),xml(s))).collect()
@@ -91,6 +91,19 @@ impl Renderer {
                 );
             }
             let id = format!("{prefix}-{}", l.id());
+            if matches!(l.content(), Content::Adjustment) {
+                svg = self.adjust_composite(
+                    &svg,
+                    l,
+                    frame,
+                    matrix,
+                    c.width(),
+                    c.height(),
+                    max_dimension,
+                    &id,
+                )?;
+                continue;
+            }
             let e = l.effects();
             let mut effect_bounds = [0.0, 0.0, l.width(), l.height()];
             if let Content::Text { text, font_size } = l.content()
@@ -165,8 +178,8 @@ impl Renderer {
             ));
             let color = format!("#{:06x}", l.color());
             match l.content() {
-                Content::Null => {}
-                Content::Rectangle => svg.push_str(&format!(
+                Content::Null | Content::Adjustment => {}
+                Content::Rectangle | Content::Solid => svg.push_str(&format!(
                     "<rect width='{}' height='{}' fill='{color}'/>",
                     l.width(),
                     l.height()

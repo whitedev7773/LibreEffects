@@ -495,7 +495,7 @@ impl Project {
     }
 
     fn validate(&self) -> Result<(), String> {
-        if !(1..=15).contains(&self.version) {
+        if !(1..=16).contains(&self.version) {
             return Err("Unsupported project version".into());
         }
         if self.version < 9
@@ -521,6 +521,14 @@ impl Project {
         let mut images = BTreeSet::new();
         let mut image_bytes = 0usize;
         for (_, comp) in self.compositions() {
+            if self.version < 16
+                && comp
+                    .layers
+                    .iter()
+                    .any(|l| matches!(l.content, Content::Solid | Content::Adjustment))
+            {
+                return Err("Solid and adjustment sources require project version 16".into());
+            }
             if self.version < 14 && (comp.fps.denominator() != 1 || comp.display_start != 0) {
                 return Err(
                     "Fractional frame rates and start timecode require project version 14".into(),
@@ -619,6 +627,14 @@ impl Project {
 /// The future scripting bridge and native controls both dispatch these commands.
 #[derive(Clone, Debug)]
 pub enum Command {
+    AddSolid,
+    AddAdjustment,
+    ConfigureSolid {
+        id: LayerId,
+        width: u32,
+        height: u32,
+        color: u32,
+    },
     RelinkMedia(Vec<MediaReplacement>),
     Marker {
         target: MarkerTarget,
@@ -984,6 +1000,13 @@ impl Editor {
             .any(|(_, c)| c.fps.denominator() != 1 || c.display_start != 0)
         {
             next.project.version = 14;
+        }
+        if next.project.compositions().into_iter().any(|(_, c)| {
+            c.layers
+                .iter()
+                .any(|l| matches!(l.content, Content::Solid | Content::Adjustment))
+        }) {
+            next.project.version = 16;
         }
         next.project.validate()?;
         if next != self.current {

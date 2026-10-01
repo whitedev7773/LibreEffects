@@ -262,7 +262,11 @@ impl Shell {
                 "x" => Some(Action::CutSelection),
                 "v" => Some(Action::PasteSelection),
                 "z" => Some(if m.shift { Action::Redo } else { Action::Undo }),
-                "y" => Some(Action::Edit(Command::AddRectangle)),
+                "y" => Some(Action::Edit(if m.alt {
+                    Command::AddAdjustment
+                } else {
+                    Command::AddSolid
+                })),
                 "d" => Some(if m.shift {
                     Action::SplitSelection
                 } else {
@@ -509,7 +513,7 @@ impl Render for Shell {
                     .child(ui::action_tool(
                         "rectangle",
                         "square",
-                        "New rectangle layer (Ctrl+Y)",
+                        "New rectangle layer",
                         &self.state,
                         Action::Edit(Command::AddRectangle),
                         false,
@@ -713,6 +717,12 @@ impl Render for Shell {
                     ),
                     ("New text", "", Some(Action::AddText)),
                     ("New null object", "", Some(Action::Edit(Command::AddNull))),
+                    ("New solid", "Ctrl+Y", Some(Action::Edit(Command::AddSolid))),
+                    (
+                        "New adjustment layer",
+                        "Ctrl+Alt+Y",
+                        Some(Action::Edit(Command::AddAdjustment)),
+                    ),
                     (
                         "Solo selected layers",
                         "",
@@ -741,7 +751,7 @@ impl Render for Shell {
                     ),
                     (
                         "New rectangle",
-                        "Ctrl+Y",
+                        "",
                         Some(Action::Edit(Command::AddRectangle)),
                     ),
                     (
@@ -1063,7 +1073,7 @@ impl Render for Shell {
             } else {
                 for line in [
                     "V / H / W / Y — Selection / Hand / Rotation / Anchor",
-                    "Ctrl+Y — New rectangle    Ctrl+D — Duplicate",
+                    "Ctrl+Y — New solid    Ctrl+Alt+Y — Adjustment    Ctrl+D — Duplicate",
                     "Ctrl+Shift+D — Split layers at playhead",
                     "Alt+[ / Alt+] — Trim In / Out to playhead",
                     "Arrow keys — Move selected layers 1 px (Shift: 10 px)",

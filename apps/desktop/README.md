@@ -217,7 +217,7 @@ cargo run -p libre-effects-core --example make_animation_study -- examples/curve
 | Ctrl+Shift+I | Import video footage |
 | Ctrl+C / Ctrl+V | Copy / Paste selected keys |
 | Ctrl+Z / Ctrl+Shift+Z | Undo / Redo |
-| Ctrl+Y / Ctrl+D | Add rectangle / Duplicate selected layer |
+| Ctrl+Y / Ctrl+Alt+Y / Ctrl+D | Add solid / Add adjustment layer / Duplicate selection |
 | Ctrl+K | Composition settings |
 | V / H / W / Y | Selection / Hand / Rotation / Anchor Point tool |
 | Ctrl+Shift+D | Split selected layers at the playhead |
@@ -340,7 +340,7 @@ nor their alpha. Existing projects default to black.
   shown in the viewer. Sequence manifests record the chosen alpha/background policy.
 - MOV with alpha retains transparency regardless of the composition background.
   To make the background part of every format, choose **Layer → New background
-  solid**. It adds an editable, full-composition rectangle beneath existing layers
+  solid**. It adds an editable, independent solid beneath existing layers
   using the current background color, in one undo step. Its size and color are
   copied at creation; later composition changes do not resize or recolor it.
 
@@ -669,3 +669,29 @@ cargo build -p libre-effects-desktop --release
 
 Use the SDK version installed on your machine; the compiler is only needed to
 build the application.
+
+## Solid and adjustment layers
+
+Use **Layer → New solid** (Ctrl+Y) to create a white source matching the current
+composition. **Properties → Solid settings** edits its color, source width and
+height independently. **Make comp size** copies the current canvas dimensions.
+Source resizing preserves the layer origin, anchor, transform animation and mask;
+use the existing anchor/position controls to recenter it if desired. Duplicates
+are independent sources. Existing Rectangle layers retain their old behavior.
+
+**Layer → New adjustment layer** (Ctrl+Alt+Y) contributes no image of its own.
+Its ordered effects process the visible, active composite below it, within the
+same composition. Higher layers remain unaffected. Transform and parent settings
+move its rectangular coverage and effect coordinate space. A rectangular mask
+(including inversion) limits coverage after filtering. Opacity animates the blend
+between original and filtered premultiplied RGBA without doubling transparency.
+Guide/Solo/range switches follow the existing compositor rules. Pre-compose must
+include all layers below a selected adjustment to retain its input.
+
+Projects using these source types require version 16. Preview, PNG and video use
+the same compositor; opaque export applies the composition background afterward.
+Adjustment boundaries rasterize at the requested preview/export resolution in
+8-bit sRGB; this is not a linear-light/HDR or continuously rasterized pipeline.
+Intermediate frames retain the existing 32 MP and 64 MiB encoded-image limits.
+`examples/adjustment-study.lfe.json` demonstrates animated, masked desaturation
+of a translucent solid while an upper blue solid keeps its color.

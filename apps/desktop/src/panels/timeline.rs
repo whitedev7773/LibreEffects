@@ -1182,7 +1182,7 @@ impl Render for Timeline {
                     .items_center()
                     .justify_center()
                     .text_color(rgb(ui::MUTED))
-                    .child("No layers. Create a rectangle with Ctrl+Y."),
+                    .child("No layers. Create a solid with Ctrl+Y."),
             );
         }
         let work_left = (work_start.saturating_sub(start) as f32 / visible as f32).clamp(0.0, 1.0);

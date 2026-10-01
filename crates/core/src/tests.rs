@@ -1,6 +1,112 @@
 use super::*;
 
 #[test]
+fn independent_solids_preserve_animation_and_support_atomic_source_edits() {
+    let mut e = Editor::default();
+    e.execute(Command::AddSolid).unwrap();
+    e.execute(Command::ToggleKeyframe {
+        id: 1,
+        property: Property::PositionX,
+        frame: 12,
+    })
+    .unwrap();
+    e.execute(Command::DuplicateLayer(1)).unwrap();
+    let before = e.project().clone();
+    e.execute(Command::ConfigureSolid {
+        id: 2,
+        width: 320,
+        height: 180,
+        color: 0x234567,
+    })
+    .unwrap();
+    let after = e.project().clone();
+    let source = &after.composition.layers[0];
+    assert_eq!(
+        (source.width, source.height, source.color),
+        (320.0, 180.0, 0x234567)
+    );
+    assert_eq!(source.properties, before.composition.layers[0].properties);
+    assert_eq!(after.composition.layers[1], before.composition.layers[1]);
+    e.undo();
+    assert_eq!(e.project(), &before);
+    e.redo();
+    assert_eq!(e.project(), &after);
+    assert_eq!(
+        Project::from_json(&after.to_json().unwrap()).unwrap(),
+        after
+    );
+    assert_eq!(after.version, 16);
+    assert!(
+        e.execute(Command::ConfigureSolid {
+            id: 2,
+            width: 0,
+            height: 180,
+            color: 0
+        })
+        .is_err()
+    );
+    assert_eq!(e.project(), &after);
+    e.execute(Command::ToggleLocked(2)).unwrap();
+    let locked = e.project().clone();
+    assert!(
+        e.execute(Command::ConfigureSolid {
+            id: 2,
+            width: 100,
+            height: 100,
+            color: 0
+        })
+        .is_err()
+    );
+    assert_eq!(e.project(), &locked);
+    let mut old = after.clone();
+    old.version = 15;
+    assert!(Project::from_json(&serde_json::to_string(&old).unwrap()).is_err());
+}
+
+#[test]
+fn adjustment_precompose_requires_lower_input_and_copies_keep_the_source_kind() {
+    let mut e = Editor::default();
+    e.execute(Command::AddSolid).unwrap();
+    e.execute(Command::AddAdjustment).unwrap();
+    e.execute(Command::AddNull).unwrap();
+    let before = e.project().clone();
+    assert!(
+        e.execute(Command::Precompose {
+            layers: vec![2],
+            name: "Unsafe".into()
+        })
+        .unwrap_err()
+        .contains("all layers below")
+    );
+    assert_eq!(e.project(), &before);
+    let copied = e.copy_layers(&[2]).unwrap();
+    e.execute(Command::PasteLayers(copied)).unwrap();
+    assert!(matches!(
+        e.selected_layer().unwrap().content(),
+        Content::Adjustment
+    ));
+    e.undo();
+    e.execute(Command::Precompose {
+        layers: vec![1, 2],
+        name: "Safe".into(),
+    })
+    .unwrap();
+    let after = e.project().clone();
+    assert!(matches!(
+        after.composition_by_id(2).unwrap().layers()[0].content(),
+        Content::Adjustment
+    ));
+    assert_eq!(
+        Project::from_json(&after.to_json().unwrap()).unwrap(),
+        after
+    );
+    e.undo();
+    assert_eq!(e.project(), &before);
+    e.redo();
+    assert_eq!(e.project(), &after);
+}
+
+#[test]
 fn trim_at_playhead_keeps_current_frame_and_keys_with_atomic_group_rollback() {
     let mut e = editor_with_layer();
     key(&mut e, 10);
@@ -1294,7 +1400,7 @@ fn serialized_project_roundtrips_animation_and_preserves_ids() {
 fn corrupt_and_future_projects_are_rejected() {
     let editor = editor_with_layer();
     let mut project = editor.project().clone();
-    project.version = 16;
+    project.version = 17;
     assert!(Project::from_json(&project.to_json().unwrap()).is_err());
     project.version = 1;
     project.composition.fps = 0.into();

@@ -125,7 +125,7 @@ impl Inspector {
                 })
             })
             .collect();
-        let extra = (0..9)
+        let extra = (0..11)
             .map(|index| {
                 let edit = state.clone();
                 cx.new(|cx| {
@@ -176,6 +176,18 @@ impl Inspector {
                                         effects.brightness = v;
                                     }
                                     Command::SetEffects { id, effects }
+                                }),
+                                9 | 10 => text.trim().parse::<u32>().ok().map(|value| {
+                                    Command::ConfigureSolid {
+                                        id,
+                                        width: if index == 9 { value } else { l.width() as u32 },
+                                        height: if index == 10 {
+                                            value
+                                        } else {
+                                            l.height() as u32
+                                        },
+                                        color: l.color(),
+                                    }
                                 }),
                                 _ => l.mask().zip(number).map(|(mut m, v)| {
                                     match index {
@@ -325,6 +337,7 @@ impl Render for Inspector {
             contents = contents.child(row);
         }
         let is_null = matches!(layer.content(), Content::Null);
+        let is_adjustment = matches!(layer.content(), Content::Adjustment);
         let mut entries = vec![(2, "Fill (hex)", format!("{:06X}", layer.color()))];
         if let Content::Text { text, font_size } = layer.content() {
             entries.insert(0, (0, "Text", text.clone()));
@@ -332,12 +345,19 @@ impl Render for Inspector {
         }
         if matches!(
             layer.content(),
-            Content::Image { .. } | Content::Video { .. } | Content::Composition { .. }
+            Content::Image { .. }
+                | Content::Video { .. }
+                | Content::Composition { .. }
+                | Content::Adjustment
         ) {
             entries.retain(|(index, _, _)| *index != 2);
         }
         if is_null {
             entries.clear();
+        }
+        if matches!(layer.content(), Content::Solid | Content::Adjustment) {
+            entries.push((9, "Source width", layer.width().to_string()));
+            entries.push((10, "Source height", layer.height().to_string()));
         }
         contents = contents.child(
             div()
@@ -347,6 +367,10 @@ impl Render for Inspector {
                 .border_color(rgb(ui::BORDER))
                 .child(if is_null {
                     "Null object · transform controller"
+                } else if is_adjustment {
+                    "Adjustment · composite below"
+                } else if matches!(layer.content(), Content::Solid) {
+                    "Solid settings"
                 } else {
                     "Content"
                 }),
@@ -488,6 +512,31 @@ impl Render for Inspector {
                             .when(locked, |s| s.child(value)),
                     ),
             );
+        }
+        if matches!(layer.content(), Content::Solid | Content::Adjustment) {
+            let state = self.state.clone();
+            let command = Command::ConfigureSolid {
+                id,
+                width: comp.width(),
+                height: comp.height(),
+                color: layer.color(),
+            };
+            contents = contents
+                .child(
+                    ui::text_button("solid-comp-size", "Make comp size").when(!locked, |s| {
+                        s.on_click(move |_, window, cx| {
+                            state.update(cx, |s, cx| {
+                                s.dispatch(&Action::Edit(command.clone()), window, cx)
+                            });
+                        })
+                    }),
+                )
+                .child(
+                    div()
+                        .text_size(px(10.0))
+                        .text_color(rgb(ui::MUTED))
+                        .child("Size edits keep the layer origin and animation."),
+                );
         }
         if !is_null {
             let state = self.state.clone();

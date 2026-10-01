@@ -8,6 +8,7 @@ use gpui::{
     WindowOptions, px, size,
 };
 
+mod adjustment_render;
 mod cli;
 mod components;
 mod editor;
