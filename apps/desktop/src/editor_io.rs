@@ -30,6 +30,7 @@ impl EditorState {
         }
         let candidate = self.recovery.take().unwrap();
         if restore {
+            self.stop();
             self.document_revision = self.document_revision.wrapping_add(1);
             let _ = self.editor.replace_project(candidate.project);
             self.clear_clipboard();
@@ -166,6 +167,7 @@ impl EditorState {
             let _ = entity.update(cx, |s, cx| {
                 match result {
                     Ok((project, views)) => {
+                        s.stop();
                         s.reset_recovery(false);
                         s.document_revision = s.document_revision.wrapping_add(1);
                         s.saved = project.clone();

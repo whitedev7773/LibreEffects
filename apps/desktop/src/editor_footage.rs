@@ -67,6 +67,7 @@ impl EditorState {
                     } else {
                         Command::AddContent { content: Content::Video { audio: info.audio, path: info.path, duration: info.duration, source_fps: info.source_fps, start_frame: frame as i64, playback: Default::default() }, width: info.width as f64, height: info.height as f64, name }
                     };
+                    s.stop();
                     s.editor.execute(command)
                 });
                 s.status = match result {
@@ -74,7 +75,7 @@ impl EditorState {
                         crate::footage::clear_cache();
                         s.preview_revision = s.preview_revision.wrapping_add(1);
                         s.selected_layers.clear();
-                        "Video linked · audio included in exports · preview playback remains silent".into()
+                        "Video linked · audio available in Preview and exports".into()
                     },
                     Err(e) => format!("Video import failed: {e}"),
                 };

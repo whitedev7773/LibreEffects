@@ -32,7 +32,13 @@ tasks:
       - '/examples/**/*'
 
   test-media:
-    command: 'cargo test -p libre-effects-desktop -- --ignored'
+    command: 'cargo test -p libre-effects-desktop -- --ignored --skip device_clock_minute'
+    options:
+      runInCI: false
+      cache: false
+
+  test-audio-device:
+    command: 'cargo test -p libre-effects-desktop device_clock_minute -- --ignored --nocapture'
     options:
       runInCI: false
       cache: false

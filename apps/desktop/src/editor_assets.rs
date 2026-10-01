@@ -40,6 +40,7 @@ impl EditorState {
                     if !s.editor.project().same_document(&snapshot) {
                         return Err("Project changed during relink; retry".into());
                     }
+                    s.stop();
                     s.editor.execute(command)
                 }) {
                     Ok(()) => "Sequence relinked in all compositions".into(),
@@ -106,10 +107,11 @@ impl EditorState {
                     if revision != s.document_revision {
                         return Err("Document changed during import; import again".into());
                     }
+                    s.stop();
                     s.editor.execute(Command::Batch(commands))
                 }) {
                     Ok(()) => {
-                        if sequence { "Imported sequence · Interpret footage sets FPS and missing-frame policy".into() } else { format!("Imported {count} file(s) · Add to composition · audio waveform and output ready (preview silent)") }
+                        if sequence { "Imported sequence · Interpret footage sets FPS and missing-frame policy".into() } else { format!("Imported {count} file(s) · Add to composition · audio waveform, Preview and output ready") }
                     }
                     Err(error) => format!("Import failed; no files added: {error}"),
                 };

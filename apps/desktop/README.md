@@ -441,7 +441,7 @@ is stopped. Wait for completion or cancel before closing the application.
    Dismiss the completed render strip to recover the full editing workspace.
 
 This workflow supports short 2D titles, animated graphics, linked video footage
-and transparent overlays. Offline audio mixing is available as described below; device playback and the full AE workflow remain pending.
+and transparent overlays. Offline audio mixing is available as described below; Windows device preview is described below; the full AE workflow remains pending.
 
 `examples/lower-third.lfe.json` is a 1920×1080, 30 fps, five-second transparent
 name/title overlay with entry/exit animation. Edit the Name and Role layers, then
@@ -495,7 +495,7 @@ controls to put footage below a title, then save the project and render MP4/MOV.
   decoded on demand and real-time playback is not guaranteed. Output renders every
   frame. Frame decoding times out after 15 seconds; cancellation can wait for the
   current source-frame decode. Preview resolution does not reduce output quality.
-- Audio sources and waveforms are imported and mixed in video exports; device playback is pending.
+- Audio sources and waveforms are imported and mixed in video exports; Windows device preview is available as described below.
   Color processing is 8-bit RGBA and is
   not an HDR/color-managed workflow. Source files must stay unchanged during export;
   project snapshots preserve edits, not the external file bytes.
@@ -621,7 +621,7 @@ asset IDs when read without changing layer sampling or pixels. Embedded PNG data
 is still written once and shared through history. Limits are 1,000 media assets,
 1,000 folders, 32 folder levels, and 128 MiB of unique encoded images. Importing
 videos includes first-stream audio metadata and waveforms. Offline mixing and
-AAC/PCM output are available; device playback remains pending.
+AAC/PCM output are available; Windows device preview is available as described below.
 
 Select footage and open Interpret footage… to override a video's source FPS
 (including rational rates such as `30000/1001`). Enter `Source` to restore the
@@ -882,7 +882,7 @@ Existing saved jobs/presets retain silent audio; new modules default to automati
 PNG sequences with a changed FPS number from zero and record source_range, output
 FPS and frame count in sequence.json. Unchanged FPS retains composition numbering.
 Audio auto/off selects 48 kHz stereo AAC (MP4) or 24-bit PCM (MOV). Additional
-sample-rate/channel/codec options and device playback remain I03/H02–H04.
+sample-rate/channel/codec options remain I03/H04; Windows device preview is described below.
 Snapshots and queue data are local to this user, not embedded in project files.
 
 The CLI shares these settings: `--size 1280x720 --fps 30000/1001 --channels rgb
@@ -895,7 +895,7 @@ menu's quick exports retain their defaults; use Render Queue for configured outp
 See [the development backlog](DEVELOPMENT_BACKLOG.md) for the current capability
 audit, priorities, dependencies and proposed acceptance criteria.
 
-Still pending: frame blending/optical flow, audio-device playback and live metering,
+Still pending: frame blending/optical flow, extended audio-device support,
 freeform/animated masks, additional effects and reusable presets,
 rich text layout, 3D, JSX, ExtendScript and expressions. PNG sequences can be
 assembled in an external video tool.
@@ -919,14 +919,14 @@ Optional FFmpeg integration checks encode and decode MP4/ProRes, check work-area
 timing and alpha, and cancel an active encoder while preserving the destination:
 
 ~~~sh
-cargo test -p libre-effects-desktop -- --ignored
+cargo test -p libre-effects-desktop -- --ignored --skip device_clock_minute
 ~~~
 
 The dedicated Windows desktop CI installs FFmpeg and runs checks, formatting,
 workspace tests, the explicit media suite and a release build. The Moon desktop
 `test` task joins normal CI; `test-media` is explicit because it needs FFmpeg.
 
-These six tests are explicitly ignored in the default suite when FFmpeg/FFprobe
+Media tests are explicitly ignored in the default suite when FFmpeg/FFprobe
 are not declared test dependencies. They also check footage import, different
 frame rates, the final source frame, missing media, and composited video output.
 Retiming checks compare preview pixels and encoded frames for reverse, slow-motion,
@@ -1099,12 +1099,12 @@ are 8–384 kHz, 1–32 channels and 24 hours, subject to installed FFmpeg decod
 Only the first audio stream is selected; stream selection and full-duration coarse
 overviews remain future extensions.
 
-**Preview device playback is still unavailable.** MP4/MOV now include the offline
-mix described below. Scrubbing, device-clock synchronization and live meters remain H02. Per-layer audio switches,
+Windows audio preview, scrubbing, device-clock playhead synchronization and live
+block meters are described below. MP4/MOV include the offline mix. Per-layer audio switches,
 level/pan/fade animation and a measured-range meter are described below. Existing
 visual rendering and PNG output remain unchanged.
 
-Validation includes 227 ordinary tests plus 24 FFmpeg integration tests. Audio
+Validation includes 230 ordinary tests plus 25 FFmpeg integration tests; the physical audio-device test is separate. Audio
 coverage includes opposite-phase stereo, silence, chunk boundaries, delayed video
 sound, WAV/FLAC/MP3/AAC imports, mixed version-25 document serialization, timing and
 shared relinking. Native QA covered mixed import, audio-source composition creation,
@@ -1150,8 +1150,7 @@ persistent decoder/RAM preview cache planned in H02/J01–J03.
 
 Current arbitrary-time sampling uses linear interpolation between 48 kHz PCM
 samples. High-speed retiming can alias: band-limited variable-rate resampling and
-pitch-preserving stretching remain follow-up quality work. No real-time playback
-or device drift guarantee is made.
+pitch-preserving stretching remain follow-up quality work. Windows device preview is described below; source interpolation quality is unchanged.
 
 Tests compare block-size-independent sample output, nested remaps, split/history/
 save round-trips, guide/solo/visibility behavior, opposite-phase channel sums,
@@ -1204,7 +1203,7 @@ the composition end. It shows per-channel pre-master peak/RMS dBFS, -60–0 dBFS
 bars, and the number of clipped stereo samples. This measures the complete preview
 mix including root Guide layers, not just the selected layer. Editing/seeking
 cancels stale measurements; decoding runs off the UI thread. It does not play sound
-or claim device-synchronized live metering, which remains H02.
+or serve as the live meter; Preview has a separate device-timed block meter.
 
 Regression tests cover atomic invalid/locked edits, history/serialization,
 mixed-media version-26 files, cross-FPS copy, split/move/fade curves, nested stereo
@@ -1221,3 +1220,57 @@ The saved project's six-second 320×180, 30 fps export contained 180 video frame
 and 288,000 stereo PCM sample frames. MOV maximum sample error was 1.19e-7;
 AAC was lossy (MSE 1.24e-8, correlation 0.99999894 for this fixture). PNG
 remained image-only. These checks validate offline controls, not device playback.
+
+## Windows audio preview
+
+Space and the Preview transport play the same 48 kHz stereo mix used by export,
+including nested compositions, source retiming and audio automation. Root Guide
+layers remain audible in preview. Windows WASAPI shared mode sends float PCM to
+the current default multimedia output; Windows handles its hardware format.
+No system volume, device setting or exclusive-mode configuration is changed.
+
+The visual playhead follows IAudioClock's consumed sample position. Audio-disabled
+or silent compositions retain the visual wall clock. A half-second preroll starts
+playback, with a requested 100 ms device buffer and a bounded producer queue.
+The mixer retains its bounded source PCM cache across work-area loops. Decoding,
+mixing and device servicing run off GPUI. Starvation freezes composition time,
+reports Buffering and resumes without skipping unheard samples. Stop, seek,
+project edits and document changes cancel the old stream; a missing/disconnected
+output reports an error instead of claiming sound is playing.
+
+Preview offers Audio, Scrub and Loop work area switches. They are session
+preferences and do not change the project or exported audio. Disabling Loop stops
+at the last frame. Scrub defaults off; when enabled, a seek that remains unchanged
+for 75 ms previews up to the next 100 ms without moving the playhead. Pause/resume
+uses the displayed composition frame. Peak/RMS bars and clipping counts follow
+completed, at-most-100 ms audio blocks before master clipping; these are sample
+meters, not intersample true-peak or peak-hold measurements.
+
+Rational loop boundaries carry their sample remainder across repetitions. Preview
+and export share the source clock, but video decoding and display refresh still
+determine the latency of actual displayed images. Persistent video decoding and
+RAM video preview remain J01/J02. Device selection, hot-plug auto-recovery,
+non-Windows audio backends and remembered preview preferences remain extensions.
+The current mixer still uses linear interpolation for arbitrary source times.
+
+The optional physical-device test is separate from media CI because it needs an
+active Windows audio endpoint and plays a quiet test tone:
+
+```sh
+cargo test -p libre-effects-desktop device_clock_minute -- --ignored --nocapture
+```
+
+The hardware test on this Windows host streamed over 62 seconds with zero
+underruns and a maximum sampled device/wall-clock difference of 4.789 ms. It also
+checked cancel/pause stability, restart at two seek positions, looping and exact
+48,000-sample finite drain. This measures the device clock and transport; it is
+not a measurement of the acoustic speaker or display pipeline latency.
+
+The backend follows Microsoft's [shared-mode initialization contract](https://learn.microsoft.com/en-us/windows/win32/api/audioclient/nf-audioclient-iaudioclient-initialize)
+and [IAudioClock position/frequency contract](https://learn.microsoft.com/en-us/windows/win32/api/audioclient/nf-audioclient-iaudioclock-getposition).
+
+Native release QA used a moving rectangle with automated stereo audio: playback
+showed changing picture/time and live meters with zero underruns, pause held
+frame 136, Loop off stopped at the work area's final frame 149, and a scrub at
+frame 90 returned to Stopped without advancing the picture. Audio off retained
+visual playback. These preview switches left the document clean.

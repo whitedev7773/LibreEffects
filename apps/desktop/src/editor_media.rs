@@ -101,6 +101,7 @@ impl EditorState {
                     }
                     let count = replacements.len();
                     if count > 0 {
+                        s.stop();
                         s.editor.execute(Command::RelinkMedia(replacements))?;
                     }
                     Ok(format!(

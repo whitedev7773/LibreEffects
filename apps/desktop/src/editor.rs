@@ -19,6 +19,8 @@ mod footage;
 mod io;
 #[path = "editor_media.rs"]
 mod media;
+#[path = "editor_playback.rs"]
+mod playback;
 #[path = "editor_queue.rs"]
 pub(crate) mod queue;
 #[path = "editor_video.rs"]
@@ -50,6 +52,9 @@ pub(crate) enum Action {
     Seek(Frame),
     Step(i32),
     Play,
+    PreviewAudio,
+    PreviewScrub,
+    PreviewLoop,
     Undo,
     Redo,
     New,
@@ -183,6 +188,11 @@ pub(crate) struct EditorState {
     pub editor: Editor,
     pub frame: Frame,
     pub playing: bool,
+    pub preview_audio: bool,
+    pub preview_scrub: bool,
+    pub preview_loop: bool,
+    pub audio_status: crate::audio_playback::Status,
+    audio_session: Option<crate::audio_playback::Session>,
     pub status: String,
     pub timeline_zoom: f32,
     pub timeline_start: Frame,
@@ -245,6 +255,14 @@ impl Default for EditorState {
             editor: Editor::default(),
             frame: 0,
             playing: false,
+            preview_audio: true,
+            preview_scrub: false,
+            preview_loop: true,
+            audio_status: crate::audio_playback::Status {
+                phase: crate::audio_playback::Phase::Ended,
+                ..Default::default()
+            },
+            audio_session: None,
             status: "Add a rectangle to start. Projects are saved as .lfe.json.".into(),
             timeline_zoom: 1.0,
             timeline_start: 0,
@@ -367,6 +385,9 @@ impl EditorState {
             .min(duration.saturating_sub(self.visible_frames()));
     }
     fn stop(&mut self) {
+        self.audio_session = None;
+        self.audio_status.phase = crate::audio_playback::Phase::Ended;
+        self.audio_status.levels = Default::default();
         self.playing = false;
         self.playback_origin = None;
         self.playback_generation = self.playback_generation.wrapping_add(1);
@@ -1038,6 +1059,7 @@ impl EditorState {
             Action::Seek(frame) => {
                 self.stop();
                 self.frame = (*frame).min(self.editor.project().composition().duration() - 1);
+                self.queue_scrub(window, cx);
             }
             Action::Step(delta) => {
                 self.stop();
@@ -1045,18 +1067,25 @@ impl EditorState {
                     0,
                     i64::from(self.editor.project().composition().duration() - 1),
                 ) as Frame;
+                self.queue_scrub(window, cx);
+            }
+            Action::PreviewAudio => {
+                self.stop();
+                self.preview_audio = !self.preview_audio;
+            }
+            Action::PreviewScrub => {
+                self.stop();
+                self.preview_scrub = !self.preview_scrub;
+            }
+            Action::PreviewLoop => {
+                self.stop();
+                self.preview_loop = !self.preview_loop;
             }
             Action::Play => {
                 if self.playing {
                     self.stop();
                 } else {
-                    self.playing = true;
-                    if self.frame < self.work_start || self.frame >= self.work_end {
-                        self.frame = self.work_start;
-                    }
-                    self.playback_origin = Some((Instant::now(), self.frame));
-                    self.playback_generation = self.playback_generation.wrapping_add(1);
-                    self.schedule_frame(self.playback_generation, window, cx);
+                    self.start_playback(window, cx);
                 }
             }
             Action::Undo | Action::Redo => {
@@ -1098,17 +1127,30 @@ impl EditorState {
 
     fn schedule_frame(&self, generation: u64, window: &mut Window, cx: &mut Context<Self>) {
         cx.on_next_frame(window, move |state, window, cx| {
-            if !state.playing || generation != state.playback_generation {
+            if (!state.playing && state.audio_session.is_none())
+                || generation != state.playback_generation
+            {
                 return;
             }
-            if let Some((start, first)) = state.playback_origin {
+            if state.audio_session.is_some() {
+                state.poll_audio();
+                cx.notify();
+                if state.playing || state.audio_session.is_some() {
+                    state.schedule_frame(generation, window, cx);
+                }
+            } else if let Some((start, first)) = state.playback_origin {
                 let comp = state.editor.project().composition();
                 let elapsed = (start.elapsed().as_secs_f64() * comp.fps().as_f64()) as u64;
                 let end = state.work_end.min(comp.duration());
                 let start = state.work_start.min(end - 1);
-                state.frame = start
-                    + ((u64::from(first.saturating_sub(start)) + elapsed) % u64::from(end - start))
-                        as Frame;
+                let position = u64::from(first.saturating_sub(start)) + elapsed;
+                if !state.preview_loop && position >= u64::from(end - start) {
+                    state.frame = end - 1;
+                    state.stop();
+                    cx.notify();
+                    return;
+                }
+                state.frame = start + (position % u64::from(end - start)) as Frame;
                 cx.notify();
                 state.schedule_frame(generation, window, cx);
             }

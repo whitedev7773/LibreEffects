@@ -35,6 +35,6 @@ jobs:
       - name: Unit and regression tests
         run: cargo test --workspace --locked
       - name: Explicit media integration tests
-        run: cargo test -p libre-effects-desktop --locked -- --ignored
+        run: cargo test -p libre-effects-desktop --locked -- --ignored --skip device_clock_minute
       - name: Build release
         run: cargo build -p libre-effects-desktop --release --locked

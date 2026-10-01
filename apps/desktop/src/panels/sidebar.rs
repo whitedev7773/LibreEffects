@@ -137,7 +137,7 @@ impl Render for Sidebar {
                         )
                         .child("Shortcut: Space")
                         .child(work.clone())
-                        .child("Playback loops within the work area.")
+                        .child(preview_audio_controls(&self.state, cx))
                         .into_any_element(),
                 });
             }
@@ -300,4 +300,104 @@ impl Render for Align {
                     )),
             )
     }
+}
+
+fn preview_audio_controls(state: &Entity<EditorState>, cx: &gpui::App) -> gpui::Div {
+    use crate::audio_playback::Phase;
+    let s = state.read(cx);
+    let mut panel = div().flex().flex_col().gap_1().text_size(px(11.0));
+    for (id, label, enabled, action) in [
+        (
+            "preview-audio",
+            "Audio",
+            s.preview_audio,
+            Action::PreviewAudio,
+        ),
+        (
+            "preview-scrub",
+            "Scrub",
+            s.preview_scrub,
+            Action::PreviewScrub,
+        ),
+        (
+            "preview-loop",
+            "Loop work area",
+            s.preview_loop,
+            Action::PreviewLoop,
+        ),
+    ] {
+        let state = state.clone();
+        panel = panel.child(
+            ui::text_button(
+                id,
+                format!("{label}: {}", if enabled { "On" } else { "Off" }),
+            )
+            .justify_start()
+            .on_click(move |_, window, cx| {
+                state.update(cx, |s, cx| s.dispatch(&action, window, cx))
+            }),
+        );
+    }
+    let status = &s.audio_status;
+    let label = match &status.phase {
+        Phase::Buffering => "Buffering audio…".to_string(),
+        Phase::Playing => format!("Playing · {} buffer underruns", status.underruns),
+        Phase::Ended if s.playing => if s.preview_audio {
+            "No active audio · visual preview"
+        } else {
+            "Audio off · visual preview"
+        }
+        .to_string(),
+        Phase::Ended => "Stopped".to_string(),
+        Phase::Failed(error) => format!("Audio error: {error}"),
+    };
+    panel = panel
+        .child("Default Windows output · 48 kHz stereo")
+        .child(label);
+    if matches!(status.phase, Phase::Playing) {
+        for channel in 0..2 {
+            let peak = f64::from(status.levels.peak[channel]);
+            let rms =
+                (status.levels.sum_squares[channel] / status.levels.frames.max(1) as f64).sqrt();
+            let db = |v: f64| {
+                if v == 0.0 {
+                    "−∞".into()
+                } else {
+                    format!("{:.1}", 20.0 * v.log10())
+                }
+            };
+            panel = panel.child(
+                div()
+                    .text_color(rgb(if peak > 1.0 { 0xef6666 } else { ui::MUTED }))
+                    .child(format!(
+                        "{} Peak {} / RMS {} dBFS",
+                        if channel == 0 { "L" } else { "R" },
+                        db(peak),
+                        db(rms)
+                    )),
+            );
+            let fraction = if peak > 0.0 {
+                ((20.0 * peak.log10() + 60.0) / 60.0).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            panel = panel.child(
+                div().h(px(5.0)).bg(rgb(0x303030)).child(
+                    div()
+                        .h_full()
+                        .w(gpui::relative(fraction as f32))
+                        .bg(rgb(if peak > 1.0 { 0xef6666 } else { 0x58bf96 })),
+                ),
+            );
+        }
+        panel = panel.child(format!(
+            "{} clipped stereo samples / block",
+            status.levels.clipped_frames
+        ));
+    }
+    panel.child(
+        div()
+            .text_color(rgb(ui::MUTED))
+            .child("Scrub previews 100 ms after seeking."),
+    )
 }
