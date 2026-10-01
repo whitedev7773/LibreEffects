@@ -821,7 +821,7 @@ frames (End is exclusive), and up to eight output modules. The preset menu selec
 H.264 MP4, ProRes 4444 alpha MOV, or PNG sequences with alpha/background. + Output
 adds the selected preset's first format; clicking an output path chooses another
 file or new PNG sequence directory. Enter a preset name and use Save preset on a
-job to reuse its output-format list when adding later jobs. Up/Down and Enter or
+job to reuse its output formats and settings when adding later jobs. Up/Down and Enter or
 Space work in the preset menu. Named presets can be removed and restored with Undo.
 
 Render processes enabled Queued outputs serially. Completed outputs are skipped.
@@ -849,10 +849,41 @@ Limits are 100 jobs, eight outputs/job, 32 named presets, 1 MiB queue metadata a
 Source projects, linked media, queue files and duplicate destinations are protected.
 A damaged/missing snapshot must be removed before the queue can start.
 
-Queue formats currently use full composition resolution and FPS, H.264 CRF 18 and
-ProRes 4444 with alpha. Output resolution/FPS/bitrate controls remain I03; audio
-is not yet implemented. Presets currently store format lists, not codec settings.
+Click an output's format label to expand its settings. Size accepts `comp` or an
+exact `WIDTHxHEIGHT` raster; an aspect-ratio change stretches the composition.
+FPS accepts `comp`, a rational rate such as `30000/1001`, or an NTSC alias such as
+`29.97`. Output samples start at the selected composition frame. Hold sampling
+duplicates/drops composition frames without changing speed; the last partial
+output frame rounds duration up by less than one output frame. This does not
+change composition keys, layer timing or the interactive preview. Frame blending
+and subframe animation evaluation remain separate work.
+
+Channels accepts `auto`, `rgb` (composition background), `rgba` (straight alpha),
+or `alpha` (opaque grayscale alpha). Auto preserves the format's original policy:
+MP4/background PNG is RGB; MOV/alpha PNG is RGBA. MP4 rejects RGBA. H.264 Quality
+accepts `auto` (CRF 18), `crf:0` through `crf:51`, or `kbps:8000` for a target
+average bitrate. Actual bitrate varies with content; this is single-pass ABR,
+not guaranteed CBR. Encoder accepts `auto` (medium) or an x264 speed preset from
+ultrafast through veryslow. Other formats reject H.264 quality/speed overrides.
+MOV remains ProRes 4444, with an alpha plane only for RGBA. PNG stores lossless
+8-bit RGB, RGBA or grayscale to match the selected channels. Encoder behavior follows
+the [FFmpeg codec options](https://ffmpeg.org/ffmpeg-codecs.html#libx264_002c-libx264rgb).
+
+Explicit MP4 size must be even; automatic composition size retains the existing
+one-pixel padding for odd dimensions. Output size is limited to 16384 per axis
+and 32 megapixels, FPS to 1–240. Reset settings returns to composition defaults.
+Changing settings requeues only that output and participates in queue Undo/Redo.
+Named presets now include each module's size, FPS, channels, quality and speed;
+version 1 queue data migrates to version 2 while preserving results and presets.
+PNG sequences with a changed FPS number from zero and record source_range, output
+FPS and frame count in sequence.json. Unchanged FPS retains composition numbering.
+Audio is not yet implemented; audio and additional codec profiles remain I03/H01–H04.
 Snapshots and queue data are local to this user, not embedded in project files.
+
+The CLI shares these settings: `--size 1280x720 --fps 30000/1001 --channels rgb
+--crf 22 --encoder slow`; use `--bitrate 8000` instead of `--crf` for ABR. A single
+PNG accepts size/channels but rejects FPS and video encoder options. The File
+menu's quick exports retain their defaults; use Render Queue for configured output.
 
 ## Remaining limitations
 

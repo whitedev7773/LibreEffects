@@ -1,6 +1,7 @@
 use crate::{
     components::TextField,
     editor::{Action, EditorState, queue::QueueAction},
+    output_settings::{Field, Spec},
     render_queue::Format,
     ui,
 };
@@ -12,6 +13,8 @@ pub(crate) struct RenderDock {
     state: Entity<EditorState>,
     timeline: Entity<super::Timeline>,
     fields: BTreeMap<(u64, bool), Entity<TextField>>,
+    output_fields: BTreeMap<(u64, usize, Field), Entity<TextField>>,
+    expanded: Option<(u64, usize)>,
     preset_name: Entity<TextField>,
     preset_open: bool,
     preset_cursor: usize,
@@ -28,6 +31,8 @@ impl RenderDock {
             state,
             timeline,
             fields: BTreeMap::new(),
+            output_fields: BTreeMap::new(),
+            expanded: None,
             preset_open: false,
             preset_cursor: 0,
             preset_focus: cx.focus_handle(),
@@ -70,17 +75,21 @@ impl Render for RenderDock {
         drop(q);
         let busy = running || self.state.read(cx).queue_busy;
         let formats = self.state.read(cx).queue_formats.clone();
-        let mut choices: Vec<(String, Vec<Format>)> = Format::ALL
+        let mut choices: Vec<(String, Vec<Spec>)> = Format::ALL
             .iter()
-            .map(|f| (f.label().into(), vec![*f]))
+            .map(|f| (f.label().into(), vec![(*f).into()]))
             .collect();
         choices.extend(
             data.presets
                 .iter()
-                .map(|p| (p.name.clone(), p.formats.clone())),
+                .map(|p| (p.name.clone(), p.specs.clone())),
         );
         let chosen = choices.iter().position(|(_, f)| *f == formats).unwrap_or(0);
-        let label = choices[chosen].0.clone();
+        let label = choices
+            .iter()
+            .find(|(_, f)| *f == formats)
+            .map(|(label, _)| label.clone())
+            .unwrap_or_else(|| "Custom".into());
         let keyboard_choices = choices.clone();
         let choice_count = choices.len();
         self.preset_cursor = self.preset_cursor.min(choice_count - 1);
@@ -135,6 +144,11 @@ impl Render for RenderDock {
         if data.jobs.is_empty() {
             list=list.child(div().p_4().text_color(rgb(ui::MUTED)).child("Add a composition to queue a snapshot of its work area. Jobs and output results restore when the editor restarts."));
         }
+        self.output_fields.retain(|(id, index, _), _| {
+            data.jobs
+                .iter()
+                .any(|j| j.id == *id && *index < j.outputs.len())
+        });
         self.fields
             .retain(|(id, _), _| data.jobs.iter().any(|j| j.id == *id));
         for (position, job) in data.jobs.iter().enumerate() {
@@ -226,7 +240,7 @@ impl Render for RenderDock {
                             self.button(
                                 ("queue-output", id),
                                 "+ Output",
-                                QueueAction::AddOutput(id, formats[0]),
+                                QueueAction::AddOutput(id, formats[0].clone()),
                             )
                             .when(busy, |d| d.opacity(0.4)),
                         )
@@ -247,7 +261,7 @@ impl Render for RenderDock {
                 );
             for (index, output) in job.outputs.iter().enumerate() {
                 let message = if active == Some((id, index)) {
-                    format!("{} / {} frames", progress, job.range.end - job.range.start)
+                    format!("{progress} output frames rendered")
                 } else {
                     output.message.clone()
                 };
@@ -265,7 +279,25 @@ impl Render for RenderDock {
                                     .text_color(rgb(ui::BLUE))
                                     .child(output.status.label()),
                             )
-                            .child(div().w(px(170.0)).child(output.format.label()))
+                            .child(
+                                ui::text_button(
+                                    gpui::SharedString::from(format!(
+                                        "queue-settings-{id}-{index}"
+                                    )),
+                                    format!("{} ▾", output.spec.format.label()),
+                                )
+                                .w(px(190.0))
+                                .on_click(cx.listener(
+                                    move |this, _, _, cx| {
+                                        this.expanded = if this.expanded == Some((id, index)) {
+                                            None
+                                        } else {
+                                            Some((id, index))
+                                        };
+                                        cx.notify();
+                                    },
+                                )),
+                            )
                             .child(
                                 self.button(
                                     gpui::SharedString::from(format!("queue-path-{id}-{index}")),
@@ -292,6 +324,62 @@ impl Render for RenderDock {
                     .when(!message.is_empty(), |row| {
                         row.child(div().pl_6().text_color(rgb(ui::MUTED)).child(message))
                     });
+                let settings = &output.spec.settings;
+                row = row.child(
+                    div()
+                        .pl_6()
+                        .text_color(rgb(ui::MUTED))
+                        .child(settings.summary(output.spec.format)),
+                );
+                if self.expanded == Some((id, index)) {
+                    let mut controls = div()
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .gap_2()
+                        .pl_6()
+                        .py_1();
+                    for field in Field::ALL {
+                        let state = self.state.clone();
+                        let input =
+                            self.output_fields
+                                .entry((id, index, field))
+                                .or_insert_with(|| {
+                                    cx.new(|cx| {
+                                        TextField::new(cx, move |text, window, cx| {
+                                            state.update(cx, |s, cx| {
+                                                s.dispatch(
+                                                    &Action::Queue(QueueAction::Settings(
+                                                        id,
+                                                        index,
+                                                        field,
+                                                        text.into(),
+                                                    )),
+                                                    window,
+                                                    cx,
+                                                )
+                                            })
+                                        })
+                                    })
+                                });
+                        input.update(cx, |f, _| {
+                            f.sync(
+                                format!("output-{id}-{index}-{field:?}"),
+                                settings.value(field),
+                                window,
+                            )
+                        });
+                        controls = controls
+                            .child(field.label())
+                            .child(div().w(px(112.0)).child(input.clone()));
+                    }
+                    controls = controls.child(self.button(
+                        gpui::SharedString::from(format!("queue-reset-{id}-{index}")),
+                        "Reset settings",
+                        QueueAction::ResetSettings(id, index),
+                    ));
+                    row=row.child(controls).child(div().pl_6().text_color(rgb(ui::MUTED)).child("Size: comp / 1920x1080 · FPS: comp / 29.97 · Channels: auto / rgb / rgba / alpha · Quality: auto / crf:18 / kbps:8000 · Encoder: auto / fast / medium / slow"));
+                }
             }
             list = list.child(row);
         }

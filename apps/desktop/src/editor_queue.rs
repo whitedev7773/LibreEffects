@@ -1,5 +1,5 @@
 use super::*;
-use crate::render_queue::{Format, Output, Preset, Queue, Status};
+use crate::render_queue::{Output, Preset, Queue, Status};
 use std::sync::{Arc, Mutex, atomic::Ordering};
 
 #[derive(Clone)]
@@ -16,8 +16,10 @@ pub(crate) enum QueueAction {
     Retry(u64),
     Range(u64, bool, String),
     Path(u64, usize),
-    AddOutput(u64, Format),
+    AddOutput(u64, crate::output_settings::Spec),
     RemoveOutput(u64, usize),
+    Settings(u64, usize, crate::output_settings::Field, String),
+    ResetSettings(u64, usize),
     Policy,
     SavePreset(u64, String),
     DeletePreset(usize),
@@ -78,6 +80,7 @@ impl EditorState {
                 return;
             }
             self.stop();
+            self.queue_message.clear();
             self.exporting = true;
             self.video_job = None;
             self.export_cancel = queue.lock().unwrap().cancel.clone();
@@ -173,17 +176,17 @@ impl EditorState {
                         let Some(o) = job.outputs.get(*index) else {
                             return;
                         };
-                        (*id, Some(*index), o.format, o.path.clone())
+                        (*id, Some(*index), o.spec.clone(), o.path.clone())
                     }
                     QueueAction::AddOutput(_, format) => (
                         *id,
                         None,
-                        *format,
+                        format.clone(),
                         job.outputs[0].path.with_file_name(format!(
                             "render-{}-{}.{}",
                             id,
                             job.outputs.len() + 1,
-                            format.extension()
+                            format.format.extension()
                         )),
                     ),
                     _ => unreachable!(),
@@ -207,9 +210,19 @@ impl EditorState {
                             if let Some(index) = index {
                                 *job.outputs
                                     .get_mut(index)
-                                    .ok_or("Output no longer exists")? = Output::new(format, path);
+                                    .ok_or("Output no longer exists")? = Output {
+                                    spec: format,
+                                    path,
+                                    status: Status::Queued,
+                                    message: String::new(),
+                                };
                             } else {
-                                job.outputs.push(Output::new(format, path));
+                                job.outputs.push(Output {
+                                    spec: format,
+                                    path,
+                                    status: Status::Queued,
+                                    message: String::new(),
+                                });
                             }
                             Ok(())
                         })
@@ -233,6 +246,28 @@ impl EditorState {
             }
             q.edit(|data| {
                 match &action {
+                    QueueAction::Settings(id, index, field, value) => {
+                        let output = data
+                            .jobs
+                            .iter_mut()
+                            .find(|j| j.id == *id)
+                            .and_then(|j| j.outputs.get_mut(*index))
+                            .ok_or("Output not found")?;
+                        output.spec.settings.change(*field, value)?;
+                        output.status = Status::Queued;
+                        output.message.clear();
+                    }
+                    QueueAction::ResetSettings(id, index) => {
+                        let output = data
+                            .jobs
+                            .iter_mut()
+                            .find(|j| j.id == *id)
+                            .and_then(|j| j.outputs.get_mut(*index))
+                            .ok_or("Output not found")?;
+                        output.spec.settings = Default::default();
+                        output.status = Status::Queued;
+                        output.message.clear();
+                    }
                     QueueAction::Policy => data.stop_on_error = !data.stop_on_error,
                     QueueAction::DeletePreset(i) => {
                         if *i < data.presets.len() {
@@ -247,7 +282,7 @@ impl EditorState {
                             .ok_or("Job not found")?;
                         let preset = Preset {
                             name: name.trim().into(),
-                            formats: job.outputs.iter().map(|o| o.format).collect(),
+                            specs: job.outputs.iter().map(|o| o.spec.clone()).collect(),
                         };
                         if let Some(old) = data.presets.iter_mut().find(|p| p.name == preset.name) {
                             *old = preset;

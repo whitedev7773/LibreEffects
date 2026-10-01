@@ -43,7 +43,7 @@ fn snapshot_outputs_history_and_restart_preserve_pixels_and_job_configuration() 
         e.project(),
         None,
         0..3,
-        &[Format::PngAlpha, Format::PngBackground],
+        &[Format::PngAlpha.into(), Format::PngBackground.into()],
         d.path(),
     )
     .unwrap();
@@ -56,7 +56,7 @@ fn snapshot_outputs_history_and_restart_preserve_pixels_and_job_configuration() 
     q.edit(|d| {
         d.presets.push(Preset {
             name: "Delivery".into(),
-            formats: vec![Format::PngAlpha, Format::PngBackground],
+            specs: vec![Format::PngAlpha.into(), Format::PngBackground.into()],
         });
         d.jobs[0].range = 1..3;
         Ok(())
@@ -132,7 +132,7 @@ fn failure_policy_cancel_interruption_and_retry_are_durable() {
             scene().project(),
             None,
             0..3,
-            &[Format::PngAlpha, Format::PngBackground],
+            &[Format::PngAlpha.into(), Format::PngBackground.into()],
             d.path(),
         )
         .unwrap();
@@ -193,7 +193,7 @@ fn invalid_edits_aliases_source_paths_and_storage_fail_atomically() {
         scene().project(),
         Some(original.clone()),
         0..3,
-        &[Format::Mp4, Format::MovAlpha],
+        &[Format::Mp4.into(), Format::MovAlpha.into()],
         d.path(),
     )
     .unwrap();
@@ -304,7 +304,11 @@ fn queue_multiple_compositions_and_modules_render_exact_snapshots() {
         e.project(),
         None,
         0..3,
-        &[Format::Mp4, Format::MovAlpha, Format::PngAlpha],
+        &[
+            Format::Mp4.into(),
+            Format::MovAlpha.into(),
+            Format::PngAlpha.into(),
+        ],
         d.path(),
     )
     .unwrap();
@@ -319,7 +323,7 @@ fn queue_multiple_compositions_and_modules_render_exact_snapshots() {
         e.project(),
         None,
         1..3,
-        &[Format::Mp4, Format::MovAlpha],
+        &[Format::Mp4.into(), Format::MovAlpha.into()],
         d.path(),
     )
     .unwrap();
@@ -335,7 +339,7 @@ fn queue_multiple_compositions_and_modules_render_exact_snapshots() {
     for job in &q.data.jobs {
         for output in &job.outputs {
             assert_eq!(output.status, Status::Completed, "{}", output.message);
-            if output.format.sequence() {
+            if output.spec.format.sequence() {
                 continue;
             }
             let mut cmd = std::process::Command::new(crate::video_export::ffmpeg_path());
@@ -354,7 +358,7 @@ fn queue_multiple_compositions_and_modules_render_exact_snapshots() {
             assert_eq!(decoded.stdout.len(), 64 * 48 * 4 * job.range.len());
             let p = &decoded.stdout[(24 * 64 + 32) * 4..][..4];
             let color = if job.id == 1 { 0 } else { 1 };
-            let expected = if output.format == Format::Mp4 {
+            let expected = if output.spec.format == Format::Mp4 {
                 128
             } else {
                 255
@@ -362,7 +366,7 @@ fn queue_multiple_compositions_and_modules_render_exact_snapshots() {
             assert!((i32::from(p[color]) - expected).abs() < 8, "{p:?}");
             assert!(
                 (i32::from(p[3])
-                    - if output.format == Format::Mp4 {
+                    - if output.spec.format == Format::Mp4 {
                         255
                     } else {
                         128

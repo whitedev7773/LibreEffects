@@ -1,8 +1,9 @@
 //! Deterministic file rendering without opening a window.
+use crate::output_settings::{Field, Format, Settings};
 use std::{ffi::OsString, path::PathBuf};
 
 const HELP: &str = "Libre Effects file renderer\n\
-    --render PROJECT.lfe.json --output FILE.mp4|mov|png [--composition ID] [--start FRAME] [--end FRAME] [--png-background]\n\
+    --render PROJECT.lfe.json --output FILE.mp4|mov|png [--composition ID] [--start FRAME] [--end FRAME] [--png-background] [--size WIDTHxHEIGHT] [--fps RATE] [--channels auto|rgb|rgba|alpha] [--crf 0..51 | --bitrate KBPS] [--encoder SPEED]\n\
     Frame range is [start, end). Videos default to the entire composition; PNG defaults to one frame.\n\
     MP4 uses the composition background. MOV and PNG preserve alpha; --png-background makes PNG opaque.";
 
@@ -14,6 +15,7 @@ struct Options {
     end: Option<u32>,
     composition: Option<u64>,
     png_background: bool,
+    settings: Settings,
 }
 
 fn parse(args: Vec<OsString>) -> Result<Options, String> {
@@ -21,6 +23,8 @@ fn parse(args: Vec<OsString>) -> Result<Options, String> {
     let (mut project, mut output, mut start, mut end) = (None, None, None, None);
     let mut png_background = false;
     let mut composition = None;
+    let mut settings = Settings::default();
+    let mut seen = std::collections::BTreeSet::new();
     while let Some(flag) = args.next() {
         let flag = flag.to_str().ok_or("Invalid command-line option")?;
         if flag == "--png-background" && !png_background {
@@ -28,6 +32,28 @@ fn parse(args: Vec<OsString>) -> Result<Options, String> {
             continue;
         }
         match flag {
+            "--size" | "--fps" | "--channels" | "--crf" | "--bitrate" | "--encoder" => {
+                let field = match flag {
+                    "--size" => Field::Size,
+                    "--fps" => Field::Fps,
+                    "--channels" => Field::Channels,
+                    "--encoder" => Field::Speed,
+                    _ => Field::Quality,
+                };
+                if !seen.insert(field) {
+                    return Err(format!("Repeated or conflicting option: {flag}"));
+                }
+                let value = args
+                    .next()
+                    .and_then(|v| v.into_string().ok())
+                    .ok_or_else(|| format!("{flag} requires a value"))?;
+                let value = match flag {
+                    "--crf" => format!("crf:{value}"),
+                    "--bitrate" => format!("kbps:{value}"),
+                    _ => value,
+                };
+                settings.change(field, &value)?;
+            }
             "--composition" if composition.is_none() => {
                 composition = Some(
                     args.next()
@@ -73,6 +99,7 @@ fn parse(args: Vec<OsString>) -> Result<Options, String> {
         end,
         composition,
         png_background,
+        settings,
     })
 }
 
@@ -89,6 +116,25 @@ fn render(options: Options) -> Result<(), String> {
     if options.png_background && extension != "png" {
         return Err("--png-background applies only to PNG output".into());
     }
+    let format = match extension.as_str() {
+        "mp4" => Format::Mp4,
+        "mov" => Format::MovAlpha,
+        _ => {
+            if options.png_background {
+                Format::PngBackground
+            } else {
+                Format::PngAlpha
+            }
+        }
+    };
+    if options.png_background && options.settings.channels != crate::output_settings::Channels::Auto
+    {
+        return Err("Use either --png-background or --channels".into());
+    }
+    if extension == "png" && options.settings.fps.is_some() {
+        return Err("--fps requires video or a queue PNG sequence".into());
+    }
+    options.settings.validate(format)?;
     let mut project = crate::project_io::read_project(&options.project)?;
     if let Some(id) = options.composition {
         project.activate_composition(id)?;
@@ -109,29 +155,35 @@ fn render(options: Options) -> Result<(), String> {
             return Err("PNG output requires exactly one frame".into());
         }
         crate::project_io::validate_render(&project, &options.output, &(options.start..end))?;
-        let mut pixels =
-            crate::rendering::Renderer::new().render(&project, options.start, u32::MAX)?;
-        if options.png_background {
-            crate::rendering::composite_background(
-                &mut pixels,
-                project.composition().background_color(),
-            );
-        }
-        let mut data = std::io::Cursor::new(Vec::new());
-        pixels
-            .write_to(&mut data, image::ImageFormat::Png)
-            .map_err(|e| e.to_string())?;
-        crate::project_io::write_bytes(&options.output, &data.into_inner())?;
+        let plan = options
+            .settings
+            .plan(project.composition(), options.start..end, format)?;
+        let mut pixels = crate::rendering::Renderer::new().render_output(
+            &project,
+            options.start,
+            plan.width,
+            plan.height,
+        )?;
+        options.settings.apply_channels(
+            &mut pixels,
+            format,
+            project.composition().background_color(),
+        );
+        crate::project_io::write_bytes(
+            &options.output,
+            &options.settings.png_bytes(pixels, format)?,
+        )?;
     } else {
         let preset = if extension == "mp4" {
             crate::video_export::VideoPreset::H264
         } else {
             crate::video_export::VideoPreset::ProResAlpha
         };
-        crate::video_export::export_video(
+        crate::video_export::export_video_with_settings(
             &project,
             options.start..end,
             preset,
+            &options.settings,
             &options.output,
             Default::default(),
             Default::default(),
@@ -162,6 +214,42 @@ pub(crate) fn run() -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn output_options_parse_exact_rates_and_reject_conflicting_rate_control() {
+        let args = [
+            "--render",
+            "x.lfe.json",
+            "--output",
+            "out.mp4",
+            "--size",
+            "1280x720",
+            "--fps",
+            "29.97",
+            "--crf",
+            "22",
+            "--encoder",
+            "slow",
+            "--channels",
+            "rgb",
+        ];
+        let parsed = parse(args.into_iter().map(OsString::from).collect()).unwrap();
+        assert_eq!(parsed.settings.size, Some([1280, 720]));
+        assert_eq!(parsed.settings.fps.unwrap().to_string(), "30000/1001");
+        assert_eq!(
+            parsed.settings.rate_control,
+            Some(crate::output_settings::RateControl::Crf(22))
+        );
+        for extra in [
+            vec!["--crf", "20", "--bitrate", "8000"],
+            vec!["--fps", "24", "--fps", "30"],
+            vec!["--size", "1280"],
+            vec!["--encoder"],
+        ] {
+            let mut args = vec!["--render", "x", "--output", "y"];
+            args.extend(extra);
+            assert!(parse(args.into_iter().map(OsString::from).collect()).is_err());
+        }
+    }
     #[test]
     fn render_arguments_keep_unicode_paths_and_reject_ambiguous_ranges() {
         let args = [
@@ -230,6 +318,7 @@ mod tests {
             end,
             composition: None,
             png_background,
+            settings: Settings::default(),
         };
         render(options(1, None, false)).unwrap();
         let alpha = image::open(&output_path).unwrap().to_rgba8();
@@ -238,6 +327,30 @@ mod tests {
         let opaque = image::open(&output_path).unwrap().to_rgba8();
         assert_eq!(opaque.get_pixel(0, 0).0, [0x12, 0x34, 0x56, 255]);
         let previous = std::fs::read(&output_path).unwrap();
+        let mut scaled = options(1, None, false);
+        scaled.settings.size = Some([8, 4]);
+        scaled.settings.channels = crate::output_settings::Channels::Alpha;
+        render(scaled).unwrap();
+        let scaled = image::open(&output_path).unwrap().to_rgba8();
+        assert_eq!(scaled.dimensions(), (8, 4));
+        assert_eq!(scaled.get_pixel(0, 0).0, [0, 0, 0, 255]);
+        std::fs::write(&output_path, &previous).unwrap();
+        for field in [Field::Quality, Field::Fps] {
+            let mut invalid = options(1, None, false);
+            invalid
+                .settings
+                .change(
+                    field,
+                    if field == Field::Quality {
+                        "crf:20"
+                    } else {
+                        "60"
+                    },
+                )
+                .unwrap();
+            assert!(render(invalid).is_err());
+            assert_eq!(std::fs::read(&output_path).unwrap(), previous);
+        }
         for (start, end) in [(2, None), (0, Some(2)), (1, Some(1)), (u32::MAX, None)] {
             assert!(render(options(start, end, false)).is_err());
             assert_eq!(std::fs::read(&output_path).unwrap(), previous);

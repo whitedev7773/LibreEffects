@@ -147,7 +147,7 @@ pub(crate) struct EditorState {
     pub queue_open: bool,
     pub queue_busy: bool,
     pub queue_message: String,
-    pub queue_formats: Vec<crate::render_queue::Format>,
+    pub queue_formats: Vec<crate::output_settings::Spec>,
     pub project_item: Option<libre_effects_core::ProjectItem>,
     composition_views:
         std::collections::BTreeMap<CompositionId, crate::view_state::CompositionView>,
@@ -214,7 +214,7 @@ impl Default for EditorState {
             queue_open: false,
             queue_busy: false,
             queue_message: "Loading render queue…".into(),
-            queue_formats: vec![crate::render_queue::Format::Mp4],
+            queue_formats: vec![crate::render_queue::Format::Mp4.into()],
             project_item: None,
             composition_views: Default::default(),
             workspace: Default::default(),

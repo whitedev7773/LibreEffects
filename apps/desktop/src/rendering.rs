@@ -359,7 +359,7 @@ impl Renderer {
         frame: u32,
         max_dimension: u32,
     ) -> Result<image::RgbaImage, String> {
-        self.render_mode(project, frame, max_dimension, false)
+        self.render_mode(project, frame, max_dimension, false, None)
     }
     pub fn render_preview(
         &self,
@@ -367,7 +367,19 @@ impl Renderer {
         frame: u32,
         max_dimension: u32,
     ) -> Result<image::RgbaImage, String> {
-        self.render_mode(project, frame, max_dimension, true)
+        self.render_mode(project, frame, max_dimension, true, None)
+    }
+    pub fn render_output(
+        &self,
+        project: &Project,
+        frame: u32,
+        width: u32,
+        height: u32,
+    ) -> Result<image::RgbaImage, String> {
+        if width == 0 || height == 0 || width > 16384 || height > 16384 {
+            return Err("Invalid output dimensions".into());
+        }
+        self.render_mode(project, frame, u32::MAX, false, Some([width, height]))
     }
     fn render_mode(
         &self,
@@ -375,6 +387,7 @@ impl Renderer {
         frame: u32,
         max_dimension: u32,
         include_guides: bool,
+        output_size: Option<[u32; 2]>,
     ) -> Result<image::RgbaImage, String> {
         let c = project.composition();
         if frame >= c.duration() {
@@ -383,6 +396,7 @@ impl Renderer {
         let scale = (max_dimension as f64 / c.width().max(c.height()) as f64).min(1.0);
         let width = (c.width() as f64 * scale).round().max(1.0) as u32;
         let height = (c.height() as f64 * scale).round().max(1.0) as u32;
+        let [width, height] = output_size.unwrap_or([width, height]);
         if width as u64 * height as u64 > 33_554_432 {
             return Err("Rendering supports up to 32 megapixels per frame".into());
         }

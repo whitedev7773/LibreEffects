@@ -17,39 +17,8 @@ use std::{
 #[path = "render_queue_tests.rs"]
 mod tests;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) enum Format {
-    Mp4,
-    MovAlpha,
-    PngAlpha,
-    PngBackground,
-}
-impl Format {
-    pub const ALL: [Self; 4] = [
-        Self::Mp4,
-        Self::MovAlpha,
-        Self::PngAlpha,
-        Self::PngBackground,
-    ];
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Mp4 => "H.264 MP4",
-            Self::MovAlpha => "ProRes 4444 · Alpha",
-            Self::PngAlpha => "PNG sequence · Alpha",
-            Self::PngBackground => "PNG sequence · Background",
-        }
-    }
-    pub fn extension(self) -> &'static str {
-        match self {
-            Self::Mp4 => "mp4",
-            Self::MovAlpha => "mov",
-            _ => "frames",
-        }
-    }
-    pub fn sequence(self) -> bool {
-        matches!(self, Self::PngAlpha | Self::PngBackground)
-    }
-}
+pub(crate) use crate::output_settings::Format;
+use crate::output_settings::{Settings, Spec};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum Status {
     Queued,
@@ -73,7 +42,8 @@ impl Status {
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Output {
-    pub format: Format,
+    #[serde(flatten)]
+    pub spec: Spec,
     pub path: PathBuf,
     pub status: Status,
     pub message: String,
@@ -81,7 +51,7 @@ pub(crate) struct Output {
 impl Output {
     pub fn new(format: Format, path: PathBuf) -> Self {
         Self {
-            format,
+            spec: format.into(),
             path,
             status: Status::Queued,
             message: String::new(),
@@ -103,7 +73,7 @@ pub(crate) struct Job {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Preset {
     pub name: String,
-    pub formats: Vec<Format>,
+    pub specs: Vec<Spec>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Data {
@@ -115,7 +85,7 @@ pub(crate) struct Data {
 impl Default for Data {
     fn default() -> Self {
         Self {
-            version: 1,
+            version: 2,
             jobs: Vec::new(),
             presets: Vec::new(),
             stop_on_error: true,
@@ -155,8 +125,35 @@ impl Queue {
                 if bytes.len() > 1024 * 1024 {
                     return Err("Render queue exceeds 1 MiB".into());
                 }
-                serde_json::from_slice(&bytes)
-                    .map_err(|e| format!("Cannot read saved render queue: {e}"))?
+                {
+                    let mut value: serde_json::Value = serde_json::from_slice(&bytes)
+                        .map_err(|e| format!("Cannot read saved render queue: {e}"))?;
+                    if value["version"] == 1 {
+                        if let Some(jobs) = value["jobs"].as_array_mut() {
+                            for job in jobs {
+                                if let Some(outputs) = job["outputs"].as_array_mut() {
+                                    for output in outputs {
+                                        output["settings"] =
+                                            serde_json::to_value(Settings::default()).unwrap();
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(presets) = value["presets"].as_array_mut() {
+                            for preset in presets {
+                                let formats = preset["formats"]
+                                    .as_array()
+                                    .ok_or("Invalid legacy preset")?
+                                    .clone();
+                                preset["specs"]=serde_json::Value::Array(formats.into_iter().map(|format|serde_json::json!({"format":format,"settings":Settings::default()})).collect());
+                                preset.as_object_mut().unwrap().remove("formats");
+                            }
+                        }
+                        value["version"] = 2.into();
+                    }
+                    serde_json::from_value(value)
+                        .map_err(|e| format!("Cannot read saved render queue: {e}"))?
+                }
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Data::default(),
             Err(e) => return Err(e.to_string()),
@@ -257,13 +254,13 @@ impl Queue {
         project: &Project,
         project_path: Option<PathBuf>,
         range: Range<u32>,
-        formats: &[Format],
+        specs: &[Spec],
         directory: &Path,
     ) -> Result<u64, String> {
         if self.running {
             return Err("Stop the queue before adding jobs".into());
         }
-        if self.data.jobs.len() >= 100 || formats.is_empty() || formats.len() > 8 {
+        if self.data.jobs.len() >= 100 || specs.is_empty() || specs.len() > 8 {
             return Err("Queue supports 100 jobs and 1–8 outputs per job".into());
         }
         let comp = project.composition();
@@ -274,9 +271,9 @@ impl Queue {
             &std::fs::canonicalize(directory).map_err(|e| e.to_string())?,
         )?);
         let mut id = self.next_id;
-        while formats.iter().enumerate().any(|(n, f)| {
+        while specs.iter().enumerate().any(|(n, f)| {
             directory
-                .join(format!("render-{id}-{}.{}", n + 1, f.extension()))
+                .join(format!("render-{id}-{}.{}", n + 1, f.format.extension()))
                 .exists()
         }) {
             id = id
@@ -285,7 +282,9 @@ impl Queue {
                 .ok_or("Queue job ID overflow")?;
         }
         let mut outputs = Vec::new();
-        for (n, format) in formats.iter().copied().enumerate() {
+        for (n, spec) in specs.iter().cloned().enumerate() {
+            spec.settings.plan(comp, range.clone(), spec.format)?;
+            let format = spec.format;
             let path = directory.join(format!("render-{id}-{}.{}", n + 1, format.extension()));
             if path.exists() {
                 return Err(format!(
@@ -293,7 +292,9 @@ impl Queue {
                     path.display()
                 ));
             }
-            outputs.push(Output::new(format, path));
+            let mut output = Output::new(format, path);
+            output.spec = spec;
+            outputs.push(output);
         }
         let json = project.to_json()?;
         crate::project_io::validate_project_size(&json)?;
@@ -344,6 +345,13 @@ impl Queue {
         }
         for job in &data.jobs {
             let project = crate::project_io::read_project(&self.root.join(&job.snapshot))?;
+            for output in &job.outputs {
+                output.spec.settings.plan(
+                    project.composition(),
+                    job.range.clone(),
+                    output.spec.format,
+                )?;
+            }
             if project.composition().duration() != job.duration {
                 return Err("Queue snapshot duration mismatch".into());
             }
@@ -400,7 +408,7 @@ impl Queue {
     }
 }
 fn validate(data: &Data) -> Result<(), String> {
-    if data.version != 1 || data.jobs.len() > 100 || data.presets.len() > 32 {
+    if data.version != 2 || data.jobs.len() > 100 || data.presets.len() > 32 {
         return Err("Unsupported or oversized render queue".into());
     }
     let mut ids = BTreeSet::new();
@@ -426,12 +434,13 @@ fn validate(data: &Data) -> Result<(), String> {
             return Err("Queue project paths must be absolute".into());
         }
         for output in &job.outputs {
+            output.spec.settings.validate(output.spec.format)?;
             if !output.path.is_absolute()
                 || output.message.len() > 16384
-                || (!output.format.sequence()
+                || (!output.spec.format.sequence()
                     && !output.path.extension().is_some_and(|s| {
                         s.to_string_lossy()
-                            .eq_ignore_ascii_case(output.format.extension())
+                            .eq_ignore_ascii_case(output.spec.format.extension())
                     }))
             {
                 return Err("Invalid queue output path or format".into());
@@ -440,10 +449,13 @@ fn validate(data: &Data) -> Result<(), String> {
     }
     let mut names = BTreeSet::new();
     for preset in &data.presets {
+        for spec in &preset.specs {
+            spec.settings.validate(spec.format)?;
+        }
         if preset.name.trim().is_empty()
             || preset.name.len() > 80
-            || preset.formats.is_empty()
-            || preset.formats.len() > 8
+            || preset.specs.is_empty()
+            || preset.specs.len() > 8
             || !names.insert(&preset.name)
         {
             return Err("Presets require unique names and 1–8 formats".into());
@@ -564,20 +576,26 @@ pub(crate) fn execute(
     if cancel.load(Ordering::Relaxed) {
         return Err("Render canceled".into());
     }
-    if !output.format.sequence() {
-        return crate::video_export::export_video(
+    if !output.spec.format.sequence() {
+        return crate::video_export::export_video_with_settings(
             project,
             range,
-            if output.format == Format::Mp4 {
+            if output.spec.format == Format::Mp4 {
                 crate::video_export::VideoPreset::H264
             } else {
                 crate::video_export::VideoPreset::ProResAlpha
             },
+            &output.spec.settings,
             &output.path,
             cancel,
             progress,
         );
     }
+    let plan =
+        output
+            .spec
+            .settings
+            .plan(project.composition(), range.clone(), output.spec.format)?;
     if output.path.exists() {
         return Err(
             "PNG sequence destination must be a new folder; choose another output path".into(),
@@ -588,23 +606,27 @@ pub(crate) fn execute(
         .tempdir_in(output.path.parent().ok_or("Output needs a parent")?)
         .map_err(|e| e.to_string())?;
     let renderer = crate::rendering::Renderer::new();
-    for (index, frame) in range.clone().enumerate() {
+    for index in 0..plan.frames {
+        let frame = plan.source_frame(index);
         if cancel.load(Ordering::Relaxed) {
             return Err("Render canceled; sequence destination unchanged".into());
         }
-        let mut pixels = renderer.render(project, frame, u32::MAX)?;
-        if output.format == Format::PngBackground {
-            crate::rendering::composite_background(
-                &mut pixels,
-                project.composition().background_color(),
-            );
-        }
-        pixels
-            .save(staging.path().join(format!("frame-{frame:06}.png")))
-            .map_err(|e| e.to_string())?;
+        let mut pixels = renderer.render_output(project, frame, plan.width, plan.height)?;
+        output.spec.settings.apply_channels(
+            &mut pixels,
+            output.spec.format,
+            project.composition().background_color(),
+        );
+        std::fs::write(
+            staging
+                .path()
+                .join(format!("frame-{:06}.png", plan.sequence_first() + index)),
+            output.spec.settings.png_bytes(pixels, output.spec.format)?,
+        )
+        .map_err(|e| e.to_string())?;
         progress.store(index as u32 + 1, Ordering::Relaxed);
     }
-    let manifest = serde_json::json!({"composition":project.composition().name(),"fps":project.composition().fps(),"width":project.composition().width(),"height":project.composition().height(),"first_frame":range.start,"rendered_frames":range.len(),"complete":true,"alpha":output.format==Format::PngAlpha,"pattern":"frame-%06d.png"});
+    let manifest = serde_json::json!({"composition":project.composition().name(),"fps":plan.fps,"width":plan.width,"height":plan.height,"first_frame":plan.sequence_first(),"source_range":range,"rendered_frames":plan.frames,"complete":true,"alpha":output.spec.settings.channels(output.spec.format)==crate::output_settings::Channels::Rgba,"pattern":"frame-%06d.png"});
     crate::project_io::write_bytes(
         &staging.path().join("sequence.json"),
         manifest.to_string().as_bytes(),

@@ -1,4 +1,5 @@
 //! Stream composited RGBA frames to FFmpeg; publish only a complete video.
+use crate::output_settings::{Format, RateControl, Settings};
 use crate::rendering::Renderer;
 use libre_effects_core::Project;
 use std::{
@@ -461,16 +462,37 @@ pub(crate) fn export_video(
     cancel: Arc<AtomicBool>,
     progress: Arc<AtomicU32>,
 ) -> Result<(), String> {
-    encode(
+    export_video_with_settings(
         project,
         range,
         preset,
+        &Settings::default(),
+        destination,
+        cancel,
+        progress,
+    )
+}
+pub(crate) fn export_video_with_settings(
+    project: &Project,
+    range: Range<u32>,
+    preset: VideoPreset,
+    settings: &Settings,
+    destination: &Path,
+    cancel: Arc<AtomicBool>,
+    progress: Arc<AtomicU32>,
+) -> Result<(), String> {
+    encode_with_settings(
+        project,
+        range,
+        preset,
+        settings,
         destination,
         &ffmpeg_path(),
         cancel,
         progress,
     )
 }
+#[cfg(test)]
 fn encode(
     project: &Project,
     range: Range<u32>,
@@ -480,7 +502,34 @@ fn encode(
     cancel: Arc<AtomicBool>,
     progress: Arc<AtomicU32>,
 ) -> Result<(), String> {
+    encode_with_settings(
+        project,
+        range,
+        preset,
+        &Settings::default(),
+        destination,
+        executable,
+        cancel,
+        progress,
+    )
+}
+fn encode_with_settings(
+    project: &Project,
+    range: Range<u32>,
+    preset: VideoPreset,
+    settings: &Settings,
+    destination: &Path,
+    executable: &Path,
+    cancel: Arc<AtomicBool>,
+    progress: Arc<AtomicU32>,
+) -> Result<(), String> {
     let comp = project.composition();
+    let format = if preset == VideoPreset::H264 {
+        Format::Mp4
+    } else {
+        Format::MovAlpha
+    };
+    let plan = settings.plan(comp, range.clone(), format)?;
     crate::project_io::validate_render(project, destination, &range)?;
     if range.is_empty() || range.end > comp.duration() {
         return Err("Choose a non-empty work area inside the composition".into());
@@ -510,8 +559,8 @@ fn encode(
         "rgba",
         "-video_size",
     ])
-    .arg(format!("{}x{}", comp.width(), comp.height()))
-    .args(["-framerate", &comp.fps().to_string(), "-i", "pipe:0", "-an"])
+    .arg(format!("{}x{}", plan.width, plan.height))
+    .args(["-framerate", &plan.fps.to_string(), "-i", "pipe:0", "-an"])
     // Working pixels are nonlinear sRGB. Preserve that transfer function, explicitly
     // encode a BT.709 YCbCr matrix at limited range, and tag both the stream/container.
     .args([
@@ -529,15 +578,13 @@ fn encode(
             cmd.arg("-vf")
                 .arg(format!(
                     "pad=ceil(iw/2)*2:ceil(ih/2)*2:color=0x{:06x},scale=in_range=full:out_range=limited:out_color_matrix=bt709,setparams=range=limited:color_primaries=bt709:color_trc=iec61966-2-1:colorspace=bt709",
-                    comp.background_color()
+                    if settings.channels(format)==crate::output_settings::Channels::Alpha {0} else {comp.background_color()}
                 ))
                 .args([
                     "-c:v",
                     "libx264",
                     "-preset",
-                    "medium",
-                    "-crf",
-                    "18",
+                    settings.encoder_speed.as_deref().unwrap_or("medium"),
                     "-pix_fmt",
                     "yuv420p",
                     "-movflags",
@@ -545,6 +592,14 @@ fn encode(
                     "-f",
                     "mp4",
                 ]);
+            match settings.rate_control.unwrap_or(RateControl::Crf(18)) {
+                RateControl::Crf(n) => {
+                    cmd.args(["-crf", &n.to_string()]);
+                }
+                RateControl::Bitrate(n) => {
+                    cmd.args(["-b:v", &format!("{n}k")]);
+                }
+            }
         }
         VideoPreset::ProResAlpha => {
             cmd.args([
@@ -555,9 +610,9 @@ fn encode(
                 "-profile:v",
                 "4",
                 "-pix_fmt",
-                "yuva444p10le",
+                if settings.channels(format)==crate::output_settings::Channels::Rgba {"yuva444p10le"}else{"yuv444p10le"},
                 "-alpha_bits",
-                "16",
+                if settings.channels(format)==crate::output_settings::Channels::Rgba {"16"}else{"0"},
                 "-movflags",
                 "+write_colr",
                 "-f",
@@ -566,7 +621,7 @@ fn encode(
         }
     }
     if comp.display_start() != 0 {
-        cmd.args(["-timecode", &comp.timecode(range.start)]);
+        cmd.args(["-timecode", &plan.timecode]);
     }
     cmd.arg(output.path())
         .stdin(Stdio::piped())
@@ -610,14 +665,13 @@ fn encode(
     });
     let result = (|| {
         let renderer = Renderer::new();
-        for (index, frame) in range.enumerate() {
+        for index in 0..plan.frames {
+            let frame = plan.source_frame(index);
             if cancel.load(Ordering::Relaxed) {
                 return Err("Render canceled".into());
             }
-            let mut pixels = renderer.render(project, frame, u32::MAX)?;
-            if preset == VideoPreset::H264 {
-                crate::rendering::composite_background(&mut pixels, comp.background_color());
-            }
+            let mut pixels = renderer.render_output(project, frame, plan.width, plan.height)?;
+            settings.apply_channels(&mut pixels, format, comp.background_color());
             input
                 .write_all(pixels.as_raw())
                 .map_err(|e| format!("Encoder input failed: {e}"))?;
