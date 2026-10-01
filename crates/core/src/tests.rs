@@ -1293,7 +1293,7 @@ fn serialized_project_roundtrips_animation_and_preserves_ids() {
 fn corrupt_and_future_projects_are_rejected() {
     let editor = editor_with_layer();
     let mut project = editor.project().clone();
-    project.version = 7;
+    project.version = 9;
     assert!(Project::from_json(&project.to_json().unwrap()).is_err());
     project.version = 1;
     project.composition.fps = 0;
@@ -1309,6 +1309,69 @@ fn corrupt_and_future_projects_are_rejected() {
         .properties
         .remove(&Property::AnchorX);
     assert!(Project::from_json(&project.to_json().unwrap()).is_err());
+}
+
+#[test]
+fn work_area_roundtrips_with_images_undoes_and_clamps_on_resize() {
+    let mut e = Editor::default();
+    assert_eq!(e.project().composition().work_area(), 0..150);
+    e.execute(Command::SetWorkArea { start: 30, end: 90 })
+        .unwrap();
+    assert_eq!(e.project().version, 8);
+    let saved = e.project().to_json().unwrap();
+    assert_eq!(
+        Project::from_json(&saved)
+            .unwrap()
+            .composition()
+            .work_area(),
+        30..90
+    );
+    e.undo();
+    assert_eq!(e.project().composition().work_area(), 0..150);
+    e.redo();
+    e.execute(Command::AddContent {
+        content: Content::Image { png: "YWJj".into() },
+        width: 2.0,
+        height: 2.0,
+        name: "Image".into(),
+    })
+    .unwrap();
+    assert_eq!(
+        Project::from_json(&e.project().to_json().unwrap()).unwrap(),
+        *e.project()
+    );
+    e.execute(Command::ConfigureComposition {
+        name: "Short".into(),
+        width: 1920,
+        height: 1080,
+        fps: 30,
+        duration: 20,
+    })
+    .unwrap();
+    assert_eq!(e.project().composition().work_area(), 19..20);
+    let before = e.project().clone();
+    assert!(
+        e.execute(Command::SetWorkArea { start: 20, end: 21 })
+            .is_err()
+    );
+    assert!(
+        e.execute(Command::ConfigureComposition {
+            name: "Too big".into(),
+            width: 8192,
+            height: 8192,
+            fps: 30,
+            duration: 20
+        })
+        .is_err()
+    );
+    assert_eq!(e.project(), &before);
+    assert_eq!(
+        Project::from_json(include_str!("../../../examples/motion-study.lfe.json"))
+            .unwrap()
+            .composition()
+            .work_area(),
+        0..180
+    );
 }
 
 #[test]

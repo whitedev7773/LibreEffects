@@ -29,7 +29,7 @@ pub enum Content {
         font_size: f64,
     },
     Image {
-        png: String,
+        png: std::sync::Arc<str>,
     },
     Video {
         path: String,
@@ -485,11 +485,30 @@ pub(super) fn apply_extended(
                 name,
             } => {
                 validate_content(content, Effects::default(), None)?;
+                let stored_content = match content {
+                    Content::Image { png } => {
+                        let shared = state
+                            .project
+                            .composition
+                            .layers
+                            .iter()
+                            .find_map(|layer| {
+                                if let Content::Image { png: existing } = &layer.content {
+                                    (existing == png).then(|| existing.clone())
+                                } else {
+                                    None
+                                }
+                            })
+                            .unwrap_or_else(|| png.clone());
+                        Content::Image { png: shared }
+                    }
+                    other => other.clone(),
+                };
                 apply(state, Command::AddRectangle)?;
                 let comp = &state.project.composition;
                 let (fps, duration, cw, ch) = (comp.fps, comp.duration, comp.width, comp.height);
                 let l = editable(state, state.selected.unwrap())?;
-                l.content = content.clone();
+                l.content = stored_content;
                 l.width = *width;
                 l.height = *height;
                 l.name = name.clone();

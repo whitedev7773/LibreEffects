@@ -931,11 +931,31 @@ impl Render for Shell {
                     "Save changes before switching projects?"
                 });
             if recovering {
+                let state = self.state.read(cx);
+                dialog = dialog
+                    .child(state.recovery.as_ref().unwrap().label.clone())
+                    .child(format!(
+                        "{} recoverable checkpoint(s)",
+                        state.recovery_pending.len() + 1
+                    ));
                 for (label, restore) in [("Restore autosave", true), ("Discard autosave", false)] {
                     dialog = dialog.child(ui::text_button(label, label).on_click(cx.listener(
                         move |this, _, _, cx| this.state.update(cx, |s, cx| s.recover(restore, cx)),
                     )));
                 }
+                dialog = dialog
+                    .child(
+                        ui::text_button("next-recovery", "Next checkpoint").on_click(cx.listener(
+                            |this, _, _, cx| this.state.update(cx, |s, cx| s.next_recovery(cx)),
+                        )),
+                    )
+                    .child(
+                        ui::text_button("keep-recovery", "Keep backups and start new").on_click(
+                            cx.listener(|this, _, _, cx| {
+                                this.state.update(cx, |s, cx| s.keep_recoveries(cx))
+                            }),
+                        ),
+                    );
             } else {
                 dialog = dialog
                     .child(ui::text_button("close-save", "Save and continue").on_click(

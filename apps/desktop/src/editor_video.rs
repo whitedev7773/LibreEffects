@@ -12,6 +12,7 @@ impl EditorState {
         }
         self.stop();
         let snapshot = self.editor.project().clone();
+        let project_path = self.path.clone();
         let range = self.work_start..self.work_end;
         let total = range.len() as u32;
         let name = format!("render.{}", preset.extension());
@@ -82,6 +83,9 @@ impl EditorState {
             cx.background_executor()
                 .spawn(async move {
                     let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        if let Some(source) = &project_path {
+                            crate::project_io::protect_source(&path, source)?;
+                        }
                         export_video(
                             &snapshot,
                             range,

@@ -2,83 +2,132 @@ use super::*;
 use crate::rendering::Renderer;
 use std::time::Duration;
 
-pub(super) fn recovery_path() -> PathBuf {
-    std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
-        .join("LibreEffects")
-        .join("recovery.lfe.json")
-}
 impl EditorState {
     pub fn dirty(&self) -> bool {
         self.editor.project() != &self.saved
     }
     pub fn recover(&mut self, restore: bool, cx: &mut Context<Self>) {
-        if let Some(project) = self.recovery.take() {
-            if restore {
-                self.document_revision = self.document_revision.wrapping_add(1);
-                let _ = self.editor.replace_project(project);
-                self.path = None;
-                self.work_end = self.editor.project().composition().duration();
-                self.status = "Recovered autosave. Save as to keep it.".into();
-            } else {
-                let _ = std::fs::remove_file(recovery_path());
-            }
+        let Some(candidate) = self.recovery.as_ref() else {
+            return;
+        };
+        let result = if restore {
+            self.recovery_session
+                .as_ref()
+                .ok_or("Recovery session unavailable".to_string())
+                .and_then(|session| {
+                    session
+                        .lock()
+                        .map_err(|e| e.to_string())?
+                        .restore(candidate)
+                })
+        } else {
+            candidate.discard()
+        };
+        if let Err(error) = result {
+            self.status = format!("Recovery failed: {error}");
+            cx.notify();
+            return;
         }
-        self.recovery_ready = true;
+        let candidate = self.recovery.take().unwrap();
+        if restore {
+            self.document_revision = self.document_revision.wrapping_add(1);
+            let _ = self.editor.replace_project(candidate.project);
+            self.editor.clear_history();
+            self.path = None;
+            self.work_end = self.editor.project().composition().duration();
+            self.status = "Recovered checkpoint. Save as to keep it. Other backups remain available at next startup.".into();
+            self.recovery_pending.clear();
+        } else {
+            self.recovery = self.recovery_pending.pop_front();
+        }
+        self.recovery_ready = self.recovery.is_none();
         self.normalize();
         cx.notify();
     }
-    pub fn start_recovery(&mut self, cx: &mut Context<Self>) {
-        let active = self.recovery_active.clone();
-        cx.spawn(async move |entity, cx| {
-            let recovered = cx
-                .background_executor()
-                .spawn(async { read_project(&recovery_path()).ok() })
-                .await;
-            if entity
-                .update(cx, |s, cx| {
-                    s.recovery = recovered;
-                    s.recovery_ready = s.recovery.is_none();
-                    cx.notify();
-                })
-                .is_err()
-            {
-                return;
+    pub fn next_recovery(&mut self, cx: &mut Context<Self>) {
+        if let Some(next) = self.recovery_pending.pop_front() {
+            if let Some(current) = self.recovery.replace(next) {
+                self.recovery_pending.push_back(current);
             }
+        }
+        cx.notify();
+    }
+    pub fn keep_recoveries(&mut self, cx: &mut Context<Self>) {
+        self.recovery = None;
+        self.recovery_pending.clear();
+        self.recovery_ready = true;
+        cx.notify();
+    }
+    pub fn reset_recovery(&self, close: bool) {
+        if let Some(session) = &self.recovery_session {
+            if let Ok(mut session) = session.lock() {
+                let _ = session.reset(close);
+            }
+        }
+    }
+    pub fn clear_recovery(&self) {
+        self.reset_recovery(true);
+    }
+    pub fn start_recovery(&mut self, cx: &mut Context<Self>) {
+        cx.spawn(async move |entity, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async { crate::recovery::Session::start() })
+                .await;
+            let session = match result {
+                Ok((session, candidates, warnings)) => {
+                    let session = std::sync::Arc::new(std::sync::Mutex::new(session));
+                    if entity
+                        .update(cx, |s, cx| {
+                            s.recovery_session = Some(session.clone());
+                            s.recovery_pending = candidates.into();
+                            s.recovery = s.recovery_pending.pop_front();
+                            s.recovery_ready = s.recovery.is_none();
+                            if !warnings.is_empty() {
+                                s.status = warnings.join("  ");
+                            }
+                            cx.notify();
+                        })
+                        .is_err()
+                    {
+                        return;
+                    }
+                    session
+                }
+                Err(error) => {
+                    let _ = entity.update(cx, |s, cx| {
+                        s.recovery_ready = true;
+                        s.status = format!("Autosave unavailable: {error}");
+                        cx.notify();
+                    });
+                    return;
+                }
+            };
             let mut previous = None;
             loop {
                 gpui::Timer::after(Duration::from_secs(5)).await;
                 let Ok(snapshot) = entity.update(cx, |s, _| {
-                    if s.recovery_ready && s.dirty() {
-                        Some(s.editor.project().clone())
-                    } else {
-                        None
-                    }
+                    let generation = session.lock().ok()?.generation;
+                    s.recovery_ready
+                        .then(|| (generation, s.dirty().then(|| s.editor.project().clone())))
                 }) else {
                     return;
                 };
-                if snapshot == previous {
+                let Some(snapshot) = snapshot else {
+                    continue;
+                };
+                if Some(&snapshot) == previous.as_ref() {
                     continue;
                 }
-                previous = snapshot.clone();
-                let active = active.clone();
+                previous = Some(snapshot.clone());
+                let session = session.clone();
                 let result = cx
                     .background_executor()
                     .spawn(async move {
-                        let enabled = active.lock().map_err(|e| e.to_string())?;
-                        if !*enabled {
-                            return Ok(());
-                        }
-                        let path = recovery_path();
-                        if let Some(project) = snapshot {
-                            std::fs::create_dir_all(path.parent().unwrap())
-                                .map_err(|e| e.to_string())?;
-                            write_project(&path, &project.to_json()?)
-                        } else {
-                            let _ = std::fs::remove_file(path);
-                            Ok(())
-                        }
+                        session
+                            .lock()
+                            .map_err(|e| e.to_string())?
+                            .checkpoint(snapshot.0, snapshot.1.as_ref())
                     })
                     .await;
                 if let Err(error) = result {
@@ -91,13 +140,6 @@ impl EditorState {
             }
         })
         .detach();
-    }
-    pub fn clear_recovery(&self) {
-        let Ok(mut active) = self.recovery_active.lock() else {
-            return;
-        };
-        *active = false;
-        let _ = std::fs::remove_file(recovery_path());
     }
     pub(super) fn open(&mut self, cx: &mut Context<Self>) {
         self.stop();
@@ -122,6 +164,7 @@ impl EditorState {
             let _ = entity.update(cx, |s, cx| {
                 match result {
                     Ok(project) => {
+                        s.reset_recovery(false);
                         s.document_revision = s.document_revision.wrapping_add(1);
                         s.saved = project.clone();
                         let _ = s.editor.replace_project(project);
@@ -261,6 +304,7 @@ impl EditorState {
         self.stop();
         self.video_job = None;
         let project = self.editor.project().clone();
+        let project_path = self.path.clone();
         let range = if sequence {
             self.work_start..self.work_end
         } else {
@@ -330,6 +374,7 @@ impl EditorState {
                     break;
                 }
                 let (renderer, project) = (renderer.clone(), project.clone());
+                let project_path = project_path.clone();
                 let destination = if sequence {
                     output.join(format!("frame-{frame:06}.png"))
                 } else {
@@ -338,6 +383,10 @@ impl EditorState {
                 let result = cx
                     .background_executor()
                     .spawn(async move {
+                        if let Some(source) = &project_path {
+                            crate::project_io::protect_source(&destination, source)?;
+                        }
+                        crate::project_io::validate_render(&project, &destination, &(frame..frame + 1))?;
                         let mut pixels = renderer.render(&project, frame, u32::MAX)?;
                         if background {
                             crate::rendering::composite_background(&mut pixels, project.composition().background_color());

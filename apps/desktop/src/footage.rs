@@ -26,7 +26,7 @@ fn command(executable: &Path) -> Command {
     }
     c
 }
-fn probe_path() -> PathBuf {
+pub(crate) fn probe_path() -> PathBuf {
     if let Some(p) = std::env::var_os("LIBRE_EFFECTS_FFPROBE") {
         return p.into();
     }

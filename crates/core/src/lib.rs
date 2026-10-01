@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub type Frame = u32;
 pub type LayerId = u64;
 
+mod document;
 mod editing;
 mod geometry;
 pub use editing::{Content, Effects, KeyCopy, KeyRef, Mask, VideoPlayback};
@@ -279,6 +280,8 @@ pub struct Composition {
     /// Preview and opaque-output matte; does not change the composition's alpha.
     #[serde(default)]
     background_color: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    work_area: Option<[Frame; 2]>,
     layers: Vec<Layer>,
 }
 
@@ -354,6 +357,10 @@ impl Composition {
     pub fn background_color(&self) -> u32 {
         self.background_color
     }
+    pub fn work_area(&self) -> std::ops::Range<Frame> {
+        let [start, end] = self.work_area.unwrap_or([0, self.duration]);
+        start..end
+    }
     pub fn layers(&self) -> &[Layer] {
         &self.layers
     }
@@ -381,6 +388,7 @@ impl Default for Project {
                 fps: 30,
                 duration: 150,
                 background_color: 0x000000,
+                work_area: None,
                 layers: Vec::new(),
             },
         }
@@ -393,18 +401,18 @@ impl Project {
     }
 
     pub fn to_json(&self) -> Result<String, String> {
-        serde_json::to_string_pretty(self).map_err(|error| error.to_string())
+        document::encode(self)
     }
 
     pub fn from_json(json: &str) -> Result<Self, String> {
-        let project: Self = serde_json::from_str(json).map_err(|error| error.to_string())?;
+        let project = document::decode(json)?;
         project.validate()?;
         Ok(project)
     }
 
     fn validate(&self) -> Result<(), String> {
         let comp = &self.composition;
-        if !(1..=6).contains(&self.version) {
+        if !(1..=8).contains(&self.version) {
             return Err("Unsupported project version".into());
         }
         if !(1..=16_384).contains(&comp.width)
@@ -415,11 +423,23 @@ impl Project {
             || comp.layers.len() > 1_000
             || comp.name.len() > 1024
             || comp.background_color > 0xffffff
+            || comp.work_area().is_empty()
+            || comp.work_area().end > comp.duration
         {
             return Err("Invalid composition settings".into());
         }
         let mut ids = BTreeSet::new();
+        let mut images = BTreeSet::new();
+        let mut image_bytes = 0usize;
         for layer in &comp.layers {
+            if let Content::Image { png } = &layer.content {
+                if images.insert(png.as_ptr() as usize) {
+                    image_bytes = image_bytes.saturating_add(png.len());
+                }
+                if image_bytes > document::MAX_IMAGE_BYTES {
+                    return Err("Embedded images exceed 128 MiB. Remove unused image layers before importing more.".into());
+                }
+            }
             editing::validate_content(&layer.content, layer.effects, layer.mask)?;
             if layer.id == 0
                 || !layer.transform_offset.valid()
@@ -466,6 +486,10 @@ impl Project {
 pub enum Command {
     Batch(Vec<Command>),
     SetCompositionBackground(u32),
+    SetWorkArea {
+        start: Frame,
+        end: Frame,
+    },
     AddBackgroundSolid,
     TrimLayers {
         ids: Vec<LayerId>,
@@ -730,6 +754,18 @@ impl Editor {
         if next.project.composition.background_color != 0 {
             next.project.version = 6;
         }
+        if next
+            .project
+            .composition
+            .layers
+            .iter()
+            .any(|l| matches!(l.content, Content::Image { .. }))
+        {
+            next.project.version = 7;
+        }
+        if next.project.composition.work_area.is_some() {
+            next.project.version = 8;
+        }
         next.project.validate()?;
         if next != self.current {
             let previous = std::mem::replace(&mut self.current, next);
@@ -740,6 +776,14 @@ impl Editor {
 }
 
 fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
+    if let Command::SetWorkArea { start, end } = command {
+        let comp = &mut state.project.composition;
+        if start >= end || end > comp.duration {
+            return Err("Work area must be nonempty and inside the composition".into());
+        }
+        comp.work_area = (start != 0 || end != comp.duration).then_some([start, end]);
+        return Ok(());
+    }
     if let Command::SetCompositionBackground(color) = command {
         if color > 0xffffff {
             return Err("Background color must be a 24-bit RGB color".into());
@@ -876,6 +920,9 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
         duration,
     } = &command
     {
+        if *width as u64 * *height as u64 > 33_554_432 {
+            return Err("Composition exceeds the 32 megapixel render limit".into());
+        }
         if name.trim().is_empty()
             || name.len() > 1024
             || !(1..=16_384).contains(width)
@@ -901,6 +948,9 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
         comp.height = *height;
         comp.fps = *fps;
         comp.duration = *duration;
+        if let Some([start, end]) = comp.work_area {
+            comp.work_area = Some([start.min(duration - 1), end.min(*duration)]);
+        }
         return Ok(());
     }
     if let Command::AddRectangle = command {

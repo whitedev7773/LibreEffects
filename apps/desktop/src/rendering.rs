@@ -25,9 +25,13 @@ pub(crate) fn composite_background(pixels: &mut image::RgbaImage, color: u32) {
     }
 }
 pub(crate) fn validate_images(project: &Project) -> Result<(), String> {
+    let mut seen = std::collections::HashSet::new();
     for layer in project.composition().layers() {
         if let Content::Image { png } = layer.content() {
-            let bytes = STANDARD.decode(png).map_err(|e| e.to_string())?;
+            if !seen.insert(png.as_ptr() as usize) {
+                continue;
+            }
+            let bytes = STANDARD.decode(png.as_bytes()).map_err(|e| e.to_string())?;
             let mut reader =
                 image::ImageReader::with_format(Cursor::new(bytes), image::ImageFormat::Png);
             reader.limits(image_limits());
@@ -203,7 +207,7 @@ pub(crate) fn import_image(path: &Path) -> Result<(Content, u32, u32), String> {
     if png.len() > 12 * 1024 * 1024 {
         return Err("Decoded image is too large to embed".into());
     }
-    Ok((Content::Image { png }, w, h))
+    Ok((Content::Image { png: png.into() }, w, h))
 }
 
 #[cfg(test)]

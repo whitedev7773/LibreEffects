@@ -2943,6 +2943,7 @@ dependencies = [
  "image",
  "libre-effects-core",
  "resvg",
+ "same-file",
  "serde_json",
  "tempfile",
 ]

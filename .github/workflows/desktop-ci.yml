@@ -1,0 +1,40 @@
+name: Desktop validation
+
+on:
+  push:
+    paths: ['apps/desktop/**', 'crates/core/**', 'examples/**', 'Cargo.*', '.prototools', '.github/workflows/desktop-ci.yml']
+  pull_request:
+    paths: ['apps/desktop/**', 'crates/core/**', 'examples/**', 'Cargo.*', '.prototools', '.github/workflows/desktop-ci.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust and media tools
+        shell: pwsh
+        run: |
+          $rustVersion = ((Get-Content .prototools | Select-String '^rust\s*=\s*"([^"]+)"').Matches.Groups[1].Value)
+          rustup toolchain install $rustVersion --profile minimal --component rustfmt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustup default $rustVersion
+          choco install ffmpeg --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $compiler = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\fxc.exe' | Sort-Object FullName -Descending | Select-Object -First 1
+          if (!$compiler) { throw 'Windows SDK fxc.exe not found' }
+          "GPUI_FXC_PATH=$($compiler.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Check formatting
+        run: cargo fmt --all --check
+      - name: Type check
+        run: cargo check -p libre-effects-desktop --locked
+      - name: Unit and regression tests
+        run: cargo test --workspace --locked
+      - name: Explicit media integration tests
+        run: cargo test -p libre-effects-desktop --locked -- --ignored
+      - name: Build release
+        run: cargo build -p libre-effects-desktop --release --locked

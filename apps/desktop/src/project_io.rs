@@ -3,9 +3,48 @@ use std::{
     path::Path,
 };
 
-use libre_effects_core::Project;
+use libre_effects_core::{Content, Project};
 
-const MAX_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_BYTES: u64 = 256 * 1024 * 1024;
+
+pub(crate) fn protect_source(destination: &Path, source: &Path) -> Result<(), String> {
+    if destination.exists() && source.exists() {
+        if same_file::is_same_file(destination, source).map_err(|e| e.to_string())? {
+            return Err(format!(
+                "Output would replace a source file: {}. Choose another destination.",
+                source.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_render(
+    project: &Project,
+    destination: &Path,
+    range: &std::ops::Range<u32>,
+) -> Result<(), String> {
+    let comp = project.composition();
+    if range.is_empty() || range.end > comp.duration() {
+        return Err("Choose a non-empty frame range inside the composition".into());
+    }
+    if comp.width() as u64 * comp.height() as u64 > 33_554_432 {
+        return Err("Rendering supports up to 32 megapixels per frame".into());
+    }
+    for layer in comp.layers() {
+        if let Content::Video { path, .. } = layer.content() {
+            protect_source(destination, Path::new(path))?;
+            if layer.visible()
+                && layer.in_frame() < range.end
+                && layer.out_frame(comp.duration()) > range.start
+                && !Path::new(path).is_file()
+            {
+                return Err(format!("Footage offline: {path}. Relink before rendering."));
+            }
+        }
+    }
+    Ok(())
+}
 
 pub(crate) fn read_project(path: &Path) -> Result<Project, String> {
     let mut json = String::new();
@@ -15,7 +54,7 @@ pub(crate) fn read_project(path: &Path) -> Result<Project, String> {
         .read_to_string(&mut json)
         .map_err(|error| error.to_string())?;
     if json.len() as u64 > MAX_BYTES {
-        return Err("Project exceeds 16 MiB".into());
+        return Err("Project exceeds 256 MiB".into());
     }
     let project = Project::from_json(&json)?;
     crate::rendering::validate_images(&project)?;
@@ -23,10 +62,14 @@ pub(crate) fn read_project(path: &Path) -> Result<Project, String> {
 }
 
 pub(crate) fn write_project(path: &Path, json: &str) -> Result<(), String> {
-    if json.len() as u64 > MAX_BYTES {
-        return Err("Project exceeds 16 MiB".into());
-    }
+    validate_project_size(json)?;
     write_bytes(path, json.as_bytes())
+}
+pub(crate) fn validate_project_size(json: &str) -> Result<(), String> {
+    if json.len() as u64 > MAX_BYTES {
+        return Err("Project exceeds 256 MiB".into());
+    }
+    Ok(())
 }
 pub(crate) fn write_bytes(path: &Path, data: &[u8]) -> Result<(), String> {
     let directory = path
@@ -51,6 +94,46 @@ pub(crate) fn write_bytes(path: &Path, data: &[u8]) -> Result<(), String> {
 mod tests {
     use super::*;
     use libre_effects_core::{Command, Editor};
+
+    #[test]
+    fn render_preflight_protects_sources_including_hardlinks_and_missing_media() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source.mp4");
+        let alias = dir.path().join("alias.mp4");
+        std::fs::write(&source, b"irreplaceable source").unwrap();
+        std::fs::hard_link(&source, &alias).unwrap();
+        let mut e = Editor::default();
+        e.execute(Command::AddContent {
+            content: Content::Video {
+                path: source.to_string_lossy().into_owned(),
+                duration: 5.0,
+                source_fps: 30.0,
+                start_frame: 0,
+                playback: Default::default(),
+            },
+            width: 16.0,
+            height: 16.0,
+            name: "Source".into(),
+        })
+        .unwrap();
+        for destination in [&source, &alias] {
+            assert!(
+                validate_render(e.project(), destination, &(0..5))
+                    .unwrap_err()
+                    .contains("replace a source")
+            );
+        }
+        assert_eq!(std::fs::read(&source).unwrap(), b"irreplaceable source");
+        let output = dir.path().join("output.mp4");
+        validate_render(e.project(), &output, &(0..5)).unwrap();
+        std::fs::remove_file(&source).unwrap();
+        assert!(
+            validate_render(e.project(), &output, &(0..5))
+                .unwrap_err()
+                .contains("offline")
+        );
+        assert!(!output.exists());
+    }
 
     #[test]
     fn opening_corrupt_embedded_image_reports_error() {

@@ -14,6 +14,7 @@ mod editor;
 mod footage;
 mod panels;
 mod project_io;
+mod recovery;
 mod rendering;
 mod shell;
 mod theme;

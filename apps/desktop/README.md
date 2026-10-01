@@ -97,7 +97,8 @@ a diamond to change its timing.
   inverts time before evaluating progress. Preview opacity is clamped to 0–100%.
 - Drag the ruler to scrub. Timeline zoom and pan keep frame mapping consistent.
 - B/N set the beginning/end of the playback work area. Playback loops within it.
-  Work area, viewport position, selection and panel layout are session state.
+  Work area is saved with the composition and supports Undo/Redo. Viewport position,
+  selection and panel layout remain session state.
 
 ## Graph Editor
 
@@ -344,10 +345,14 @@ Versioned .lfe.json files contain the composition, layer ranges, transforms and
 keyframes. Files from the initial rectangle editor remain readable. Bezier or
 parenting edits upgrade the project to version 2; text, images, masks or effects
 upgrade it to version 3; linked videos require version 4, and altered video playback
-requires version 5. Nonblack composition backgrounds require version 6. Older applications reject
+requires version 5. Nonblack composition backgrounds require version 6; shared embedded image assets require version 7, and saved work areas require version 8. Older applications reject
 unsupported versions. Save writes
 the snapshot captured when clicked using a temporary file before replacement.
-The size limit is 16 MiB. Undo history is capped at 100 edits and is reset at a
+Files are limited to 256 MiB, with up to 128 MiB of unique base64 image data and
+16 MiB of compact metadata when saving. Image payloads are stored once in the
+version 7 asset table; duplicates and Undo snapshots share immutable image memory.
+Older inline-image projects are upgraded when opened. Undo history is capped at
+100 edits and is reset at a
 New/Open document boundary. Failed saves leave the edited project intact.
 
 An asterisk in the window title indicates unsaved changes. Ctrl+S saves to the
@@ -355,11 +360,29 @@ current file; Ctrl+Shift+S chooses another path. Closing, New and Open offer
 Save / Discard / Cancel when there are changes. Save and continue proceeds only
 after a successful save. Canceling a file picker does not discard the document.
 
-Changed unsaved projects are checkpointed every five seconds under
-`%LOCALAPPDATA%/LibreEffects/recovery.lfe.json`. After an interrupted session,
-startup offers Restore or Discard. Restoring creates an unsaved document so the
-original file is not overwritten. This is one recovery slot for one running app
-instance, not a versioned backup system. A normal save/discard close clears it.
+Changed unsaved projects are checkpointed every five seconds in a uniquely named
+slot under `%LOCALAPPDATA%/LibreEffects/recovery/`. Each running instance holds an
+OS file lock; other instances neither offer nor remove its checkpoints. Each slot
+keeps a current and previous checkpoint. After an interrupted session, startup
+lets you browse abandoned slots and Restore, Discard, or keep them for later.
+A damaged current checkpoint falls back to the previous one when it is readable.
+Restore first copies the project into the current instance's slot and opens an
+unsaved document; saving the original is an explicit later action. Closing or
+switching documents cleans only the current slot, and queued older writes cannot
+recreate it. Corrupt unreadable slots are preserved and reported. Small lock files
+remain on disk. Old `recovery.lfe.json` files are preserved untouched and can be
+restored using File > Open, including while an older application is running.
+
+Render preflight rejects output destinations that identify a linked source file
+(including hard links), and GUI/CLI exports also protect the open/input project.
+Missing visible footage and compositions over the 32 megapixel output limit fail
+before video encoding. New composition settings enforce that pixel limit.
+
+SDR output assumes nonlinear sRGB working pixels, explicitly converts to a BT.709
+YCbCr matrix at limited range, and records BT.709 primaries with the sRGB transfer
+function in MP4/ProRes metadata. ProRes retains alpha. This defines the current
+8-bit output policy; ICC-aware import, monitor transforms, HDR and linear-light
+compositing remain pending. Playback applications may handle color tags differently.
 
 ## Render from the command line
 
@@ -404,6 +427,8 @@ moon run desktop:dev
 moon run desktop:check
 moon run desktop:build
 cargo test --workspace
+moon run desktop:test
+moon run desktop:test-media
 cargo fmt --all --check
 ~~~
 
@@ -413,6 +438,10 @@ timing and alpha, and cancel an active encoder while preserving the destination:
 ~~~sh
 cargo test -p libre-effects-desktop -- --ignored
 ~~~
+
+The dedicated Windows desktop CI installs FFmpeg and runs checks, formatting,
+workspace tests, the explicit media suite and a release build. The Moon desktop
+`test` task joins normal CI; `test-media` is explicit because it needs FFmpeg.
 
 These six tests are explicitly ignored in the default suite when FFmpeg/FFprobe
 are not declared test dependencies. They also check footage import, different

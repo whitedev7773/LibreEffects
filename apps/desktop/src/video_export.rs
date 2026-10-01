@@ -108,6 +108,29 @@ mod tests {
             )
             .unwrap();
             assert_eq!(progress.load(Ordering::Relaxed), 3);
+            let metadata = command(&crate::footage::probe_path())
+                .args([
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "v:0",
+                    "-show_entries",
+                    "stream=color_range,color_space,color_transfer,color_primaries",
+                    "-of",
+                    "json",
+                ])
+                .arg(&path)
+                .output()
+                .unwrap();
+            assert!(metadata.status.success());
+            let metadata: serde_json::Value = serde_json::from_slice(&metadata.stdout).unwrap();
+            let stream = &metadata["streams"][0];
+            assert_eq!(stream["color_space"], "bt709");
+            assert_eq!(stream["color_primaries"], "bt709");
+            assert_eq!(stream["color_transfer"], "iec61966-2-1");
+            if preset == VideoPreset::H264 {
+                assert_eq!(stream["color_range"], "tv");
+            }
             let decoded = command(&ffmpeg_path())
                 .args(["-v", "error", "-i"])
                 .arg(&path)
@@ -326,6 +349,7 @@ fn encode(
     progress: Arc<AtomicU32>,
 ) -> Result<(), String> {
     let comp = project.composition();
+    crate::project_io::validate_render(project, destination, &range)?;
     if range.is_empty() || range.end > comp.duration() {
         return Err("Choose a non-empty work area inside the composition".into());
     }
@@ -355,12 +379,24 @@ fn encode(
         "-video_size",
     ])
     .arg(format!("{}x{}", comp.width(), comp.height()))
-    .args(["-framerate", &comp.fps().to_string(), "-i", "pipe:0", "-an"]);
+    .args(["-framerate", &comp.fps().to_string(), "-i", "pipe:0", "-an"])
+    // Working pixels are nonlinear sRGB. Preserve that transfer function, explicitly
+    // encode a BT.709 YCbCr matrix at limited range, and tag both the stream/container.
+    .args([
+        "-color_primaries",
+        "bt709",
+        "-color_trc",
+        "iec61966-2-1",
+        "-colorspace",
+        "bt709",
+        "-color_range",
+        "tv",
+    ]);
     match preset {
         VideoPreset::H264 => {
             cmd.arg("-vf")
                 .arg(format!(
-                    "pad=ceil(iw/2)*2:ceil(ih/2)*2:color=0x{:06x}",
+                    "pad=ceil(iw/2)*2:ceil(ih/2)*2:color=0x{:06x},scale=in_range=full:out_range=limited:out_color_matrix=bt709,setparams=range=limited:color_primaries=bt709:color_trc=iec61966-2-1:colorspace=bt709",
                     comp.background_color()
                 ))
                 .args([
@@ -380,6 +416,8 @@ fn encode(
         }
         VideoPreset::ProResAlpha => {
             cmd.args([
+                "-vf",
+                "scale=in_range=full:out_range=limited:out_color_matrix=bt709,setparams=range=limited:color_primaries=bt709:color_trc=iec61966-2-1:colorspace=bt709",
                 "-c:v",
                 "prores_ks",
                 "-profile:v",
@@ -388,6 +426,8 @@ fn encode(
                 "yuva444p10le",
                 "-alpha_bits",
                 "16",
+                "-movflags",
+                "+write_colr",
                 "-f",
                 "mov",
             ]);

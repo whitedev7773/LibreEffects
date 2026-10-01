@@ -114,9 +114,10 @@ pub(crate) struct EditorState {
     pub saving: bool,
     pub request_open: bool,
     pub close_after_save: bool,
-    pub recovery: Option<Project>,
+    pub recovery: Option<crate::recovery::Candidate>,
+    pub recovery_pending: std::collections::VecDeque<crate::recovery::Candidate>,
+    recovery_session: Option<std::sync::Arc<std::sync::Mutex<crate::recovery::Session>>>,
     recovery_ready: bool,
-    recovery_active: std::sync::Arc<std::sync::Mutex<bool>>,
     pub exporting: bool,
     pub video_job: Option<VideoJob>,
     export_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -157,7 +158,8 @@ impl Default for EditorState {
             close_after_save: false,
             recovery: None,
             recovery_ready: false,
-            recovery_active: std::sync::Arc::new(std::sync::Mutex::new(true)),
+            recovery_pending: Default::default(),
+            recovery_session: None,
             exporting: false,
             video_job: None,
             export_cancel: Default::default(),
@@ -218,8 +220,9 @@ impl EditorState {
         }
         let duration = self.editor.project().composition().duration();
         self.frame = self.frame.min(duration - 1);
-        self.work_start = self.work_start.min(duration - 1);
-        self.work_end = self.work_end.min(duration).max(self.work_start + 1);
+        let work_area = self.editor.project().composition().work_area();
+        self.work_start = work_area.start;
+        self.work_end = work_area.end;
         self.timeline_start = self
             .timeline_start
             .min(duration.saturating_sub(self.visible_frames()));
@@ -481,12 +484,22 @@ impl EditorState {
             Action::Checkerboard => self.checkerboard = !self.checkerboard,
             Action::SetTool(tool) => self.tool = *tool,
             Action::WorkStart => {
-                self.work_start = self.frame;
-                self.work_end = self.work_end.max(self.frame + 1);
+                self.stop();
+                if let Err(error) = self.editor.execute(Command::SetWorkArea {
+                    start: self.frame,
+                    end: self.work_end.max(self.frame + 1),
+                }) {
+                    self.status = error;
+                }
             }
             Action::WorkEnd => {
-                self.work_end = self.frame + 1;
-                self.work_start = self.work_start.min(self.frame);
+                self.stop();
+                if let Err(error) = self.editor.execute(Command::SetWorkArea {
+                    start: self.work_start.min(self.frame),
+                    end: self.frame + 1,
+                }) {
+                    self.status = error;
+                }
             }
             Action::ToggleExpanded => self.expanded = !self.expanded,
             Action::Filter(filter) => {
@@ -564,6 +577,7 @@ impl EditorState {
                 self.step_history(matches!(action, Action::Redo));
             }
             Action::New => {
+                self.reset_recovery(false);
                 self.document_revision = self.document_revision.wrapping_add(1);
                 self.stop();
                 match self.editor.replace_project(Project::default()) {

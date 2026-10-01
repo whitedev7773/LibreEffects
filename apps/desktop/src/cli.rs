@@ -79,6 +79,7 @@ fn render(options: Options) -> Result<(), String> {
         return Err("--png-background applies only to PNG output".into());
     }
     let project = crate::project_io::read_project(&options.project)?;
+    crate::project_io::protect_source(&options.output, &options.project)?;
     let end = options.end.unwrap_or_else(|| {
         if extension == "png" {
             options.start.saturating_add(1)
@@ -93,6 +94,7 @@ fn render(options: Options) -> Result<(), String> {
         if end - options.start != 1 {
             return Err("PNG output requires exactly one frame".into());
         }
+        crate::project_io::validate_render(&project, &options.output, &(options.start..end))?;
         let mut pixels =
             crate::rendering::Renderer::new().render(&project, options.start, u32::MAX)?;
         if options.png_background {
