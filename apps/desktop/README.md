@@ -386,6 +386,9 @@ use `--output title.png --start 30 --png-background`. Use `--help` for syntax.
 
 ## Remaining limitations
 
+See [the development backlog](DEVELOPMENT_BACKLOG.md) for the current capability
+audit, priorities, dependencies and proposed acceptance criteria.
+
 Still pending: multiple compositions and precompositions, audio footage,
 audio output, freeform/animated masks, an effect stack and animated effects,
 rich text layout, 3D, JSX, ExtendScript and expressions. PNG sequences can be
