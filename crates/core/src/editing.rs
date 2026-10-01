@@ -109,6 +109,8 @@ pub(super) fn apply_extended(
     if !matches!(
         command,
         Command::Batch(_)
+            | Command::TrimLayers { .. }
+            | Command::NudgeLayers { .. }
             | Command::DuplicateLayers(_)
             | Command::SplitLayers { .. }
             | Command::SetAnchor { .. }
@@ -126,6 +128,62 @@ pub(super) fn apply_extended(
     }
     Some((|| {
         match command {
+            Command::TrimLayers { ids, frame, start } => {
+                let duration = state.project.composition.duration;
+                if *frame >= duration || ids.is_empty() {
+                    return Err("Select layers and a frame inside the composition".into());
+                }
+                for id in ids.iter().copied().collect::<BTreeSet<_>>() {
+                    let layer = editable(state, id)?;
+                    let (a, b) = if *start {
+                        (*frame, layer.out_frame(duration))
+                    } else {
+                        (layer.in_frame, frame + 1)
+                    };
+                    apply(
+                        state,
+                        Command::SetLayerRange {
+                            id,
+                            start: a,
+                            end: b,
+                        },
+                    )?;
+                }
+            }
+            Command::NudgeLayers { ids, frame, delta } => {
+                let ids: BTreeSet<_> = ids.iter().copied().collect();
+                if ids.is_empty() {
+                    return Err("Select a layer first".into());
+                }
+                for id in &ids {
+                    editable(state, *id)?;
+                }
+                let comp = &state.project.composition;
+                let commands: Result<Vec<_>, String> = ids
+                    .iter()
+                    .filter(|id| {
+                        !ids.iter()
+                            .any(|parent| parent != *id && !comp.can_parent(*parent, Some(**id)))
+                    })
+                    .map(|id| {
+                        let layer = comp.layer(*id).ok_or("Layer not found")?;
+                        let space = comp
+                            .position_space(*id, *frame)
+                            .and_then(Affine::inverse)
+                            .ok_or("Layer transform cannot be inverted")?;
+                        let d = space.vector(*delta);
+                        Ok(Command::SetPosition {
+                            id: *id,
+                            frame: *frame,
+                            x: layer.property(Property::PositionX).value_at(*frame) + d[0],
+                            y: layer.property(Property::PositionY).value_at(*frame) + d[1],
+                        })
+                    })
+                    .collect();
+                for command in commands? {
+                    apply(state, command)?;
+                }
+            }
             Command::DuplicateLayers(ids) | Command::SplitLayers { ids, .. } => {
                 let ids: BTreeSet<_> = ids.iter().copied().collect();
                 if ids.is_empty() {

@@ -457,6 +457,16 @@ impl Project {
 #[derive(Clone, Debug)]
 pub enum Command {
     Batch(Vec<Command>),
+    TrimLayers {
+        ids: Vec<LayerId>,
+        frame: Frame,
+        start: bool,
+    },
+    NudgeLayers {
+        ids: Vec<LayerId>,
+        frame: Frame,
+        delta: [f64; 2],
+    },
     DuplicateLayers(Vec<LayerId>),
     SplitLayers {
         ids: Vec<LayerId>,

@@ -13,6 +13,15 @@ use crate::components::{Button, ButtonSize, ButtonVariant};
 use crate::project_io::{read_project, write_project};
 #[path = "editor_io.rs"]
 mod io;
+#[path = "editor_video.rs"]
+mod video;
+#[derive(Clone)]
+pub(crate) struct VideoJob {
+    pub label: String,
+    pub progress: u32,
+    pub total: u32,
+    pub message: String,
+}
 
 #[derive(Clone)]
 pub(crate) enum Action {
@@ -32,17 +41,22 @@ pub(crate) enum Action {
     AddText,
     ExportFrame,
     ExportSequence,
+    ExportVideo(crate::video_export::VideoPreset),
+    DismissRender,
     CancelExport,
     CopyKeys,
     PasteKeys,
     DeleteSelection,
     DuplicateSelection,
     SplitSelection,
+    TrimSelection(bool),
+    NudgeSelection(f64, f64),
     SelectMany(LayerId, bool, bool),
     ZoomTimeline(f32),
     PanTimeline(i32),
     ZoomPreview(f32),
     FitPreview,
+    CyclePreviewResolution,
     Checkerboard,
     SetTool(Tool),
     WorkStart,
@@ -97,6 +111,7 @@ pub(crate) struct EditorState {
     recovery_ready: bool,
     recovery_active: std::sync::Arc<std::sync::Mutex<bool>>,
     pub exporting: bool,
+    pub video_job: Option<VideoJob>,
     export_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub editor: Editor,
     pub frame: Frame,
@@ -105,6 +120,7 @@ pub(crate) struct EditorState {
     pub timeline_zoom: f32,
     pub timeline_start: Frame,
     pub preview_zoom: Option<f32>,
+    pub preview_resolution: u32,
     pub checkerboard: bool,
     pub tool: Tool,
     pub work_start: Frame,
@@ -133,6 +149,7 @@ impl Default for EditorState {
             recovery_ready: false,
             recovery_active: std::sync::Arc::new(std::sync::Mutex::new(true)),
             exporting: false,
+            video_job: None,
             export_cancel: Default::default(),
             editor: Editor::default(),
             frame: 0,
@@ -141,6 +158,7 @@ impl Default for EditorState {
             timeline_zoom: 1.0,
             timeline_start: 0,
             preview_zoom: None,
+            preview_resolution: 1,
             checkerboard: false,
             tool: Tool::Select,
             work_start: 0,
@@ -372,7 +390,31 @@ impl EditorState {
             ),
             Action::ImportImage => self.import(cx),
             Action::ExportFrame => self.export(false, cx),
+            Action::TrimSelection(start) => self.dispatch(
+                &Action::Edit(Command::TrimLayers {
+                    ids: self.selected_layers.iter().copied().collect(),
+                    frame: self.frame,
+                    start: *start,
+                }),
+                window,
+                cx,
+            ),
+            Action::NudgeSelection(x, y) => self.dispatch(
+                &Action::Edit(Command::NudgeLayers {
+                    ids: self.selected_layers.iter().copied().collect(),
+                    frame: self.frame,
+                    delta: [*x, *y],
+                }),
+                window,
+                cx,
+            ),
             Action::ExportSequence => self.export(true, cx),
+            Action::ExportVideo(preset) => self.export_video(*preset, cx),
+            Action::DismissRender => {
+                if !self.exporting {
+                    self.video_job = None;
+                }
+            }
             Action::CancelExport => self
                 .export_cancel
                 .store(true, std::sync::atomic::Ordering::Relaxed),
@@ -390,6 +432,13 @@ impl EditorState {
                     Some((self.preview_zoom.unwrap_or(0.5) * factor).clamp(0.0625, 8.0))
             }
             Action::FitPreview => self.preview_zoom = None,
+            Action::CyclePreviewResolution => {
+                self.preview_resolution = if self.preview_resolution == 4 {
+                    1
+                } else {
+                    self.preview_resolution * 2
+                }
+            }
             Action::Checkerboard => self.checkerboard = !self.checkerboard,
             Action::SetTool(tool) => self.tool = *tool,
             Action::WorkStart => {

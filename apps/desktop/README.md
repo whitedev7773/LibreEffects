@@ -139,6 +139,8 @@ cargo run -p libre-effects-core --example make_animation_study -- examples/curve
 | Ctrl+K | Composition settings |
 | V / H / W / Y | Selection / Hand / Rotation / Anchor Point tool |
 | Ctrl+Shift+D | Split selected layers at the playhead |
+| Alt+[ / Alt+] | Trim selected layers' In / Out to the playhead |
+| Arrow keys / Shift+Arrow | Move selected layers 1 / 10 composition pixels |
 | Space | Play / Pause |
 | Home / End | First / Last composition frame |
 | Page Up / Page Down | Previous / Next frame (Shift: 10 frames) |
@@ -184,6 +186,56 @@ dimensions, frame range and completion status in `sequence.json`. Cancel render
 stops after the current frame and keeps completed files. Export uses a project
 snapshot, so editing during a render does not change its output. The preview is
 limited to 1280 pixels on its longest side; exports support up to 32 megapixels.
+Click Full / Half / Quarter below the composition to reduce preview resolution
+for faster interaction. This changes only the preview; every output uses the full
+composition resolution.
+
+File → Render work area — MP4 exports H.264 (CRF 18, yuv420p, fast-start). Transparent
+pixels are composited over black. Odd dimensions are padded by one pixel on the
+right/bottom for H.264 compatibility. Render work area — MOV with alpha exports
+ProRes 4444 with transparency and the exact composition dimensions. Both use the
+composition frame rate and the B/N work area; the first output frame is the work
+area's first frame. These presets currently export silent video.
+
+Video export requires FFmpeg with `libx264` and `prores_ks` on PATH. Alternatively,
+set `LIBRE_EFFECTS_FFMPEG` to the full executable path before launching the app.
+FFmpeg is not bundled or downloaded automatically. A missing executable/encoder
+is reported in the render status. Use a `.mp4` or `.mov` filename matching the preset.
+
+The render strip shows the preset, frame range, progress and destination. Editing
+can continue while a snapshot renders. Cancel interrupts the encoder, removes
+temporary output and preserves an existing destination. A completed video replaces
+the destination only after successful encoding; an encoder stalled for 120 seconds
+is stopped. Wait for completion or cancel before closing the application.
+
+### A complete 2D motion-graphics delivery
+
+1. Open `examples/content-study.lfe.json`, or create a composition with Ctrl+K.
+2. Add text/rectangles from Layer, or import a PNG/JPEG with Ctrl+I.
+3. Enable a transform stopwatch, move the playhead and change the value to animate.
+   Use P/S/R/T and the Graph Editor to refine motion; save with Ctrl+S.
+4. Set B/N for the output range. Alt+[ and Alt+] trim layers without moving their
+   animation; the Out trim includes the frame under the playhead. Arrow keys nudge
+   in composition pixels, even under transformed parents, without moving a selected
+   child twice when its parent is also selected.
+5. Choose the MP4 preset for viewing/sharing, or MOV with alpha for another compositor.
+   Dismiss the completed render strip to recover the full editing workspace.
+
+This workflow supports short 2D titles, animated graphics and transparent overlays.
+It does not yet provide footage editing, audio mixing or the full AE workflow.
+
+`examples/lower-third.lfe.json` is a 1920×1080, 30 fps, five-second transparent
+name/title overlay with entry/exit animation. Edit the Name and Role layers, then
+render MOV with alpha to place it over footage in another editor. Its first and
+last frames are transparent; frame 30 is useful for editing the visible title.
+
+![Completed ProRes 4444 alpha render from the Windows release application](screenshots/video-export.png)
+
+Regenerate the template with:
+
+~~~sh
+cargo run -p libre-effects-core --example make_lower_third -- examples/lower-third.lfe.json
+~~~
 
 Open `examples/content-study.lfe.json` for a text/mask/effects sample.
 Regenerate it with `cargo run -p libre-effects-core --example make_content_study -- examples/content-study.lfe.json`.
@@ -212,7 +264,7 @@ instance, not a versioned backup system. A normal save/discard close clears it.
 ## Remaining limitations
 
 Still pending: multiple compositions and precompositions, audio/video footage,
-video encoding, freeform/animated masks, an effect stack and animated effects,
+audio output, freeform/animated masks, an effect stack and animated effects,
 rich text layout, 3D, JSX, ExtendScript and expressions. PNG sequences can be
 assembled in an external video tool.
 There is no claim of AEP or Adobe script compatibility.
@@ -229,6 +281,16 @@ cargo test --workspace
 cargo fmt --all --check
 ~~~
 
+Optional FFmpeg integration checks encode and decode MP4/ProRes, check work-area
+timing and alpha, and cancel an active encoder while preserving the destination:
+
+~~~sh
+cargo test -p libre-effects-desktop video_export::tests -- --ignored
+~~~
+
+These two tests are explicitly ignored in the default suite when FFmpeg is not a
+declared test dependency; run them separately when validating video export.
+
 When Moon is unavailable, the corresponding local commands are:
 
 ~~~sh
@@ -239,8 +301,21 @@ cargo build -p libre-effects-desktop --release
 
 The executable is target/debug/libre-effects.exe (or target/release/ for release).
 The first GPUI build can take a while.
+The Windows release executable opens the editor without an extra console window.
 
 Windows uses Win32/DirectWrite. macOS requires Xcode command line tools. Linux
 requires Vulkan, a C toolchain, cmake, libvulkan1, libwayland-dev, libx11-xcb-dev,
 libxkbcommon-x11-dev and libfontconfig-dev. WSLg uses XWayland when available due
 to the GPUI 0.2.2/xdg_wm_base version mismatch.
+
+On Windows, GPUI also needs the Windows SDK shader compiler. If a clean build
+reports `Failed to find fxc.exe`, set `GPUI_FXC_PATH` to the installed SDK's x64
+compiler before running Cargo or Moon, for example in PowerShell:
+
+~~~powershell
+$env:GPUI_FXC_PATH = 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64\fxc.exe'
+cargo build -p libre-effects-desktop --release
+~~~
+
+Use the SDK version installed on your machine; the compiler is only needed to
+build the application.

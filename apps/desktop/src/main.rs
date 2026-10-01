@@ -1,3 +1,8 @@
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
+
 use gpui::{
     App, AppContext, Application, Bounds, SharedString, TitlebarOptions, WindowBounds,
     WindowOptions, px, size,
@@ -11,6 +16,7 @@ mod rendering;
 mod shell;
 mod theme;
 mod ui;
+mod video_export;
 
 use shell::Shell;
 

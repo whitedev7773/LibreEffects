@@ -1,6 +1,101 @@
 use super::*;
 
 #[test]
+fn trim_at_playhead_keeps_current_frame_and_keys_with_atomic_group_rollback() {
+    let mut e = editor_with_layer();
+    key(&mut e, 10);
+    set(&mut e, 100, 500.0);
+    let keys = e.selected_layer().unwrap().properties.clone();
+    e.execute(Command::TrimLayers {
+        ids: vec![1],
+        frame: 40,
+        start: true,
+    })
+    .unwrap();
+    e.execute(Command::TrimLayers {
+        ids: vec![1],
+        frame: 70,
+        start: false,
+    })
+    .unwrap();
+    let l = e.selected_layer().unwrap();
+    assert_eq!((l.in_frame(), l.out_frame(150)), (40, 71));
+    assert!(l.active_at(70, 150));
+    assert!(!l.active_at(71, 150));
+    assert_eq!(l.properties, keys);
+    e.execute(Command::AddRectangle).unwrap();
+    e.execute(Command::ToggleLocked(2)).unwrap();
+    let before = e.project().clone();
+    assert!(
+        e.execute(Command::TrimLayers {
+            ids: vec![1, 2],
+            frame: 50,
+            start: true
+        })
+        .is_err()
+    );
+    assert_eq!(e.project(), &before);
+    assert!(
+        e.execute(Command::TrimLayers {
+            ids: vec![1],
+            frame: 80,
+            start: true
+        })
+        .is_err()
+    );
+    assert_eq!(e.project(), &before);
+}
+
+#[test]
+fn nudge_moves_selected_hierarchy_once_in_composition_coordinates() {
+    let mut e = editor_with_layer();
+    e.execute(Command::AddRectangle).unwrap();
+    e.execute(Command::SetParent {
+        id: 2,
+        parent: Some(1),
+        frame: 0,
+    })
+    .unwrap();
+    set_property(&mut e, 1, Property::Rotation, 42.0);
+    set_property(&mut e, 1, Property::ScaleX, 180.0);
+    let before = e.project().clone();
+    e.execute(Command::NudgeLayers {
+        ids: vec![1, 2],
+        frame: 0,
+        delta: [10.0, -1.0],
+    })
+    .unwrap();
+    for id in [1, 2] {
+        let expected = before
+            .composition()
+            .corners_at(id, 0)
+            .unwrap()
+            .map(|[x, y]| [x + 10.0, y - 1.0]);
+        assert_corners_close(
+            e.project().composition().corners_at(id, 0).unwrap(),
+            expected,
+        );
+    }
+    e.undo();
+    assert_eq!(e.project(), &before);
+    e.execute(Command::NudgeLayers {
+        ids: vec![2],
+        frame: 0,
+        delta: [1.0, 10.0],
+    })
+    .unwrap();
+    let expected = before
+        .composition()
+        .corners_at(2, 0)
+        .unwrap()
+        .map(|[x, y]| [x + 1.0, y + 10.0]);
+    assert_corners_close(
+        e.project().composition().corners_at(2, 0).unwrap(),
+        expected,
+    );
+}
+
+#[test]
 fn anchor_tool_preserves_parented_pose_and_keys_in_one_undo() {
     let mut e = editor_with_layer();
     e.execute(Command::AddRectangle).unwrap();

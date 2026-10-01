@@ -200,11 +200,33 @@ impl Shell {
                 }
                 _ => None,
             }
+        } else if m.alt {
+            match key {
+                "[" => Some(Action::TrimSelection(true)),
+                "]" => Some(Action::TrimSelection(false)),
+                _ => None,
+            }
         } else if m.shift && key == "f3" {
             Some(Action::ToggleGraph)
         } else {
             match key {
                 "space" => Some(Action::Play),
+                "left" => Some(Action::NudgeSelection(
+                    if m.shift { -10.0 } else { -1.0 },
+                    0.0,
+                )),
+                "right" => Some(Action::NudgeSelection(
+                    if m.shift { 10.0 } else { 1.0 },
+                    0.0,
+                )),
+                "up" => Some(Action::NudgeSelection(
+                    0.0,
+                    if m.shift { -10.0 } else { -1.0 },
+                )),
+                "down" => Some(Action::NudgeSelection(
+                    0.0,
+                    if m.shift { 10.0 } else { 1.0 },
+                )),
                 "home" => Some(Action::Seek(0)),
                 "end" => Some(Action::Seek(
                     self.state
@@ -259,7 +281,9 @@ impl Render for Shell {
                 let weak = weak.clone();
                 window.defer(cx, move |window, cx| {
                     let _ = weak.update(cx, |s, cx| {
-                        if s.state.read(cx).dirty() || s.state.read(cx).saving {
+                        if s.state.read(cx).exporting {
+                            s.state.update(cx, |s, cx| { s.status = "A render is running. Cancel it or wait for completion before closing.".into(); cx.notify(); });
+                        } else if s.state.read(cx).dirty() || s.state.read(cx).saving {
                             s.closing = true;
                             cx.notify();
                         } else {
@@ -300,13 +324,15 @@ impl Render for Shell {
                 .unwrap_or("Untitled".into())
         );
         window.set_window_title(&title);
-        if state.close_after_save && !state.saving && !state.dirty() {
+        if state.close_after_save && !state.saving && !state.dirty() && !state.exporting {
             state.clear_recovery();
             window.remove_window();
         }
         let selected = state.editor.selected();
         let tool = state.tool;
         let status = state.status.clone();
+        let video_job = state.video_job.clone();
+        let exporting = state.exporting;
         let mut root = div()
             .id("editor-workspace")
             .track_focus(&self.focus)
@@ -438,6 +464,65 @@ impl Render for Shell {
                     ),
             )
             .child(div().flex_1().min_h_0().child(self.layout.clone()))
+            .when_some(video_job, |root, job| {
+                root.child(
+                    div()
+                        .flex_none()
+                        .px_3()
+                        .py_2()
+                        .border_t_1()
+                        .border_color(rgb(ui::BORDER))
+                        .bg(rgb(ui::PANEL))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_3()
+                                .child(div().flex_1().child(format!("Render · {}", job.label)))
+                                .child(format!(
+                                    "{} / {} frames{}",
+                                    job.progress,
+                                    job.total,
+                                    if exporting && job.progress == job.total {
+                                        " · Finalizing…"
+                                    } else {
+                                        ""
+                                    }
+                                ))
+                                .child(
+                                    ui::text_button(
+                                        "render-job-action",
+                                        if exporting {
+                                            "Cancel render"
+                                        } else {
+                                            "Dismiss"
+                                        },
+                                    )
+                                    .on_click(cx.listener(
+                                        move |this, _, window, cx| {
+                                            this.dispatch(
+                                                if exporting {
+                                                    Action::CancelExport
+                                                } else {
+                                                    Action::DismissRender
+                                                },
+                                                window,
+                                                cx,
+                                            )
+                                        },
+                                    )),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(11.0))
+                                .text_color(rgb(ui::MUTED))
+                                .max_h(px(32.0))
+                                .overflow_hidden()
+                                .child(job.message),
+                        ),
+                )
+            })
             .child(
                 div()
                     .h(px(23.0))
@@ -456,6 +541,18 @@ impl Render for Shell {
         if let Some(menu) = self.menu {
             let items: Vec<(&str, &str, Option<Action>)> = match menu {
                 "File" => vec![
+                    (
+                        "Render work area — MP4…",
+                        "",
+                        Some(Action::ExportVideo(crate::video_export::VideoPreset::H264)),
+                    ),
+                    (
+                        "Render work area — MOV with alpha…",
+                        "",
+                        Some(Action::ExportVideo(
+                            crate::video_export::VideoPreset::ProResAlpha,
+                        )),
+                    ),
                     ("New project", "Ctrl+N", Some(Action::New)),
                     ("Open project…", "Ctrl+O", Some(Action::Open)),
                     ("Save", "Ctrl+S", Some(Action::Save)),
@@ -487,6 +584,16 @@ impl Render for Shell {
                     ),
                 ],
                 "Layer" => vec![
+                    (
+                        "Trim In to playhead",
+                        "Alt+[",
+                        selected.map(|_| Action::TrimSelection(true)),
+                    ),
+                    (
+                        "Trim Out to playhead",
+                        "Alt+]",
+                        selected.map(|_| Action::TrimSelection(false)),
+                    ),
                     ("New text", "", Some(Action::AddText)),
                     (
                         "New rectangle",
@@ -604,6 +711,9 @@ impl Render for Shell {
         }
         if self.settings || self.help {
             let mut dialog = div()
+                .id("settings-help-dialog")
+                .max_h(px(640.0))
+                .overflow_y_scroll()
                 .w(px(460.0))
                 .p_5()
                 .flex()
@@ -671,6 +781,8 @@ impl Render for Shell {
                     "V / H / W / Y — Selection / Hand / Rotation / Anchor",
                     "Ctrl+Y — New rectangle    Ctrl+D — Duplicate",
                     "Ctrl+Shift+D — Split layers at playhead",
+                    "Alt+[ / Alt+] — Trim In / Out to playhead",
+                    "Arrow keys — Move selected layers 1 px (Shift: 10 px)",
                     "Drag handles — Scale    Shift — Proportional scale / 15° rotation",
                     "Esc — Cancel canvas drag",
                     "Ctrl+Z / Ctrl+Shift+Z — Undo / Redo",

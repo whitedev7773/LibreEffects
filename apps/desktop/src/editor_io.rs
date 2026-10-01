@@ -257,6 +257,7 @@ impl EditorState {
             return;
         }
         self.stop();
+        self.video_job = None;
         let project = self.editor.project().clone();
         let range = if sequence {
             self.work_start..self.work_end

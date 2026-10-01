@@ -66,6 +66,7 @@ pub(crate) struct Preview {
     cached: Option<(
         libre_effects_core::Project,
         u32,
+        u32,
         std::sync::Arc<gpui::RenderImage>,
     )>,
 }
@@ -314,6 +315,8 @@ impl Render for Preview {
         let selected = state.selected_layers.clone();
         let zoom = state.preview_zoom;
         let checker = state.checkerboard;
+        let resolution = state.preview_resolution;
+        let max_dimension = (comp.width().max(comp.height()).min(1280) / resolution).max(1);
         let hand = state.tool == Tool::Hand;
         let title = format!("Composition   {}", comp.name());
         let time = timecode(frame, comp.fps());
@@ -329,28 +332,27 @@ impl Render for Preview {
             render_project = temporary.project().clone();
         }
         let comp = render_project.composition().clone();
-        if self
-            .cached
-            .as_ref()
-            .is_none_or(|(p, f, _)| p != &render_project || *f != frame)
-        {
-            if let Some((_, _, old)) = self.cached.take() {
+        if self.cached.as_ref().is_none_or(|(p, f, dimension, _)| {
+            p != &render_project || *f != frame || *dimension != max_dimension
+        }) {
+            if let Some((_, _, _, old)) = self.cached.take() {
                 let _ = window.drop_image(old);
             }
-            if let Ok(mut pixels) = self.renderer.render(&render_project, frame, 1280) {
+            if let Ok(mut pixels) = self.renderer.render(&render_project, frame, max_dimension) {
                 for pixel in pixels.pixels_mut() {
                     pixel.0.swap(0, 2);
                 }
                 self.cached = Some((
                     render_project,
                     frame,
+                    max_dimension,
                     std::sync::Arc::new(gpui::RenderImage::new(vec![image::Frame::new(pixels)])),
                 ));
             } else {
                 self.cached = None;
             }
         }
-        let rendered = self.cached.as_ref().map(|(_, _, image)| image.clone());
+        let rendered = self.cached.as_ref().map(|(_, _, _, image)| image.clone());
         let measured = self.bounds.clone();
         div()
             .flex()
@@ -587,7 +589,21 @@ impl Render for Preview {
                         Action::ZoomPreview(2.0),
                         false,
                     ))
-                    .child(div().px_2().text_size(px(11.0)).child("Full"))
+                    .child(
+                        ui::text_button(
+                            "preview-resolution",
+                            match resolution {
+                                2 => "Half ▾",
+                                4 => "Quarter ▾",
+                                _ => "Full ▾",
+                            },
+                        )
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.state.update(cx, |s, cx| {
+                                s.dispatch(&Action::CyclePreviewResolution, window, cx)
+                            })
+                        })),
+                    )
                     .child(ui::action_tool(
                         "transparency",
                         "square-dashed",

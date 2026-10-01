@@ -1,0 +1,434 @@
+//! Stream composited RGBA frames to FFmpeg; publish only a complete video.
+use crate::rendering::Renderer;
+use libre_effects_core::Project;
+use std::{
+    io::{Read, Seek, SeekFrom, Write},
+    ops::Range,
+    path::{Path, PathBuf},
+    process::{Child, Command, Stdio},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicU32, Ordering},
+    },
+    time::{Duration, Instant},
+};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum VideoPreset {
+    H264,
+    ProResAlpha,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use libre_effects_core::{Command as Edit, Content, Editor, Property};
+    fn scene() -> Project {
+        let mut e = Editor::default();
+        e.execute(Edit::ConfigureComposition {
+            name: "Export QA".into(),
+            width: 101,
+            height: 99,
+            fps: 24,
+            duration: 8,
+        })
+        .unwrap();
+        e.execute(Edit::AddContent {
+            content: Content::Rectangle,
+            width: 40.0,
+            height: 40.0,
+            name: "Red".into(),
+        })
+        .unwrap();
+        e.execute(Edit::SetColor {
+            id: 1,
+            color: 0xff0000,
+        })
+        .unwrap();
+        e.execute(Edit::SetValue {
+            id: 1,
+            property: Property::Opacity,
+            frame: 0,
+            value: 0.0,
+        })
+        .unwrap();
+        e.execute(Edit::ToggleKeyframe {
+            id: 1,
+            property: Property::Opacity,
+            frame: 0,
+        })
+        .unwrap();
+        for (frame, value) in [(2, 50.0), (5, 100.0)] {
+            e.execute(Edit::SetValue {
+                id: 1,
+                property: Property::Opacity,
+                frame,
+                value,
+            })
+            .unwrap();
+        }
+        e.project().clone()
+    }
+    #[test]
+    fn canceled_or_failed_encoder_preserves_destination_and_cleans_temp_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("existing.mp4");
+        std::fs::write(&path, b"original").unwrap();
+        for canceled in [true, false] {
+            let result = encode(
+                &scene(),
+                2..5,
+                VideoPreset::H264,
+                &path,
+                &dir.path().join("missing-ffmpeg"),
+                Arc::new(AtomicBool::new(canceled)),
+                Default::default(),
+            );
+            assert!(result.is_err());
+            assert_eq!(std::fs::read(&path).unwrap(), b"original");
+            assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+        }
+    }
+    #[test]
+    #[ignore = "requires FFmpeg with libx264 and prores_ks; run explicitly for export validation"]
+    fn ffmpeg_roundtrip_preserves_range_rate_alpha_and_black_matte() {
+        let dir = tempfile::tempdir().unwrap();
+        for preset in [VideoPreset::H264, VideoPreset::ProResAlpha] {
+            let path = dir
+                .path()
+                .join(format!("한글 output.{}", preset.extension()));
+            let progress = Arc::new(AtomicU32::new(0));
+            export_video(
+                &scene(),
+                2..5,
+                preset,
+                &path,
+                Default::default(),
+                progress.clone(),
+            )
+            .unwrap();
+            assert_eq!(progress.load(Ordering::Relaxed), 3);
+            let decoded = command(&ffmpeg_path())
+                .args(["-v", "error", "-i"])
+                .arg(&path)
+                .args(["-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"])
+                .output()
+                .unwrap();
+            assert!(
+                decoded.status.success(),
+                "{}",
+                String::from_utf8_lossy(&decoded.stderr)
+            );
+            let (w, h) = if preset == VideoPreset::H264 {
+                (102, 100)
+            } else {
+                (101, 99)
+            };
+            assert_eq!(decoded.stdout.len(), w * h * 4 * 3);
+            let center = &decoded.stdout[(49 * w + 50) * 4..][..4];
+            let background = &decoded.stdout[..4];
+            if preset == VideoPreset::H264 {
+                assert!((center[0] as i32 - 128).abs() < 8, "{center:?}");
+                assert!(center[1] < 8 && center[2] < 8);
+                assert_eq!(background, [0, 0, 0, 255]);
+            } else {
+                assert!((center[3] as i32 - 128).abs() < 3, "{center:?}");
+                assert!(center[0] > 245);
+                assert_eq!(background[3], 0);
+            }
+            // Decode at 24 fps; an incorrect encoded time base changes this count.
+            let rate = command(&ffmpeg_path())
+                .args(["-v", "error", "-i"])
+                .arg(&path)
+                .args([
+                    "-vf", "fps=24", "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1",
+                ])
+                .output()
+                .unwrap();
+            assert!(rate.status.success());
+            assert_eq!(rate.stdout.len(), decoded.stdout.len());
+        }
+    }
+    #[test]
+    #[ignore = "requires FFmpeg; validates cancellation after encoder startup"]
+    fn cancel_running_encoder_leaves_existing_video_intact() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("keep.mp4");
+        std::fs::write(&path, b"keep me").unwrap();
+        let mut e = Editor::default();
+        e.replace_project(scene()).unwrap();
+        e.execute(Edit::ConfigureComposition {
+            name: "Long".into(),
+            width: 101,
+            height: 99,
+            fps: 24,
+            duration: 10000,
+        })
+        .unwrap();
+        let progress = Arc::new(AtomicU32::new(0));
+        let cancel = Arc::new(AtomicBool::new(false));
+        let (p, c) = (progress.clone(), cancel.clone());
+        let stopper = std::thread::spawn(move || {
+            let deadline = Instant::now();
+            while p.load(Ordering::Relaxed) < 2 && deadline.elapsed() < Duration::from_secs(15) {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            c.store(true, Ordering::Relaxed);
+        });
+        let result = export_video(
+            e.project(),
+            0..10000,
+            VideoPreset::H264,
+            &path,
+            cancel,
+            progress.clone(),
+        );
+        stopper.join().unwrap();
+        assert!(result.unwrap_err().contains("canceled"));
+        assert!(progress.load(Ordering::Relaxed) >= 2);
+        assert_eq!(std::fs::read(&path).unwrap(), b"keep me");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+}
+impl VideoPreset {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::H264 => "H.264 MP4",
+            Self::ProResAlpha => "ProRes 4444 MOV · Alpha",
+        }
+    }
+    pub fn extension(self) -> &'static str {
+        match self {
+            Self::H264 => "mp4",
+            Self::ProResAlpha => "mov",
+        }
+    }
+}
+pub(crate) fn ffmpeg_path() -> PathBuf {
+    std::env::var_os("LIBRE_EFFECTS_FFMPEG")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| "ffmpeg".into())
+}
+fn command(executable: &Path) -> Command {
+    let mut command = Command::new(executable);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    command
+}
+struct Encoder {
+    child: Arc<Mutex<Child>>,
+    done: Arc<AtomicBool>,
+}
+impl Drop for Encoder {
+    fn drop(&mut self) {
+        self.done.store(true, Ordering::Relaxed);
+        if let Ok(mut child) = self.child.lock() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+pub(crate) fn export_video(
+    project: &Project,
+    range: Range<u32>,
+    preset: VideoPreset,
+    destination: &Path,
+    cancel: Arc<AtomicBool>,
+    progress: Arc<AtomicU32>,
+) -> Result<(), String> {
+    encode(
+        project,
+        range,
+        preset,
+        destination,
+        &ffmpeg_path(),
+        cancel,
+        progress,
+    )
+}
+fn encode(
+    project: &Project,
+    range: Range<u32>,
+    preset: VideoPreset,
+    destination: &Path,
+    executable: &Path,
+    cancel: Arc<AtomicBool>,
+    progress: Arc<AtomicU32>,
+) -> Result<(), String> {
+    let comp = project.composition();
+    if range.is_empty() || range.end > comp.duration() {
+        return Err("Choose a non-empty work area inside the composition".into());
+    }
+    if comp.width() as u64 * comp.height() as u64 > 33_554_432 {
+        return Err("Video export supports up to 32 megapixels per frame".into());
+    }
+    if cancel.load(Ordering::Relaxed) {
+        return Err("Render canceled".into());
+    }
+    let directory = destination
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let output = tempfile::NamedTempFile::new_in(directory).map_err(|e| e.to_string())?;
+    let mut log = tempfile::tempfile().map_err(|e| e.to_string())?;
+    let mut cmd = command(executable);
+    cmd.args([
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostdin",
+        "-y",
+        "-f",
+        "rawvideo",
+        "-pixel_format",
+        "rgba",
+        "-video_size",
+    ])
+    .arg(format!("{}x{}", comp.width(), comp.height()))
+    .args(["-framerate", &comp.fps().to_string(), "-i", "pipe:0", "-an"]);
+    match preset {
+        VideoPreset::H264 => {
+            cmd.args([
+                "-vf",
+                "pad=ceil(iw/2)*2:ceil(ih/2)*2",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "medium",
+                "-crf",
+                "18",
+                "-pix_fmt",
+                "yuv420p",
+                "-movflags",
+                "+faststart",
+                "-f",
+                "mp4",
+            ]);
+        }
+        VideoPreset::ProResAlpha => {
+            cmd.args([
+                "-c:v",
+                "prores_ks",
+                "-profile:v",
+                "4",
+                "-pix_fmt",
+                "yuva444p10le",
+                "-alpha_bits",
+                "16",
+                "-f",
+                "mov",
+            ]);
+        }
+    }
+    cmd.arg(output.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::from(log.try_clone().map_err(|e| e.to_string())?));
+    let mut child = cmd.spawn().map_err(|e| format!("Cannot start FFmpeg: {e}. Install FFmpeg on PATH or set LIBRE_EFFECTS_FFMPEG to its executable."))?;
+    let mut input = child.stdin.take().ok_or("Cannot open encoder input")?;
+    let encoder = Encoder {
+        child: Arc::new(Mutex::new(child)),
+        done: Arc::new(AtomicBool::new(false)),
+    };
+    let timed_out = Arc::new(AtomicBool::new(false));
+    // Kill the encoder independently of a blocked pipe write, so cancellation also
+    // works while FFmpeg is stalled or finalizing the container.
+    let (child, done, canceled, completed, timeout) = (
+        encoder.child.clone(),
+        encoder.done.clone(),
+        cancel.clone(),
+        progress.clone(),
+        timed_out.clone(),
+    );
+    let monitor = std::thread::spawn(move || {
+        let mut last_progress = completed.load(Ordering::Relaxed);
+        let mut changed = Instant::now();
+        while !done.load(Ordering::Relaxed) {
+            let current = completed.load(Ordering::Relaxed);
+            if current != last_progress {
+                changed = Instant::now();
+                last_progress = current;
+            }
+            let stalled = changed.elapsed() > Duration::from_secs(120);
+            if canceled.load(Ordering::Relaxed) || stalled {
+                timeout.store(stalled, Ordering::Relaxed);
+                if let Ok(mut child) = child.lock() {
+                    let _ = child.kill();
+                }
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    });
+    let result = (|| {
+        let renderer = Renderer::new();
+        for (index, frame) in range.enumerate() {
+            if cancel.load(Ordering::Relaxed) {
+                return Err("Render canceled".into());
+            }
+            let mut pixels = renderer.render(project, frame, u32::MAX)?;
+            if preset == VideoPreset::H264 {
+                // MP4 has no alpha. Composite against black instead of just dropping
+                // alpha, which would turn half-transparent elements fully opaque.
+                for p in pixels.pixels_mut() {
+                    let alpha = p[3] as u16;
+                    for channel in &mut p.0[..3] {
+                        *channel = ((*channel as u16 * alpha + 127) / 255) as u8;
+                    }
+                    p[3] = 255;
+                }
+            }
+            input
+                .write_all(pixels.as_raw())
+                .map_err(|e| format!("Encoder input failed: {e}"))?;
+            progress.store(index as u32 + 1, Ordering::Relaxed);
+        }
+        drop(input);
+        loop {
+            if let Some(status) = encoder
+                .child
+                .lock()
+                .map_err(|e| e.to_string())?
+                .try_wait()
+                .map_err(|e| e.to_string())?
+            {
+                if !status.success() {
+                    return Err(format!("FFmpeg exited with {status}"));
+                }
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        Ok(())
+    })();
+    drop(encoder);
+    let _ = monitor.join();
+    if cancel.load(Ordering::Relaxed) {
+        return Err("Render canceled; destination unchanged".into());
+    }
+    if timed_out.load(Ordering::Relaxed) {
+        return Err("Encoder stalled for 120 seconds; destination unchanged".into());
+    }
+    if let Err(error) = result {
+        let mut diagnostic = String::new();
+        let _ = log.seek(SeekFrom::Start(0));
+        let _ = log.take(8192).read_to_string(&mut diagnostic);
+        return Err(format!("{error}: {}", diagnostic.trim()));
+    }
+    output.as_file().sync_all().map_err(|e| e.to_string())?;
+    if output
+        .as_file()
+        .metadata()
+        .map_err(|e| e.to_string())?
+        .len()
+        == 0
+    {
+        return Err("Encoder produced an empty video".into());
+    }
+    output.persist(destination).map_err(|e| e.to_string())?;
+    Ok(())
+}

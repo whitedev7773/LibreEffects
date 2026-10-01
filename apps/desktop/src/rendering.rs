@@ -186,6 +186,24 @@ pub(crate) fn import_image(path: &Path) -> Result<(Content, u32, u32), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn lower_third_template_enters_and_exits_on_transparent_frames() {
+        let project =
+            Project::from_json(include_str!("../../../examples/lower-third.lfe.json")).unwrap();
+        let renderer = Renderer::new();
+        for frame in [0, 149] {
+            assert!(
+                renderer
+                    .render(&project, frame, 384)
+                    .unwrap()
+                    .pixels()
+                    .all(|p| p[3] == 0)
+            );
+        }
+        let visible = renderer.render(&project, 30, 384).unwrap();
+        assert!(visible.pixels().any(|p| p[3] > 200));
+        assert_eq!(visible.get_pixel(0, 0)[3], 0);
+    }
     use libre_effects_core::{Command, Editor, Effects, Mask};
     fn scene() -> Editor {
         let mut e = Editor::default();
