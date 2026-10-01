@@ -31,6 +31,9 @@ pub(crate) fn validate_render(
     if comp.width() as u64 * comp.height() as u64 > 33_554_432 {
         return Err("Rendering supports up to 32 megapixels per frame".into());
     }
+    for path in crate::media_io::video_paths(project) {
+        protect_source(destination, Path::new(&path))?;
+    }
     for layer in project
         .compositions()
         .into_iter()

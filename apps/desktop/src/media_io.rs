@@ -19,6 +19,13 @@ pub(crate) fn video_paths(project: &Project) -> BTreeSet<String> {
                 None
             }
         })
+        .chain(project.asset_library().assets().values().filter_map(|a| {
+            if let Content::Video { path, .. } = a.content() {
+                Some(path.clone())
+            } else {
+                None
+            }
+        }))
         .collect()
 }
 
@@ -104,6 +111,9 @@ pub(crate) struct MediaEntry {
 }
 pub(crate) fn entries(project: &Project) -> Vec<MediaEntry> {
     let mut entries = std::collections::BTreeMap::<String, usize>::new();
+    for path in video_paths(project) {
+        entries.insert(path, 0);
+    }
     for (_, comp) in project.compositions() {
         for layer in comp.layers() {
             if let Content::Video { path, .. } = layer.content() {

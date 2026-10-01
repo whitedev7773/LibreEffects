@@ -8,6 +8,16 @@ pub(super) fn encode(project: &Project) -> Result<String, String> {
     let mut compact = project.clone();
     let mut assets: BTreeMap<String, Arc<str>> = BTreeMap::new();
     let mut ids = BTreeMap::new();
+    for asset in compact.asset_library.assets.values_mut() {
+        if let Content::Image { png } = &mut asset.content {
+            let id = ids.entry(png.as_ptr() as usize).or_insert_with(|| {
+                let id = format!("image-{}", assets.len() + 1);
+                assets.insert(id.clone(), png.clone());
+                id
+            });
+            *png = Arc::from(id.as_str());
+        }
+    }
     for layer in compact
         .compositions_mut()
         .flat_map(|comp| comp.layers.iter_mut())
@@ -25,7 +35,7 @@ pub(super) fn encode(project: &Project) -> Result<String, String> {
     let mut value = serde_json::to_value(&compact).map_err(|e| e.to_string())?;
     if !assets.is_empty() {
         value["version"] = project.version.max(7).into();
-        each_layer(&mut value, |layer| {
+        each_source(&mut value, |_, layer| {
             if let Some(image) = layer
                 .get_mut("content")
                 .and_then(|v| v.get_mut("Image"))
@@ -52,7 +62,7 @@ pub(super) fn decode(json: &str) -> Result<Project, String> {
         .as_object_mut()
         .ok_or("Project must be an object")?
         .remove("image_assets");
-    if assets_value.is_some() && !matches!(value["version"].as_u64(), Some(7..=21)) {
+    if assets_value.is_some() && !matches!(value["version"].as_u64(), Some(7..=22)) {
         return Err("Image assets require project version 7".into());
     }
     let assets: BTreeMap<String, Arc<str>> = assets_value
@@ -64,8 +74,7 @@ pub(super) fn decode(json: &str) -> Result<Project, String> {
         return Err("Embedded images exceed 128 MiB".into());
     }
     let mut refs = BTreeMap::new();
-    each_layer(&mut value, |layer| {
-        let layer_id = layer["id"].as_u64().ok_or("Invalid layer id")?;
+    each_source(&mut value, |source_id, layer| {
         if let Some(image) = layer
             .get_mut("content")
             .and_then(|v| v.get_mut("Image"))
@@ -79,7 +88,7 @@ pub(super) fn decode(json: &str) -> Result<Project, String> {
                 if image.contains_key("png") || !assets.contains_key(&id) {
                     return Err("Missing or ambiguous image asset".into());
                 }
-                refs.insert(layer_id, id);
+                refs.insert(source_id, id);
                 image.insert("png".into(), "".into());
             }
         }
@@ -88,12 +97,23 @@ pub(super) fn decode(json: &str) -> Result<Project, String> {
     let mut project: Project = serde_json::from_value(value).map_err(|e| e.to_string())?;
     // Legacy inline images are accepted and interned as well.
     let mut intern: BTreeMap<Arc<str>, Arc<str>> = BTreeMap::new();
+    for (id, asset) in &mut project.asset_library.assets {
+        if let Content::Image { png } = &mut asset.content {
+            if let Some(id) = refs.get(&format!("asset-{id}")) {
+                *png = assets[id].clone();
+            }
+            *png = intern
+                .entry(png.clone())
+                .or_insert_with(|| png.clone())
+                .clone();
+        }
+    }
     for layer in project
         .compositions_mut()
         .flat_map(|comp| comp.layers.iter_mut())
     {
         if let Content::Image { png } = &mut layer.content {
-            if let Some(id) = refs.get(&layer.id) {
+            if let Some(id) = refs.get(&format!("layer-{}", layer.id)) {
                 *png = assets[id].clone();
             }
             *png = intern
@@ -108,17 +128,27 @@ pub(super) fn decode(json: &str) -> Result<Project, String> {
     Ok(project)
 }
 
-fn each_layer(
+fn each_source(
     value: &mut serde_json::Value,
-    mut visit: impl FnMut(&mut serde_json::Value) -> Result<(), String>,
+    mut visit: impl FnMut(String, &mut serde_json::Value) -> Result<(), String>,
 ) -> Result<(), String> {
+    if let Some(assets) = value
+        .get_mut("asset_library")
+        .and_then(|v| v.get_mut("assets"))
+        .and_then(|v| v.as_object_mut())
+    {
+        for (id, asset) in assets {
+            visit(format!("asset-{id}"), asset)?;
+        }
+    }
     if let Some(layers) = value
         .get_mut("composition")
         .and_then(|c| c.get_mut("layers"))
         .and_then(|l| l.as_array_mut())
     {
         for layer in layers {
-            visit(layer)?;
+            let id = layer["id"].as_u64().ok_or("Invalid layer id")?;
+            visit(format!("layer-{id}"), layer)?;
         }
     }
     if let Some(comps) = value
@@ -128,7 +158,8 @@ fn each_layer(
         for comp in comps.values_mut() {
             if let Some(layers) = comp.get_mut("layers").and_then(|l| l.as_array_mut()) {
                 for layer in layers {
-                    visit(layer)?;
+                    let id = layer["id"].as_u64().ok_or("Invalid layer id")?;
+                    visit(format!("layer-{id}"), layer)?;
                 }
             }
         }
@@ -172,10 +203,18 @@ mod tests {
         assert!(Arc::ptr_eq(a, b));
         let broken = json.replace("\"asset\": \"image-1\"", "\"asset\": \"missing\"");
         assert!(Project::from_json(&broken).is_err());
-        let legacy = serde_json::to_string(e.project())
-            .unwrap()
-            .replace("\"version\":7", "\"version\":3");
-        assert_eq!(Project::from_json(&legacy).unwrap(), loaded);
+        let mut legacy = serde_json::to_value(e.project()).unwrap();
+        legacy["version"] = 3.into();
+        legacy.as_object_mut().unwrap().remove("asset_library");
+        for layer in legacy["composition"]["layers"].as_array_mut().unwrap() {
+            layer.as_object_mut().unwrap().remove("asset");
+        }
+        let legacy = Project::from_json(&legacy.to_string()).unwrap();
+        assert_eq!(legacy.asset_library.assets.len(), 1);
+        assert_eq!(
+            legacy.composition.layers[0].content,
+            loaded.composition.layers[0].content
+        );
     }
     #[test]
     fn duplicated_large_images_no_longer_expand_the_document() {

@@ -1,31 +1,215 @@
 use crate::{
     components::TextField,
     editor::{Action, EditorState},
+    project_browser::{self, Row},
     ui,
 };
-use gpui::{Context, Entity, SharedString, Window, div, prelude::*, px, rgb};
-use libre_effects_core::Command;
+use gpui::{Context, Entity, SharedString, Window, div, img, prelude::*, px, rgb};
+use libre_effects_core::{Command, Content, FolderId, Project, ProjectItem};
+use std::{collections::BTreeSet, sync::Arc};
 
 pub(crate) struct Browser {
     state: Entity<EditorState>,
     search: Entity<TextField>,
+    name: Entity<TextField>,
     effects: Entity<super::effects::EffectControls>,
+    collapsed: BTreeSet<FolderId>,
+    by_type: bool,
+    descending: bool,
+    move_open: bool,
+    thumbnail: Option<Arc<gpui::RenderImage>>,
+    thumbnail_key: Option<(ProjectItem, Project, u64)>,
+    thumbnail_pending: bool,
+    thumbnail_error: Option<String>,
 }
 impl Browser {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
         let search = cx.new(|cx| TextField::new(cx, |_, _, _| {}));
         cx.observe(&search, |_, _, cx| cx.notify()).detach();
+        let edit = state.clone();
+        let name = cx.new(|cx| {
+            TextField::new(cx, move |value, window, cx| {
+                edit.update(cx, |s, cx| {
+                    if let Some(item) = s.project_item {
+                        s.dispatch(
+                            &Action::Edit(Command::RenameProjectItem {
+                                item,
+                                name: value.into(),
+                            }),
+                            window,
+                            cx,
+                        );
+                    }
+                });
+            })
+        });
         let effects = cx.new(|cx| super::effects::EffectControls::new(state.clone(), cx));
         Self {
             state,
             search,
+            name,
             effects,
+            collapsed: BTreeSet::new(),
+            by_type: false,
+            descending: false,
+            move_open: false,
+            thumbnail: None,
+            thumbnail_key: None,
+            thumbnail_pending: false,
+            thumbnail_error: None,
         }
+    }
+    fn load_thumbnail(
+        &mut self,
+        project: &Project,
+        item: ProjectItem,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let key = (item, project.clone(), self.state.read(cx).preview_revision);
+        if self.thumbnail_key.as_ref() == Some(&key) || self.thumbnail_pending {
+            return;
+        }
+        if let Some(image) = self.thumbnail.take() {
+            let _ = window.drop_image(image);
+        }
+        self.thumbnail_key = Some(key.clone());
+        self.thumbnail_error = None;
+        if matches!(item, ProjectItem::Folder(_)) {
+            return;
+        }
+        self.thumbnail_pending = true;
+        cx.spawn(async move |entity, cx| {
+            let snapshot = key.1.clone();
+            let result = cx
+                .background_executor()
+                .spawn(async move { project_browser::thumbnail(&snapshot, item) })
+                .await;
+            let _ = entity.update(cx, |this, cx| {
+                this.thumbnail_pending = false;
+                if this.thumbnail_key.as_ref() == Some(&key) {
+                    match result {
+                        Ok(pixels) => {
+                            this.thumbnail =
+                                Some(Arc::new(gpui::RenderImage::new(vec![image::Frame::new(
+                                    pixels,
+                                )])))
+                        }
+                        Err(error) => this.thumbnail_error = Some(error),
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+    fn item_row(
+        &self,
+        row: Row,
+        selected: ProjectItem,
+        active: u64,
+        frame: u32,
+        cx: &mut Context<Self>,
+    ) -> gpui::Stateful<gpui::Div> {
+        let Row {
+            item,
+            name,
+            kind,
+            depth,
+            ..
+        } = row;
+        let icon = match item {
+            ProjectItem::Folder(_) => "folder-open",
+            _ if kind == "Image" => "square",
+            _ => "filmstrip",
+        };
+        let state = self.state.clone();
+        let mut element = ui::text_button(SharedString::from(format!("project-{item:?}")), "")
+            .w_full()
+            .h(px(29.0))
+            .gap_2()
+            .justify_start()
+            .pl(px(12.0 + depth as f32 * 12.0))
+            .pr_2()
+            .when(item == selected, |s| s.bg(rgb(0x343434)))
+            .child(ui::icon(icon))
+            .child(div().flex_1().overflow_hidden().child(name))
+            .child(
+                div()
+                    .text_size(px(10.0))
+                    .text_color(rgb(ui::MUTED))
+                    .child(kind),
+            )
+            .on_click(move |event, window, cx| {
+                state.update(cx, |s, cx| {
+                    s.project_item = Some(item);
+                    if event.click_count() == 2 {
+                        if let ProjectItem::Composition(id) = item {
+                            s.dispatch(&Action::ActivateComposition(id), window, cx);
+                        }
+                    }
+                    cx.notify();
+                });
+            });
+        match item {
+            ProjectItem::Folder(id) => {
+                element = element.child(
+                    ui::tool(
+                        SharedString::from(format!("folder-toggle-{id}")),
+                        if self.collapsed.contains(&id) {
+                            "chevron-right"
+                        } else {
+                            "chevron-down"
+                        },
+                        "Expand or collapse folder",
+                        false,
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        if !this.collapsed.remove(&id) {
+                            this.collapsed.insert(id);
+                        }
+                        cx.notify();
+                    })),
+                );
+            }
+            ProjectItem::Asset(id) => {
+                element = element.child(ui::action_tool(
+                    SharedString::from(format!("asset-add-{id}")),
+                    "plus",
+                    "Add footage at playhead",
+                    &self.state,
+                    Action::Edit(Command::AddAssetLayer { asset: id, frame }),
+                    false,
+                ));
+            }
+            ProjectItem::Composition(id) => {
+                element = element.child(ui::action_tool(
+                    SharedString::from(format!("comp-open-{id}")),
+                    "arrow-right",
+                    "Open composition",
+                    &self.state,
+                    Action::ActivateComposition(id),
+                    false,
+                ));
+                if id != active {
+                    element = element.child(ui::action_tool(
+                        SharedString::from(format!("comp-add-{id}")),
+                        "plus",
+                        "Add to active composition",
+                        &self.state,
+                        Action::AddComposition(id),
+                        false,
+                    ));
+                }
+            }
+        }
+        element
     }
 }
 impl Render for Browser {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let effects_open = self.state.read(cx).effect_controls_open;
         let tabs = div()
             .flex()
@@ -41,7 +225,6 @@ impl Render for Browser {
                             s.effect_controls_open = false;
                             cx.notify();
                         });
-                        cx.notify();
                     })),
             )
             .child(
@@ -52,7 +235,6 @@ impl Render for Browser {
                             s.effect_controls_open = true;
                             cx.notify();
                         });
-                        cx.notify();
                     })),
             );
         if effects_open {
@@ -66,11 +248,105 @@ impl Render for Browser {
                 .child(div().flex_1().min_h_0().child(self.effects.clone()))
                 .into_any_element();
         }
-        let project = self.state.read(cx).editor.project();
-        let comp = project.composition();
+        let state = self.state.read(cx);
+        let project = state.editor.project().clone();
         let active = project.active_composition_id();
-        let query = self.search.read(cx).value().trim().to_lowercase();
-        div()
+        let frame = state.frame;
+        let all = project_browser::rows(&project, "", false, false, &BTreeSet::new());
+        let selected = state
+            .project_item
+            .filter(|item| all.iter().any(|r| r.item == *item))
+            .unwrap_or(ProjectItem::Composition(active));
+        let row = all.iter().find(|r| r.item == selected).unwrap();
+        let folder = match selected {
+            ProjectItem::Folder(id) => Some(id),
+            _ => row.folder,
+        };
+        let name = row.name.clone();
+        let path = project_browser::folder_path(&project, row.folder);
+        let details: Vec<String> = match selected {
+            ProjectItem::Composition(id) => {
+                let c = project.composition_by_id(id).unwrap();
+                vec![
+                    format!("{} × {} (1.00)", c.width(), c.height()),
+                    format!(
+                        "{} fps · {:.2} s",
+                        c.fps().label(),
+                        c.fps().seconds(u64::from(c.duration()))
+                    ),
+                    format!("{} layers", c.layers().len()),
+                ]
+            }
+            ProjectItem::Asset(id) => {
+                let a = &project.asset_library().assets()[&id];
+                let source = match a.content() {
+                    Content::Video {
+                        duration,
+                        source_fps,
+                        ..
+                    } => format!("{source_fps:.3} fps · {duration:.2} s"),
+                    _ => "Still image · embedded".into(),
+                };
+                vec![
+                    format!("{} × {}", a.width(), a.height()),
+                    source,
+                    format!("{} layer reference(s)", project.asset_references(id)),
+                ]
+            }
+            ProjectItem::Folder(id) => vec![
+                format!(
+                    "{} direct item(s)",
+                    all.iter().filter(|r| r.folder == Some(id)).count()
+                ),
+                path.clone(),
+            ],
+        };
+        self.state
+            .update(cx, |s, _| s.project_item = Some(selected));
+        self.name.update(cx, |field, _| {
+            field.sync(format!("{selected:?}"), name, window)
+        });
+        self.load_thumbnail(&project, selected, window, cx);
+        let mut thumb = div()
+            .w(px(72.0))
+            .h(px(45.0))
+            .flex_none()
+            .bg(rgb(0x080808))
+            .border_1()
+            .border_color(rgb(0x4b4b4b))
+            .flex()
+            .items_center()
+            .justify_center();
+        if let Some(image) = self.thumbnail.as_ref().filter(|_| {
+            self.thumbnail_key
+                .as_ref()
+                .is_some_and(|(item, p, revision)| {
+                    *item == selected
+                        && p == &project
+                        && *revision == self.state.read(cx).preview_revision
+                })
+        }) {
+            thumb = thumb.child(
+                img(image.clone())
+                    .size_full()
+                    .object_fit(gpui::ObjectFit::Contain),
+            );
+        } else {
+            thumb = thumb.child(ui::icon(if matches!(selected, ProjectItem::Folder(_)) {
+                "folder-open"
+            } else {
+                "filmstrip"
+            }));
+        }
+        let query = self.search.read(cx).value().to_owned();
+        let rows = project_browser::rows(
+            &project,
+            &query,
+            self.by_type,
+            self.descending,
+            &self.collapsed,
+        );
+        let mut panel = div()
             .flex()
             .flex_col()
             .size_full()
@@ -85,40 +361,22 @@ impl Render for Browser {
                     .p_3()
                     .h(px(110.0))
                     .flex_none()
+                    .child(thumb)
                     .child(
                         div()
-                            .w(px(72.0))
-                            .h(px(45.0))
-                            .bg(rgb(0x080808))
-                            .border_1()
-                            .border_color(rgb(0x4b4b4b))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(ui::icon("filmstrip")),
-                    )
-                    .child(
-                        div()
+                            .flex_1()
+                            .min_w_0()
                             .flex()
                             .flex_col()
                             .gap_1()
                             .text_size(px(11.0))
-                            .child(comp.name().to_string())
-                            .child(div().text_color(rgb(ui::MUTED)).child(format!(
-                                "{} × {} (1.00)",
-                                comp.width(),
-                                comp.height()
-                            )))
-                            .child(div().text_color(rgb(ui::MUTED)).child(format!(
-                                "{} fps  •  {:.2} s",
-                                comp.fps().label(),
-                                comp.fps().seconds(u64::from(comp.duration()))
-                            )))
-                            .child(
+                            .child(self.name.clone())
+                            .children(details.into_iter().map(|line| {
                                 div()
+                                    .overflow_hidden()
                                     .text_color(rgb(ui::MUTED))
-                                    .child(format!("{} layers", comp.layers().len())),
-                            ),
+                                    .child(line)
+                            })),
                     ),
             )
             .child(
@@ -134,68 +392,152 @@ impl Render for Browser {
             .child(
                 div()
                     .flex()
-                    .px_3()
+                    .h(px(25.0))
+                    .px_2()
+                    .items_center()
+                    .child(
+                        ui::text_button("project-move", format!("Move to… · {path}"))
+                            .flex_1()
+                            .overflow_hidden()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.move_open = !this.move_open;
+                                cx.notify();
+                            })),
+                    )
+                    .when(matches!(selected, ProjectItem::Asset(_)), |d| {
+                        d.child(ui::action_tool(
+                            "delete-project-asset",
+                            "trash-bin",
+                            "Delete unused source",
+                            &self.state,
+                            Action::Edit(Command::DeleteProjectItem(selected)),
+                            false,
+                        ))
+                    })
+                    .when(matches!(selected, ProjectItem::Folder(_)), |d| {
+                        d.child(ui::action_tool(
+                            "delete-project-folder",
+                            "trash-bin",
+                            "Delete empty folder",
+                            &self.state,
+                            Action::Edit(Command::DeleteProjectItem(selected)),
+                            false,
+                        ))
+                    }),
+            );
+        if self.move_open {
+            let mut destinations = vec![(None, "Project root".to_owned())];
+            destinations.extend(
+                project
+                    .asset_library()
+                    .folders()
+                    .keys()
+                    .map(|id| (Some(*id), project_browser::folder_path(&project, Some(*id)))),
+            );
+            panel = panel.child(
+                div()
+                    .id("project-move-destinations")
+                    .max_h(px(160.0))
+                    .overflow_y_scroll()
+                    .children(destinations.into_iter().map(|(folder, label)| {
+                        ui::text_button(
+                            SharedString::from(format!("move-destination-{folder:?}")),
+                            label,
+                        )
+                        .w_full()
+                        .justify_start()
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.state.update(cx, |s, cx| {
+                                    s.dispatch(
+                                        &Action::Edit(Command::MoveProjectItem {
+                                            item: selected,
+                                            folder,
+                                        }),
+                                        window,
+                                        cx,
+                                    )
+                                });
+                                this.move_open = false;
+                                cx.notify();
+                            },
+                        ))
+                    })),
+            );
+        }
+        if let Some(error) = &self.thumbnail_error {
+            panel = panel.child(
+                div()
+                    .text_size(px(10.0))
+                    .text_color(rgb(0xf0a070))
+                    .h(px(20.0))
+                    .px_2()
+                    .overflow_hidden()
+                    .child(error.clone()),
+            );
+        }
+        if let ProjectItem::Asset(id) = selected {
+            if let Content::Video { path, .. } = project.asset_library().assets()[&id].content() {
+                panel = panel.child(
+                    ui::text_button("project-relink", "Relink source…").on_click({
+                        let state = self.state.clone();
+                        let path = path.clone();
+                        move |_, window, cx| {
+                            state.update(cx, |s, cx| {
+                                s.dispatch(&Action::RelinkSource(path.clone()), window, cx)
+                            })
+                        }
+                    }),
+                );
+            }
+        }
+        panel
+            .child(
+                div()
+                    .flex()
+                    .px_2()
                     .h(px(25.0))
                     .items_center()
                     .border_b_1()
                     .border_color(rgb(0x3a3a3a))
                     .text_size(px(11.0))
                     .text_color(rgb(ui::MUTED))
-                    .child(div().flex_1().child("Name"))
-                    .child("Type"),
+                    .child(
+                        ui::text_button(
+                            "project-sort-name",
+                            if !self.by_type && self.descending {
+                                "Name ↓"
+                            } else {
+                                "Name ↑"
+                            },
+                        )
+                        .flex_1()
+                        .justify_start()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.descending = !this.by_type && !this.descending;
+                            this.by_type = false;
+                            cx.notify();
+                        })),
+                    )
+                    .child(
+                        ui::text_button("project-sort-type", "Type").on_click(cx.listener(
+                            |this, _, _, cx| {
+                                this.descending = this.by_type && !this.descending;
+                                this.by_type = true;
+                                cx.notify();
+                            },
+                        )),
+                    ),
             )
             .child(
                 div()
-                    .id("composition-items")
+                    .id("project-items")
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
                     .children(
-                        project
-                            .compositions()
-                            .into_iter()
-                            .filter(|(_, comp)| comp.name().to_lowercase().contains(&query))
-                            .map(|(id, comp)| {
-                                let state = self.state.clone();
-                                ui::text_button(
-                                    SharedString::from(format!("project-comp-{id}")),
-                                    "",
-                                )
-                                .w_full()
-                                .h(px(29.0))
-                                .gap_2()
-                                .justify_start()
-                                .px_3()
-                                .when(id == active, |s| s.bg(rgb(0x343434)))
-                                .child(ui::icon("filmstrip"))
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .overflow_hidden()
-                                        .child(comp.name().to_string()),
-                                )
-                                .child(
-                                    div()
-                                        .text_size(px(10.0))
-                                        .text_color(rgb(ui::MUTED))
-                                        .child("Comp"),
-                                )
-                                .when(id != active, |s| {
-                                    s.child(ui::action_tool(
-                                        SharedString::from(format!("add-composition-{id}")),
-                                        "plus",
-                                        "Add to active composition",
-                                        &self.state,
-                                        Action::AddComposition(id),
-                                        false,
-                                    ))
-                                })
-                                .on_click(move |_, window, cx| {
-                                    state.update(cx, |s, cx| {
-                                        s.dispatch(&Action::ActivateComposition(id), window, cx)
-                                    })
-                                })
-                            }),
+                        rows.into_iter()
+                            .map(|row| self.item_row(row, selected, active, frame, cx)),
                     ),
             )
             .child(
@@ -209,16 +551,27 @@ impl Render for Browser {
                     .border_t_1()
                     .border_color(rgb(ui::BORDER))
                     .child(ui::action_tool(
-                        "project-open",
+                        "project-import",
                         "folder-open",
-                        "Open project",
+                        "Import footage (Ctrl+I)",
                         &self.state,
-                        Action::RequestOpen,
+                        Action::ImportImage,
+                        false,
+                    ))
+                    .child(ui::action_tool(
+                        "project-new-folder",
+                        "plus",
+                        "New folder",
+                        &self.state,
+                        Action::Edit(Command::NewProjectFolder {
+                            name: "Untitled Folder".into(),
+                            parent: folder,
+                        }),
                         false,
                     ))
                     .child(ui::action_tool(
                         "project-composition",
-                        "plus",
+                        "filmstrip",
                         "New composition",
                         &self.state,
                         Action::Edit(Command::NewComposition),
@@ -229,7 +582,7 @@ impl Render for Browser {
                         div()
                             .text_size(px(10.0))
                             .text_color(rgb(ui::MUTED))
-                            .child("RGBA"),
+                            .child(format!("{} assets", project.asset_library().assets().len())),
                     ),
             )
             .into_any_element()

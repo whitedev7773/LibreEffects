@@ -147,6 +147,15 @@ fn paste(state: &mut Snapshot, clipboard: &LayerClipboard) -> Result<(), String>
     };
     let mut layers = clipboard.layers.clone();
     for layer in &mut layers {
+        if layer.asset.is_some_and(|id| {
+            state.project.asset_library.assets.get(&id).is_none_or(|a| {
+                assets::source(&layer.content).as_ref() != Some(&a.content)
+                    || a.width() != layer.width
+                    || a.height() != layer.height
+            })
+        }) {
+            layer.asset = None;
+        }
         layer.id = mapping[&layer.id];
         layer.parent = layer.parent.map(|p| mapping.get(&p).copied().unwrap_or(p));
         layer.remap_matte(&mapping);

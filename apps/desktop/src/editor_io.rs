@@ -254,48 +254,6 @@ impl EditorState {
         })
         .detach();
     }
-    pub(super) fn import(&mut self, cx: &mut Context<Self>) {
-        let prompt = cx.prompt_for_paths(PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: false,
-            prompt: Some("Import PNG or JPEG image".into()),
-        });
-        cx.spawn(async move |entity, cx| {
-            let Ok(Ok(Some(paths))) = prompt.await else {
-                return;
-            };
-            let Some(path) = paths.into_iter().next() else {
-                return;
-            };
-            let name = path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned();
-            let result = cx
-                .background_executor()
-                .spawn(async move { crate::rendering::import_image(&path) })
-                .await;
-            let _ = entity.update(cx, |s, cx| {
-                s.status = match result.and_then(|(content, w, h)| {
-                    s.editor.execute(Command::AddContent {
-                        content,
-                        width: w as f64,
-                        height: h as f64,
-                        name,
-                    })
-                }) {
-                    Ok(()) => "Image embedded in project".into(),
-                    Err(e) => format!("Import failed: {e}"),
-                };
-                s.selected_layers.clear();
-                s.normalize();
-                cx.notify();
-            });
-        })
-        .detach();
-    }
     pub(super) fn export(&mut self, sequence: bool, background: bool, cx: &mut Context<Self>) {
         if self.exporting {
             return;

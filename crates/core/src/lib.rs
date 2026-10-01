@@ -31,8 +31,10 @@ mod precompositions;
 pub use guides::{Guide, GuideAxis};
 mod selection_transform;
 pub use selection_transform::AlignTarget;
+mod assets;
 mod time;
 mod time_remap;
+pub use assets::{AssetId, AssetLibrary, FolderId, MediaAsset, ProjectFolder, ProjectItem};
 mod tracks;
 pub use editing::{Content, Effects, KeyCopy, KeyRef, Mask, VideoPlayback};
 pub use geometry::{Affine, Bezier};
@@ -190,6 +192,8 @@ impl AnimatedProperty {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Layer {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    asset: Option<AssetId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     time_remap: Option<AnimatedProperty>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -456,6 +460,8 @@ impl Composition {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Project {
+    #[serde(default, skip_serializing_if = "AssetLibrary::is_default")]
+    asset_library: AssetLibrary,
     version: u32,
     next_layer_id: LayerId,
     composition: Composition,
@@ -480,6 +486,7 @@ impl Default for Project {
     fn default() -> Self {
         Self {
             version: 1,
+            asset_library: AssetLibrary::default(),
             next_layer_id: 1,
             composition_id: 1,
             next_composition_id: 2,
@@ -512,13 +519,15 @@ impl Project {
     }
 
     pub fn from_json(json: &str) -> Result<Self, String> {
-        let project = document::decode(json)?;
+        let mut project = document::decode(json)?;
+        project.validate()?;
+        project.sync_assets()?;
         project.validate()?;
         Ok(project)
     }
 
     fn validate(&self) -> Result<(), String> {
-        if !(1..=21).contains(&self.version) {
+        if !(1..=22).contains(&self.version) {
             return Err("Unsupported project version".into());
         }
         if self.version < 9
@@ -543,6 +552,17 @@ impl Project {
         let mut ids = BTreeSet::new();
         let mut images = BTreeSet::new();
         let mut image_bytes = 0usize;
+        assets::validate(self)?;
+        for asset in self.asset_library.assets.values() {
+            if let Content::Image { png } = &asset.content {
+                if images.insert(png.as_ptr() as usize) {
+                    image_bytes = image_bytes.saturating_add(png.len());
+                }
+            }
+        }
+        if image_bytes > document::MAX_IMAGE_BYTES {
+            return Err("Embedded image assets exceed 128 MiB".into());
+        }
         for (_, comp) in self.compositions() {
             matte::validate(comp, self.version)?;
             guides::validate(&comp.guides)?;
@@ -671,6 +691,31 @@ impl Project {
 /// The future scripting bridge and native controls both dispatch these commands.
 #[derive(Clone, Debug)]
 pub enum Command {
+    ImportAsset {
+        content: Content,
+        width: f64,
+        height: f64,
+        name: String,
+        folder: Option<FolderId>,
+        frame: Option<Frame>,
+    },
+    AddAssetLayer {
+        asset: AssetId,
+        frame: Frame,
+    },
+    NewProjectFolder {
+        name: String,
+        parent: Option<FolderId>,
+    },
+    RenameProjectItem {
+        item: ProjectItem,
+        name: String,
+    },
+    MoveProjectItem {
+        item: ProjectItem,
+        folder: Option<FolderId>,
+    },
+    DeleteProjectItem(ProjectItem),
     SetTimeRemap {
         id: LayerId,
         enabled: bool,
@@ -1138,6 +1183,7 @@ impl Editor {
         {
             next.project.version = 21;
         }
+        next.project.sync_assets()?;
         next.project.validate()?;
         if next != self.current {
             let previous = std::mem::replace(&mut self.current, next);
@@ -1148,6 +1194,9 @@ impl Editor {
 }
 
 fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
+    if let Some(result) = assets::apply(state, &command) {
+        return result;
+    }
     if let Some(result) = time_remap::apply(state, &command) {
         return result;
     }
@@ -1393,6 +1442,7 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
         comp.layers.insert(
             0,
             Layer {
+                asset: None,
                 time_remap: None,
                 track_matte: None,
                 blend_mode: BlendMode::Normal,

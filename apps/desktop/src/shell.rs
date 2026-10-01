@@ -389,10 +389,6 @@ impl Render for Shell {
                 .detach();
             self.initialized = true;
         }
-        if self.state.read(cx).request_open {
-            self.state.update(cx, |s, _| s.request_open = false);
-            self.dispatch(Action::Open, window, cx);
-        }
         if self.pending_save && !self.state.read(cx).saving {
             self.pending_save = false;
             if !self.state.read(cx).dirty() {
@@ -657,7 +653,7 @@ impl Render for Shell {
                             .collecting
                             .then_some(Action::CancelCollection),
                     ),
-                    ("Import image…", "Ctrl+I", Some(Action::ImportImage)),
+                    ("Import footage…", "Ctrl+I", Some(Action::ImportImage)),
                     ("Import video…", "Ctrl+Shift+I", Some(Action::ImportVideo)),
                     ("Manage project media…", "", Some(Action::ManageMedia)),
                     ("Relink selected video…", "", Some(Action::RelinkVideo)),

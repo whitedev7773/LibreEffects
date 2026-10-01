@@ -67,7 +67,7 @@ fn enabling_preserves_shifted_trimmed_speed_reverse_and_frozen_sources() {
             [5, 80]
         );
         let remapped = e.project().clone();
-        assert_eq!(remapped.version, 21);
+        assert_eq!(remapped.version, 22);
         e.undo();
         assert_eq!(e.project(), &before);
         e.redo();

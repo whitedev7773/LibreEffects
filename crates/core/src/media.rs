@@ -29,6 +29,27 @@ pub(super) fn relink(
         }
     }
     let mut found = BTreeSet::new();
+    for asset in state.project.asset_library.assets.values_mut() {
+        let (width, height) = (asset.width(), asset.height());
+        let Content::Video {
+            path,
+            duration,
+            source_fps,
+            ..
+        } = &mut asset.content
+        else {
+            continue;
+        };
+        if let Some(source) = sources.get(path) {
+            if width != f64::from(source.width) || height != f64::from(source.height) {
+                return Err("Relink requires matching asset dimensions".into());
+            }
+            found.insert(source.original.clone());
+            *path = source.path.clone();
+            *duration = source.duration;
+            *source_fps = source.fps;
+        }
+    }
     for comp in state.project.compositions_mut() {
         for layer in &mut comp.layers {
             let Content::Video {
@@ -70,7 +91,19 @@ impl Project {
         mut map: impl FnMut(&str) -> Result<String, String>,
     ) -> Result<Self, String> {
         let mut copy = self.clone();
-        let mut paths = BTreeMap::new();
+        let mut paths: BTreeMap<String, String> = BTreeMap::new();
+        for asset in copy.asset_library.assets.values_mut() {
+            if let Content::Video { path, .. } = &mut asset.content {
+                let value = if let Some(value) = paths.get(path) {
+                    value.clone()
+                } else {
+                    let value = map(path)?;
+                    paths.insert(path.clone(), value.clone());
+                    value
+                };
+                *path = value;
+            }
+        }
         for comp in copy.compositions_mut() {
             for layer in &mut comp.layers {
                 if let Content::Video { path, .. } = &mut layer.content {
@@ -124,7 +157,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(count, 1);
-        assert_eq!(collected.version, 15);
+        assert_eq!(collected.version, 22);
         assert_eq!(e.project(), &source);
         for (_, comp) in collected.compositions() {
             assert!(

@@ -23,6 +23,7 @@ impl Project {
     }
     pub fn same_document(&self, other: &Self) -> bool {
         self.version == other.version
+            && self.asset_library == other.asset_library
             && self.next_layer_id == other.next_layer_id
             && self.next_composition_id == other.next_composition_id
             && self.compositions() == other.compositions()
@@ -76,6 +77,7 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
             let old = project.composition_id;
             project.activate_composition(id)?;
             project.other_compositions.remove(&old);
+            project.asset_library.remove_composition(old);
         } else {
             if project.other_compositions.len() >= 99 || project.next_composition_id == u64::MAX {
                 return Err("Composition limit reached".into());
@@ -83,6 +85,9 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
             let id = project.next_composition_id;
             project.next_composition_id += 1;
             let mut comp = project.composition.clone();
+            project
+                .asset_library
+                .copy_composition(project.composition_id, id);
             if matches!(command, Command::DuplicateComposition) {
                 let mut mapping = BTreeMap::new();
                 for layer in &comp.layers {

@@ -625,7 +625,11 @@ pub(super) fn apply_extended(
                     l.properties.get_mut(&Property::ScaleY).unwrap().value = scale;
                 }
             }
-            Command::SetContent { id, content } => editable(state, *id)?.content = content.clone(),
+            Command::SetContent { id, content } => {
+                let layer = editable(state, *id)?;
+                layer.content = content.clone();
+                layer.asset = None;
+            }
             Command::SetEffects { id, effects } => editable(state, *id)?.effects = *effects,
             Command::SetMask { id, mask } => editable(state, *id)?.mask = *mask,
             Command::SetColor { id, color } => editable(state, *id)?.color = *color,

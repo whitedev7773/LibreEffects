@@ -19,7 +19,7 @@ Command-line renders remain independent of the interactive editor.
   The default proportions follow the open After Effects 2026 workspace measured at
   1920 × 1032. The Timeline ends at the right dock; toggling the graph changes only
   its time area, preserving the layer list, composition tab and ruler.
-- Project and Timeline search fields filter composition and layer names as you type.
+- Project searches media, folders and compositions by name/type; Timeline searches layer names.
 - Preview controls live in the right dock; Info shows the current composition and time.
 - Drag panel dividers to resize; double-click a divider or choose Window → Reset
   default workspace to restore the layout.
@@ -55,8 +55,9 @@ Command-line renders remain independent of the interactive editor.
 - Rectangle, text and embedded image layers with stable IDs, rename, duplicate,
   ordering, visibility and locking. Layer → New text uses embedded Wanted Sans.
   Properties edits the text, font size and hexadecimal fill color.
-- Ctrl+I imports PNG/JPEG images (up to 8 MiB and 4096 × 4096 pixels). Images are
-  re-encoded as PNG and stored inside the project, so moving the original is safe.
+- Ctrl+I imports one or multiple PNG/JPEG/video files into Project. Use the source's
+  plus button to add it at the playhead. Images (up to 8 MiB and 4096 × 4096 pixels)
+  are re-encoded as PNG and embedded, so moving the original is safe.
 - Ctrl+Shift+I imports a local video as a linked layer at the playhead. See
   Video footage below for source requirements and relinking.
 - Position, anchor, scale, rotation and opacity; X and Y remain separate animation
@@ -260,7 +261,7 @@ cargo run -p libre-effects-core --example make_animation_study -- examples/curve
 | Shortcut | Action |
 | --- | --- |
 | Ctrl+N / Ctrl+O / Ctrl+S | New / Open / Save |
-| Ctrl+Shift+S / Ctrl+I | Save as / Import image |
+| Ctrl+Shift+S / Ctrl+I | Save as / Import footage into Project |
 | Ctrl+Shift+I | Import video footage |
 | Ctrl+C / Ctrl+V | Copy / Paste selected keys |
 | Ctrl+Z / Ctrl+Shift+Z | Undo / Redo |
@@ -427,7 +428,7 @@ is stopped. Wait for completion or cancel before closing the application.
 ### A complete 2D motion-graphics delivery
 
 1. Open `examples/content-study.lfe.json`, or create a composition with Ctrl+K.
-2. Add text/rectangles from Layer, or import a PNG/JPEG with Ctrl+I.
+2. Add text/rectangles from Layer, or import a PNG/JPEG with Ctrl+I and click its Project plus button.
 3. Enable a transform stopwatch, move the playhead and change the value to animate.
    Use P/S/R/T and the Graph Editor to refine motion; save with Ctrl+S.
 4. Set B/N for the output range. Alt+[ and Alt+] trim layers without moving their
@@ -573,7 +574,8 @@ moving a layer shifts its keys, and cross-FPS layer paste converts key positions
 without changing their values in seconds. Layer transforms/effects keep using
 composition time while the nested source evaluates at remapped time.
 
-Projects with remapping use version 21. Preview, PNG, MP4 and alpha MOV use the
+Projects with remapping require version 21 or later (media assets use version 22).
+Preview, PNG, MP4 and alpha MOV use the
 same preceding-source-frame sampling; frame blending, optical flow and audio
 retiming are not implemented. `examples/time-remap-study.lfe.json` compares four
 instances of one animated source: original, fast/slow, hold and reverse.
@@ -587,10 +589,50 @@ Undo/Redo, Ctrl+Alt+T and reopening the edited project with its source time inta
 
 ## Project files and recovery
 
+### Project assets and folders
+
+The Project panel stores footage independently of its layers. Select an item to
+inspect dimensions, duration/FPS and reference count, and edit its name in the
+header. Images, footage and compositions have an asynchronous thumbnail. Double-click
+a composition, or use its arrow button, to open it. A source's plus button adds
+another independently animated layer to the active composition at the playhead.
+Removing layers leaves their source available for reuse.
+
+The bottom plus creates a folder inside the selected folder (or beside a selected
+item). Use Move to… to move footage, compositions and folders; the folder chevron
+collapses its children. Search includes items inside collapsed folders. Name/Type
+headers sort the list; clicking the same header reverses its order. The trash
+button removes unused footage or an empty folder. Referenced footage and nonempty
+folders cannot be deleted. Folder changes and source renames preserve layer names,
+animation and pixels, and support Undo/Redo and save/reopen.
+
+Ctrl+I reads all selected files before committing one undoable import. If a file
+fails, no selected files are added. Identical source data and dimensions reuse an
+asset ID. Linked video relinking updates the shared source and every instance;
+layer trims, speed and Time Remap remain independent. Collect Files and source
+overwrite protection include footage without any layers. Video thumbnails report
+missing sources, and Relink source… works directly from Project.
+
+Version 22 persists asset IDs, folders and source metadata. Older projects acquire
+asset IDs when read without changing layer sampling or pixels. Embedded PNG data
+is still written once and shared through history. Limits are 1,000 media assets,
+1,000 folders, 32 folder levels, and 128 MiB of unique encoded images. Importing
+videos remains visual-only; audio, image sequence interpretation, source FPS/alpha
+overrides and composition creation from footage are pending in A08/H01–H04.
+
+Open `examples/asset-library-study.lfe.json` to inspect two compositions sharing
+one embedded image in a folder tree. Native validation covered source rename,
+folder move with Undo/Redo, adding a shared source as another layer, mixed PNG/MP4
+import with one Undo/Redo, searching collapsed folders and save/reopen. The saved
+project also rendered to PNG and a 1280 × 720, 30 fps MP4. Regression tests cover
+unused sources, migration, failed batches, Collect Files, shared relinking and
+MP4/alpha-MOV output.
+
 ### Multiple compositions
 
 Use Composition > New / Duplicate / Delete composition, or the Project panel's
-plus button. Click a composition in Project or its viewer tab to activate it.
+filmstrip button. Double-click a composition in Project, use its arrow, or click
+its viewer tab to activate it.
 Each composition has independent dimensions, frame rate, duration, background,
 layers and B/N work area. Ctrl+K edits the active composition's settings and name.
 The project supports up to 100 compositions and 1,000 total layers. Duplicate

@@ -11,6 +11,8 @@ use libre_effects_core::{
 };
 
 use crate::components::{Button, ButtonSize, ButtonVariant};
+#[path = "editor_assets.rs"]
+pub(crate) mod assets;
 #[path = "editor_footage.rs"]
 mod footage;
 #[path = "editor_io.rs"]
@@ -49,7 +51,6 @@ pub(crate) enum Action {
     Redo,
     New,
     Open,
-    RequestOpen,
     SaveAs,
     Save,
     CollectFiles,
@@ -137,6 +138,7 @@ impl PropertyFilter {
 }
 
 pub(crate) struct EditorState {
+    pub project_item: Option<libre_effects_core::ProjectItem>,
     composition_views:
         std::collections::BTreeMap<CompositionId, crate::view_state::CompositionView>,
     pub workspace: crate::view_state::WorkspaceView,
@@ -160,7 +162,6 @@ pub(crate) struct EditorState {
     pub media_entries: Vec<crate::media_io::MediaEntry>,
     pub media_message: String,
     collection_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    pub request_open: bool,
     pub close_after_save: bool,
     pub recovery: Option<crate::recovery::Candidate>,
     pub recovery_pending: std::collections::VecDeque<crate::recovery::Candidate>,
@@ -199,6 +200,7 @@ pub(crate) struct EditorState {
 impl Default for EditorState {
     fn default() -> Self {
         Self {
+            project_item: None,
             composition_views: Default::default(),
             workspace: Default::default(),
             preview_pan: [0.0; 2],
@@ -217,7 +219,6 @@ impl Default for EditorState {
             media_entries: Vec::new(),
             media_message: String::new(),
             collection_cancel: Default::default(),
-            request_open: false,
             close_after_save: false,
             recovery: None,
             recovery_ready: false,
@@ -834,7 +835,7 @@ impl EditorState {
                 window,
                 cx,
             ),
-            Action::ImportImage => self.import(cx),
+            Action::ImportImage => self.import_assets(cx),
             Action::ImportVideo => self.import_video(false, cx),
             Action::RelinkVideo => self.import_video(true, cx),
             Action::ManageMedia => {
@@ -1064,7 +1065,6 @@ impl EditorState {
                 }
             }
             Action::Open => self.open(cx),
-            Action::RequestOpen => self.request_open = true,
             Action::SaveAs => self.save_as(cx),
             Action::Save => self.save(cx),
             Action::CollectFiles => self.collect_files(cx),

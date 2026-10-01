@@ -29,12 +29,20 @@ pub(crate) fn composite_background(pixels: &mut image::RgbaImage, color: u32) {
 }
 pub(crate) fn validate_images(project: &Project) -> Result<(), String> {
     let mut seen = std::collections::HashSet::new();
-    for layer in project
+    for (name, content) in project
         .compositions()
         .into_iter()
         .flat_map(|(_, comp)| comp.layers())
+        .map(|layer| (layer.name(), layer.content()))
+        .chain(
+            project
+                .asset_library()
+                .assets()
+                .values()
+                .map(|a| (a.name(), a.content())),
+        )
     {
-        if let Content::Image { png } = layer.content() {
+        if let Content::Image { png } = content {
             if !seen.insert(png.as_ptr() as usize) {
                 continue;
             }
@@ -44,7 +52,7 @@ pub(crate) fn validate_images(project: &Project) -> Result<(), String> {
             reader.limits(image_limits());
             reader
                 .decode()
-                .map_err(|e| format!("Invalid image in {}: {e}", layer.name()))?;
+                .map_err(|e| format!("Invalid image in {name}: {e}"))?;
         }
     }
     Ok(())

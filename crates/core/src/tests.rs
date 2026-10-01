@@ -1732,7 +1732,7 @@ fn video_timing_survives_trim_move_split_and_serialization() {
         assert_eq!(layer.content().video_time(20, 30), Some(1.0));
     }
     let json = e.project().to_json().unwrap();
-    assert!(json.contains("\"version\": 4"));
+    assert!(json.contains("\"version\": 22"));
     assert_eq!(&Project::from_json(&json).unwrap(), e.project());
     e.undo();
     assert_eq!(e.project().composition().layers().len(), 1);
@@ -1850,7 +1850,7 @@ fn playback_speed_and_source_slip_keep_ranges_keys_and_support_undo() {
     e.redo();
     e.redo();
     let saved = e.project().to_json().unwrap();
-    assert!(saved.contains("\"version\": 5"));
+    assert!(saved.contains("\"version\": 22"));
     assert_eq!(&Project::from_json(&saved).unwrap(), e.project());
 }
 

@@ -18,6 +18,7 @@ mod footage;
 mod matte_render;
 mod media_io;
 mod panels;
+mod project_browser;
 mod project_io;
 mod recovery;
 mod rendering;
