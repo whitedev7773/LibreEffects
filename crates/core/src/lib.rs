@@ -31,6 +31,8 @@ mod precompositions;
 pub use guides::{Guide, GuideAxis};
 mod selection_transform;
 pub use selection_transform::AlignTarget;
+mod audio;
+pub use audio::AudioMetadata;
 mod assets;
 mod footage_interpretation;
 mod image_sequence;
@@ -533,7 +535,7 @@ impl Project {
     }
 
     fn validate(&self) -> Result<(), String> {
-        if !(1..=24).contains(&self.version) {
+        if !(1..=25).contains(&self.version) {
             return Err("Unsupported project version".into());
         }
         if self.version < 9

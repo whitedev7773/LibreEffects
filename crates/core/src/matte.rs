@@ -45,7 +45,7 @@ impl Composition {
     pub fn can_track_matte(&self, target: LayerId, source: LayerId) -> bool {
         if self
             .layer(target)
-            .is_none_or(|l| matches!(l.content, Content::Null))
+            .is_none_or(|l| matches!(l.content, Content::Null | Content::Audio { .. }))
         {
             return false;
         }
@@ -58,7 +58,10 @@ impl Composition {
             let Some(layer) = self.layer(id) else {
                 return false;
             };
-            if matches!(layer.content, Content::Null | Content::Adjustment) {
+            if matches!(
+                layer.content,
+                Content::Null | Content::Adjustment | Content::Audio { .. }
+            ) {
                 return false;
             }
             current = layer.track_matte.map(|m| m.source);
@@ -91,7 +94,7 @@ pub(super) fn set(
     }
     if let Some(matte) = matte {
         if !comp.can_track_matte(id, matte.source) {
-            return Err("Choose a non-circular pixel source (up to 16 matte links); Null and Adjustment cannot be matte sources".into());
+            return Err("Choose a non-circular pixel source (up to 16 matte links); Null, Adjustment and Audio cannot be matte sources".into());
         }
         // On first assignment hide an editable source, as in AE. A locked source
         // can still be referenced but its visibility must not be changed.

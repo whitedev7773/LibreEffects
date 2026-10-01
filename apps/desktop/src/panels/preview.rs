@@ -148,14 +148,15 @@ fn controls_active(
     frame: u32,
     selected: bool,
 ) -> bool {
-    comp.layer_active(layer, frame, true)
-        || (selected
-            && frame >= layer.in_frame()
-            && frame < layer.out_frame(comp.duration())
-            && comp
-                .layers()
-                .iter()
-                .any(|l| l.track_matte().is_some_and(|m| m.source == layer.id())))
+    !matches!(layer.content(), libre_effects_core::Content::Audio { .. })
+        && (comp.layer_active(layer, frame, true)
+            || (selected
+                && frame >= layer.in_frame()
+                && frame < layer.out_frame(comp.duration())
+                && comp
+                    .layers()
+                    .iter()
+                    .any(|l| l.track_matte().is_some_and(|m| m.source == layer.id()))))
 }
 
 impl Preview {
@@ -447,6 +448,7 @@ impl Preview {
             .or_else(|| {
                 comp.layers().iter().find(|layer| {
                     comp.layer_active(layer, frame, true)
+                        && !matches!(layer.content(), libre_effects_core::Content::Audio { .. })
                         && !layer.locked()
                         && comp
                             .corners_at(layer.id(), frame)

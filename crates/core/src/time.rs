@@ -383,6 +383,7 @@ mod tests {
         configure(&mut e, "23.976", 240, 86400).unwrap();
         e.execute(Command::AddContent {
             content: Content::Video {
+                audio: None,
                 path: "clock.mp4".into(),
                 duration: 20.0,
                 source_fps: 24.0,

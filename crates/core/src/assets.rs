@@ -104,8 +104,8 @@ impl AssetLibrary {
         folder: Option<FolderId>,
         interpretation: FootageInterpretation,
     ) -> Result<AssetId, String> {
-        let content =
-            source(&content).ok_or("Only image and video footage can be imported as assets")?;
+        let content = source(&content)
+            .ok_or("Only image, video and audio footage can be imported as assets")?;
         if folder.is_some_and(|id| !self.folders.contains_key(&id)) {
             return Err("Destination folder no longer exists".into());
         }
@@ -151,11 +151,19 @@ pub(super) fn source(content: &Content) -> Option<Content> {
             path,
             duration,
             source_fps,
+            audio,
             ..
         } => Content::Video {
+            audio: audio.clone(),
             path: path.clone(),
             duration: *duration,
             source_fps: *source_fps,
+            start_frame: 0,
+            playback: Default::default(),
+        },
+        Content::Audio { path, audio, .. } => Content::Audio {
+            path: path.clone(),
+            audio: audio.clone(),
             start_frame: 0,
             playback: Default::default(),
         },
@@ -227,6 +235,9 @@ impl Project {
         {
             self.version = 24;
         }
+        if library.assets.values().any(|a| a.content.audio().is_some()) {
+            self.version = 25;
+        }
         Ok(())
     }
 }
@@ -251,6 +262,9 @@ pub(super) fn validate(project: &Project) -> Result<(), String> {
     let valid_folder = |id: Option<FolderId>| id.is_none_or(|id| library.folders.contains_key(&id));
     let valid_id = |id: u64| id > 0 && id < library.next_id;
     for (id, asset) in &library.assets {
+        if project.version < 25 && asset.content.audio().is_some() {
+            return Err("Audio requires project version 25".into());
+        }
         if project.version < 24 && matches!(asset.content, Content::ImageSequence { .. }) {
             return Err("Image sequences require version 24".into());
         }
@@ -300,6 +314,9 @@ pub(super) fn validate(project: &Project) -> Result<(), String> {
     }
     for (_, comp) in project.compositions() {
         for layer in &comp.layers {
+            if project.version < 25 && layer.content.audio().is_some() {
+                return Err("Audio requires project version 25".into());
+            }
             if project.version < 24 && matches!(layer.content, Content::ImageSequence { .. }) {
                 return Err("Image sequences require version 24".into());
             }
@@ -487,8 +504,9 @@ fn add_layer(state: &mut Snapshot, asset: AssetId, frame: Frame) -> Result<(), S
         .clone();
     let mut content = a.content;
     let interpreted_duration = a.interpretation.duration(&content);
-    if let Content::Video { start_frame, .. } | Content::ImageSequence { start_frame, .. } =
-        &mut content
+    if let Content::Video { start_frame, .. }
+    | Content::Audio { start_frame, .. }
+    | Content::ImageSequence { start_frame, .. } = &mut content
     {
         *start_frame = i64::from(frame);
     }

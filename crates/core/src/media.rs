@@ -9,6 +9,7 @@ pub struct MediaReplacement {
     pub height: u32,
     pub duration: f64,
     pub fps: f64,
+    pub audio: Option<AudioMetadata>,
 }
 
 pub(super) fn relink(
@@ -42,6 +43,7 @@ pub(super) fn relink(
             path,
             duration,
             source_fps,
+            audio,
             ..
         } = content
         {
@@ -49,6 +51,19 @@ pub(super) fn relink(
                 *path = source.path.clone();
                 *duration = source.duration;
                 *source_fps = source.fps;
+                *audio = source.audio.clone();
+            }
+        } else if let Content::Audio { path, audio, .. } = content {
+            if let Some(source) = sources.get(path) {
+                let replacement = source
+                    .audio
+                    .clone()
+                    .ok_or("Replacement has no audio stream")?;
+                if source.width != 1 || source.height != 1 || replacement.start_time != 0.0 {
+                    return Err("Relink audio with an audio-only source".into());
+                }
+                *path = source.path.clone();
+                *audio = replacement;
             }
         } else {
             for path in content.linked_paths_mut() {
@@ -141,6 +156,7 @@ mod tests {
         let mut e = Editor::default();
         e.execute(Command::AddContent {
             content: Content::Video {
+                audio: None,
                 path: "C:/source/movie.mp4".into(),
                 duration: 5.0,
                 source_fps: 30.0,
@@ -190,6 +206,7 @@ mod tests {
         let mut e = Editor::default();
         e.execute(Command::AddContent {
             content: Content::Video {
+                audio: None,
                 path: "old.mp4".into(),
                 duration: 5.0,
                 source_fps: 30.0,
@@ -208,6 +225,7 @@ mod tests {
         e.execute(Command::ToggleLocked(2)).unwrap();
         let before = e.project().clone();
         let replacement = MediaReplacement {
+            audio: None,
             original: "old.mp4".into(),
             path: "new.mp4".into(),
             width: 20,
@@ -242,6 +260,7 @@ mod tests {
                 ..replacement.clone()
             },
             MediaReplacement {
+                audio: None,
                 original: "missing.mp4".into(),
                 ..replacement.clone()
             },

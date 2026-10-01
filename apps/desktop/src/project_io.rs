@@ -261,6 +261,7 @@ mod tests {
         let mut e = Editor::default();
         e.execute(Command::AddContent {
             content: Content::Video {
+                audio: None,
                 path: source.to_string_lossy().into_owned(),
                 duration: 5.0,
                 source_fps: 30.0,
@@ -317,6 +318,7 @@ mod tests {
         let mut e = Editor::default();
         e.execute(Command::AddContent {
             content: Content::Video {
+                audio: None,
                 path: source.to_string_lossy().into_owned(),
                 duration: 5.0,
                 source_fps: 30.0,
@@ -382,6 +384,7 @@ mod tests {
         e.execute(Command::NewComposition).unwrap();
         e.execute(Command::AddContent {
             content: Content::Video {
+                audio: None,
                 path: dir
                     .path()
                     .join("missing.mp4")

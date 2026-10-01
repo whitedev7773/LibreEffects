@@ -132,6 +132,29 @@ pub(crate) fn replacement_for_project(
     original: String,
     path: &Path,
 ) -> Result<libre_effects_core::MediaReplacement, String> {
+    let audio = project
+        .asset_library()
+        .assets()
+        .values()
+        .any(|a| matches!(a.content(), Content::Audio { path, .. } if path == &original));
+    if audio {
+        let probe = crate::audio::probe(path)?;
+        if probe.has_video {
+            return Err("Relink audio with an audio-only source".into());
+        }
+        let audio = probe.audio.ok_or("No audio stream found")?;
+        let path = path_string(&std::fs::canonicalize(path).map_err(|e| e.to_string())?)?;
+        crate::audio::decode_chunk(&path, &audio, 0)?;
+        return Ok(libre_effects_core::MediaReplacement {
+            original,
+            path,
+            width: 1,
+            height: 1,
+            duration: audio.duration,
+            fps: 1.0,
+            audio: Some(audio),
+        });
+    }
     let sequence = project.asset_library().assets().values().any(|a| matches!(a.content(), Content::ImageSequence { frames, .. } if frames.contains(&original)));
     if !sequence {
         return replacement(original, path);
@@ -139,6 +162,7 @@ pub(crate) fn replacement_for_project(
     let (_, width, height) = crate::rendering::import_image(path)?;
     let absolute = std::fs::canonicalize(path).map_err(|e| e.to_string())?;
     Ok(libre_effects_core::MediaReplacement {
+        audio: None,
         original,
         path: path_string(&absolute)?,
         width,
@@ -155,6 +179,7 @@ pub(crate) fn replacement(
     let info = crate::footage::probe(path)?;
     crate::footage::frame_png(&info.path, 0.0, info.width, info.height, 320)?;
     Ok(libre_effects_core::MediaReplacement {
+        audio: info.audio,
         original,
         path: info.path,
         width: info.width,
@@ -379,6 +404,7 @@ mod tests {
         let mut e = Editor::default();
         e.execute(Command::AddContent {
             content: Content::Video {
+                audio: None,
                 path: source.to_str().unwrap().into(),
                 duration: 5.0,
                 source_fps: 30.0,
@@ -477,6 +503,7 @@ mod tests {
         e.execute(Command::SetContent {
             id: 2,
             content: Content::Video {
+                audio: None,
                 path: second.to_str().unwrap().into(),
                 duration: 5.0,
                 source_fps: 30.0,
@@ -572,6 +599,7 @@ mod tests {
         .unwrap();
         e.execute(Command::AddContent {
             content: Content::Video {
+                audio: None,
                 path: info.path,
                 duration: info.duration,
                 source_fps: info.source_fps,

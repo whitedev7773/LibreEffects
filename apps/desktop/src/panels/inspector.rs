@@ -266,6 +266,7 @@ impl Render for Inspector {
             self.parent_owner = Some(id);
         }
         let locked = layer.locked();
+        let is_audio = matches!(layer.content(), Content::Audio { .. });
         self.name.update(cx, |field, _| {
             field.sync(id.to_string(), layer.name().to_string(), window)
         });
@@ -290,17 +291,19 @@ impl Render for Inspector {
                             .when(locked, |s| s.child(layer.name().to_string())),
                     ),
             )
-            .child(
-                div()
-                    .h(px(28.0))
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .border_b_1()
-                    .border_color(rgb(0x353535))
-                    .child(ui::icon("chevron-down"))
-                    .child("Transform"),
-            );
+            .when(!is_audio, |d| {
+                d.child(
+                    div()
+                        .h(px(28.0))
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .border_b_1()
+                        .border_color(rgb(0x353535))
+                        .child(ui::icon("chevron-down"))
+                        .child("Transform"),
+                )
+            });
         for (label, indices) in [
             ("Anchor Point", vec![2, 3]),
             ("Position", vec![0, 1]),
@@ -308,6 +311,9 @@ impl Render for Inspector {
             ("Rotation", vec![6]),
             ("Opacity", vec![7]),
         ] {
+            if is_audio {
+                continue;
+            }
             let properties: Vec<_> = indices.iter().map(|i| Property::ALL[*i]).collect();
             let animated = properties
                 .iter()
@@ -354,7 +360,7 @@ impl Render for Inspector {
             contents = contents.child(row);
         }
         let is_null = matches!(layer.content(), Content::Null);
-        if !is_null {
+        if !is_null && !is_audio {
             if self.blend.as_ref().is_none_or(|(owner, _)| *owner != id) {
                 self.blend = Some((
                     id,
@@ -370,7 +376,7 @@ impl Render for Inspector {
                     .child(div().flex_1().child(self.blend.as_ref().unwrap().1.clone())),
             );
         }
-        if !is_null {
+        if !is_null && !is_audio {
             if self.matte.as_ref().is_none_or(|(owner, _, _)| *owner != id) {
                 self.matte = Some((
                     id,
@@ -402,6 +408,7 @@ impl Render for Inspector {
         if matches!(
             layer.content(),
             Content::Image { .. }
+                | Content::Audio { .. }
                 | Content::Video { .. }
                 | Content::ImageSequence { .. }
                 | Content::Composition { .. }
@@ -537,12 +544,15 @@ impl Render for Inspector {
                     );
             }
         }
-        if let Content::Video { playback, .. } | Content::ImageSequence { playback, .. } =
-            layer.content()
+        if let Content::Video { playback, .. }
+        | Content::Audio { playback, .. }
+        | Content::ImageSequence { playback, .. } = layer.content()
         {
             let path = layer.content().linked_paths()[0].clone();
             let relink = if matches!(layer.content(), Content::ImageSequence { .. }) {
                 Action::RelinkSequence(layer.asset_id().unwrap())
+            } else if matches!(layer.content(), Content::Audio { .. }) {
+                Action::RelinkSource(path.clone())
             } else {
                 Action::RelinkVideo
             };
@@ -556,6 +566,16 @@ impl Render for Inspector {
                         Content::ImageSequence { frames, .. } => {
                             format!("Image sequence · {} frames · {duration:.2}s", frames.len())
                         }
+                        Content::Audio { audio, .. } => format!(
+                            "Audio · {} Hz · {} ch · {duration:.2}s",
+                            audio.sample_rate, audio.channels
+                        ),
+                        Content::Video {
+                            audio: Some(audio), ..
+                        } => format!(
+                            "Video + audio · {} Hz · {} ch",
+                            audio.sample_rate, audio.channels
+                        ),
                         _ => format!("Linked video · {duration:.2}s · no audio"),
                     },
                 ))
@@ -640,6 +660,14 @@ impl Render for Inspector {
                         "0% freezes · negative speed reverses. Layer range and keys stay fixed.",
                     ));
             }
+            if layer.content().audio().is_some() {
+                contents = contents.child(
+                    div()
+                        .text_size(px(11.0))
+                        .text_color(rgb(ui::MUTED))
+                        .child("Audio waveform only · playback and exports are silent"),
+                );
+            }
             let source_status =
                 if frame < layer.in_frame() || frame >= layer.out_frame(comp.duration()) {
                     "Playhead is outside the layer".to_string()
@@ -703,7 +731,7 @@ impl Render for Inspector {
                         .child("Size edits keep the layer origin and animation."),
                 );
         }
-        if !is_null {
+        if !is_null && !is_audio {
             let state = self.state.clone();
             contents = contents.child(
                 ui::text_button("open-effects", "Open Effect Controls").on_click(

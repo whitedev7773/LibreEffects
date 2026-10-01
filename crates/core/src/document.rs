@@ -79,7 +79,7 @@ pub(super) fn decode(json: &str) -> Result<Project, String> {
         .as_object_mut()
         .ok_or("Project must be an object")?
         .remove("image_assets");
-    if assets_value.is_some() && !matches!(value["version"].as_u64(), Some(7..=24)) {
+    if assets_value.is_some() && !matches!(value["version"].as_u64(), Some(7..=25)) {
         return Err("Image assets require project version 7".into());
     }
     let assets: BTreeMap<String, Arc<str>> = assets_value
@@ -91,7 +91,7 @@ pub(super) fn decode(json: &str) -> Result<Project, String> {
         return Err("Embedded images exceed 128 MiB".into());
     }
     let sequences_value = value.as_object_mut().unwrap().remove("sequence_assets");
-    if sequences_value.is_some() && value["version"].as_u64() != Some(24) {
+    if sequences_value.is_some() && !matches!(value["version"].as_u64(), Some(24..=25)) {
         return Err("Sequence manifests require version 24".into());
     }
     let sequences: BTreeMap<String, Arc<Vec<String>>> = sequences_value

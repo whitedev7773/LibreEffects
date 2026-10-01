@@ -1,3 +1,4 @@
+mod audio_waveform;
 mod blend;
 mod browser;
 mod color_curve;

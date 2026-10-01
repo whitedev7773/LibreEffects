@@ -22,6 +22,7 @@ struct KeyDrag {
     to: u32,
 }
 pub(crate) struct Timeline {
+    waveforms: Entity<super::audio_waveform::AudioWaveforms>,
     matte_pickers: BTreeMap<
         LayerId,
         (
@@ -61,7 +62,10 @@ impl Timeline {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
         let search = cx.new(|cx| TextField::new(cx, |_, _, _| {}));
         cx.observe(&search, |_, _, cx| cx.notify()).detach();
+        let waveforms = cx.new(|_| super::audio_waveform::AudioWaveforms::new());
+        cx.observe(&waveforms, |_, _, cx| cx.notify()).detach();
         Self {
+            waveforms,
             blend_pickers: BTreeMap::new(),
             matte_pickers: BTreeMap::new(),
             left: LEFT,
@@ -723,6 +727,18 @@ impl Render for Timeline {
             let layer_hits = self.hit_layers.clone();
             let bar_bounds = Rc::new(Cell::new(None));
             let bar_measure = bar_bounds.clone();
+            let waveform = if bar_visible && layer.content().audio().is_some() {
+                let shift = bar_offset
+                    .filter(|(_, edge, _, _)| *edge == 0)
+                    .map_or(0, |(_, _, _, delta)| *delta);
+                let a = i64::from(bar_start.max(start)) - shift;
+                let b = i64::from(bar_end.min(start + visible)) - shift;
+                Some(self.waveforms.update(cx, |waves, cx| {
+                    waves.row(layer, comp.fps(), a as f64, b as f64, cx)
+                }))
+            } else {
+                None
+            };
             let time_area = div()
                 .relative()
                 .flex_1()
@@ -751,6 +767,7 @@ impl Render for Timeline {
                             .border_1()
                             .border_color(rgb(if selected_row { 0xddd2ff } else { 0x777777 }))
                             .cursor_grab()
+                            .children(waveform)
                             .child(
                                 canvas(move |b, _, _| bar_measure.set(Some(b)), |_, _, _, _| ())
                                     .absolute()
@@ -834,10 +851,12 @@ impl Render for Timeline {
                     .when(!graph_open, |s| s.child(time_area)),
             );
             if selected_row && expanded {
-                if filter != Some(PropertyFilter::Animated)
-                    || Property::ALL
-                        .into_iter()
-                        .any(|p| !layer.property(p).keys().is_empty())
+                let is_audio = matches!(layer.content(), libre_effects_core::Content::Audio { .. });
+                if !is_audio
+                    && (filter != Some(PropertyFilter::Animated)
+                        || Property::ALL
+                            .into_iter()
+                            .any(|p| !layer.property(p).keys().is_empty()))
                 {
                     rows = rows.child(
                         div()
@@ -880,6 +899,9 @@ impl Render for Timeline {
                     )
                 })
                 .collect();
+                if is_audio {
+                    groups.clear();
+                }
                 if layer.time_remap().is_some() {
                     groups.push(("Time Remap".into(), vec![PropertyPath::TimeRemap]));
                 }

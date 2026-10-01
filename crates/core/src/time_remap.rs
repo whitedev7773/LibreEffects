@@ -14,7 +14,10 @@ impl Layer {
     pub fn can_time_remap(&self) -> bool {
         matches!(
             self.content,
-            Content::Video { .. } | Content::ImageSequence { .. } | Content::Composition { .. }
+            Content::Video { .. }
+                | Content::Audio { .. }
+                | Content::ImageSequence { .. }
+                | Content::Composition { .. }
         )
     }
     pub fn time_remap(&self) -> Option<&AnimatedProperty> {
@@ -140,9 +143,9 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                     return Err("Place the playhead inside the layer to freeze".into());
                 }
                 let seconds = match layer.content {
-                    Content::Video { .. } | Content::ImageSequence { .. } => {
-                        layer.video_time(*frame, fps)
-                    }
+                    Content::Video { .. }
+                    | Content::Audio { .. }
+                    | Content::ImageSequence { .. } => layer.video_time(*frame, fps),
                     Content::Composition { composition, .. } => {
                         let source = state
                             .project

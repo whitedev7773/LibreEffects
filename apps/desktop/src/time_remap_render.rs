@@ -228,6 +228,7 @@ fn remapped_footage_and_precompositions_roundtrip_through_video_export() {
     video
         .execute(Command::AddContent {
             content: Content::Video {
+                audio: None,
                 path: media.to_string_lossy().into_owned(),
                 duration: 1.0,
                 source_fps: 30.0,

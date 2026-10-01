@@ -494,7 +494,8 @@ controls to put footage below a title, then save the project and render MP4/MOV.
   decoded on demand and real-time playback is not guaranteed. Output renders every
   frame. Frame decoding times out after 15 seconds; cancellation can wait for the
   current source-frame decode. Preview resolution does not reduce output quality.
-- Audio is not imported, played or exported. Color processing is 8-bit RGBA and is
+- Audio sources and waveforms are imported; sound is not yet played or exported.
+  Color processing is 8-bit RGBA and is
   not an HDR/color-managed workflow. Source files must stay unchanged during export;
   project snapshots preserve edits, not the external file bytes.
 
@@ -618,7 +619,8 @@ Version 22 persists asset IDs, folders and source metadata. Older projects acqui
 asset IDs when read without changing layer sampling or pixels. Embedded PNG data
 is still written once and shared through history. Limits are 1,000 media assets,
 1,000 folders, 32 folder levels, and 128 MiB of unique encoded images. Importing
-videos remains visual-only; audio is pending in H01–H04.
+videos includes first-stream audio metadata and waveforms; playback and mixing
+remain pending in H02–H04.
 
 Select footage and open Interpret footage… to override a video's source FPS
 (including rational rates such as `30000/1001`). Enter `Source` to restore the
@@ -877,7 +879,7 @@ Named presets now include each module's size, FPS, channels, quality and speed;
 version 1 queue data migrates to version 2 while preserving results and presets.
 PNG sequences with a changed FPS number from zero and record source_range, output
 FPS and frame count in sequence.json. Unchanged FPS retains composition numbering.
-Audio is not yet implemented; audio and additional codec profiles remain I03/H01–H04.
+Audio output is not yet implemented; audio mixing and additional codec profiles remain I03/H02–H04.
 Snapshots and queue data are local to this user, not embedded in project files.
 
 The CLI shares these settings: `--size 1280x720 --fps 30000/1001 --channels rgb
@@ -1061,3 +1063,49 @@ all four modes over Wanted Sans text. Regression tests cover reference alpha and
 luma pixels, inversion, masks, effects, animation, parent transforms, nested/reused
 mattes, history, copy/split/pre-compose, invalid references and hidden offline
 footage. Explicit FFmpeg tests compare MP4 and alpha MOV frames to PNG results.
+
+
+## Linked audio and waveforms
+
+Ctrl+I accepts independent audio files as shared Project assets and reads the first
+embedded audio stream of newly imported video. Project details show sample rate,
+channel count, layout and duration. Add to composition reuses the source; New comp
+from an audio source keeps the current canvas and FPS and uses the audio duration.
+Old video assets without audio metadata keep their previous behavior; relink or
+reimport the file to discover audio. Audio cover art does not turn a sound into a
+video layer. Audio remains linked on disk and participates in missing-media lists,
+relative paths, Collect Files, source protection and shared relinking.
+
+The timeline displays a waveform inside the existing layer bar. Trim, move, split,
+source-in, speed, reverse and Time Remap use the layer's source clock. Embedded audio
+retains its offset from the video's first frame, and source-FPS interpretation
+scales its clock. Pure audio contributes no pixels or visual transform handles and cannot supply or
+receive a Track Matte.
+Audio source compositions keep the current canvas size. Metadata, references and
+timing round-trip in project version 25, including mixed image/sequence projects.
+
+Waveforms are decoded off the UI thread, one job per timeline. Each ten-second
+chunk aggregates min/max across channels independently, so opposite-phase stereo
+is not canceled by a mono mix. Display data uses 100 bins per second and at most
+48 kHz decoding; it is a waveform visualization, not a true-peak meter. The cache
+holds at most 4,096 chunks and 40 MiB of data/path payload, invalidated by file size,
+modification time and stream metadata. A row spanning more than 60 source chunks
+asks to zoom in; errors/loading are visible instead of fabricated waveform data.
+The Project thumbnail previews the first ten seconds. Supported metadata limits
+are 8–384 kHz, 1–32 channels and 24 hours, subject to installed FFmpeg decoders.
+Only the first audio stream is selected; stream selection and full-duration coarse
+overviews remain future extensions.
+
+**Preview and exported MP4/MOV files are still silent.** Audio device playback,
+scrubbing, A/V synchronization, levels, mute/solo, pan, fades, meters, nested mixing
+and AAC/PCM encoding remain H02–H04. A visible frozen/reversed waveform does not yet
+imply audible retiming; mixing policy and sample-accurate output will be verified
+with those features. Existing PNG/video rendering behavior remains unchanged.
+
+Validation includes 216 ordinary tests plus 20 FFmpeg integration tests. Audio
+coverage includes opposite-phase stereo, silence, chunk boundaries, delayed video
+sound, WAV/FLAC/MP3/AAC imports, mixed version-25 document serialization, timing and
+shared relinking. Native QA covered mixed import, audio-source composition creation,
+split/undo/redo, move/trim, relink/undo/redo and save/reopen. The saved QA project's
+CLI PNG is byte-identical to its visual-only counterpart; its 30-frame MP4 remains
+explicitly silent. No audio-device synchronization or mixing claim is made here.

@@ -4,6 +4,7 @@ fn image() -> Content {
 }
 fn video() -> Content {
     Content::Video {
+        audio: None,
         path: "old.mp4".into(),
         duration: 2.0,
         source_fps: 30.0,
@@ -185,6 +186,7 @@ fn unused_sources_relink_collect_and_undo_with_every_used_instance() {
     e.execute(import(video(), None, None)).unwrap();
     let before = e.project().clone();
     e.execute(Command::RelinkMedia(vec![MediaReplacement {
+        audio: None,
         original: "old.mp4".into(),
         path: "new.mp4".into(),
         duration: 3.0,

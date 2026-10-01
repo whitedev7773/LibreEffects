@@ -3,6 +3,7 @@ fn video(speed: f64) -> Editor {
     let mut e = Editor::default();
     e.execute(Command::AddContent {
         content: Content::Video {
+            audio: None,
             path: "source.mp4".into(),
             duration: 10.0,
             source_fps: 24000.0 / 1001.0,

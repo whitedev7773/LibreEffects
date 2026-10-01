@@ -118,6 +118,15 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                 .interpretation
                 .frame_rate(a.content())
                 .unwrap_or(state.project.composition.fps);
+            let audio_only = matches!(a.content(), Content::Audio { .. });
+            let (width, height) = if audio_only {
+                (
+                    state.project.composition.width,
+                    state.project.composition.height,
+                )
+            } else {
+                (a.width() as u32, a.height() as u32)
+            };
             // A still uses the current composition's elapsed duration, at its FPS.
             let duration = a
                 .interpretation
@@ -129,8 +138,8 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                 state,
                 Command::ConfigureCompositionRate {
                     name: a.name().to_owned(),
-                    width: a.width() as u32,
-                    height: a.height() as u32,
+                    width,
+                    height,
                     fps,
                     duration,
                     display_start: 0,

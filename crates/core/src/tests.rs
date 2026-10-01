@@ -1696,6 +1696,7 @@ fn video_timing_survives_trim_move_split_and_serialization() {
     let mut e = Editor::default();
     e.execute(Command::AddContent {
         content: Content::Video {
+            audio: None,
             path: "C:/footage/clip.mp4".into(),
             duration: 2.0,
             source_fps: 24.0,
@@ -1751,6 +1752,7 @@ fn video_timing_survives_trim_move_split_and_serialization() {
 #[test]
 fn video_sampling_uses_preceding_source_frame_and_rejects_invalid_metadata() {
     let video = Content::Video {
+        audio: None,
         path: "clip.mov".into(),
         duration: 1.0,
         source_fps: 24.0,
@@ -1772,6 +1774,7 @@ fn video_sampling_uses_preceding_source_frame_and_rejects_invalid_metadata() {
         assert!(
             e.execute(Command::AddContent {
                 content: Content::Video {
+                    audio: None,
                     path: "clip.mp4".into(),
                     duration,
                     source_fps,
@@ -1792,6 +1795,7 @@ fn editor_with_video() -> Editor {
     let mut e = Editor::default();
     e.execute(Command::AddContent {
         content: Content::Video {
+            audio: None,
             path: "source.mp4".into(),
             duration: 2.0,
             source_fps: 24.0,

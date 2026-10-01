@@ -338,6 +338,7 @@ mod tests {
         let path = dir.path().join("offline.mp4");
         e.execute(Command::AddContent {
             content: Content::Video {
+                audio: None,
                 path: path.to_string_lossy().into_owned(),
                 duration: 1.0,
                 source_fps: 30.0,

@@ -145,6 +145,7 @@ fn unused_sources_are_collected_protected_and_checked_on_open() {
     configure(&mut e);
     e.execute(Command::ImportAsset {
         content: Content::Video {
+            audio: None,
             path: source.to_string_lossy().into(),
             duration: 1.0,
             source_fps: 30.0,

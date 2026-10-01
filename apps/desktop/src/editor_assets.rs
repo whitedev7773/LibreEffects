@@ -79,7 +79,7 @@ impl EditorState {
                 if sequence {
                     "Choose the first numbered PNG/JPEG frame"
                 } else {
-                    "Import images or video footage"
+                    "Import images, video or audio footage"
                 }
                 .into(),
             ),
@@ -109,7 +109,7 @@ impl EditorState {
                     s.editor.execute(Command::Batch(commands))
                 }) {
                     Ok(()) => {
-                        if sequence { "Imported sequence · Interpret footage sets FPS and missing-frame policy".into() } else { format!("Imported {count} file(s) · select footage and Add to composition") }
+                        if sequence { "Imported sequence · Interpret footage sets FPS and missing-frame policy".into() } else { format!("Imported {count} file(s) · Add to composition · audio waveform only (playback/export silent)") }
                     }
                     Err(error) => format!("Import failed; no files added: {error}"),
                 };
@@ -141,11 +141,30 @@ pub(crate) fn read_assets(
                 let (mut content, width, height) =
                     if matches!(extension.as_str(), "png" | "jpg" | "jpeg") {
                         crate::rendering::import_image(path)?
+                    } else if !crate::audio::probe(path)?.has_video {
+                        let audio = crate::audio::probe(path)?
+                            .audio
+                            .ok_or("No audio or video stream found")?;
+                        let path = crate::media_io::path_string(
+                            &std::fs::canonicalize(path).map_err(|e| e.to_string())?,
+                        )?;
+                        crate::audio::decode_chunk(&path, &audio, 0)?;
+                        (
+                            Content::Audio {
+                                path,
+                                audio,
+                                start_frame: 0,
+                                playback: Default::default(),
+                            },
+                            1,
+                            1,
+                        )
                     } else {
                         let info = crate::footage::probe(path)?;
                         crate::footage::frame_png(&info.path, 0.0, info.width, info.height, 160)?;
                         (
                             Content::Video {
+                                audio: info.audio,
                                 path: info.path,
                                 duration: info.duration,
                                 source_fps: info.source_fps,

@@ -289,10 +289,19 @@ impl Render for Browser {
                         a.interpretation().frame_rate(a.content()).unwrap().label(),
                         a.interpretation().duration(a.content()).unwrap()
                     ),
+                    Content::Audio { audio, .. } => format!("Audio · {:.2} s", audio.duration),
                     _ => "Still image · embedded".into(),
                 };
                 vec![
-                    format!("{} × {}", a.width(), a.height()),
+                    a.content()
+                        .audio()
+                        .map(|(_, audio)| {
+                            format!(
+                                "{} Hz · {} ch · {}",
+                                audio.sample_rate, audio.channels, audio.channel_layout
+                            )
+                        })
+                        .unwrap_or_else(|| format!("{} × {}", a.width(), a.height())),
                     source,
                     format!("{} layer reference(s)", project.asset_references(id)),
                 ]
@@ -486,13 +495,21 @@ impl Render for Browser {
                     .flex()
                     .px_2()
                     .gap_1()
-                    .child(
-                        ui::text_button("interpret-footage", "Interpret footage…")
-                            .flex_1()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.interpretation_open = !this.interpretation_open;
-                                cx.notify();
-                            })),
+                    .when(
+                        !matches!(
+                            project.asset_library().assets()[&id].content(),
+                            Content::Audio { .. }
+                        ),
+                        |d| {
+                            d.child(
+                                ui::text_button("interpret-footage", "Interpret footage…")
+                                    .flex_1()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.interpretation_open = !this.interpretation_open;
+                                        cx.notify();
+                                    })),
+                            )
+                        },
                     )
                     .child(
                         ui::text_button("comp-from-footage", "New comp from source").on_click({
@@ -509,7 +526,12 @@ impl Render for Browser {
                         }),
                     ),
             );
-            if self.interpretation_open {
+            if self.interpretation_open
+                && !matches!(
+                    project.asset_library().assets()[&id].content(),
+                    Content::Audio { .. }
+                )
+            {
                 if self
                     .interpretation
                     .as_ref()
@@ -543,7 +565,9 @@ impl Render for Browser {
                     }),
                 );
             }
-            if let Content::Video { path, .. } = project.asset_library().assets()[&id].content() {
+            if let Content::Video { path, .. } | Content::Audio { path, .. } =
+                project.asset_library().assets()[&id].content()
+            {
                 panel = panel.child(
                     ui::text_button("project-relink", "Relink source…").on_click({
                         let state = self.state.clone();

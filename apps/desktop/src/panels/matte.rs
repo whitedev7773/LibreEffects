@@ -100,7 +100,7 @@ impl Render for MattePicker {
         };
         let matte = layer.track_matte();
         let disabled = layer.locked()
-            || matches!(layer.content(), Content::Null)
+            || matches!(layer.content(), Content::Null | Content::Audio { .. })
             || (!self.source_picker && matte.is_none());
         let choices = self.choices(cx);
         let current = choices.iter().position(|(m, _)| *m == matte).unwrap_or(0);

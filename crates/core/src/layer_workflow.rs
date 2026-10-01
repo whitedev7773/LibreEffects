@@ -196,6 +196,7 @@ fn paste(state: &mut Snapshot, clipboard: &LayerClipboard) -> Result<(), String>
             track.keys = keys;
         }
         if let Content::Video { start_frame, .. }
+        | Content::Audio { start_frame, .. }
         | Content::ImageSequence { start_frame, .. }
         | Content::Composition { start_frame, .. } = &mut layer.content
         {
@@ -470,6 +471,7 @@ mod tests {
         let mut e = Editor::default();
         e.execute(Command::AddContent {
             content: Content::Video {
+                audio: None,
                 path: "source.mp4".into(),
                 duration: 10.0,
                 source_fps: 30.0,

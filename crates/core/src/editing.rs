@@ -50,8 +50,17 @@ pub enum Content {
         /// Parent frame at which source frame zero occurs. Trimming does not shift it.
         start_frame: i64,
     },
+    Audio {
+        path: String,
+        audio: AudioMetadata,
+        start_frame: i64,
+        #[serde(default, skip_serializing_if = "VideoPlayback::is_default")]
+        playback: VideoPlayback,
+    },
     Video {
         path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        audio: Option<AudioMetadata>,
         duration: f64,
         source_fps: f64,
         /// Composition frame at which playback.source_in occurs; trimming never changes it.
@@ -65,6 +74,11 @@ impl Content {
     pub fn video_source_time(&self, frame: Frame, fps: impl Into<FrameRate>) -> Option<f64> {
         let fps = fps.into();
         let (Self::Video {
+            start_frame,
+            playback,
+            ..
+        }
+        | Self::Audio {
             start_frame,
             playback,
             ..
@@ -183,14 +197,33 @@ pub(super) fn validate_content(
                 && playback.speed.is_finite()
                 && (playback.speed == 0.0 || (0.01..=100.0).contains(&playback.speed.abs()))
         }
+        Content::Audio {
+            path,
+            audio,
+            start_frame,
+            playback,
+        } => {
+            audio.valid()
+                && audio.start_time == 0.0
+                && !path.is_empty()
+                && path.len() <= 32768
+                && !path.contains('\0')
+                && start_frame.abs_diff(0) <= 100_000_000
+                && playback.source_in.is_finite()
+                && playback.source_in.abs() <= 8_640_000.0
+                && playback.speed.is_finite()
+                && (playback.speed == 0.0 || (0.01..=100.0).contains(&playback.speed.abs()))
+        }
         Content::Video {
             path,
             duration,
             start_frame,
             source_fps,
             playback,
+            audio,
         } => {
-            !path.is_empty()
+            audio.as_ref().is_none_or(AudioMetadata::valid)
+                && !path.is_empty()
                 && source_fps.is_finite()
                 && (1.0..=240.0).contains(source_fps)
                 && path.len() <= 32768
@@ -362,8 +395,9 @@ pub(super) fn apply_extended(
                     );
                 }
                 let end = layer.out_frame(duration);
-                let (Content::Video { playback, .. } | Content::ImageSequence { playback, .. }) =
-                    layer.content
+                let (Content::Video { playback, .. }
+                | Content::Audio { playback, .. }
+                | Content::ImageSequence { playback, .. }) = layer.content
                 else {
                     return Err("Select a footage layer first".into());
                 };
@@ -417,6 +451,11 @@ pub(super) fn apply_extended(
                     _ => unreachable!(),
                 }
                 let (Content::Video {
+                    start_frame,
+                    playback,
+                    ..
+                }
+                | Content::Audio {
                     start_frame,
                     playback,
                     ..
@@ -677,6 +716,7 @@ pub(super) fn apply_extended(
                 l.in_frame = shifted(l.in_frame, *delta, duration, false)?;
                 l.out_frame = Some(shifted(end, *delta, duration, true)?);
                 if let Content::Video { start_frame, .. }
+                | Content::Audio { start_frame, .. }
                 | Content::ImageSequence { start_frame, .. }
                 | Content::Composition { start_frame, .. } = &mut l.content
                 {

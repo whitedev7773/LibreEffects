@@ -16,8 +16,9 @@ pub(crate) struct VideoInfo {
     pub height: u32,
     pub duration: f64,
     pub source_fps: f64,
+    pub audio: Option<libre_effects_core::AudioMetadata>,
 }
-fn command(executable: &Path) -> Command {
+pub(crate) fn command(executable: &Path) -> Command {
     let mut c = Command::new(executable);
     #[cfg(windows)]
     {
@@ -42,7 +43,7 @@ pub(crate) fn probe_path() -> PathBuf {
     }
 }
 // File-backed pipes avoid deadlocks and unbounded memory on malformed media.
-fn output(mut cmd: Command, limit: u64) -> Result<Vec<u8>, String> {
+pub(crate) fn output(mut cmd: Command, limit: u64) -> Result<Vec<u8>, String> {
     let mut stdout = tempfile::tempfile().map_err(|e| e.to_string())?;
     let mut stderr = tempfile::tempfile().map_err(|e| e.to_string())?;
     cmd.stdin(Stdio::null())
@@ -158,7 +159,9 @@ pub(crate) fn probe(path: &Path) -> Result<VideoInfo, String> {
                 .into(),
         );
     }
+    let audio = crate::audio::probe(Path::new(&path))?.audio;
     Ok(VideoInfo {
+        audio,
         path,
         width,
         height,
@@ -230,6 +233,7 @@ mod tests {
         .unwrap();
         e.execute(Edit::AddContent {
             content: Content::Video {
+                audio: None,
                 path: info.path,
                 duration: info.duration,
                 source_fps: info.source_fps,
@@ -322,6 +326,7 @@ mod tests {
         );
         let info = probe(&path).unwrap();
         let content = Content::Video {
+            audio: None,
             path: info.path.clone(),
             duration: info.duration,
             source_fps: info.source_fps,
@@ -355,6 +360,7 @@ mod tests {
         .unwrap();
         e.execute(Edit::AddContent {
             content: Content::Video {
+                audio: None,
                 path: path.to_str().unwrap().into(),
                 duration: 1.5,
                 source_fps: 4.0,

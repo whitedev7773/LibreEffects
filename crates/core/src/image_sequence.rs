@@ -19,6 +19,7 @@ impl Content {
                 source_fps,
                 ..
             } => Some((*duration, *source_fps)),
+            Self::Audio { audio, .. } => Some((audio.duration, f64::from(audio.sample_rate))),
             Self::ImageSequence { frames, fps, .. } => {
                 Some((frames.len() as f64 / fps.as_f64(), fps.as_f64()))
             }
@@ -27,22 +28,22 @@ impl Content {
     }
     pub fn footage_origin(&self) -> Option<i64> {
         match self {
-            Self::Video { start_frame, .. } | Self::ImageSequence { start_frame, .. } => {
-                Some(*start_frame)
-            }
+            Self::Video { start_frame, .. }
+            | Self::Audio { start_frame, .. }
+            | Self::ImageSequence { start_frame, .. } => Some(*start_frame),
             _ => None,
         }
     }
     pub fn linked_paths(&self) -> &[String] {
         match self {
-            Self::Video { path, .. } => std::slice::from_ref(path),
+            Self::Video { path, .. } | Self::Audio { path, .. } => std::slice::from_ref(path),
             Self::ImageSequence { frames, .. } => frames,
             _ => &[],
         }
     }
     pub(super) fn linked_paths_mut(&mut self) -> &mut [String] {
         match self {
-            Self::Video { path, .. } => std::slice::from_mut(path),
+            Self::Video { path, .. } | Self::Audio { path, .. } => std::slice::from_mut(path),
             Self::ImageSequence { frames, .. } => std::sync::Arc::make_mut(frames).as_mut_slice(),
             _ => &mut [],
         }

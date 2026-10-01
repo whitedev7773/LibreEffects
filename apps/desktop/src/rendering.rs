@@ -96,7 +96,8 @@ impl Renderer {
             .ok_or("Missing source composition")?;
         let mut svg = String::new();
         for l in c.layers().iter().rev().filter(|l| {
-            c.layer_active(l, frame, include_guides) && !matches!(l.content(), Content::Null)
+            c.layer_active(l, frame, include_guides)
+                && !matches!(l.content(), Content::Null | Content::Audio { .. })
         }) {
             if matches!(l.content(), Content::Adjustment) {
                 let Some(matrix) = c.world_transform(l.id(), frame) else {
@@ -315,6 +316,7 @@ impl Renderer {
                     }
                 }
             }
+            Content::Audio { .. } => {}
             Content::Video { path, .. } => {
                 if let Some(seconds) = l.video_decode_time(frame, c.fps()) {
                     let png = crate::footage::interpreted_frame_png(

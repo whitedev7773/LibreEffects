@@ -2,6 +2,7 @@ use super::*;
 fn video(e: &mut Editor) {
     e.execute(Command::ImportAsset {
         content: Content::Video {
+            audio: None,
             path: "source.mov".into(),
             duration: 1.5,
             source_fps: 4.0,
@@ -73,6 +74,7 @@ fn interpretation_changes_shared_sampling_but_preserves_timeline_and_history() {
     e.redo();
     assert_eq!(e.project(), &interpreted);
     e.execute(Command::RelinkMedia(vec![MediaReplacement {
+        audio: None,
         original: "source.mov".into(),
         path: "new.mov".into(),
         width: 64,
@@ -198,6 +200,7 @@ fn composition_from_source_matches_interpretation_and_folder_in_one_undo() {
         let mut e = Editor::default();
         e.execute(Command::ImportAsset {
             content: Content::Video {
+                audio: None,
                 path: "ntsc.mov".into(),
                 duration: 1001.0 / f64::from(fps) * 120.0,
                 source_fps: f64::from(fps) / 1001.0,
@@ -276,7 +279,7 @@ fn still_alpha_interpretation_survives_source_reuse_and_rejects_invalid_data() {
                 .remove("footage_interpretation")
                 .map(|_| ())
                 .unwrap(),
-            _ => json["version"] = 25.into(),
+            _ => json["version"] = 26.into(),
         }
         assert!(Project::from_json(&json.to_string()).is_err());
     }

@@ -33,7 +33,7 @@ impl EditorState {
                 if relink {
                     "Relink video source"
                 } else {
-                    "Import local video (without audio)"
+                    "Import local video"
                 }
                 .into(),
             ),
@@ -63,9 +63,9 @@ impl EditorState {
                         if current.content() != old.content() { return Err("Video source changed during relink".into()); }
                         if info.width as f64 != old.width() || info.height as f64 != old.height() { return Err("Relink requires the same source dimensions; import this file as a new layer".into()); }
                         let Content::Video { path: original, .. } = old.content() else { unreachable!() };
-                        Command::RelinkMedia(vec![libre_effects_core::MediaReplacement { original: original.clone(), path: info.path, duration: info.duration, fps: info.source_fps, width: info.width, height: info.height }])
+                        Command::RelinkMedia(vec![libre_effects_core::MediaReplacement { audio: info.audio, original: original.clone(), path: info.path, duration: info.duration, fps: info.source_fps, width: info.width, height: info.height }])
                     } else {
-                        Command::AddContent { content: Content::Video { path: info.path, duration: info.duration, source_fps: info.source_fps, start_frame: frame as i64, playback: Default::default() }, width: info.width as f64, height: info.height as f64, name }
+                        Command::AddContent { content: Content::Video { audio: info.audio, path: info.path, duration: info.duration, source_fps: info.source_fps, start_frame: frame as i64, playback: Default::default() }, width: info.width as f64, height: info.height as f64, name }
                     };
                     s.editor.execute(command)
                 });
@@ -74,7 +74,7 @@ impl EditorState {
                         crate::footage::clear_cache();
                         s.preview_revision = s.preview_revision.wrapping_add(1);
                         s.selected_layers.clear();
-                        "Video linked · audio is not imported · keep the original source file".into()
+                        "Video linked · audio metadata imported · playback and export remain silent".into()
                     },
                     Err(e) => format!("Video import failed: {e}"),
                 };
