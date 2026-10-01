@@ -7,6 +7,7 @@ use gpui::{Context, Entity, Window, div, prelude::*, px, rgb};
 use libre_effects_core::{Command, Content, Mask, Property};
 
 pub(crate) struct Inspector {
+    blend: Option<(u64, Entity<super::blend::BlendPicker>)>,
     state: Entity<EditorState>,
     name: Entity<TextField>,
     fields: Vec<Entity<TextField>>,
@@ -211,6 +212,7 @@ impl Inspector {
             })
             .collect();
         Self {
+            blend: None,
             extra,
             state,
             name,
@@ -337,6 +339,22 @@ impl Render for Inspector {
             contents = contents.child(row);
         }
         let is_null = matches!(layer.content(), Content::Null);
+        if !is_null {
+            if self.blend.as_ref().is_none_or(|(owner, _)| *owner != id) {
+                self.blend = Some((
+                    id,
+                    cx.new(|cx| super::blend::BlendPicker::new(self.state.clone(), id, cx)),
+                ));
+            }
+            contents = contents.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .mt_1()
+                    .child(div().w(px(105.0)).child("Blend mode"))
+                    .child(div().flex_1().child(self.blend.as_ref().unwrap().1.clone())),
+            );
+        }
         let is_adjustment = matches!(layer.content(), Content::Adjustment);
         let mut entries = vec![(2, "Fill (hex)", format!("{:06X}", layer.color()))];
         if let Content::Text { text, font_size } = layer.content() {

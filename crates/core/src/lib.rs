@@ -7,6 +7,8 @@ pub type Frame = u32;
 pub type LayerId = u64;
 pub type CompositionId = u64;
 
+mod blend;
+pub use blend::BlendMode;
 mod compositions;
 mod document;
 mod editing;
@@ -179,6 +181,8 @@ impl AnimatedProperty {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Layer {
+    #[serde(default, skip_serializing_if = "BlendMode::is_normal")]
+    blend_mode: BlendMode,
     #[serde(default, skip_serializing_if = "markers::Markers::is_default")]
     markers: markers::Markers,
     #[serde(default)]
@@ -217,6 +221,9 @@ pub struct Layer {
 }
 
 impl Layer {
+    pub fn blend_mode(&self) -> BlendMode {
+        self.blend_mode
+    }
     pub fn solo(&self) -> bool {
         self.solo
     }
@@ -495,7 +502,7 @@ impl Project {
     }
 
     fn validate(&self) -> Result<(), String> {
-        if !(1..=16).contains(&self.version) {
+        if !(1..=17).contains(&self.version) {
             return Err("Unsupported project version".into());
         }
         if self.version < 9
@@ -521,6 +528,9 @@ impl Project {
         let mut images = BTreeSet::new();
         let mut image_bytes = 0usize;
         for (_, comp) in self.compositions() {
+            if self.version < 17 && comp.layers.iter().any(|l| !l.blend_mode.is_normal()) {
+                return Err("Layer blending modes require project version 17".into());
+            }
             if self.version < 16
                 && comp
                     .layers
@@ -627,6 +637,10 @@ impl Project {
 /// The future scripting bridge and native controls both dispatch these commands.
 #[derive(Clone, Debug)]
 pub enum Command {
+    SetBlendMode {
+        id: LayerId,
+        mode: BlendMode,
+    },
     AddSolid,
     AddAdjustment,
     ConfigureSolid {
@@ -1008,6 +1022,14 @@ impl Editor {
         }) {
             next.project.version = 16;
         }
+        if next
+            .project
+            .compositions()
+            .into_iter()
+            .any(|(_, c)| c.layers.iter().any(|l| !l.blend_mode.is_normal()))
+        {
+            next.project.version = 17;
+        }
         next.project.validate()?;
         if next != self.current {
             let previous = std::mem::replace(&mut self.current, next);
@@ -1249,6 +1271,7 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
         comp.layers.insert(
             0,
             Layer {
+                blend_mode: BlendMode::Normal,
                 markers: Default::default(),
                 content: Content::default(),
                 effects: Effects::default(),

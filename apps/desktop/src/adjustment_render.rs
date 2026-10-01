@@ -10,7 +10,7 @@ fn transform(matrix: Affine) -> String {
     format!("matrix({a} {b} {c} {d} {x} {y})")
 }
 
-fn embedded(pixels: &Pixmap, width: u32, height: u32) -> Result<String, String> {
+pub(crate) fn embedded(pixels: &Pixmap, width: u32, height: u32) -> Result<String, String> {
     let png = STANDARD.encode(pixels.encode_png().map_err(|e| e.to_string())?);
     if png.len() > 64 * 1024 * 1024 {
         return Err("Adjustment frame exceeds the 64 MiB image limit".into());
@@ -20,7 +20,7 @@ fn embedded(pixels: &Pixmap, width: u32, height: u32) -> Result<String, String> 
     ))
 }
 impl Renderer {
-    fn raster_canvas(
+    pub(crate) fn raster_canvas(
         &self,
         svg: &str,
         width: u32,
@@ -148,9 +148,10 @@ impl Renderer {
             .zip(coverage.data().chunks_exact(4))
         {
             let weight = u32::from(mask[3]);
+            let adjusted = crate::blend_render::adjusted_pixel(a, b, layer.blend_mode());
             for channel in 0..4 {
                 a[channel] = ((u32::from(a[channel]) * (255 - weight)
-                    + u32::from(b[channel]) * weight
+                    + u32::from(adjusted[channel]) * weight
                     + 127)
                     / 255) as u8;
             }

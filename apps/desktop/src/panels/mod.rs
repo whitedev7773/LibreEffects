@@ -1,3 +1,4 @@
+mod blend;
 mod browser;
 mod effects;
 mod graph;

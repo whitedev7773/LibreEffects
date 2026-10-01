@@ -214,6 +214,7 @@ pub(super) fn apply_extended(
     if !matches!(
         command,
         Command::Batch(_)
+            | Command::SetBlendMode { .. }
             | Command::AddSolid
             | Command::AddAdjustment
             | Command::ConfigureSolid { .. }
@@ -241,6 +242,13 @@ pub(super) fn apply_extended(
     }
     Some((|| {
         match command {
+            Command::SetBlendMode { id, mode } => {
+                let layer = editable(state, *id)?;
+                if matches!(layer.content, Content::Null) {
+                    return Err("Null objects have no pixels to blend".into());
+                }
+                layer.blend_mode = *mode;
+            }
             Command::AddSolid | Command::AddAdjustment => {
                 let comp = &state.project.composition;
                 let adjustment = matches!(command, Command::AddAdjustment);

@@ -695,3 +695,33 @@ Adjustment boundaries rasterize at the requested preview/export resolution in
 Intermediate frames retain the existing 32 MP and 64 MiB encoded-image limits.
 `examples/adjustment-study.lfe.json` demonstrates animated, masked desaturation
 of a translucent solid while an upper blue solid keeps its color.
+
+## Layer blending
+
+The timeline **Mode** column and **Properties → Blend mode** choose Normal,
+Multiply, Screen, Add or Overlay. The Mode column appears when the timeline's
+left pane is at least 540 logical pixels wide; the property control is always
+available for renderable layers. Open with click/Enter, navigate with Up/Down,
+confirm with Enter and close with Escape or an outside click. Locked layers and
+Null objects cannot change mode. The choice supports Undo/Redo and independent
+copy/duplicate, and is saved in project version 17.
+
+RGB blending operates on straight sRGB channel values, followed by premultiplied
+source-over with alpha `As + Ab * (1 - As)`. Normal, Multiply, Screen and Overlay
+follow the [W3C separable blending equations](https://www.w3.org/TR/compositing-1/#blending).
+Add saturates the sum of straight channels before the same source-over step;
+it does not add alpha. Colors in fully transparent pixels do not contribute.
+Effects, transforms, masks and layer opacity are evaluated before layer blending.
+The composition background is applied only when a render format requests a matte.
+
+On an Adjustment Layer the blend function mixes filtered and original colors in
+place, weighted by the original alpha, while retaining the filtered alpha. Its
+mask and opacity then interpolate that result against the original composite.
+This avoids adding the same lower alpha twice. Adjustment with no active effects
+remains a no-op. Nested compositions isolate their internal blend backdrop;
+pre-composing a blended layer therefore requires including all lower layers.
+
+Blended boundaries use the same 8-bit raster buffers and limits as adjustments.
+`examples/blend-modes-study.lfe.json` compares the five modes with animated source
+opacity on translucent backdrops. This does not claim Adobe project interchange
+or full color-managed AE equivalence.

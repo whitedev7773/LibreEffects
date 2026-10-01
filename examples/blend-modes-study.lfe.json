@@ -1,0 +1,1042 @@
+{
+  "version": 17,
+  "next_layer_id": 16,
+  "composition": {
+    "name": "Blend Modes",
+    "width": 960,
+    "height": 400,
+    "fps": 30,
+    "display_start": 0,
+    "duration": 90,
+    "background_color": 1581359,
+    "layers": [
+      {
+        "content": {
+          "Text": {
+            "text": "Overlay",
+            "font_size": 22
+          }
+        },
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 15,
+        "name": "Overlay label",
+        "visible": true,
+        "locked": false,
+        "width": 150,
+        "height": 36,
+        "color": 16777215,
+        "properties": {
+          "PositionX": {
+            "value": 730,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 90,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "content": "Solid",
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 14,
+        "name": "Overlay animated source",
+        "visible": true,
+        "locked": false,
+        "width": 110,
+        "height": 160,
+        "color": 12599424,
+        "properties": {
+          "PositionX": {
+            "value": 825,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 230,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 55,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 80,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 80,
+            "keys": {
+              "0": {
+                "value": 0,
+                "interpolation": "Smooth"
+              },
+              "45": {
+                "value": 80,
+                "interpolation": "Smooth"
+              },
+              "89": {
+                "value": 0,
+                "interpolation": "Smooth"
+              }
+            }
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "blend_mode": "Overlay"
+      },
+      {
+        "content": "Solid",
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 13,
+        "name": "Overlay backdrop",
+        "visible": true,
+        "locked": false,
+        "width": 110,
+        "height": 160,
+        "color": 4227264,
+        "properties": {
+          "PositionX": {
+            "value": 785,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 230,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 55,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 80,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 60,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "content": {
+          "Text": {
+            "text": "Add",
+            "font_size": 22
+          }
+        },
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 12,
+        "name": "Add label",
+        "visible": true,
+        "locked": false,
+        "width": 150,
+        "height": 36,
+        "color": 16777215,
+        "properties": {
+          "PositionX": {
+            "value": 560,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 90,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "content": "Solid",
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 11,
+        "name": "Add animated source",
+        "visible": true,
+        "locked": false,
+        "width": 110,
+        "height": 160,
+        "color": 12599424,
+        "properties": {
+          "PositionX": {
+            "value": 655,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 230,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 55,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 80,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 80,
+            "keys": {
+              "0": {
+                "value": 0,
+                "interpolation": "Smooth"
+              },
+              "45": {
+                "value": 80,
+                "interpolation": "Smooth"
+              },
+              "89": {
+                "value": 0,
+                "interpolation": "Smooth"
+              }
+            }
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "blend_mode": "Add"
+      },
+      {
+        "content": "Solid",
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 10,
+        "name": "Add backdrop",
+        "visible": true,
+        "locked": false,
+        "width": 110,
+        "height": 160,
+        "color": 4227264,
+        "properties": {
+          "PositionX": {
+            "value": 615,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 230,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 55,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 80,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 60,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "content": {
+          "Text": {
+            "text": "Screen",
+            "font_size": 22
+          }
+        },
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 9,
+        "name": "Screen label",
+        "visible": true,
+        "locked": false,
+        "width": 150,
+        "height": 36,
+        "color": 16777215,
+        "properties": {
+          "PositionX": {
+            "value": 390,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 90,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "content": "Solid",
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 8,
+        "name": "Screen animated source",
+        "visible": true,
+        "locked": false,
+        "width": 110,
+        "height": 160,
+        "color": 12599424,
+        "properties": {
+          "PositionX": {
+            "value": 485,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 230,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 55,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 80,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 80,
+            "keys": {
+              "0": {
+                "value": 0,
+                "interpolation": "Smooth"
+              },
+              "45": {
+                "value": 80,
+                "interpolation": "Smooth"
+              },
+              "89": {
+                "value": 0,
+                "interpolation": "Smooth"
+              }
+            }
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "blend_mode": "Screen"
+      },
+      {
+        "content": "Solid",
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 7,
+        "name": "Screen backdrop",
+        "visible": true,
+        "locked": false,
+        "width": 110,
+        "height": 160,
+        "color": 4227264,
+        "properties": {
+          "PositionX": {
+            "value": 445,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 230,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 55,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 80,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 60,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "content": {
+          "Text": {
+            "text": "Multiply",
+            "font_size": 22
+          }
+        },
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 6,
+        "name": "Multiply label",
+        "visible": true,
+        "locked": false,
+        "width": 150,
+        "height": 36,
+        "color": 16777215,
+        "properties": {
+          "PositionX": {
+            "value": 220,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 90,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "content": "Solid",
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 5,
+        "name": "Multiply animated source",
+        "visible": true,
+        "locked": false,
+        "width": 110,
+        "height": 160,
+        "color": 12599424,
+        "properties": {
+          "PositionX": {
+            "value": 315,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 230,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 55,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 80,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 80,
+            "keys": {
+              "0": {
+                "value": 0,
+                "interpolation": "Smooth"
+              },
+              "45": {
+                "value": 80,
+                "interpolation": "Smooth"
+              },
+              "89": {
+                "value": 0,
+                "interpolation": "Smooth"
+              }
+            }
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "blend_mode": "Multiply"
+      },
+      {
+        "content": "Solid",
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 4,
+        "name": "Multiply backdrop",
+        "visible": true,
+        "locked": false,
+        "width": 110,
+        "height": 160,
+        "color": 4227264,
+        "properties": {
+          "PositionX": {
+            "value": 275,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 230,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 55,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 80,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 60,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "content": {
+          "Text": {
+            "text": "Normal",
+            "font_size": 22
+          }
+        },
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 3,
+        "name": "Normal label",
+        "visible": true,
+        "locked": false,
+        "width": 150,
+        "height": 36,
+        "color": 16777215,
+        "properties": {
+          "PositionX": {
+            "value": 50,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 90,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "content": "Solid",
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 2,
+        "name": "Normal animated source",
+        "visible": true,
+        "locked": false,
+        "width": 110,
+        "height": 160,
+        "color": 12599424,
+        "properties": {
+          "PositionX": {
+            "value": 145,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 230,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 55,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 80,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 80,
+            "keys": {
+              "0": {
+                "value": 0,
+                "interpolation": "Smooth"
+              },
+              "45": {
+                "value": 80,
+                "interpolation": "Smooth"
+              },
+              "89": {
+                "value": 0,
+                "interpolation": "Smooth"
+              }
+            }
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "blend_mode": "Normal"
+      },
+      {
+        "content": "Solid",
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 1,
+        "name": "Normal backdrop",
+        "visible": true,
+        "locked": false,
+        "width": 110,
+        "height": 160,
+        "color": 4227264,
+        "properties": {
+          "PositionX": {
+            "value": 105,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 230,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 55,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 80,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 60,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      }
+    ]
+  },
+  "composition_id": 1,
+  "next_composition_id": 2
+}

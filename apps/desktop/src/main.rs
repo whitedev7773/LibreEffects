@@ -9,6 +9,7 @@ use gpui::{
 };
 
 mod adjustment_render;
+mod blend_render;
 mod cli;
 mod components;
 mod editor;

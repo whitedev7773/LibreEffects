@@ -21,6 +21,7 @@ struct KeyDrag {
     to: u32,
 }
 pub(crate) struct Timeline {
+    blend_pickers: BTreeMap<LayerId, Entity<super::blend::BlendPicker>>,
     left: f32,
     resizing: bool,
     fields: BTreeMap<(LayerId, PropertyPath), Entity<TextField>>,
@@ -53,6 +54,7 @@ impl Timeline {
         let search = cx.new(|cx| TextField::new(cx, |_, _, _| {}));
         cx.observe(&search, |_, _, cx| cx.notify()).detach();
         Self {
+            blend_pickers: BTreeMap::new(),
             left: LEFT,
             resizing: false,
             fields: BTreeMap::new(),
@@ -369,10 +371,12 @@ impl Render for Timeline {
         self.hit_keys.borrow_mut().clear();
         self.hit_layers.borrow_mut().clear();
         let left = self.left;
+        let show_modes = left >= 540.0;
         let state = self.state.read(cx);
         let selected_layers = state.selected_layers.clone();
         let selected_keys = state.selected_keys.clone();
         let comp = state.editor.project().composition().clone();
+        self.blend_pickers.retain(|id, _| comp.layer(*id).is_some());
         self.fields
             .retain(|(id, p), _| comp.layer(*id).is_some_and(|l| l.track(*p).is_some()));
         let graph_open = state.graph_open;
@@ -526,6 +530,12 @@ impl Render for Timeline {
                             },
                         )),
                 );
+            if show_modes {
+                let picker = self.blend_pickers.entry(id).or_insert_with(|| {
+                    cx.new(|cx| super::blend::BlendPicker::new(self.state.clone(), id, cx))
+                });
+                controls = controls.child(div().w(px(88.0)).flex_none().child(picker.clone()));
+            }
             let parent_name = layer
                 .parent()
                 .and_then(|id| comp.layer(id))
@@ -1452,6 +1462,7 @@ impl Render for Timeline {
                             .text_color(rgb(ui::MUTED))
                             .child(div().w(px(178.0)).child("Switches"))
                             .child(div().flex_1().child("Source Name"))
+                            .when(show_modes, |s| s.child(div().w(px(88.0)).child("Mode")))
                             .child(div().w(px(181.0)).child("Parent & Link       Order")),
                     )
                     .child(

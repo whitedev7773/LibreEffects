@@ -139,13 +139,12 @@ fn precompose(state: &mut Snapshot, layers: &[LayerId], name: &str) -> Result<()
         return Err("Selected layer no longer exists".into());
     }
     let first = positions[0];
-    if parent
-        .layers
-        .iter()
-        .any(|l| ids.contains(&l.id) && matches!(l.content, Content::Adjustment))
-        && parent.layers[first..].iter().any(|l| !ids.contains(&l.id))
+    if parent.layers.iter().any(|l| {
+        ids.contains(&l.id)
+            && (matches!(l.content, Content::Adjustment) || !l.blend_mode.is_normal())
+    }) && parent.layers[first..].iter().any(|l| !ids.contains(&l.id))
     {
-        return Err("Include all layers below the adjustment layer when pre-composing to preserve its input".into());
+        return Err("Include all layers below adjustment or blended layers when pre-composing to preserve their input".into());
     }
     if positions.last().unwrap() - first + 1 != ids.len() {
         return Err(

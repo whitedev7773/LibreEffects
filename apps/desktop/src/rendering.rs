@@ -105,6 +105,8 @@ impl Renderer {
                 continue;
             }
             let e = l.effects();
+            let backdrop = (l.blend_mode() != libre_effects_core::BlendMode::Normal)
+                .then(|| std::mem::take(&mut svg));
             let mut effect_bounds = [0.0, 0.0, l.width(), l.height()];
             if let Content::Text { text, font_size } = l.content()
                 && l.effect_stack().iter().any(|e| !e.bypassed())
@@ -238,6 +240,16 @@ impl Renderer {
                 }
             }
             svg.push_str(&format!("</g></g>{effect_close}</g>"));
+            if let Some(lower) = backdrop {
+                svg = self.blend_composite(
+                    &lower,
+                    &svg,
+                    l.blend_mode(),
+                    c.width(),
+                    c.height(),
+                    max_dimension,
+                )?;
+            }
             if svg.len() > 64 * 1024 * 1024 {
                 return Err("Frame SVG exceeds 64 MiB; reduce embedded image instances".into());
             }

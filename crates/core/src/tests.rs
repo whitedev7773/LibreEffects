@@ -1,6 +1,87 @@
 use super::*;
 
 #[test]
+fn blend_modes_roundtrip_copy_undo_and_reject_locked_edits() {
+    let mut e = editor_with_layer();
+    let before = e.project().clone();
+    e.execute(Command::SetBlendMode {
+        id: 1,
+        mode: BlendMode::Multiply,
+    })
+    .unwrap();
+    let after = e.project().clone();
+    assert_eq!(after.version, 17);
+    assert_eq!(
+        Project::from_json(&after.to_json().unwrap()).unwrap(),
+        after
+    );
+    e.undo();
+    assert_eq!(e.project(), &before);
+    e.redo();
+    assert_eq!(e.project(), &after);
+    let copy = e.copy_layers(&[1]).unwrap();
+    e.execute(Command::PasteLayers(copy)).unwrap();
+    assert_eq!(
+        e.selected_layer().unwrap().blend_mode(),
+        BlendMode::Multiply
+    );
+    e.execute(Command::ToggleLocked(1)).unwrap();
+    let locked = e.project().clone();
+    assert!(
+        e.execute(Command::SetBlendMode {
+            id: 1,
+            mode: BlendMode::Screen
+        })
+        .is_err()
+    );
+    assert_eq!(e.project(), &locked);
+    let mut legacy = serde_json::to_value(&before).unwrap();
+    legacy["version"] = serde_json::json!(1);
+    assert_eq!(
+        Project::from_json(&legacy.to_string())
+            .unwrap()
+            .composition
+            .layers[0]
+            .blend_mode,
+        BlendMode::Normal
+    );
+    let mut incompatible = after.clone();
+    incompatible.version = 16;
+    assert!(Project::from_json(&serde_json::to_string(&incompatible).unwrap()).is_err());
+}
+
+#[test]
+fn blended_precompose_keeps_the_complete_backdrop() {
+    let mut e = editor_with_layer();
+    e.execute(Command::AddRectangle).unwrap();
+    e.execute(Command::SetBlendMode {
+        id: 2,
+        mode: BlendMode::Screen,
+    })
+    .unwrap();
+    let before = e.project().clone();
+    assert!(
+        e.execute(Command::Precompose {
+            layers: vec![2],
+            name: "Missing backdrop".into()
+        })
+        .is_err()
+    );
+    assert_eq!(e.project(), &before);
+    e.execute(Command::Precompose {
+        layers: vec![1, 2],
+        name: "Complete backdrop".into(),
+    })
+    .unwrap();
+    assert_eq!(
+        e.project().composition_by_id(2).unwrap().layers()[0].blend_mode(),
+        BlendMode::Screen
+    );
+    e.undo();
+    assert_eq!(e.project(), &before);
+}
+
+#[test]
 fn independent_solids_preserve_animation_and_support_atomic_source_edits() {
     let mut e = Editor::default();
     e.execute(Command::AddSolid).unwrap();
@@ -1400,7 +1481,7 @@ fn serialized_project_roundtrips_animation_and_preserves_ids() {
 fn corrupt_and_future_projects_are_rejected() {
     let editor = editor_with_layer();
     let mut project = editor.project().clone();
-    project.version = 17;
+    project.version = 18;
     assert!(Project::from_json(&project.to_json().unwrap()).is_err());
     project.version = 1;
     project.composition.fps = 0.into();
