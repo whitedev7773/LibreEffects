@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 
 pub type Frame = u32;
 pub type LayerId = u64;
+pub type CompositionId = u64;
 
+mod compositions;
 mod document;
 mod editing;
 mod geometry;
@@ -374,6 +376,18 @@ pub struct Project {
     version: u32,
     next_layer_id: LayerId,
     composition: Composition,
+    #[serde(default = "first_composition_id")]
+    composition_id: CompositionId,
+    #[serde(default = "next_composition_id")]
+    next_composition_id: CompositionId,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    other_compositions: BTreeMap<CompositionId, Composition>,
+}
+fn first_composition_id() -> CompositionId {
+    1
+}
+fn next_composition_id() -> CompositionId {
+    2
 }
 
 impl Default for Project {
@@ -381,6 +395,9 @@ impl Default for Project {
         Self {
             version: 1,
             next_layer_id: 1,
+            composition_id: 1,
+            next_composition_id: 2,
+            other_compositions: BTreeMap::new(),
             composition: Composition {
                 name: "Composition 01".into(),
                 width: 1920,
@@ -411,68 +428,91 @@ impl Project {
     }
 
     fn validate(&self) -> Result<(), String> {
-        let comp = &self.composition;
-        if !(1..=8).contains(&self.version) {
+        if !(1..=9).contains(&self.version) {
             return Err("Unsupported project version".into());
         }
-        if !(1..=16_384).contains(&comp.width)
-            || !(1..=16_384).contains(&comp.height)
-            || !(1..=240).contains(&comp.fps)
-            || comp.duration == 0
-            || comp.duration > comp.fps * 86_400
-            || comp.layers.len() > 1_000
-            || comp.name.len() > 1024
-            || comp.background_color > 0xffffff
-            || comp.work_area().is_empty()
-            || comp.work_area().end > comp.duration
+        if self.version < 9
+            && (self.composition_id != 1
+                || self.next_composition_id != 2
+                || !self.other_compositions.is_empty())
         {
-            return Err("Invalid composition settings".into());
+            return Err("Multiple compositions require project version 9".into());
+        }
+        if self.composition_id == 0
+            || self.composition_id >= self.next_composition_id
+            || self.other_compositions.len() >= 100
+            || self.other_compositions.contains_key(&self.composition_id)
+            || self
+                .other_compositions
+                .keys()
+                .any(|id| *id == 0 || *id >= self.next_composition_id)
+            || self.next_composition_id == u64::MAX
+        {
+            return Err("Invalid composition IDs".into());
         }
         let mut ids = BTreeSet::new();
         let mut images = BTreeSet::new();
         let mut image_bytes = 0usize;
-        for layer in &comp.layers {
-            if let Content::Image { png } = &layer.content {
-                if images.insert(png.as_ptr() as usize) {
-                    image_bytes = image_bytes.saturating_add(png.len());
-                }
-                if image_bytes > document::MAX_IMAGE_BYTES {
-                    return Err("Embedded images exceed 128 MiB. Remove unused image layers before importing more.".into());
-                }
-            }
-            editing::validate_content(&layer.content, layer.effects, layer.mask)?;
-            if layer.id == 0
-                || !layer.transform_offset.valid()
-                || !comp.can_parent(layer.id, layer.parent)
-                || layer.in_frame >= layer.out_frame(comp.duration)
-                || layer.out_frame(comp.duration) > comp.duration
-                || layer.id >= self.next_layer_id
-                || !ids.insert(layer.id)
-                || layer.name.len() > 1024
-                || layer.color > 0xff_ffff
-                || !layer.width.is_finite()
-                || !(1.0..=16_384.0).contains(&layer.width)
-                || !layer.height.is_finite()
-                || !(1.0..=16_384.0).contains(&layer.height)
-                || layer.properties.len() != Property::ALL.len()
+        for (_, comp) in self.compositions() {
+            if !(1..=16_384).contains(&comp.width)
+                || !(1..=16_384).contains(&comp.height)
+                || !(1..=240).contains(&comp.fps)
+                || comp.duration == 0
+                || comp.duration > comp.fps * 86_400
+                || comp.layers.len() > 1_000
+                || comp.name.len() > 1024
+                || comp.background_color > 0xffffff
+                || comp.work_area().is_empty()
+                || comp.work_area().end > comp.duration
             {
-                return Err("Invalid layer".into());
+                return Err("Invalid composition settings".into());
             }
-            for property in Property::ALL {
-                let track = layer
-                    .properties
-                    .get(&property)
-                    .ok_or("Missing transform property")?;
-                if !property.accepts(track.value)
-                    || track.keys.iter().any(|(frame, key)| {
-                        *frame >= comp.duration
-                            || !property.accepts(key.value)
-                            || !key.interpolation.valid()
-                    })
+            for layer in &comp.layers {
+                if let Content::Image { png } = &layer.content {
+                    if images.insert(png.as_ptr() as usize) {
+                        image_bytes = image_bytes.saturating_add(png.len());
+                    }
+                    if image_bytes > document::MAX_IMAGE_BYTES {
+                        return Err("Embedded images exceed 128 MiB. Remove unused image layers before importing more.".into());
+                    }
+                }
+                editing::validate_content(&layer.content, layer.effects, layer.mask)?;
+                if layer.id == 0
+                    || !layer.transform_offset.valid()
+                    || !comp.can_parent(layer.id, layer.parent)
+                    || layer.in_frame >= layer.out_frame(comp.duration)
+                    || layer.out_frame(comp.duration) > comp.duration
+                    || layer.id >= self.next_layer_id
+                    || !ids.insert(layer.id)
+                    || layer.name.len() > 1024
+                    || layer.color > 0xff_ffff
+                    || !layer.width.is_finite()
+                    || !(1.0..=16_384.0).contains(&layer.width)
+                    || !layer.height.is_finite()
+                    || !(1.0..=16_384.0).contains(&layer.height)
+                    || layer.properties.len() != Property::ALL.len()
                 {
-                    return Err("Invalid property or keyframe".into());
+                    return Err("Invalid layer".into());
+                }
+                for property in Property::ALL {
+                    let track = layer
+                        .properties
+                        .get(&property)
+                        .ok_or("Missing transform property")?;
+                    if !property.accepts(track.value)
+                        || track.keys.iter().any(|(frame, key)| {
+                            *frame >= comp.duration
+                                || !property.accepts(key.value)
+                                || !key.interpolation.valid()
+                        })
+                    {
+                        return Err("Invalid property or keyframe".into());
+                    }
                 }
             }
+        }
+        if ids.len() > 1000 {
+            return Err("Project limit is 1000 layers across all compositions".into());
         }
         if self.next_layer_id == 0 || self.next_layer_id == u64::MAX {
             return Err("Invalid next layer ID".into());
@@ -485,6 +525,9 @@ impl Project {
 #[derive(Clone, Debug)]
 pub enum Command {
     Batch(Vec<Command>),
+    NewComposition,
+    DuplicateComposition,
+    DeleteComposition,
     SetCompositionBackground(u32),
     SetWorkArea {
         start: Frame,
@@ -766,6 +809,12 @@ impl Editor {
         if next.project.composition.work_area.is_some() {
             next.project.version = 8;
         }
+        if next.project.next_composition_id > 2
+            || next.project.composition_id != 1
+            || !next.project.other_compositions.is_empty()
+        {
+            next.project.version = 9;
+        }
         next.project.validate()?;
         if next != self.current {
             let previous = std::mem::replace(&mut self.current, next);
@@ -776,6 +825,9 @@ impl Editor {
 }
 
 fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
+    if let Some(result) = compositions::apply(state, &command) {
+        return result;
+    }
     if let Command::SetWorkArea { start, end } = command {
         let comp = &mut state.project.composition;
         if start >= end || end > comp.duration {

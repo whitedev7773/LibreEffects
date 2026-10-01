@@ -6,7 +6,7 @@ use std::{
 
 use gpui::{Context, ElementId, Entity, PathPromptOptions, SharedString, Window};
 use libre_effects_core::{
-    Command, Content, Editor, Frame, KeyCopy, KeyRef, LayerId, Project, Property,
+    Command, CompositionId, Content, Editor, Frame, KeyCopy, KeyRef, LayerId, Project, Property,
 };
 
 use crate::components::{Button, ButtonSize, ButtonVariant};
@@ -28,6 +28,7 @@ pub(crate) struct VideoJob {
 #[derive(Clone)]
 pub(crate) enum Action {
     Edit(Command),
+    ActivateComposition(CompositionId),
     Select(LayerId),
     Seek(Frame),
     Step(i32),
@@ -235,10 +236,14 @@ impl EditorState {
 
     fn step_history(&mut self, redo: bool) {
         self.stop();
+        let previous = self.editor.project().active_composition_id();
         if redo {
             self.editor.redo();
         } else {
             self.editor.undo();
+        }
+        if previous != self.editor.project().active_composition_id() {
+            self.composition_changed();
         }
         // Core history restores its primary selection. Keep every panel in sync
         // instead of retaining a now-inactive head after redoing a layer split.
@@ -246,6 +251,17 @@ impl EditorState {
         self.selected_keys.clear();
         self.normalize();
         self.status = "History updated".into();
+    }
+
+    fn composition_changed(&mut self) {
+        self.stop();
+        self.frame = 0;
+        self.timeline_start = 0;
+        self.selected_layers.clear();
+        self.selected_keys.clear();
+        self.graph_key = None;
+        self.document_revision = self.document_revision.wrapping_add(1);
+        self.preview_revision = self.preview_revision.wrapping_add(1);
     }
 
     pub fn dispatch(&mut self, action: &Action, window: &mut Window, cx: &mut Context<Self>) {
@@ -535,12 +551,30 @@ impl EditorState {
             Action::Edit(command) => {
                 self.stop();
                 let before = self.editor.selected();
+                let composition = self.editor.project().active_composition_id();
                 self.status = match self.editor.execute(command.clone()) {
                     Ok(()) => "Edited".into(),
                     Err(error) => error,
                 };
                 if before != self.editor.selected() {
                     self.selected_layers.clear();
+                }
+                if composition != self.editor.project().active_composition_id() {
+                    self.composition_changed();
+                }
+            }
+            Action::ActivateComposition(id) => {
+                if *id != self.editor.project().active_composition_id() {
+                    match self.editor.activate_composition(*id) {
+                        Ok(()) => {
+                            self.composition_changed();
+                            self.status = format!(
+                                "Composition: {}",
+                                self.editor.project().composition().name()
+                            );
+                        }
+                        Err(error) => self.status = error,
+                    }
                 }
             }
             Action::Select(id) => {
@@ -654,6 +688,32 @@ pub(crate) fn timecode(frame: Frame, fps: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn composition_navigation_is_not_dirty_and_history_resets_timeline() {
+        let mut state = EditorState::default();
+        state.editor.execute(Command::AddRectangle).unwrap();
+        state
+            .editor
+            .execute(Command::SetWorkArea { start: 10, end: 50 })
+            .unwrap();
+        state.editor.execute(Command::NewComposition).unwrap();
+        state.saved = state.editor.project().clone();
+        state.editor.activate_composition(1).unwrap();
+        assert!(!state.dirty());
+        state.normalize();
+        assert_eq!((state.work_start, state.work_end), (10, 50));
+        state.editor.execute(Command::DeleteComposition).unwrap();
+        state.frame = 100;
+        state.step_history(false);
+        assert_eq!(state.frame, 0);
+        assert_eq!(state.editor.project().active_composition_id(), 1);
+        assert_eq!(state.selected_layers, [1].into());
+        assert!(!state.dirty());
+        state.step_history(true);
+        assert_eq!(state.editor.project().active_composition_id(), 2);
+        assert!(state.selected_layers.is_empty());
+        assert_eq!((state.work_start, state.work_end), (0, 150));
+    }
     #[test]
     fn split_undo_redo_keeps_timeline_and_preview_selection_on_restored_layer() {
         let mut state = EditorState::default();

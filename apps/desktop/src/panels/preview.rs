@@ -334,7 +334,14 @@ impl Render for Preview {
         let playing = state.playing;
         let max_dimension = (comp.width().max(comp.height()).min(1280) / resolution).max(1);
         let hand = state.tool == Tool::Hand;
-        let title = format!("Composition   {}", comp.name());
+        let active_composition = state.editor.project().active_composition_id();
+        let tabs: Vec<_> = state
+            .editor
+            .project()
+            .compositions()
+            .into_iter()
+            .map(|(id, comp)| (id, comp.name().to_string()))
+            .collect();
         let time = timecode(frame, comp.fps());
         let pan = self.pan;
         let gesture = self.gesture.clone();
@@ -466,7 +473,34 @@ impl Render for Preview {
             .min_w_0()
             .min_h_0()
             .bg(rgb(ui::BG))
-            .child(ui::panel_header(title))
+            .child(
+                div()
+                    .id("composition-tabs")
+                    .flex()
+                    .flex_none()
+                    .h(px(27.0))
+                    .overflow_x_scroll()
+                    .border_b_1()
+                    .border_color(rgb(ui::BORDER))
+                    .children(tabs.into_iter().map(|(id, name)| {
+                        let state = self.state.clone();
+                        ui::text_button(
+                            gpui::SharedString::from(format!("composition-tab-{id}")),
+                            format!("Composition   {name}"),
+                        )
+                        .flex_none()
+                        .text_size(px(11.0))
+                        .px_3()
+                        .when(id == active_composition, |s| {
+                            s.bg(rgb(0x343434)).border_b_1().border_color(rgb(ui::BLUE))
+                        })
+                        .on_click(move |_, window, cx| {
+                            state.update(cx, |s, cx| {
+                                s.dispatch(&Action::ActivateComposition(id), window, cx)
+                            })
+                        })
+                    })),
+            )
             .when_some(error, |s, error| {
                 s.child(
                     div()

@@ -3,7 +3,7 @@ use crate::{
     editor::{Action, EditorState},
     ui,
 };
-use gpui::{Context, Entity, Window, div, prelude::*, px, rgb};
+use gpui::{Context, Entity, SharedString, Window, div, prelude::*, px, rgb};
 use libre_effects_core::Command;
 
 pub(crate) struct Browser {
@@ -20,11 +20,10 @@ impl Browser {
 }
 impl Render for Browser {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let comp = self.state.read(cx).editor.project().composition();
-        let matches = comp
-            .name()
-            .to_lowercase()
-            .contains(&self.search.read(cx).value().trim().to_lowercase());
+        let project = self.state.read(cx).editor.project();
+        let comp = project.composition();
+        let active = project.active_composition_id();
+        let query = self.search.read(cx).value().trim().to_lowercase();
         div()
             .flex()
             .flex_col()
@@ -99,31 +98,50 @@ impl Render for Browser {
                     .child(div().flex_1().child("Name"))
                     .child("Type"),
             )
-            .when(matches, |s| {
-                s.child(
-                    div()
-                        .flex()
-                        .gap_2()
-                        .items_center()
-                        .h(px(29.0))
-                        .px_3()
-                        .bg(rgb(0x343434))
-                        .child(ui::icon("filmstrip"))
-                        .child(
-                            div()
-                                .flex_1()
-                                .overflow_hidden()
-                                .child(comp.name().to_string()),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(10.0))
-                                .text_color(rgb(ui::MUTED))
-                                .child("Comp"),
-                        ),
-                )
-            })
-            .child(div().flex_1())
+            .child(
+                div()
+                    .id("composition-items")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .children(
+                        project
+                            .compositions()
+                            .into_iter()
+                            .filter(|(_, comp)| comp.name().to_lowercase().contains(&query))
+                            .map(|(id, comp)| {
+                                let state = self.state.clone();
+                                ui::text_button(
+                                    SharedString::from(format!("project-comp-{id}")),
+                                    "",
+                                )
+                                .w_full()
+                                .h(px(29.0))
+                                .gap_2()
+                                .justify_start()
+                                .px_3()
+                                .when(id == active, |s| s.bg(rgb(0x343434)))
+                                .child(ui::icon("filmstrip"))
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .overflow_hidden()
+                                        .child(comp.name().to_string()),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(px(10.0))
+                                        .text_color(rgb(ui::MUTED))
+                                        .child("Comp"),
+                                )
+                                .on_click(move |_, window, cx| {
+                                    state.update(cx, |s, cx| {
+                                        s.dispatch(&Action::ActivateComposition(id), window, cx)
+                                    })
+                                })
+                            }),
+                    ),
+            )
             .child(
                 div()
                     .h(px(31.0))
@@ -143,11 +161,11 @@ impl Render for Browser {
                         false,
                     ))
                     .child(ui::action_tool(
-                        "project-rectangle",
+                        "project-composition",
                         "plus",
-                        "New rectangle layer",
+                        "New composition",
                         &self.state,
-                        Action::Edit(Command::AddRectangle),
+                        Action::Edit(Command::NewComposition),
                         false,
                     ))
                     .child(div().flex_1())

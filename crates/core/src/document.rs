@@ -8,7 +8,10 @@ pub(super) fn encode(project: &Project) -> Result<String, String> {
     let mut compact = project.clone();
     let mut assets: BTreeMap<String, Arc<str>> = BTreeMap::new();
     let mut ids = BTreeMap::new();
-    for layer in &mut compact.composition.layers {
+    for layer in compact
+        .compositions_mut()
+        .flat_map(|comp| comp.layers.iter_mut())
+    {
         if let Content::Image { png } = &mut layer.content {
             let pointer = png.as_ptr() as usize;
             let id = ids.entry(pointer).or_insert_with(|| {
@@ -22,7 +25,7 @@ pub(super) fn encode(project: &Project) -> Result<String, String> {
     let mut value = serde_json::to_value(&compact).map_err(|e| e.to_string())?;
     if !assets.is_empty() {
         value["version"] = project.version.max(7).into();
-        for layer in value["composition"]["layers"].as_array_mut().unwrap() {
+        each_layer(&mut value, |layer| {
             if let Some(image) = layer
                 .get_mut("content")
                 .and_then(|v| v.get_mut("Image"))
@@ -31,7 +34,8 @@ pub(super) fn encode(project: &Project) -> Result<String, String> {
                 let id = image.remove("png").unwrap();
                 image.insert("asset".into(), id);
             }
-        }
+            Ok(())
+        })?;
     }
     if serde_json::to_vec(&value).map_err(|e| e.to_string())?.len() > MAX_METADATA_BYTES {
         return Err("Project metadata exceeds 16 MiB".into());
@@ -48,7 +52,7 @@ pub(super) fn decode(json: &str) -> Result<Project, String> {
         .as_object_mut()
         .ok_or("Project must be an object")?
         .remove("image_assets");
-    if assets_value.is_some() && !matches!(value["version"].as_u64(), Some(7 | 8)) {
+    if assets_value.is_some() && !matches!(value["version"].as_u64(), Some(7 | 8 | 9)) {
         return Err("Image assets require project version 7".into());
     }
     let assets: BTreeMap<String, Arc<str>> = assets_value
@@ -60,32 +64,34 @@ pub(super) fn decode(json: &str) -> Result<Project, String> {
         return Err("Embedded images exceed 128 MiB".into());
     }
     let mut refs = BTreeMap::new();
-    if let Some(layers) = value["composition"]["layers"].as_array_mut() {
-        for layer in layers {
-            let layer_id = layer["id"].as_u64().ok_or("Invalid layer id")?;
-            if let Some(image) = layer
-                .get_mut("content")
-                .and_then(|v| v.get_mut("Image"))
-                .and_then(|v| v.as_object_mut())
-            {
-                if let Some(reference) = image.remove("asset") {
-                    let id = reference
-                        .as_str()
-                        .ok_or("Invalid image asset reference")?
-                        .to_owned();
-                    if image.contains_key("png") || !assets.contains_key(&id) {
-                        return Err("Missing or ambiguous image asset".into());
-                    }
-                    refs.insert(layer_id, id);
-                    image.insert("png".into(), "".into());
+    each_layer(&mut value, |layer| {
+        let layer_id = layer["id"].as_u64().ok_or("Invalid layer id")?;
+        if let Some(image) = layer
+            .get_mut("content")
+            .and_then(|v| v.get_mut("Image"))
+            .and_then(|v| v.as_object_mut())
+        {
+            if let Some(reference) = image.remove("asset") {
+                let id = reference
+                    .as_str()
+                    .ok_or("Invalid image asset reference")?
+                    .to_owned();
+                if image.contains_key("png") || !assets.contains_key(&id) {
+                    return Err("Missing or ambiguous image asset".into());
                 }
+                refs.insert(layer_id, id);
+                image.insert("png".into(), "".into());
             }
         }
-    }
+        Ok(())
+    })?;
     let mut project: Project = serde_json::from_value(value).map_err(|e| e.to_string())?;
     // Legacy inline images are accepted and interned as well.
     let mut intern: BTreeMap<Arc<str>, Arc<str>> = BTreeMap::new();
-    for layer in &mut project.composition.layers {
+    for layer in project
+        .compositions_mut()
+        .flat_map(|comp| comp.layers.iter_mut())
+    {
         if let Content::Image { png } = &mut layer.content {
             if let Some(id) = refs.get(&layer.id) {
                 *png = assets[id].clone();
@@ -96,10 +102,38 @@ pub(super) fn decode(json: &str) -> Result<Project, String> {
                 .clone();
         }
     }
-    if !intern.is_empty() && (1..=8).contains(&project.version) {
+    if !intern.is_empty() && (1..=9).contains(&project.version) {
         project.version = project.version.max(7);
     }
     Ok(project)
+}
+
+fn each_layer(
+    value: &mut serde_json::Value,
+    mut visit: impl FnMut(&mut serde_json::Value) -> Result<(), String>,
+) -> Result<(), String> {
+    if let Some(layers) = value
+        .get_mut("composition")
+        .and_then(|c| c.get_mut("layers"))
+        .and_then(|l| l.as_array_mut())
+    {
+        for layer in layers {
+            visit(layer)?;
+        }
+    }
+    if let Some(comps) = value
+        .get_mut("other_compositions")
+        .and_then(|c| c.as_object_mut())
+    {
+        for comp in comps.values_mut() {
+            if let Some(layers) = comp.get_mut("layers").and_then(|l| l.as_array_mut()) {
+                for layer in layers {
+                    visit(layer)?;
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

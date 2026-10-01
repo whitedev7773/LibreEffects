@@ -26,7 +26,11 @@ pub(crate) fn composite_background(pixels: &mut image::RgbaImage, color: u32) {
 }
 pub(crate) fn validate_images(project: &Project) -> Result<(), String> {
     let mut seen = std::collections::HashSet::new();
-    for layer in project.composition().layers() {
+    for layer in project
+        .compositions()
+        .into_iter()
+        .flat_map(|(_, comp)| comp.layers())
+    {
         if let Content::Image { png } = layer.content() {
             if !seen.insert(png.as_ptr() as usize) {
                 continue;

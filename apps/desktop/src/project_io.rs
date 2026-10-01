@@ -31,9 +31,17 @@ pub(crate) fn validate_render(
     if comp.width() as u64 * comp.height() as u64 > 33_554_432 {
         return Err("Rendering supports up to 32 megapixels per frame".into());
     }
-    for layer in comp.layers() {
+    for layer in project
+        .compositions()
+        .into_iter()
+        .flat_map(|(_, comp)| comp.layers())
+    {
         if let Content::Video { path, .. } = layer.content() {
             protect_source(destination, Path::new(path))?;
+        }
+    }
+    for layer in comp.layers() {
+        if let Content::Video { path, .. } = layer.content() {
             if layer.visible()
                 && layer.in_frame() < range.end
                 && layer.out_frame(comp.duration()) > range.start
@@ -126,7 +134,16 @@ mod tests {
         assert_eq!(std::fs::read(&source).unwrap(), b"irreplaceable source");
         let output = dir.path().join("output.mp4");
         validate_render(e.project(), &output, &(0..5)).unwrap();
+        e.execute(Command::NewComposition).unwrap();
+        assert!(
+            validate_render(e.project(), &source, &(0..5))
+                .unwrap_err()
+                .contains("replace a source")
+        );
         std::fs::remove_file(&source).unwrap();
+        // Missing sources in an unrelated composition do not block this render.
+        validate_render(e.project(), &output, &(0..5)).unwrap();
+        e.activate_composition(1).unwrap();
         assert!(
             validate_render(e.project(), &output, &(0..5))
                 .unwrap_err()
@@ -148,6 +165,9 @@ mod tests {
             .unwrap();
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("broken.lfe.json");
+        write_project(&path, &editor.project().to_json().unwrap()).unwrap();
+        assert!(read_project(&path).unwrap_err().contains("Invalid image"));
+        editor.execute(Command::NewComposition).unwrap();
         write_project(&path, &editor.project().to_json().unwrap()).unwrap();
         assert!(read_project(&path).unwrap_err().contains("Invalid image"));
     }

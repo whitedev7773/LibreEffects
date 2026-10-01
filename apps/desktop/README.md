@@ -341,11 +341,26 @@ directory. Neither tool is downloaded automatically.
 
 ## Project files and recovery
 
-Versioned .lfe.json files contain the composition, layer ranges, transforms and
+### Multiple compositions
+
+Use Composition > New / Duplicate / Delete composition, or the Project panel's
+plus button. Click a composition in Project or its viewer tab to activate it.
+Each composition has independent dimensions, frame rate, duration, background,
+layers and B/N work area. Ctrl+K edits the active composition's settings and name.
+The project supports up to 100 compositions and 1,000 total layers. Duplicate
+assigns new layer IDs and reconnects parent links within the copy. Create,
+duplicate and delete support Undo/Redo; the last composition cannot be deleted.
+Switching tabs does not create an edit or mark a saved document dirty. Selection
+and playhead reset on switching; view state persistence is still pending.
+The active composition is captured at save/export time. All compositions and
+their shared image assets are saved together. Nested composition layers and
+Pre-compose are not implemented yet.
+
+Versioned .lfe.json files contain compositions, layer ranges, transforms and
 keyframes. Files from the initial rectangle editor remain readable. Bezier or
 parenting edits upgrade the project to version 2; text, images, masks or effects
 upgrade it to version 3; linked videos require version 4, and altered video playback
-requires version 5. Nonblack composition backgrounds require version 6; shared embedded image assets require version 7, and saved work areas require version 8. Older applications reject
+requires version 5. Nonblack composition backgrounds require version 6; shared embedded image assets require version 7, saved work areas require version 8, and multiple compositions require version 9. Older applications reject
 unsupported versions. Save writes
 the snapshot captured when clicked using a temporary file before replacement.
 Files are limited to 256 MiB, with up to 128 MiB of unique base64 image data and
@@ -389,7 +404,9 @@ compositing remain pending. Playback applications may handle color tags differen
 Use `--render PROJECT --output FILE` to render a saved project without opening
 the editor or changing its recovery slot. The output extension selects MP4/H.264,
 MOV/ProRes with alpha, or a single PNG. MP4 uses the composition background; PNG
-preserves transparency unless `--png-background` is supplied.
+preserves transparency unless `--png-background` is supplied. The saved active
+composition is used by default; `--composition ID` selects another stable ID
+from the project JSON (`composition_id` or an `other_compositions` key).
 
 `--start FRAME` is inclusive and `--end FRAME` is exclusive. Video defaults to
 the whole composition; PNG defaults to one frame starting at frame zero.
@@ -412,7 +429,7 @@ use `--output title.png --start 30 --png-background`. Use `--help` for syntax.
 See [the development backlog](DEVELOPMENT_BACKLOG.md) for the current capability
 audit, priorities, dependencies and proposed acceptance criteria.
 
-Still pending: multiple compositions and precompositions, audio footage,
+Still pending: precompositions, audio footage,
 audio output, freeform/animated masks, an effect stack and animated effects,
 rich text layout, 3D, JSX, ExtendScript and expressions. PNG sequences can be
 assembled in an external video tool.

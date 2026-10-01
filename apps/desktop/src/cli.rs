@@ -2,7 +2,7 @@
 use std::{ffi::OsString, path::PathBuf};
 
 const HELP: &str = "Libre Effects file renderer\n\
-    --render PROJECT.lfe.json --output FILE.mp4|mov|png [--start FRAME] [--end FRAME] [--png-background]\n\
+    --render PROJECT.lfe.json --output FILE.mp4|mov|png [--composition ID] [--start FRAME] [--end FRAME] [--png-background]\n\
     Frame range is [start, end). Videos default to the entire composition; PNG defaults to one frame.\n\
     MP4 uses the composition background. MOV and PNG preserve alpha; --png-background makes PNG opaque.";
 
@@ -12,6 +12,7 @@ struct Options {
     output: PathBuf,
     start: u32,
     end: Option<u32>,
+    composition: Option<u64>,
     png_background: bool,
 }
 
@@ -19,6 +20,7 @@ fn parse(args: Vec<OsString>) -> Result<Options, String> {
     let mut args = args.into_iter();
     let (mut project, mut output, mut start, mut end) = (None, None, None, None);
     let mut png_background = false;
+    let mut composition = None;
     while let Some(flag) = args.next() {
         let flag = flag.to_str().ok_or("Invalid command-line option")?;
         if flag == "--png-background" && !png_background {
@@ -26,6 +28,14 @@ fn parse(args: Vec<OsString>) -> Result<Options, String> {
             continue;
         }
         match flag {
+            "--composition" if composition.is_none() => {
+                composition = Some(
+                    args.next()
+                        .and_then(|v| v.to_str().and_then(|s| s.parse::<u64>().ok()))
+                        .filter(|id| *id > 0)
+                        .ok_or("--composition requires a positive composition ID")?,
+                );
+            }
             "--render" if project.is_none() => {
                 project = Some(PathBuf::from(
                     args.next().ok_or("--render requires a project path")?,
@@ -61,6 +71,7 @@ fn parse(args: Vec<OsString>) -> Result<Options, String> {
         output: output.ok_or("Use --output FILE.mp4, FILE.mov or FILE.png")?,
         start: start.unwrap_or(0),
         end,
+        composition,
         png_background,
     })
 }
@@ -78,7 +89,10 @@ fn render(options: Options) -> Result<(), String> {
     if options.png_background && extension != "png" {
         return Err("--png-background applies only to PNG output".into());
     }
-    let project = crate::project_io::read_project(&options.project)?;
+    let mut project = crate::project_io::read_project(&options.project)?;
+    if let Some(id) = options.composition {
+        project.activate_composition(id)?;
+    }
     crate::project_io::protect_source(&options.output, &options.project)?;
     let end = options.end.unwrap_or_else(|| {
         if extension == "png" {
@@ -158,14 +172,28 @@ mod tests {
             "--start",
             "30",
             "--png-background",
+            "--composition",
+            "2",
         ];
         let parsed = parse(args.into_iter().map(OsString::from).collect()).unwrap();
         assert_eq!(parsed.project, PathBuf::from("한글 project.lfe.json"));
         assert_eq!(parsed.start, 30);
         assert!(parsed.png_background);
+        assert_eq!(parsed.composition, Some(2));
         for args in [
             vec!["--render"],
             vec!["--render", "x", "--output", "y", "--start", "-1"],
+            vec!["--render", "x", "--output", "y", "--composition", "0"],
+            vec![
+                "--render",
+                "x",
+                "--output",
+                "y",
+                "--composition",
+                "1",
+                "--composition",
+                "2",
+            ],
             vec![
                 "--render", "x", "--output", "y", "--start", "0", "--start", "1",
             ],
@@ -200,6 +228,7 @@ mod tests {
             output: output_path.clone(),
             start,
             end,
+            composition: None,
             png_background,
         };
         render(options(1, None, false)).unwrap();
@@ -213,5 +242,40 @@ mod tests {
             assert!(render(options(start, end, false)).is_err());
             assert_eq!(std::fs::read(&output_path).unwrap(), previous);
         }
+        editor
+            .execute(libre_effects_core::Command::NewComposition)
+            .unwrap();
+        editor
+            .execute(libre_effects_core::Command::SetCompositionBackground(
+                0xff0000,
+            ))
+            .unwrap();
+        crate::project_io::write_project(&project_path, &editor.project().to_json().unwrap())
+            .unwrap();
+        let mut first = options(0, None, true);
+        first.composition = Some(1);
+        render(first).unwrap();
+        assert_eq!(
+            image::open(&output_path)
+                .unwrap()
+                .to_rgba8()
+                .get_pixel(0, 0)
+                .0,
+            [0x12, 0x34, 0x56, 255]
+        );
+        render(options(0, None, true)).unwrap();
+        assert_eq!(
+            image::open(&output_path)
+                .unwrap()
+                .to_rgba8()
+                .get_pixel(0, 0)
+                .0,
+            [255, 0, 0, 255]
+        );
+        let previous = std::fs::read(&output_path).unwrap();
+        let mut invalid = options(0, None, true);
+        invalid.composition = Some(99);
+        assert!(render(invalid).is_err());
+        assert_eq!(std::fs::read(&output_path).unwrap(), previous);
     }
 }

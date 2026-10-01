@@ -718,6 +718,31 @@ impl Render for Shell {
                 );
             }
             if menu == "Composition" {
+                for (id, label, command) in [
+                    (
+                        "composition-new",
+                        "New composition",
+                        Command::NewComposition,
+                    ),
+                    (
+                        "composition-duplicate",
+                        "Duplicate composition",
+                        Command::DuplicateComposition,
+                    ),
+                    (
+                        "composition-delete",
+                        "Delete composition",
+                        Command::DeleteComposition,
+                    ),
+                ] {
+                    dropdown = dropdown.child(ui::text_button(id, label).on_click(cx.listener(
+                        move |this, _, window, cx| {
+                            this.menu = None;
+                            this.dispatch(Action::Edit(command.clone()), window, cx);
+                            cx.notify();
+                        },
+                    )));
+                }
                 dropdown = dropdown.child(
                     ui::text_button("composition-settings", "Composition settings…    Ctrl+K")
                         .on_click(

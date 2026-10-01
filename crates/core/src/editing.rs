@@ -489,9 +489,9 @@ pub(super) fn apply_extended(
                     Content::Image { png } => {
                         let shared = state
                             .project
-                            .composition
-                            .layers
-                            .iter()
+                            .compositions()
+                            .into_iter()
+                            .flat_map(|(_, comp)| &comp.layers)
                             .find_map(|layer| {
                                 if let Content::Image { png: existing } = &layer.content {
                                     (existing == png).then(|| existing.clone())

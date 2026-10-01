@@ -4,7 +4,7 @@ use std::time::Duration;
 
 impl EditorState {
     pub fn dirty(&self) -> bool {
-        self.editor.project() != &self.saved
+        !self.editor.project().same_document(&self.saved)
     }
     pub fn recover(&mut self, restore: bool, cx: &mut Context<Self>) {
         let Some(candidate) = self.recovery.as_ref() else {
