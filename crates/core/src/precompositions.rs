@@ -159,6 +159,12 @@ fn precompose(state: &mut Snapshot, layers: &[LayerId], name: &str) -> Result<()
         if selected && layer.locked {
             return Err("Unlock selected layers before pre-composing".into());
         }
+        if layer
+            .track_matte
+            .is_some_and(|m| ids.contains(&m.source) != selected)
+        {
+            return Err("Include matte sources and all their consumers when pre-composing".into());
+        }
         if layer.parent.is_some_and(|id| ids.contains(&id) != selected) {
             return Err("Include the complete parent hierarchy when pre-composing".into());
         }

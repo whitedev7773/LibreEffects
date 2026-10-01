@@ -679,6 +679,14 @@ impl EditorState {
                     // Detach children first, including selected ones, to keep deletion atomic.
                     let mut commands = Vec::new();
                     for l in self.editor.project().composition().layers() {
+                        if l.track_matte()
+                            .is_some_and(|m| self.selected_layers.contains(&m.source))
+                        {
+                            commands.push(Command::SetTrackMatte {
+                                id: l.id(),
+                                matte: None,
+                            });
+                        }
                         if l.parent()
                             .is_some_and(|id| self.selected_layers.contains(&id))
                         {

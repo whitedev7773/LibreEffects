@@ -725,3 +725,49 @@ Blended boundaries use the same 8-bit raster buffers and limits as adjustments.
 `examples/blend-modes-study.lfe.json` compares the five modes with animated source
 opacity on translucent backdrops. This does not claim Adobe project interchange
 or full color-managed AE equivalence.
+
+
+### Track mattes
+
+Select a consumer layer and use **Properties → Track Matte** to choose its source,
+then **Matte mode** for Alpha, Alpha inverted, Luma, or Luma inverted. The same
+controls appear beside Mode in the timeline when its layer columns are widened
+to at least 750 logical pixels. Menus support arrows, Enter/Space and Escape.
+A source can be reused by multiple consumers anywhere in the layer stack.
+Selecting an unlocked source hides its independent composite in the same undoable
+edit; a locked source retains its visibility. Switching modes keeps visibility.
+Use the source's eye switch to render it independently as well. A selected hidden
+matte source still has transform handles and can be moved in the Composition viewer.
+
+Matte inputs include their own source content, rectangular mask, ordered effects,
+opacity, parent/world transform and recursively assigned matte. Their independent
+blend mode, eye, Solo and Guide switches do not suppress the input. In/out points
+still apply. Source pixels outside their time or spatial bounds are transparent;
+inverted modes therefore retain the consumer there. A Null or Adjustment cannot
+serve as a matte source; pre-compose a desired adjustment result into a pixel source.
+Adjustment consumers are supported: matte coverage limits the adjusted region,
+without compositing the underlying alpha a second time.
+
+The renderer multiplies premultiplied consumer RGBA by matte coverage after its
+own effects and before blending. Alpha uses source alpha. Luma is the weighted
+sum of premultiplied sRGB channels (0.2126 R + 0.7152 G + 0.0722 B), including source
+alpha. Inversion uses one minus that coverage. This is an explicit 8-bit sRGB
+policy, not linear-light or HDR luminance. Preview and every output format use the
+same path; MP4 flattens the resulting alpha over the composition background.
+Raster boundaries use the requested output resolution and existing 32 MP limits.
+
+Projects with mattes use version 18. Cycles, absent references and paths longer
+than 16 matte links are rejected atomically. A frame remains limited to 4,096
+evaluated layer/matte instances. Duplicate and paste remap copied references;
+pasting into another composition requires the matte source to be copied as well.
+Pre-compose requires all sources and consumers together, and splitting a source
+requires all its consumers so both halves retain the correct references. Deleting
+through the editor clears affected references in one Undo transaction; locked
+consumers prevent that edit. Direct core deletion must remove or detach all
+consumers in the same transaction. Reordering never changes the selected source.
+
+`examples/track-matte-study.lfe.json` demonstrates animated traveling mattes in
+all four modes over Wanted Sans text. Regression tests cover reference alpha and
+luma pixels, inversion, masks, effects, animation, parent transforms, nested/reused
+mattes, history, copy/split/pre-compose, invalid references and hidden offline
+footage. Explicit FFmpeg tests compare MP4 and alpha MOV frames to PNG results.

@@ -7,6 +7,11 @@ use gpui::{Context, Entity, Window, div, prelude::*, px, rgb};
 use libre_effects_core::{Command, Content, Mask, Property};
 
 pub(crate) struct Inspector {
+    matte: Option<(
+        u64,
+        Entity<super::matte::MattePicker>,
+        Entity<super::matte::MattePicker>,
+    )>,
     blend: Option<(u64, Entity<super::blend::BlendPicker>)>,
     state: Entity<EditorState>,
     name: Entity<TextField>,
@@ -213,6 +218,7 @@ impl Inspector {
             .collect();
         Self {
             blend: None,
+            matte: None,
             extra,
             state,
             name,
@@ -354,6 +360,29 @@ impl Render for Inspector {
                     .child(div().w(px(105.0)).child("Blend mode"))
                     .child(div().flex_1().child(self.blend.as_ref().unwrap().1.clone())),
             );
+        }
+        if !is_null {
+            if self.matte.as_ref().is_none_or(|(owner, _, _)| *owner != id) {
+                self.matte = Some((
+                    id,
+                    cx.new(|cx| super::matte::MattePicker::new(self.state.clone(), id, true, cx)),
+                    cx.new(|cx| super::matte::MattePicker::new(self.state.clone(), id, false, cx)),
+                ));
+            }
+            let (_, source, mode) = self.matte.as_ref().unwrap();
+            for (label, picker) in [
+                ("Track Matte", source.clone()),
+                ("Matte mode", mode.clone()),
+            ] {
+                contents = contents.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .mt_1()
+                        .child(div().w(px(105.0)).child(label))
+                        .child(div().flex_1().min_w_0().child(picker)),
+                );
+            }
         }
         let is_adjustment = matches!(layer.content(), Content::Adjustment);
         let mut entries = vec![(2, "Fill (hex)", format!("{:06X}", layer.color()))];

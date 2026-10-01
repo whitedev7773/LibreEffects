@@ -111,6 +111,22 @@ fn geometry(
         ),
     )
 }
+fn controls_active(
+    comp: &libre_effects_core::Composition,
+    layer: &libre_effects_core::Layer,
+    frame: u32,
+    selected: bool,
+) -> bool {
+    comp.layer_active(layer, frame, true)
+        || (selected
+            && frame >= layer.in_frame()
+            && frame < layer.out_frame(comp.duration())
+            && comp
+                .layers()
+                .iter()
+                .any(|l| l.track_matte().is_some_and(|m| m.source == layer.id())))
+}
+
 impl Preview {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
@@ -147,7 +163,7 @@ impl Preview {
             .filter(|l| {
                 state.selected_layers.contains(&l.id())
                     && !l.locked()
-                    && comp.layer_active(l, frame, true)
+                    && controls_active(comp, l, frame, true)
             })
             .find_map(|l| {
                 let world = comp.world_transform(l.id(), frame)?;
@@ -167,15 +183,28 @@ impl Preview {
                         .then_some((l.id(), index))
                 })
             });
-        let hit = handle_hit.and_then(|(id, _)| comp.layer(id)).or_else(|| {
-            comp.layers().iter().find(|layer| {
-                comp.layer_active(layer, frame, true)
-                    && !layer.locked()
-                    && comp
-                        .corners_at(layer.id(), frame)
-                        .is_some_and(|corners| point_in_quad(p, corners))
+        let hit = handle_hit
+            .and_then(|(id, _)| comp.layer(id))
+            .or_else(|| {
+                comp.layers().iter().find(|l| {
+                    state.selected_layers.contains(&l.id())
+                        && !l.locked()
+                        && !comp.layer_active(l, frame, true)
+                        && controls_active(comp, l, frame, true)
+                        && comp
+                            .corners_at(l.id(), frame)
+                            .is_some_and(|corners| point_in_quad(p, corners))
+                })
             })
-        });
+            .or_else(|| {
+                comp.layers().iter().find(|layer| {
+                    comp.layer_active(layer, frame, true)
+                        && !layer.locked()
+                        && comp
+                            .corners_at(layer.id(), frame)
+                            .is_some_and(|corners| point_in_quad(p, corners))
+                })
+            });
         let (layer, _) = hit.map_or((None, [0.0, 0.0]), |layer| {
             (
                 Some(layer.id()),
@@ -643,7 +672,12 @@ impl Render for Preview {
                                             }
                                             for layer in
                                                 comp.layers().iter().rev().filter(|layer| {
-                                                    comp.layer_active(layer, frame, true)
+                                                    controls_active(
+                                                        &comp,
+                                                        layer,
+                                                        frame,
+                                                        selected.contains(&layer.id()),
+                                                    )
                                                 })
                                             {
                                                 let corners = comp

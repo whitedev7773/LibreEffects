@@ -103,6 +103,13 @@ fn paste(state: &mut Snapshot, clipboard: &LayerClipboard) -> Result<(), String>
     let comp = &state.project.composition;
     let copied: BTreeSet<_> = clipboard.layers.iter().map(|l| l.id).collect();
     for layer in &clipboard.layers {
+        if let Some(matte) = layer.track_matte
+            && !copied.contains(&matte.source)
+            && (state.project.composition_id != clipboard.composition
+                || comp.layer(matte.source).is_none())
+        {
+            return Err("Copy the matte source as well before pasting into another composition or after source removal".into());
+        }
         if let Some(parent) = layer.parent
             && !copied.contains(&parent)
         {
@@ -142,6 +149,7 @@ fn paste(state: &mut Snapshot, clipboard: &LayerClipboard) -> Result<(), String>
     for layer in &mut layers {
         layer.id = mapping[&layer.id];
         layer.parent = layer.parent.map(|p| mapping.get(&p).copied().unwrap_or(p));
+        layer.remap_matte(&mapping);
         let end = convert(layer.out_frame(clipboard.duration))?;
         if end > comp.duration {
             return Err(

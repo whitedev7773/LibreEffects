@@ -4,6 +4,7 @@ mod effects;
 mod graph;
 mod inspector;
 mod markers;
+mod matte;
 mod preview;
 mod sidebar;
 mod timeline;

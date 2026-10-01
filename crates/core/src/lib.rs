@@ -20,6 +20,8 @@ mod geometry;
 mod layer_workflow;
 pub use layer_workflow::{LayerClipboard, LayerSwitch};
 mod markers;
+mod matte;
+pub use matte::{MatteMode, TrackMatte};
 mod media;
 pub use media::MediaReplacement;
 mod precompositions;
@@ -181,6 +183,8 @@ impl AnimatedProperty {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Layer {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    track_matte: Option<TrackMatte>,
     #[serde(default, skip_serializing_if = "BlendMode::is_normal")]
     blend_mode: BlendMode,
     #[serde(default, skip_serializing_if = "markers::Markers::is_default")]
@@ -502,7 +506,7 @@ impl Project {
     }
 
     fn validate(&self) -> Result<(), String> {
-        if !(1..=17).contains(&self.version) {
+        if !(1..=18).contains(&self.version) {
             return Err("Unsupported project version".into());
         }
         if self.version < 9
@@ -528,6 +532,7 @@ impl Project {
         let mut images = BTreeSet::new();
         let mut image_bytes = 0usize;
         for (_, comp) in self.compositions() {
+            matte::validate(comp, self.version)?;
             if self.version < 17 && comp.layers.iter().any(|l| !l.blend_mode.is_normal()) {
                 return Err("Layer blending modes require project version 17".into());
             }
@@ -637,6 +642,10 @@ impl Project {
 /// The future scripting bridge and native controls both dispatch these commands.
 #[derive(Clone, Debug)]
 pub enum Command {
+    SetTrackMatte {
+        id: LayerId,
+        matte: Option<TrackMatte>,
+    },
     SetBlendMode {
         id: LayerId,
         mode: BlendMode,
@@ -1030,6 +1039,14 @@ impl Editor {
         {
             next.project.version = 17;
         }
+        if next
+            .project
+            .compositions()
+            .into_iter()
+            .any(|(_, c)| c.layers.iter().any(|l| l.track_matte.is_some()))
+        {
+            next.project.version = 18;
+        }
         next.project.validate()?;
         if next != self.current {
             let previous = std::mem::replace(&mut self.current, next);
@@ -1040,6 +1057,9 @@ impl Editor {
 }
 
 fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
+    if let Command::SetTrackMatte { id, matte } = command {
+        return matte::set(state, id, matte);
+    }
     if let Command::RelinkMedia(replacements) = command {
         return media::relink(state, replacements);
     }
@@ -1271,6 +1291,7 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
         comp.layers.insert(
             0,
             Layer {
+                track_matte: None,
                 blend_mode: BlendMode::Normal,
                 markers: Default::default(),
                 content: Content::default(),

@@ -65,15 +65,27 @@ fn validate_sources(
     let comp = project
         .composition_by_id(id)
         .ok_or("Missing source composition")?;
-    for layer in comp
+    let mut pending: Vec<_> = comp
         .layers()
         .iter()
         .filter(|l| comp.layer_enabled(l, false))
-    {
+        .map(|l| (l.id(), range.clone()))
+        .collect();
+    let mut checked = std::collections::BTreeSet::new();
+    while let Some((layer_id, range)) = pending.pop() {
+        let layer = comp.layer(layer_id).ok_or("Missing matte source")?;
         let start = range.start.max(layer.in_frame());
         let end = range.end.min(layer.out_frame(comp.duration()));
-        if start >= end {
+        if start >= end || !checked.insert((layer_id, start, end)) {
             continue;
+        }
+        if checked.len() > 4096 {
+            return Err(
+                "Too many matte time ranges; simplify the composition before rendering".into(),
+            );
+        }
+        if let Some(matte) = layer.track_matte() {
+            pending.push((matte.source, start..end));
         }
         match layer.content() {
             Content::Video { path, .. } if !Path::new(path).is_file() => {

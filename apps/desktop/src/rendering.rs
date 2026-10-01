@@ -56,6 +56,15 @@ fn image_limits() -> image::Limits {
     limits.max_alloc = Some(128 * 1024 * 1024);
     limits
 }
+fn count_layer(count: &mut usize) -> Result<(), String> {
+    *count += 1;
+    if *count > 4096 {
+        return Err(
+            "Frame exceeds 4096 nested layer or matte instances; simplify the composition".into(),
+        );
+    }
+    Ok(())
+}
 impl Renderer {
     pub fn new() -> Self {
         let mut options = resvg::usvg::Options::default();
@@ -81,17 +90,21 @@ impl Renderer {
         for l in c.layers().iter().rev().filter(|l| {
             c.layer_active(l, frame, include_guides) && !matches!(l.content(), Content::Null)
         }) {
-            let Some(matrix) = c.world_transform(l.id(), frame) else {
-                continue;
-            };
-            *layer_count += 1;
-            if *layer_count > 4096 {
-                return Err(
-                    "Frame exceeds 4096 nested layer instances; simplify the composition".into(),
-                );
-            }
-            let id = format!("{prefix}-{}", l.id());
             if matches!(l.content(), Content::Adjustment) {
+                let Some(matrix) = c.world_transform(l.id(), frame) else {
+                    continue;
+                };
+                count_layer(layer_count)?;
+                let id = format!("{prefix}-{}", l.id());
+                let matte = self.matte_pixels(
+                    project,
+                    composition,
+                    l,
+                    frame,
+                    max_dimension,
+                    &id,
+                    layer_count,
+                )?;
                 svg = self.adjust_composite(
                     &svg,
                     l,
@@ -101,158 +114,217 @@ impl Renderer {
                     c.height(),
                     max_dimension,
                     &id,
+                    matte.as_ref().map(|(p, m)| (p, *m)),
                 )?;
-                continue;
-            }
-            let e = l.effects();
-            let backdrop = (l.blend_mode() != libre_effects_core::BlendMode::Normal)
-                .then(|| std::mem::take(&mut svg));
-            let mut effect_bounds = [0.0, 0.0, l.width(), l.height()];
-            if let Content::Text { text, font_size } = l.content()
-                && l.effect_stack().iter().any(|e| !e.bypassed())
-            {
-                // Point text can extend outside the layer's nominal size. Measure the
-                // same shaped glyph paths used by the compositor before filtering.
-                let source = format!(
-                    "<svg xmlns='http://www.w3.org/2000/svg' width='{}' height='{}'>{}</svg>",
-                    l.width(),
-                    l.height(),
-                    text_svg(text, *font_size, "white")
-                );
-                let measured = resvg::usvg::Tree::from_str(&source, &self.options)
-                    .map_err(|e| e.to_string())?;
-                let bounds = measured.root().bounding_box();
-                let left = f64::from(bounds.left()).min(0.0);
-                let top = f64::from(bounds.top()).min(0.0);
-                effect_bounds = [
-                    left,
-                    top,
-                    f64::from(bounds.right()).max(l.width()) - left,
-                    f64::from(bounds.bottom()).max(l.height()) - top,
-                ];
-            }
-            let (effect_defs, effect_open, effect_close) =
-                crate::effect_render::stack(l, frame, &id, effect_bounds)?;
-            svg.push_str(&effect_defs);
-            svg.push_str(&format!(
-                "<defs><filter id='fx{id}' x='-100%' y='-100%' width='300%' height='300%'>"
-            ));
-            if e.blur > 0.0 {
-                svg.push_str(&format!("<feGaussianBlur stdDeviation='{}'/>", e.blur));
-            }
-            if e.grayscale {
-                svg.push_str("<feColorMatrix type='saturate' values='0'/>");
-            }
-            if e.brightness != 1.0 {
-                let b = e.brightness;
-                svg.push_str(&format!(
-                    "<feColorMatrix values='{b} 0 0 0 0 0 {b} 0 0 0 0 0 {b} 0 0 0 0 0 1 0'/>"
-                ));
-            }
-            svg.push_str("</filter>");
-            if let Some(m) = l.mask() {
-                svg.push_str(&format!("<clipPath id='mask{id}'><path clip-rule='evenodd' d='{}M{} {}h{}v{}h{}z'/></clipPath>", if m.inverted { format!("M0 0h{}v{}h{}z ",l.width(),l.height(),-l.width()) } else { String::new() },m.x,m.y,m.width,m.height,-m.width));
-            }
-            svg.push_str("</defs>");
-            let a = matrix.0;
-            svg.push_str(&format!(
-                "<g transform='matrix({} {} {} {} {} {})' opacity='{}'>{effect_open}<g {}><g {}>",
-                a[0],
-                a[1],
-                a[2],
-                a[3],
-                a[4],
-                a[5],
-                l.property(Property::Opacity)
-                    .value_at(frame)
-                    .clamp(0.0, 100.0)
-                    / 100.0,
-                if e != libre_effects_core::Effects::default() {
-                    format!("filter='url(#fx{id})'")
-                } else {
-                    String::new()
-                },
-                if l.mask().is_some() {
-                    format!("clip-path='url(#mask{id})'")
-                } else {
-                    String::new()
-                }
-            ));
-            let color = format!("#{:06x}", l.color());
-            match l.content() {
-                Content::Null | Content::Adjustment => {}
-                Content::Rectangle | Content::Solid => svg.push_str(&format!(
-                    "<rect width='{}' height='{}' fill='{color}'/>",
-                    l.width(),
-                    l.height()
-                )),
-                Content::Text { text, font_size } => {
-                    svg.push_str(&text_svg(text, *font_size, &color));
-                }
-                Content::Image { png } => svg.push_str(&format!(
-                    "<image width='{}' height='{}' xlink:href='data:image/png;base64,{png}'/>",
-                    l.width(),
-                    l.height()
-                )),
-                Content::Composition { composition, .. } => {
-                    let source = project
-                        .composition_by_id(*composition)
-                        .ok_or("Missing source composition")?;
-                    if let Some(source_frame) =
-                        l.content().composition_frame(frame, c.fps(), source)
-                    {
-                        let inner = self.layers_svg(
-                            project,
-                            *composition,
-                            source_frame,
-                            max_dimension,
-                            &id,
-                            layer_count,
-                            false,
-                        )?;
-                        // An unchanged full-canvas group already shares its parent's clip.
-                        // Avoid a redundant clip pass, which can round antialiased edges again.
-                        if source.width() == c.width()
-                            && source.height() == c.height()
-                            && l.width() == f64::from(source.width())
-                            && l.height() == f64::from(source.height())
-                            && matrix == libre_effects_core::Affine::default()
-                            && e == libre_effects_core::Effects::default()
-                        {
-                            svg.push_str(&inner);
-                        } else {
-                            // Nested viewports clip to the source canvas and retain alpha.
-                            svg.push_str(&format!("<svg width='{}' height='{}' viewBox='0 0 {} {}' preserveAspectRatio='none' overflow='hidden'>{inner}</svg>", l.width(), l.height(), source.width(), source.height()));
-                        }
-                    }
-                }
-                Content::Video { path, .. } => {
-                    if let Some(seconds) = l.content().video_time(frame, c.fps()) {
-                        let png = crate::footage::frame_png(
-                            path,
-                            seconds,
-                            l.width() as u32,
-                            l.height() as u32,
-                            max_dimension,
-                        )?;
-                        svg.push_str(&format!("<image width='{}' height='{}' xlink:href='data:image/png;base64,{png}'/>", l.width(), l.height()));
-                    }
-                }
-            }
-            svg.push_str(&format!("</g></g>{effect_close}</g>"));
-            if let Some(lower) = backdrop {
-                svg = self.blend_composite(
-                    &lower,
-                    &svg,
-                    l.blend_mode(),
-                    c.width(),
-                    c.height(),
+            } else {
+                let source = self.isolated_layer_svg(
+                    project,
+                    composition,
+                    l.id(),
+                    frame,
                     max_dimension,
+                    prefix,
+                    layer_count,
                 )?;
+                if l.blend_mode() == libre_effects_core::BlendMode::Normal {
+                    svg.push_str(&source);
+                } else {
+                    svg = self.blend_composite(
+                        &svg,
+                        &source,
+                        l.blend_mode(),
+                        c.width(),
+                        c.height(),
+                        max_dimension,
+                    )?;
+                }
             }
             if svg.len() > 64 * 1024 * 1024 {
                 return Err("Frame SVG exceeds 64 MiB; reduce embedded image instances".into());
             }
+        }
+        Ok(svg)
+    }
+    /// A matte reads the source's own effects, mask, opacity and transforms before
+    /// blending. Visibility, Solo and Guide only control its independent composite.
+    pub(crate) fn isolated_layer_svg(
+        &self,
+        project: &Project,
+        composition: libre_effects_core::CompositionId,
+        layer: libre_effects_core::LayerId,
+        frame: u32,
+        max_dimension: u32,
+        prefix: &str,
+        layer_count: &mut usize,
+    ) -> Result<String, String> {
+        let c = project
+            .composition_by_id(composition)
+            .ok_or("Missing source composition")?;
+        let l = c.layer(layer).ok_or("Missing matte source")?;
+        if frame < l.in_frame()
+            || frame >= l.out_frame(c.duration())
+            || matches!(l.content(), Content::Null | Content::Adjustment)
+        {
+            return Ok(String::new());
+        }
+        let Some(matrix) = c.world_transform(l.id(), frame) else {
+            return Ok(String::new());
+        };
+        count_layer(layer_count)?;
+        let id = format!("{prefix}-{}", l.id());
+        let mut svg = String::new();
+        let e = l.effects();
+        let mut effect_bounds = [0.0, 0.0, l.width(), l.height()];
+        if let Content::Text { text, font_size } = l.content()
+            && l.effect_stack().iter().any(|e| !e.bypassed())
+        {
+            // Point text can extend outside the layer's nominal size. Measure the
+            // same shaped glyph paths used by the compositor before filtering.
+            let source = format!(
+                "<svg xmlns='http://www.w3.org/2000/svg' width='{}' height='{}'>{}</svg>",
+                l.width(),
+                l.height(),
+                text_svg(text, *font_size, "white")
+            );
+            let measured =
+                resvg::usvg::Tree::from_str(&source, &self.options).map_err(|e| e.to_string())?;
+            let bounds = measured.root().bounding_box();
+            let left = f64::from(bounds.left()).min(0.0);
+            let top = f64::from(bounds.top()).min(0.0);
+            effect_bounds = [
+                left,
+                top,
+                f64::from(bounds.right()).max(l.width()) - left,
+                f64::from(bounds.bottom()).max(l.height()) - top,
+            ];
+        }
+        let (effect_defs, effect_open, effect_close) =
+            crate::effect_render::stack(l, frame, &id, effect_bounds)?;
+        svg.push_str(&effect_defs);
+        svg.push_str(&format!(
+            "<defs><filter id='fx{id}' x='-100%' y='-100%' width='300%' height='300%'>"
+        ));
+        if e.blur > 0.0 {
+            svg.push_str(&format!("<feGaussianBlur stdDeviation='{}'/>", e.blur));
+        }
+        if e.grayscale {
+            svg.push_str("<feColorMatrix type='saturate' values='0'/>");
+        }
+        if e.brightness != 1.0 {
+            let b = e.brightness;
+            svg.push_str(&format!(
+                "<feColorMatrix values='{b} 0 0 0 0 0 {b} 0 0 0 0 0 {b} 0 0 0 0 0 1 0'/>"
+            ));
+        }
+        svg.push_str("</filter>");
+        if let Some(m) = l.mask() {
+            svg.push_str(&format!("<clipPath id='mask{id}'><path clip-rule='evenodd' d='{}M{} {}h{}v{}h{}z'/></clipPath>", if m.inverted { format!("M0 0h{}v{}h{}z ",l.width(),l.height(),-l.width()) } else { String::new() },m.x,m.y,m.width,m.height,-m.width));
+        }
+        svg.push_str("</defs>");
+        let a = matrix.0;
+        svg.push_str(&format!(
+            "<g transform='matrix({} {} {} {} {} {})' opacity='{}'>{effect_open}<g {}><g {}>",
+            a[0],
+            a[1],
+            a[2],
+            a[3],
+            a[4],
+            a[5],
+            l.property(Property::Opacity)
+                .value_at(frame)
+                .clamp(0.0, 100.0)
+                / 100.0,
+            if e != libre_effects_core::Effects::default() {
+                format!("filter='url(#fx{id})'")
+            } else {
+                String::new()
+            },
+            if l.mask().is_some() {
+                format!("clip-path='url(#mask{id})'")
+            } else {
+                String::new()
+            }
+        ));
+        let color = format!("#{:06x}", l.color());
+        match l.content() {
+            Content::Null | Content::Adjustment => {}
+            Content::Rectangle | Content::Solid => svg.push_str(&format!(
+                "<rect width='{}' height='{}' fill='{color}'/>",
+                l.width(),
+                l.height()
+            )),
+            Content::Text { text, font_size } => {
+                svg.push_str(&text_svg(text, *font_size, &color));
+            }
+            Content::Image { png } => svg.push_str(&format!(
+                "<image width='{}' height='{}' xlink:href='data:image/png;base64,{png}'/>",
+                l.width(),
+                l.height()
+            )),
+            Content::Composition { composition, .. } => {
+                let source = project
+                    .composition_by_id(*composition)
+                    .ok_or("Missing source composition")?;
+                if let Some(source_frame) = l.content().composition_frame(frame, c.fps(), source) {
+                    let inner = self.layers_svg(
+                        project,
+                        *composition,
+                        source_frame,
+                        max_dimension,
+                        &id,
+                        layer_count,
+                        false,
+                    )?;
+                    // An unchanged full-canvas group already shares its parent's clip.
+                    // Avoid a redundant clip pass, which can round antialiased edges again.
+                    if source.width() == c.width()
+                        && source.height() == c.height()
+                        && l.width() == f64::from(source.width())
+                        && l.height() == f64::from(source.height())
+                        && matrix == libre_effects_core::Affine::default()
+                        && e == libre_effects_core::Effects::default()
+                    {
+                        svg.push_str(&inner);
+                    } else {
+                        // Nested viewports clip to the source canvas and retain alpha.
+                        svg.push_str(&format!("<svg width='{}' height='{}' viewBox='0 0 {} {}' preserveAspectRatio='none' overflow='hidden'>{inner}</svg>", l.width(), l.height(), source.width(), source.height()));
+                    }
+                }
+            }
+            Content::Video { path, .. } => {
+                if let Some(seconds) = l.content().video_time(frame, c.fps()) {
+                    let png = crate::footage::frame_png(
+                        path,
+                        seconds,
+                        l.width() as u32,
+                        l.height() as u32,
+                        max_dimension,
+                    )?;
+                    svg.push_str(&format!(
+                        "<image width='{}' height='{}' xlink:href='data:image/png;base64,{png}'/>",
+                        l.width(),
+                        l.height()
+                    ));
+                }
+            }
+        }
+        svg.push_str(&format!("</g></g>{effect_close}</g>"));
+
+        if let Some((matte, mode)) = self.matte_pixels(
+            project,
+            composition,
+            l,
+            frame,
+            max_dimension,
+            &id,
+            layer_count,
+        )? {
+            let mut source = self.raster_canvas(&svg, c.width(), c.height(), max_dimension)?;
+            crate::matte_render::apply_matte(&mut source, &matte, mode);
+            svg = crate::adjustment_render::embedded(&source, c.width(), c.height())?;
+        }
+        if svg.len() > 64 * 1024 * 1024 {
+            return Err("Layer SVG exceeds 64 MiB; reduce embedded image instances".into());
         }
         Ok(svg)
     }

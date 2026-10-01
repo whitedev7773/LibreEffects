@@ -95,6 +95,7 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                 for layer in &mut comp.layers {
                     layer.id = mapping[&layer.id];
                     layer.parent = layer.parent.map(|id| mapping[&id]);
+                    layer.remap_matte(&mapping);
                 }
                 comp.name = format!("{} copy", comp.name);
             } else {

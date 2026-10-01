@@ -21,6 +21,13 @@ struct KeyDrag {
     to: u32,
 }
 pub(crate) struct Timeline {
+    matte_pickers: BTreeMap<
+        LayerId,
+        (
+            Entity<super::matte::MattePicker>,
+            Entity<super::matte::MattePicker>,
+        ),
+    >,
     blend_pickers: BTreeMap<LayerId, Entity<super::blend::BlendPicker>>,
     left: f32,
     resizing: bool,
@@ -55,6 +62,7 @@ impl Timeline {
         cx.observe(&search, |_, _, cx| cx.notify()).detach();
         Self {
             blend_pickers: BTreeMap::new(),
+            matte_pickers: BTreeMap::new(),
             left: LEFT,
             resizing: false,
             fields: BTreeMap::new(),
@@ -372,10 +380,12 @@ impl Render for Timeline {
         self.hit_layers.borrow_mut().clear();
         let left = self.left;
         let show_modes = left >= 540.0;
+        let show_mattes = left >= 750.0;
         let state = self.state.read(cx);
         let selected_layers = state.selected_layers.clone();
         let selected_keys = state.selected_keys.clone();
         let comp = state.editor.project().composition().clone();
+        self.matte_pickers.retain(|id, _| comp.layer(*id).is_some());
         self.blend_pickers.retain(|id, _| comp.layer(*id).is_some());
         self.fields
             .retain(|(id, p), _| comp.layer(*id).is_some_and(|l| l.track(*p).is_some()));
@@ -535,6 +545,21 @@ impl Render for Timeline {
                     cx.new(|cx| super::blend::BlendPicker::new(self.state.clone(), id, cx))
                 });
                 controls = controls.child(div().w(px(88.0)).flex_none().child(picker.clone()));
+            }
+            if show_mattes {
+                let (source, mode) = self.matte_pickers.entry(id).or_insert_with(|| {
+                    (
+                        cx.new(|cx| {
+                            super::matte::MattePicker::new(self.state.clone(), id, true, cx)
+                        }),
+                        cx.new(|cx| {
+                            super::matte::MattePicker::new(self.state.clone(), id, false, cx)
+                        }),
+                    )
+                });
+                controls = controls
+                    .child(div().w(px(120.0)).flex_none().child(source.clone()))
+                    .child(div().w(px(80.0)).flex_none().child(mode.clone()));
             }
             let parent_name = layer
                 .parent()
@@ -1463,6 +1488,9 @@ impl Render for Timeline {
                             .child(div().w(px(178.0)).child("Switches"))
                             .child(div().flex_1().child("Source Name"))
                             .when(show_modes, |s| s.child(div().w(px(88.0)).child("Mode")))
+                            .when(show_mattes, |s| {
+                                s.child(div().w(px(200.0)).child("Track Matte"))
+                            })
                             .child(div().w(px(181.0)).child("Parent & Link       Order")),
                     )
                     .child(

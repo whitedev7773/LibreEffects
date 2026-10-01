@@ -448,6 +448,14 @@ pub(super) fn apply_extended(
                     return Err("Select a layer first".into());
                 }
                 let duration = state.project.composition.duration;
+                if matches!(command, Command::SplitLayers { .. })
+                    && state.project.composition.layers.iter().any(|l| {
+                        l.track_matte.is_some_and(|m| ids.contains(&m.source))
+                            && !ids.contains(&l.id)
+                    })
+                {
+                    return Err("Split a matte source together with all its consumers to preserve their timing".into());
+                }
                 for id in &ids {
                     let layer = editable(state, *id)?;
                     if let Command::SplitLayers { frame, .. } = command {
@@ -499,6 +507,7 @@ pub(super) fn apply_extended(
                         copy.name.push_str(" copy");
                     }
                     copy.parent = copy.parent.map(|p| mapping.get(&p).copied().unwrap_or(p));
+                    copy.remap_matte(&mapping);
                     state.selected = Some(copy.id);
                     state.project.composition.layers.insert(index, copy);
                 }

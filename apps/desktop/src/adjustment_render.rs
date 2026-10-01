@@ -60,6 +60,7 @@ impl Renderer {
         height: u32,
         max_dimension: u32,
         id: &str,
+        matte: Option<(&Pixmap, libre_effects_core::MatteMode)>,
     ) -> Result<String, String> {
         let opacity = layer
             .property(Property::Opacity)
@@ -140,7 +141,10 @@ impl Renderer {
             String::new()
         };
         region.push_str(&format!("<g transform='{forward}'><rect width='{}' height='{}' fill='white' opacity='{opacity}' {clip}/></g>",layer.width(),layer.height()));
-        let coverage = self.raster_canvas(&region, width, height, max_dimension)?;
+        let mut coverage = self.raster_canvas(&region, width, height, max_dimension)?;
+        if let Some((pixels, mode)) = matte {
+            crate::matte_render::apply_matte(&mut coverage, pixels, mode);
+        }
         for ((a, b), mask) in original
             .data_mut()
             .chunks_exact_mut(4)
