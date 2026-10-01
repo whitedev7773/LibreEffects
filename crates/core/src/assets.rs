@@ -219,24 +219,24 @@ impl Project {
             }
         }
         if !library.is_default() {
-            self.version = 22;
+            self.version = self.version.max(22);
         }
         if library
             .assets
             .values()
             .any(|a| !a.interpretation.is_default())
         {
-            self.version = 23;
+            self.version = self.version.max(23);
         }
         if library
             .assets
             .values()
             .any(|a| matches!(a.content, Content::ImageSequence { .. }))
         {
-            self.version = 24;
+            self.version = self.version.max(24);
         }
         if library.assets.values().any(|a| a.content.audio().is_some()) {
-            self.version = 25;
+            self.version = self.version.max(25);
         }
         Ok(())
     }

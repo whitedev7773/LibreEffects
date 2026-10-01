@@ -1,3 +1,4 @@
+mod audio_controls;
 mod audio_waveform;
 mod blend;
 mod browser;

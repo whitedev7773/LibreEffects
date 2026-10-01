@@ -243,6 +243,164 @@ fn mixing_sums_channels_preserves_phase_and_reports_master_clipping() {
     );
 }
 
+#[test]
+fn animated_audio_controls_and_nested_pan_apply_before_master_metering() {
+    use libre_effects_core::AudioParam;
+    let mut e = scene("missing.wav", 30.into());
+    let level = -6.020599913279624;
+    e.execute(Command::EditAudio {
+        id: 1,
+        parameter: AudioParam::RightLevel,
+        edit: TrackEdit::Value {
+            frame: 0,
+            value: level,
+        },
+    })
+    .unwrap();
+    e.execute(Command::FadeAudio {
+        id: 1,
+        start: 0,
+        end: 30,
+        fade_in: true,
+    })
+    .unwrap();
+    let mut mixer = cached(&e, false);
+    let v = mixer
+        .render(0.5, 0, 1, 6.0, &AtomicBool::new(false))
+        .unwrap()[0];
+    near(v[0], 0.09375);
+    near(v[1], -0.046875);
+    assert_eq!(mixer.levels.frames, 1);
+    near(mixer.levels.sum_squares[0].sqrt() as f32, v[0].abs());
+    let source = e.project().active_composition_id();
+    e.execute(Command::Precompose {
+        layers: vec![1],
+        name: "Bus".into(),
+    })
+    .unwrap();
+    let id = e.selected().unwrap();
+    e.execute(Command::EditAudio {
+        id,
+        parameter: AudioParam::Pan,
+        edit: TrackEdit::Value {
+            frame: 0,
+            value: 100.0,
+        },
+    })
+    .unwrap();
+    let v = cached(&e, false)
+        .render(0.5, 0, 1, 6.0, &AtomicBool::new(false))
+        .unwrap()[0];
+    assert_eq!(v[0], 0.0);
+    near(v[1], 0.046875);
+    // Outer bus levels apply before its pan, after all inner bus processing.
+    e.execute(Command::EditAudio {
+        id,
+        parameter: AudioParam::RightLevel,
+        edit: TrackEdit::Value {
+            frame: 0,
+            value: level,
+        },
+    })
+    .unwrap();
+    let v = cached(&e, false)
+        .render(0.5, 0, 1, 6.0, &AtomicBool::new(false))
+        .unwrap()[0];
+    near(v[1], 0.0703125);
+    e.execute(Command::SetAudioEnabled { id, enabled: false })
+        .unwrap();
+    assert!(!cached(&e, false).has_audio());
+    e.undo();
+    assert!(cached(&e, false).has_audio());
+    assert_eq!(e.project().active_composition_id(), source);
+    let restored = libre_effects_core::Project::from_json(&e.project().to_json().unwrap()).unwrap();
+    assert_eq!(&restored, e.project());
+}
+
+#[test]
+#[ignore = "requires FFmpeg; checks automated channel levels, pan, fade and nested bus output"]
+fn automated_mix_pcm_matches_independent_sample_math_and_silent_visual_pixels() {
+    use libre_effects_core::AudioParam;
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("voice.wav");
+    wav(&source);
+    let mut e = scene(source.to_str().unwrap(), 30.into());
+    let before = e.project().clone();
+    e.execute(Command::EditAudio {
+        id: 1,
+        parameter: AudioParam::LeftLevel,
+        edit: TrackEdit::Value {
+            frame: 0,
+            value: -6.020599913279624,
+        },
+    })
+    .unwrap();
+    e.execute(Command::FadeAudio {
+        id: 1,
+        start: 0,
+        end: 30,
+        fade_in: true,
+    })
+    .unwrap();
+    e.execute(Command::Precompose {
+        layers: vec![1],
+        name: "Audio bus".into(),
+    })
+    .unwrap();
+    let id = e.selected().unwrap();
+    e.execute(Command::EditAudio {
+        id,
+        parameter: AudioParam::Pan,
+        edit: TrackEdit::Value {
+            frame: 0,
+            value: -50.0,
+        },
+    })
+    .unwrap();
+    e.execute(Command::EditAudio {
+        id,
+        parameter: AudioParam::RightLevel,
+        edit: TrackEdit::Value {
+            frame: 0,
+            value: -6.020599913279624,
+        },
+    })
+    .unwrap();
+    let project = libre_effects_core::Project::from_json(&e.project().to_json().unwrap()).unwrap();
+    let out = dir.path().join("mix.mov");
+    crate::video_export::export_video_with_settings(
+        &project,
+        0..45,
+        crate::video_export::VideoPreset::ProResAlpha,
+        &Default::default(),
+        &out,
+        Default::default(),
+        Default::default(),
+    )
+    .unwrap();
+    let data = decoded(&out);
+    let source_samples = decoded(&source);
+    assert_eq!(data.len(), 72000);
+    let q = std::f64::consts::FRAC_1_SQRT_2;
+    for (i, actual) in data.iter().enumerate() {
+        let fade = (i as f64 / 48000.0).min(1.0);
+        let l = f64::from(source_samples[i][0]) * 0.5 * fade;
+        let r = f64::from(source_samples[i][1]) * fade * 0.5;
+        let expected = [l + r * q, r * q];
+        for c in 0..2 {
+            assert!(
+                (f64::from(actual[c]) - expected[c]).abs() < 3e-7,
+                "sample {i} channel {c}"
+            );
+        }
+    }
+    let mut renderer = crate::rendering::Renderer::new();
+    assert_eq!(
+        renderer.render(&project, 15, 64).unwrap(),
+        renderer.render(&before, 15, 64).unwrap()
+    );
+}
+
 fn wav(path: &Path) {
     let frames = 3 * SAMPLE_RATE;
     let length = frames * 8;

@@ -31,6 +31,8 @@ mod precompositions;
 pub use guides::{Guide, GuideAxis};
 mod selection_transform;
 pub use selection_transform::AlignTarget;
+mod audio_controls;
+pub use audio_controls::AudioParam;
 mod audio;
 pub use audio::AudioMetadata;
 mod assets;
@@ -198,6 +200,11 @@ impl AnimatedProperty {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Layer {
+    #[serde(
+        default,
+        skip_serializing_if = "audio_controls::AudioControls::is_default"
+    )]
+    audio_controls: audio_controls::AudioControls,
     #[serde(default, skip_serializing_if = "FootageInterpretation::is_default")]
     footage_interpretation: FootageInterpretation,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -535,7 +542,7 @@ impl Project {
     }
 
     fn validate(&self) -> Result<(), String> {
-        if !(1..=25).contains(&self.version) {
+        if !(1..=26).contains(&self.version) {
             return Err("Unsupported project version".into());
         }
         if self.version < 9
@@ -640,6 +647,7 @@ impl Project {
             }
             for layer in &comp.layers {
                 time_remap::validate(layer, comp.duration, self.version)?;
+                audio_controls::validate(layer, comp.duration, self.version)?;
                 layer.markers.validate(comp.duration)?;
                 effects::validate(layer, comp.duration)?;
                 if let Content::Image { png } = &layer.content {
@@ -737,6 +745,21 @@ pub enum Command {
         folder: Option<FolderId>,
     },
     DeleteProjectItem(ProjectItem),
+    SetAudioEnabled {
+        id: LayerId,
+        enabled: bool,
+    },
+    EditAudio {
+        id: LayerId,
+        parameter: AudioParam,
+        edit: TrackEdit,
+    },
+    FadeAudio {
+        id: LayerId,
+        start: Frame,
+        end: Frame,
+        fade_in: bool,
+    },
     SetTimeRemap {
         id: LayerId,
         enabled: bool,
@@ -1205,6 +1228,14 @@ impl Editor {
             next.project.version = 21;
         }
         next.project.sync_assets()?;
+        if next
+            .project
+            .compositions()
+            .into_iter()
+            .any(|(_, c)| c.layers.iter().any(|l| !l.audio_controls.is_default()))
+        {
+            next.project.version = 26;
+        }
         next.project.validate()?;
         if next != self.current {
             let previous = std::mem::replace(&mut self.current, next);
@@ -1215,6 +1246,9 @@ impl Editor {
 }
 
 fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
+    if let Some(result) = audio_controls::apply(state, &command) {
+        return result;
+    }
     if let Some(result) = image_sequence::apply(state, &command) {
         return result;
     }
@@ -1471,6 +1505,7 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
             Layer {
                 footage_interpretation: Default::default(),
                 asset: None,
+                audio_controls: Default::default(),
                 time_remap: None,
                 track_matte: None,
                 blend_mode: BlendMode::Normal,

@@ -20,11 +20,13 @@ pub(crate) fn progress_label(value: u32) -> Option<String> {
         .then(|| format!("Mixing audio · {}%", (value & !AUDIO_PHASE).min(100)))
 }
 
-#[derive(Default, Debug)]
+#[derive(Clone, Default, Debug)]
 pub(crate) struct Levels {
     /// Absolute channel peaks before master clipping.
     pub peak: [f32; 2],
     pub clipped_frames: u64,
+    pub frames: u64,
+    pub sum_squares: [f64; 2],
 }
 struct Step {
     layer: Layer,
@@ -36,8 +38,9 @@ struct Voice {
     steps: Vec<Step>,
 }
 impl Voice {
-    fn position(&self, seconds: f64) -> Option<(f64, f64)> {
+    fn position(&self, seconds: f64) -> Option<(f64, f64, [f64; 4])> {
         let (mut a, mut b) = (seconds, seconds + 1.0 / f64::from(SAMPLE_RATE));
+        let mut matrix = [1.0, 0.0, 0.0, 1.0];
         for step in &self.steps {
             let fps = step.fps.as_f64();
             let (frame, next) = (a * fps, b * fps);
@@ -49,6 +52,13 @@ impl Voice {
             {
                 return None;
             }
+            let m = step.layer.audio_matrix(frame);
+            matrix = [
+                matrix[0] * m[0] + matrix[1] * m[2],
+                matrix[0] * m[1] + matrix[1] * m[3],
+                matrix[2] * m[0] + matrix[3] * m[2],
+                matrix[2] * m[1] + matrix[3] * m[3],
+            ];
             if let Content::Composition { start_frame, .. } = step.layer.content() {
                 if let Some(track) = step.layer.time_remap() {
                     a = track.sample(frame);
@@ -63,7 +73,7 @@ impl Voice {
             }
         }
         // A held source has no advancing waveform: output silence rather than DC.
-        (a.is_finite() && b.is_finite() && (b - a).abs() > 1e-12).then_some((a, b - a))
+        (a.is_finite() && b.is_finite() && (b - a).abs() > 1e-12).then_some((a, b - a, matrix))
     }
 }
 struct Source {
@@ -116,7 +126,10 @@ impl Mixer {
             .ok_or("Missing audio composition")?;
         let solo = comp.layers().iter().any(Layer::solo);
         for layer in comp.layers() {
-            if (!include_guides && layer.guide()) || (solo && !layer.solo()) {
+            if !layer.audio_enabled()
+                || (!include_guides && layer.guide())
+                || (solo && !layer.solo())
+            {
                 continue;
             }
             // Visibility, alpha, mattes and visual effects do not mute sound.
@@ -240,6 +253,7 @@ impl Mixer {
             return Err("Invalid audio block".into());
         }
         let mut output = vec![[0.0_f32; 2]; count];
+        self.levels.frames += count as u64;
         for (offset, value) in output.iter_mut().enumerate() {
             if offset % 256 == 0 && cancel.load(Ordering::Relaxed) {
                 return Err("Audio processing canceled".into());
@@ -250,7 +264,7 @@ impl Mixer {
             }
             let mut mixed = [0.0_f64; 2];
             for voice in 0..self.voices.len() {
-                let Some((time, _rate)) = self.voices[voice].position(seconds) else {
+                let Some((time, _rate, matrix)) = self.voices[voice].position(seconds) else {
                     continue;
                 };
                 let source = self.voices[voice].source;
@@ -266,10 +280,10 @@ impl Mixer {
                 } else {
                     self.sample(source, index + 1, cancel)?
                 };
-                for channel in 0..2 {
-                    mixed[channel] += f64::from(a[channel])
-                        + (f64::from(b[channel]) - f64::from(a[channel])) * fraction;
-                }
+                let l = f64::from(a[0]) + (f64::from(b[0]) - f64::from(a[0])) * fraction;
+                let r = f64::from(a[1]) + (f64::from(b[1]) - f64::from(a[1])) * fraction;
+                mixed[0] += matrix[0] * l + matrix[1] * r;
+                mixed[1] += matrix[2] * l + matrix[3] * r;
             }
             if mixed.iter().any(|v| v.abs() > 1.0) {
                 self.levels.clipped_frames += 1;
@@ -277,6 +291,7 @@ impl Mixer {
             for channel in 0..2 {
                 self.levels.peak[channel] =
                     self.levels.peak[channel].max(mixed[channel].abs() as f32);
+                self.levels.sum_squares[channel] += mixed[channel] * mixed[channel];
                 value[channel] = mixed[channel].clamp(-1.0, 1.0) as f32;
             }
         }

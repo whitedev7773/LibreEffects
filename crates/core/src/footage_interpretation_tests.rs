@@ -279,7 +279,7 @@ fn still_alpha_interpretation_survives_source_reuse_and_rejects_invalid_data() {
                 .remove("footage_interpretation")
                 .map(|_| ())
                 .unwrap(),
-            _ => json["version"] = 26.into(),
+            _ => json["version"] = 27.into(),
         }
         assert!(Project::from_json(&json.to_string()).is_err());
     }

@@ -450,6 +450,27 @@ impl Render for Timeline {
                     Action::Edit(Command::ToggleVisible(id)),
                     false,
                 ))
+                .child(div().w(px(22.0)).flex_none().when(layer.can_audio(), |d| {
+                    d.child(
+                        ui::action_tool(
+                            control_id("audio"),
+                            if layer.audio_enabled() {
+                                "volume"
+                            } else {
+                                "volume-xmark"
+                            },
+                            "Enable or mute layer audio",
+                            &self.state,
+                            Action::Edit(Command::SetAudioEnabled {
+                                id,
+                                enabled: !layer.audio_enabled(),
+                            }),
+                            false,
+                        )
+                        .w(px(22.0))
+                        .h(px(22.0)),
+                    )
+                }))
                 .child(ui::action_tool(
                     control_id("lock"),
                     if layer.locked() { "lock" } else { "lock-open" },
@@ -763,7 +784,20 @@ impl Render for Timeline {
                             .top(px(3.0))
                             .h(px(17.0))
                             .bg(rgb(layer.color()))
-                            .opacity(if layer.visible() { 0.85 } else { 0.25 })
+                            .opacity(
+                                if if matches!(
+                                    layer.content(),
+                                    libre_effects_core::Content::Audio { .. }
+                                ) {
+                                    layer.audio_enabled()
+                                } else {
+                                    layer.visible()
+                                } {
+                                    0.85
+                                } else {
+                                    0.25
+                                },
+                            )
                             .border_1()
                             .border_color(rgb(if selected_row { 0xddd2ff } else { 0x777777 }))
                             .cursor_grab()
@@ -902,6 +936,11 @@ impl Render for Timeline {
                 if is_audio {
                     groups.clear();
                 }
+                if layer.can_audio() {
+                    for p in libre_effects_core::AudioParam::ALL {
+                        groups.push((p.label().into(), vec![PropertyPath::Audio(p)]));
+                    }
+                }
                 if layer.time_remap().is_some() {
                     groups.push(("Time Remap".into(), vec![PropertyPath::TimeRemap]));
                 }
@@ -922,9 +961,9 @@ impl Render for Timeline {
                         !properties.iter().any(|p| {
                             (match p {
                                 PropertyPath::Transform(p) => f.includes(*p),
-                                PropertyPath::Effect { .. } | PropertyPath::TimeRemap => {
-                                    f == PropertyFilter::Animated
-                                }
+                                PropertyPath::Audio(_)
+                                | PropertyPath::Effect { .. }
+                                | PropertyPath::TimeRemap => f == PropertyFilter::Animated,
                             }) && (f != PropertyFilter::Animated
                                 || !layer.track(*p).expect("visible property").keys().is_empty())
                         })

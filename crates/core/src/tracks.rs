@@ -3,6 +3,7 @@ use super::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PropertyPath {
+    Audio(AudioParam),
     TimeRemap,
     Transform(Property),
     Effect {
@@ -40,6 +41,7 @@ pub enum TrackEdit {
 impl Layer {
     pub fn track_label(&self, path: PropertyPath) -> Option<String> {
         Some(match path {
+            PropertyPath::Audio(p) => p.label().into(),
             PropertyPath::TimeRemap => "Time Remap (s)".into(),
             PropertyPath::Transform(p) => p.label().to_string(),
             PropertyPath::Effect { effect, parameter } => {
@@ -55,6 +57,9 @@ impl Layer {
     }
     pub fn track(&self, path: PropertyPath) -> Option<&AnimatedProperty> {
         match path {
+            PropertyPath::Audio(p) => self
+                .can_audio()
+                .then(|| &self.audio_controls.parameters[&p]),
             PropertyPath::TimeRemap => self.time_remap.as_ref(),
             PropertyPath::Transform(p) => self.properties.get(&p),
             PropertyPath::Effect { effect, parameter } => self
@@ -66,6 +71,10 @@ impl Layer {
     }
     pub fn track_value(&self, path: PropertyPath, frame: Frame) -> Option<f64> {
         Some(match path {
+            PropertyPath::Audio(p) => self
+                .track(path)?
+                .value_at(frame)
+                .clamp(p.bounds().0, p.bounds().1),
             PropertyPath::TimeRemap => self.time_remap.as_ref()?.value_at(frame),
             PropertyPath::Transform(p) => self.property(p).value_at(frame),
             PropertyPath::Effect { effect, parameter } => {
@@ -80,6 +89,12 @@ impl Layer {
             .into_iter()
             .map(PropertyPath::from)
             .chain(self.time_remap.as_ref().map(|_| PropertyPath::TimeRemap))
+            .chain(
+                AudioParam::ALL
+                    .into_iter()
+                    .filter(|_| self.can_audio())
+                    .map(PropertyPath::Audio),
+            )
             .chain(self.effect_stack.iter().flat_map(|e| {
                 e.kind()
                     .parameters()
@@ -94,7 +109,7 @@ impl Layer {
     pub fn copy_key(&self, property: PropertyPath, frame: Frame) -> Option<KeyCopy> {
         let data = self.track(property)?.keys().get(&frame)?.clone();
         let effect_kind = match property {
-            PropertyPath::Transform(_) | PropertyPath::TimeRemap => None,
+            PropertyPath::Audio(_) | PropertyPath::Transform(_) | PropertyPath::TimeRemap => None,
             PropertyPath::Effect { effect, .. } => {
                 Some(self.effect_stack.iter().find(|e| e.id() == effect)?.kind())
             }
@@ -114,6 +129,13 @@ impl Layer {
         path: PropertyPath,
     ) -> Result<&mut AnimatedProperty, String> {
         match path {
+            PropertyPath::Audio(p) => {
+                if self.can_audio() {
+                    self.audio_controls.parameters.get_mut(&p)
+                } else {
+                    None
+                }
+            }
             PropertyPath::TimeRemap => self.time_remap.as_mut(),
             PropertyPath::Transform(p) => self.properties.get_mut(&p),
             PropertyPath::Effect { effect, parameter } => self
@@ -378,6 +400,11 @@ mod tests {
 
 pub(super) fn command(id: LayerId, property: PropertyPath, edit: TrackEdit) -> Command {
     match property {
+        PropertyPath::Audio(parameter) => Command::EditAudio {
+            id,
+            parameter,
+            edit,
+        },
         PropertyPath::TimeRemap => Command::EditTimeRemap { id, edit },
         PropertyPath::Transform(property) => match edit {
             TrackEdit::Value { frame, value } => Command::SetValue {

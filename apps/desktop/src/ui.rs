@@ -41,6 +41,8 @@ impl AssetSource for Assets {
             _ => None,
         } }; }
         Ok(icons!(
+            "volume",
+            "volume-xmark",
             "hand",
             "square",
             "plus",

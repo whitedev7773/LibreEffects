@@ -338,6 +338,7 @@ impl Layer {
         self.properties
             .values_mut()
             .chain(self.time_remap.iter_mut())
+            .chain(self.audio_controls.parameters.values_mut())
             .chain(
                 self.effect_stack
                     .iter_mut()

@@ -21,6 +21,7 @@ pub(crate) struct Inspector {
     parent_owner: Option<u64>,
     extra: Vec<Entity<TextField>>,
     playback: Vec<Entity<TextField>>,
+    audio_controls: Entity<super::audio_controls::AudioControls>,
 }
 impl Inspector {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
@@ -225,6 +226,8 @@ impl Inspector {
                 })
             })
             .collect();
+        let audio_controls =
+            cx.new(|cx| super::audio_controls::AudioControls::new(state.clone(), cx));
         Self {
             blend: None,
             matte: None,
@@ -236,6 +239,7 @@ impl Inspector {
             parent_open: false,
             parent_owner: None,
             playback,
+            audio_controls,
         }
     }
 }
@@ -291,6 +295,7 @@ impl Render for Inspector {
                             .when(locked, |s| s.child(layer.name().to_string())),
                     ),
             )
+            .when(layer.can_audio(), |d| d.child(self.audio_controls.clone()))
             .when(!is_audio, |d| {
                 d.child(
                     div()

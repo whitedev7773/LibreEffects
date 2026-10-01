@@ -175,6 +175,7 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                     .ok_or("Enable Time Remap first")?,
                 duration,
                 edit,
+                accepts,
             )?,
             _ => unreachable!(),
         }
@@ -182,10 +183,11 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
     })())
 }
 
-fn edit_track(
+pub(super) fn edit_track(
     track: &mut AnimatedProperty,
     duration: Frame,
     edit: &TrackEdit,
+    accepts: impl Fn(f64) -> bool,
 ) -> Result<(), String> {
     let frame = match *edit {
         TrackEdit::Value { frame, .. }
@@ -195,12 +197,12 @@ fn edit_track(
         TrackEdit::Keyframe { to, .. } => to,
     };
     if frame >= duration {
-        return Err("Time Remap key is outside the composition".into());
+        return Err("Key is outside the composition".into());
     }
     match *edit {
         TrackEdit::Value { value, .. } => {
             if !accepts(value) {
-                return Err("Invalid source time in seconds".into());
+                return Err("Invalid animated property value".into());
             }
             if track.keys.is_empty() {
                 track.value = value;
@@ -220,7 +222,7 @@ fn edit_track(
         }
         TrackEdit::Keyframe { from, value, .. } => {
             if !accepts(value) {
-                return Err("Invalid source time in seconds".into());
+                return Err("Invalid animated property value".into());
             }
             if from != frame && track.keys.contains_key(&frame) {
                 return Err("Destination already contains a key".into());

@@ -441,7 +441,7 @@ is stopped. Wait for completion or cancel before closing the application.
    Dismiss the completed render strip to recover the full editing workspace.
 
 This workflow supports short 2D titles, animated graphics, linked video footage
-and transparent overlays. Audio mixing and the full AE workflow remain pending.
+and transparent overlays. Offline audio mixing is available as described below; device playback and the full AE workflow remain pending.
 
 `examples/lower-third.lfe.json` is a 1920×1080, 30 fps, five-second transparent
 name/title overlay with entry/exit animation. Edit the Name and Role layers, then
@@ -550,7 +550,7 @@ is unchanged; playback controls appear only for video layers.
 - Every operation supports undo/redo and survives saving, relinking, moving and
   splitting. Preview, PNG sequences and MP4/MOV use the same source-time mapping.
   These are the base constant-speed controls. Use Animated Time Remap below for
-  variable playback. Automatic layer/keyframe stretching and audio retiming remain pending.
+  variable playback. Automatic layer/keyframe stretching remains pending; imported audio follows the source clock in offline mixing.
 
 FFprobe must be on PATH alongside FFmpeg. `LIBRE_EFFECTS_FFPROBE` overrides its
 executable; when `LIBRE_EFFECTS_FFMPEG` is absolute, FFprobe defaults to that same
@@ -621,7 +621,7 @@ asset IDs when read without changing layer sampling or pixels. Embedded PNG data
 is still written once and shared through history. Limits are 1,000 media assets,
 1,000 folders, 32 folder levels, and 128 MiB of unique encoded images. Importing
 videos includes first-stream audio metadata and waveforms. Offline mixing and
-AAC/PCM output are available; device playback and level controls remain pending.
+AAC/PCM output are available; device playback remains pending.
 
 Select footage and open Interpret footage… to override a video's source FPS
 (including rational rates such as `30000/1001`). Enter `Source` to restore the
@@ -895,7 +895,7 @@ menu's quick exports retain their defaults; use Render Queue for configured outp
 See [the development backlog](DEVELOPMENT_BACKLOG.md) for the current capability
 audit, priorities, dependencies and proposed acceptance criteria.
 
-Still pending: frame blending/optical flow, audio-device playback and level controls,
+Still pending: frame blending/optical flow, audio-device playback and live metering,
 freeform/animated masks, additional effects and reusable presets,
 rich text layout, 3D, JSX, ExtendScript and expressions. PNG sequences can be
 assembled in an external video tool.
@@ -1100,11 +1100,11 @@ Only the first audio stream is selected; stream selection and full-duration coar
 overviews remain future extensions.
 
 **Preview device playback is still unavailable.** MP4/MOV now include the offline
-mix described below. Scrubbing, device-clock synchronization, per-layer audio
-switches, level/pan/fade animation and visible meters remain H02/H03. Existing
+mix described below. Scrubbing, device-clock synchronization and live meters remain H02. Per-layer audio switches,
+level/pan/fade animation and a measured-range meter are described below. Existing
 visual rendering and PNG output remain unchanged.
 
-Validation includes 222 ordinary tests plus 23 FFmpeg integration tests. Audio
+Validation includes 227 ordinary tests plus 24 FFmpeg integration tests. Audio
 coverage includes opposite-phase stereo, silence, chunk boundaries, delayed video
 sound, WAV/FLAC/MP3/AAC imports, mixed version-25 document serialization, timing and
 shared relinking. Native QA covered mixed import, audio-source composition creation,
@@ -1127,10 +1127,10 @@ interpretation and nested composition Time Remap. Speed changes also change pitc
 there is no pitch-preserving stretch yet. Hold/freeze and out-of-source times are
 silent. Solo applies within each composition; exported/nested Guide audio is
 excluded. The eye switch, opacity, visual transforms, effects and mattes do not
-mute sound. Independent audio enable and gain/pan/fade controls are still H03.
+mute sound. Independent audio enable and level/pan/fade controls are described below.
 Streams sum in floating point and master samples clamp to [-1, 1]; automatic gain
 normalization and limiting are not applied. Internal pre-clamp peak/clipping
-counts are available for the future meters.
+and RMS measurements feed the measured-range meter below.
 
 Audio starts exactly at the selected source range. Its sample count is the ceiling
 of output-video duration times 48,000, using rational arithmetic. Any final video
@@ -1169,3 +1169,55 @@ an independently calculated mix within 1.20e-7 per sample; AAC is lossy (this
 clipping test mix had MSE 0.000261, correlation 0.999684). Audio off produced no
 audio stream. Malformed legacy queue settings return an error without changing
 the saved queue.
+
+## Audio levels, pan, fades and meters
+
+Audio, video with audio, and precomposition layers now have an Audio section in
+Properties and a separate Gravity speaker switch in Timeline. Audio On/Off mutes
+sound independently of the eye switch. Existing Solo still isolates the entire
+layer, including its visual content. Locked layers reject audio edits.
+
+Left and Right Level accept -192 through +12 dB, with 0 dB unchanged and -192 dB
+exact silence. Pan accepts -100 (left) through +100 (right). Center preserves the
+stereo signal exactly; moving right attenuates the left channel by cos(p×π/2) and
+adds it to the right by sin(p×π/2), with the mirrored rule for left pan. At either
+end both channels sum into one. Correlated channels can boost and opposite-phase
+channels can cancel; this is signal panning rather than channel balance. Levels
+apply before pan. Fade is an independent 0–100% amplitude multiplier.
+
+All four properties share Timeline keys, stopwatch/diamond controls, value graphs,
+interpolation, key copy/move/delete, Undo/Redo and version-26 project persistence.
+Their curves use continuous composition time at each audio sample; source remapping
+only changes source time. Child controls are applied before the containing
+precomposition's controls. The full mix clips only once at the final master;
+visual opacity, transforms and effects remain independent.
+
+Fade In/Out 0.5s creates two linear-amplitude Fade keys at the layer's first/last
+visible frame and a half-second inward, shortened for short layers. Keys in that
+inclusive fade interval are replaced, while keys outside it are retained. A
+one-frame layer has no room for this shortcut. Curves remain editable in Timeline
+and Graph; splitting retains the original envelope and moving shifts its keys.
+Copying between different FPS compositions converts audio-key times with other keys.
+
+Measure mix samples up to the next 100 ms from the current playhead, clipped to
+the composition end. It shows per-channel pre-master peak/RMS dBFS, -60–0 dBFS
+bars, and the number of clipped stereo samples. This measures the complete preview
+mix including root Guide layers, not just the selected layer. Editing/seeking
+cancels stale measurements; decoding runs off the UI thread. It does not play sound
+or claim device-synchronized live metering, which remains H02.
+
+Regression tests cover atomic invalid/locked edits, history/serialization,
+mixed-media version-26 files, cross-FPS copy, split/move/fade curves, nested stereo
+matrices and meters. The PCM output of an automated nested bus is compared with
+independently calculated source-sample math; visual pixels remain unchanged.
+
+Native QA entered -6.020599913279624 dB on the left and +50% pan, created both
+half-second fades, and dragged the first full-level fade key from frame 15/100%
+to frame 18/79.75%. Value/graph Undo/Redo, Timeline mute with a silent meter,
+version-26 save and restart/reopen retained the exact values and four fade keys.
+The 100 ms mix at frame 18 measured L peak/RMS -19.8/-22.9 dBFS and R
+-14.6/-17.6 dBFS, matching independent sample calculations with no clipping.
+The saved project's six-second 320×180, 30 fps export contained 180 video frames
+and 288,000 stereo PCM sample frames. MOV maximum sample error was 1.19e-7;
+AAC was lossy (MSE 1.24e-8, correlation 0.99999894 for this fixture). PNG
+remained image-only. These checks validate offline controls, not device playback.
