@@ -14,6 +14,7 @@ pub(crate) struct Inspector {
     parent_open: bool,
     parent_owner: Option<u64>,
     extra: Vec<Entity<TextField>>,
+    playback: Vec<Entity<TextField>>,
 }
 impl Inspector {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
@@ -92,6 +93,35 @@ impl Inspector {
                             }
                         });
                     })
+                })
+            })
+            .collect();
+        let playback = (0..2)
+            .map(|index| {
+                let edit = state.clone();
+                cx.new(|cx| {
+                    TextField::new(cx, move |text, window, cx| {
+                        edit.update(cx, |s, cx| {
+                            let Some(id) = s.editor.selected() else {
+                                return;
+                            };
+                            let Ok(value) = text.trim().parse::<f64>() else {
+                                s.status = "Enter a number for video playback".into();
+                                cx.notify();
+                                return;
+                            };
+                            let command = if index == 0 {
+                                Command::SetVideoSpeed {
+                                    id,
+                                    speed: value / 100.0,
+                                }
+                            } else {
+                                Command::SetVideoSourceIn { id, seconds: value }
+                            };
+                            s.dispatch(&Action::Edit(command), window, cx);
+                        });
+                    })
+                    .numeric()
                 })
             })
             .collect();
@@ -176,6 +206,7 @@ impl Inspector {
             range,
             parent_open: false,
             parent_owner: None,
+            playback,
         }
     }
 }
@@ -320,7 +351,13 @@ impl Render for Inspector {
                 .border_color(rgb(ui::BORDER))
                 .child("Content & Effects"),
         );
-        if let Content::Video { path, duration, .. } = layer.content() {
+        if let Content::Video {
+            path,
+            duration,
+            playback,
+            ..
+        } = layer.content()
+        {
             contents = contents
                 .child(
                     div()
@@ -341,6 +378,82 @@ impl Render for Inspector {
                         state.update(cx, |s, cx| s.dispatch(&Action::RelinkVideo, window, cx));
                     }
                 }));
+            for (index, label, value) in [
+                (0, "Speed (%)", format!("{:.2}", playback.speed * 100.0)),
+                (
+                    1,
+                    "Source In (s)",
+                    format!(
+                        "{:.6}",
+                        layer
+                            .content()
+                            .video_source_time(layer.in_frame(), comp.fps())
+                            .unwrap()
+                    ),
+                ),
+            ] {
+                self.playback[index].update(cx, |field, _| {
+                    field.sync(format!("{id}-{}", layer.in_frame()), value.clone(), window);
+                });
+                contents = contents.child(
+                    div()
+                        .flex()
+                        .h(px(29.0))
+                        .items_center()
+                        .child(div().w(px(105.0)).child(label))
+                        .child(
+                            div()
+                                .flex_1()
+                                .when(!locked, |s| s.child(self.playback[index].clone()))
+                                .when(locked, |s| s.child(value)),
+                        ),
+                );
+            }
+            contents = contents
+                .child(div().flex().gap_1().when(!locked, |row| {
+                    row.child(ui::text_button("reverse-video", "Reverse").on_click({
+                        let state = self.state.clone();
+                        move |_, window, cx| {
+                            state.update(cx, |s, cx| {
+                                s.dispatch(&Action::Edit(Command::ReverseVideo { id }), window, cx)
+                            })
+                        }
+                    }))
+                    .child(
+                        ui::text_button("freeze-video", "Freeze at playhead").on_click({
+                            let state = self.state.clone();
+                            move |_, window, cx| {
+                                state.update(cx, |s, cx| {
+                                    s.dispatch(
+                                        &Action::Edit(Command::FreezeVideo { id, frame: s.frame }),
+                                        window,
+                                        cx,
+                                    )
+                                })
+                            }
+                        }),
+                    )
+                }))
+                .child(div().text_size(px(10.0)).text_color(rgb(ui::MUTED)).child(
+                    "0% freezes · negative speed reverses. Layer range and keys stay fixed.",
+                ));
+            let source_status =
+                if frame < layer.in_frame() || frame >= layer.out_frame(comp.duration()) {
+                    "Playhead is outside the layer".to_string()
+                } else {
+                    layer
+                        .content()
+                        .video_time(frame, comp.fps())
+                        .map(|seconds| format!("Source now: {seconds:.3}s"))
+                        .unwrap_or_else(|| "Outside source · transparent frame".into())
+                };
+            contents = contents.child(
+                div()
+                    .mt_1()
+                    .text_size(px(11.0))
+                    .text_color(rgb(ui::MUTED))
+                    .child(source_status),
+            );
         }
         for (index, label, value) in entries {
             self.extra[index].update(cx, |field, _| {

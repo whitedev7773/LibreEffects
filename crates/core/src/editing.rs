@@ -1,5 +1,25 @@
 use super::*;
 
+/// Source time at the video's origin and source seconds per composition second.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct VideoPlayback {
+    pub source_in: f64,
+    pub speed: f64,
+}
+impl Default for VideoPlayback {
+    fn default() -> Self {
+        Self {
+            source_in: 0.0,
+            speed: 1.0,
+        }
+    }
+}
+impl VideoPlayback {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum Content {
     #[default]
@@ -15,22 +35,46 @@ pub enum Content {
         path: String,
         duration: f64,
         source_fps: f64,
-        /// Composition frame at which source time zero occurs; trimming never changes it.
+        /// Composition frame at which playback.source_in occurs; trimming never changes it.
         start_frame: i64,
+        #[serde(default, skip_serializing_if = "VideoPlayback::is_default")]
+        playback: VideoPlayback,
     },
 }
 impl Content {
+    /// Unquantized source seconds, including times outside the source's range.
+    pub fn video_source_time(&self, frame: Frame, fps: u32) -> Option<f64> {
+        let Self::Video {
+            start_frame,
+            playback,
+            ..
+        } = self
+        else {
+            return None;
+        };
+        if fps == 0 {
+            return None;
+        }
+        Some(
+            playback.source_in + (frame as f64 - *start_frame as f64) / fps as f64 * playback.speed,
+        )
+    }
     pub fn video_time(&self, frame: Frame, fps: u32) -> Option<f64> {
         let Self::Video {
             duration,
-            start_frame,
             source_fps,
             ..
         } = self
         else {
             return None;
         };
-        let seconds = (frame as i64 - start_frame) as f64 / fps as f64;
+        let seconds = self.video_source_time(frame, fps)?;
+        // Reversing an interval can land a few ulps below zero on its last frame.
+        let seconds = if (-1e-9..0.0).contains(&seconds) {
+            0.0
+        } else {
+            seconds
+        };
         (seconds >= 0.0 && seconds < *duration)
             .then(|| ((seconds * source_fps + 1e-7).floor() / source_fps).max(0.0))
     }
@@ -92,6 +136,7 @@ pub(super) fn validate_content(
             duration,
             start_frame,
             source_fps,
+            playback,
         } => {
             !path.is_empty()
                 && source_fps.is_finite()
@@ -102,6 +147,10 @@ pub(super) fn validate_content(
                 && (0.0..=86400.0).contains(duration)
                 && *duration > 0.0
                 && start_frame.abs_diff(0) <= 100_000_000
+                && playback.source_in.is_finite()
+                && playback.source_in.abs() <= 8_640_000.0
+                && playback.speed.is_finite()
+                && (playback.speed == 0.0 || (0.01..=100.0).contains(&playback.speed.abs()))
         }
     };
     if !valid
@@ -155,6 +204,10 @@ pub(super) fn apply_extended(
             | Command::SetAnchor { .. }
             | Command::AddContent { .. }
             | Command::SetContent { .. }
+            | Command::SetVideoSpeed { .. }
+            | Command::SetVideoSourceIn { .. }
+            | Command::ReverseVideo { .. }
+            | Command::FreezeVideo { .. }
             | Command::SetEffects { .. }
             | Command::SetMask { .. }
             | Command::SetColor { .. }
@@ -167,6 +220,80 @@ pub(super) fn apply_extended(
     }
     Some((|| {
         match command {
+            Command::SetVideoSpeed { id, .. }
+            | Command::SetVideoSourceIn { id, .. }
+            | Command::ReverseVideo { id }
+            | Command::FreezeVideo { id, .. } => {
+                let comp = &state.project.composition;
+                let (fps, duration) = (comp.fps, comp.duration);
+                let layer = editable(state, *id)?;
+                let start = layer.in_frame;
+                let end = layer.out_frame(duration);
+                let Content::Video {
+                    playback,
+                    duration: source_duration,
+                    ..
+                } = layer.content
+                else {
+                    return Err("Select a video layer first".into());
+                };
+                let mut next = playback;
+                next.source_in = layer.content.video_source_time(start, fps).unwrap();
+                match command {
+                    Command::SetVideoSpeed { speed, .. } => {
+                        if !speed.is_finite()
+                            || (*speed != 0.0 && !(0.01..=100.0).contains(&speed.abs()))
+                        {
+                            return Err(
+                                "Speed must be 0%, or between 1% and 10000% in either direction"
+                                    .into(),
+                            );
+                        }
+                        next.speed = *speed;
+                    }
+                    Command::SetVideoSourceIn { seconds, .. } => {
+                        if !seconds.is_finite() || *seconds < 0.0 || *seconds >= source_duration {
+                            return Err("Source In must be inside the video, in seconds".into());
+                        }
+                        next.source_in = *seconds;
+                    }
+                    Command::ReverseVideo { .. } => {
+                        if layer.content.video_time(start, fps).is_none()
+                            || layer.content.video_time(end - 1, fps).is_none()
+                        {
+                            return Err(
+                                "Trim the layer to valid source frames before reversing".into()
+                            );
+                        }
+                        // Reverse the visible discrete interval exactly, including mixed frame rates.
+                        next.source_in = layer.content.video_source_time(end - 1, fps).unwrap();
+                        next.speed = -playback.speed;
+                    }
+                    Command::FreezeVideo { frame, .. } => {
+                        if *frame < start || *frame >= end {
+                            return Err(
+                                "Place the playhead inside the video layer to freeze".into()
+                            );
+                        }
+                        next.source_in = layer
+                            .content
+                            .video_time(*frame, fps)
+                            .ok_or("There is no source frame at the playhead")?;
+                        next.speed = 0.0;
+                    }
+                    _ => unreachable!(),
+                }
+                let Content::Video {
+                    start_frame,
+                    playback,
+                    ..
+                } = &mut layer.content
+                else {
+                    unreachable!()
+                };
+                *start_frame = start as i64;
+                *playback = next;
+            }
             Command::TrimLayers { ids, frame, start } => {
                 let duration = state.project.composition.duration;
                 if *frame >= duration || ids.is_empty() {

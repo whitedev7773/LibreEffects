@@ -238,6 +238,7 @@ mod tests {
                 duration: info.duration,
                 source_fps: info.source_fps,
                 start_frame: 2,
+                playback: Default::default(),
             },
             width: 64.0,
             height: 48.0,
@@ -329,6 +330,7 @@ mod tests {
             duration: info.duration,
             source_fps: info.source_fps,
             start_frame: 0,
+            playback: Default::default(),
         };
         let seconds = content.video_time(29, 30).unwrap();
         let data = STANDARD
@@ -336,6 +338,98 @@ mod tests {
             .unwrap();
         let decoded = image::load_from_memory(&data).unwrap().to_rgba8();
         assert!(decoded.get_pixel(20, 20)[2] > 240);
+    }
+
+    #[test]
+    #[ignore = "requires FFmpeg; verifies retimed preview pixels against encoded output"]
+    fn retimed_footage_preview_and_exports_agree() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("timing.mkv");
+        assert!(command(&crate::video_export::ffmpeg_path())
+            .args(["-v", "error", "-f", "lavfi", "-i", "color=red:r=4:s=64x48:d=1.5,drawbox=c=lime:t=fill:enable='gte(t,0.5)',drawbox=c=blue:t=fill:enable='gte(t,1)'", "-c:v", "ffv1"])
+            .arg(&path).status().unwrap().success());
+        let mut e = Editor::default();
+        e.execute(Edit::ConfigureComposition {
+            name: "Timing QA".into(),
+            width: 64,
+            height: 48,
+            fps: 8,
+            duration: 20,
+        })
+        .unwrap();
+        e.execute(Edit::AddContent {
+            content: Content::Video {
+                path: path.to_str().unwrap().into(),
+                duration: 1.5,
+                source_fps: 4.0,
+                start_frame: 2,
+                playback: Default::default(),
+            },
+            width: 64.0,
+            height: 48.0,
+            name: "Video".into(),
+        })
+        .unwrap();
+        let id = e.selected().unwrap();
+        let renderer = crate::rendering::Renderer::new();
+        // Each case uses the same nonzero work-area start and unchanged layer duration.
+        for (name, edit, channels) in [
+            (
+                "reverse",
+                Edit::ReverseVideo { id },
+                vec![2, 2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0],
+            ),
+            (
+                "slow",
+                Edit::SetVideoSpeed { id, speed: 0.5 },
+                vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1],
+            ),
+            ("freeze", Edit::FreezeVideo { id, frame: 7 }, vec![1; 12]),
+            (
+                "slip",
+                Edit::SetVideoSourceIn { id, seconds: 0.5 },
+                vec![1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3],
+            ),
+        ] {
+            e.execute(edit).unwrap();
+            let saved = e.project().to_json().unwrap();
+            let project = libre_effects_core::Project::from_json(&saved).unwrap();
+            for (offset, channel) in channels.iter().copied().enumerate() {
+                let image = renderer.render(&project, 2 + offset as u32, 64).unwrap();
+                let p = image.get_pixel(20, 20);
+                if channel == 3 {
+                    assert_eq!(p[3], 0);
+                } else {
+                    assert!(p[channel] > 240, "{name} frame {offset}: {p:?}");
+                }
+            }
+            let destination = dir.path().join(format!("{name}.mp4"));
+            crate::video_export::export_video(
+                &project,
+                2..14,
+                crate::video_export::VideoPreset::H264,
+                &destination,
+                Default::default(),
+                Default::default(),
+            )
+            .unwrap();
+            let mut decoder = command(&crate::video_export::ffmpeg_path());
+            decoder
+                .args(["-v", "error", "-i"])
+                .arg(&destination)
+                .args(["-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]);
+            let pixels = output(decoder, 1024 * 1024).unwrap();
+            assert_eq!(pixels.len(), 64 * 48 * 4 * channels.len());
+            for (offset, channel) in channels.iter().copied().enumerate() {
+                let p = &pixels[offset * 64 * 48 * 4 + (20 * 64 + 20) * 4..][..4];
+                if channel == 3 {
+                    assert!(p[..3].iter().all(|v| *v < 10), "{name}: {p:?}");
+                } else {
+                    assert!(p[channel] > 230, "{name} frame {offset}: {p:?}");
+                }
+            }
+            e.undo();
+        }
     }
 }
 pub(crate) fn frame_png(

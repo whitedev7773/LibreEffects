@@ -280,6 +280,37 @@ controls to put footage below a title, then save the project and render MP4/MOV.
   not an HDR/color-managed workflow. Source files must stay unchanged during export;
   project snapshots preserve edits, not the external file bytes.
 
+### Video speed, reverse and freeze
+
+![Reverse playback in the existing Properties panel](screenshots/video-retiming.png)
+
+Select a video layer and use Properties → Content & Effects. The workspace layout
+is unchanged; playback controls appear only for video layers.
+
+- **Speed (%)** changes how fast the source advances: 50 is half speed, 200 is
+  double speed, and 0 holds the source at the layer's In point. Negative values
+  play backward. Supported nonzero magnitudes are 1–10000%.
+- **Source In (s)** sets the source time shown at the layer's current In point,
+  allowing a different section of the original video to occupy the same timeline
+  slot. Speed changes preserve this source time, including after trimming.
+- **Reverse** reverses the currently visible discrete frame interval. It starts
+  with the frame previously shown at Out minus one and ends with the old In frame,
+  including when source and composition frame rates differ. Trim to valid source
+  frames first if the layer extends beyond the source. Reversing twice restores
+  the original frame sequence.
+- **Freeze at playhead** holds the sampled source frame for the entire layer.
+  Put the playhead on a visible source frame first. Set Speed back to 100 to resume
+  forward playback from the held frame at the layer's In point, or undo to restore
+  the previous mapping.
+- The current source time, or an outside-source message, appears under the controls.
+  These edits preserve layer In/Out, transform keys, parenting, masks and effects.
+  Faster or slipped footage can run out before Out; those frames are transparent
+  (black in MP4). Extend/trim the layer explicitly when changing its duration.
+- Every operation supports undo/redo and survives saving, relinking, moving and
+  splitting. Preview, PNG sequences and MP4/MOV use the same source-time mapping.
+  This is constant-speed footage playback, not animated time remapping, automatic
+  layer/keyframe stretching, optical flow or audio retiming.
+
 FFprobe must be on PATH alongside FFmpeg. `LIBRE_EFFECTS_FFPROBE` overrides its
 executable; when `LIBRE_EFFECTS_FFMPEG` is absolute, FFprobe defaults to that same
 directory. Neither tool is downloaded automatically.
@@ -289,7 +320,8 @@ directory. Neither tool is downloaded automatically.
 Versioned .lfe.json files contain the composition, layer ranges, transforms and
 keyframes. Files from the initial rectangle editor remain readable. Bezier or
 parenting edits upgrade the project to version 2; text, images, masks or effects
-upgrade it to version 3; linked videos require version 4. Older applications reject
+upgrade it to version 3; linked videos require version 4, and altered video playback
+requires version 5. Older applications reject
 unsupported versions. Save writes
 the snapshot captured when clicked using a temporary file before replacement.
 The size limit is 16 MiB. Undo history is capped at 100 edits and is reset at a
@@ -333,9 +365,11 @@ timing and alpha, and cancel an active encoder while preserving the destination:
 cargo test -p libre-effects-desktop -- --ignored
 ~~~
 
-These four tests are explicitly ignored in the default suite when FFmpeg/FFprobe
+These five tests are explicitly ignored in the default suite when FFmpeg/FFprobe
 are not declared test dependencies. They also check footage import, different
 frame rates, the final source frame, missing media, and composited video output.
+Retiming checks compare preview pixels and encoded frames for reverse, slow-motion,
+freeze and slipped footage after a project-file round trip.
 
 When Moon is unavailable, the corresponding local commands are:
 

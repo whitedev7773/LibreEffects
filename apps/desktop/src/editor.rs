@@ -244,6 +244,22 @@ impl EditorState {
     }
 
     pub fn dispatch(&mut self, action: &Action, window: &mut Window, cx: &mut Context<Self>) {
+        if matches!(
+            action,
+            Action::Open
+                | Action::Save
+                | Action::SaveAs
+                | Action::ImportImage
+                | Action::ImportVideo
+                | Action::RelinkVideo
+                | Action::ExportFrame
+                | Action::ExportSequence
+                | Action::ExportVideo(_)
+        ) {
+            // GPUI activates focused buttons on Enter key-up. A native file dialog
+            // may close on key-down, sending its key-up back to the editor button.
+            window.blur();
+        }
         match action {
             Action::SelectMany(id, toggle, range) => {
                 let comp = self.editor.project().composition();

@@ -8,7 +8,7 @@ pub type LayerId = u64;
 
 mod editing;
 mod geometry;
-pub use editing::{Content, Effects, KeyCopy, KeyRef, Mask};
+pub use editing::{Content, Effects, KeyCopy, KeyRef, Mask, VideoPlayback};
 pub use geometry::{Affine, Bezier};
 
 #[derive(Clone, Copy, Debug)]
@@ -397,7 +397,7 @@ impl Project {
 
     fn validate(&self) -> Result<(), String> {
         let comp = &self.composition;
-        if !(1..=4).contains(&self.version) {
+        if !(1..=5).contains(&self.version) {
             return Err("Unsupported project version".into());
         }
         if !(1..=16_384).contains(&comp.width)
@@ -487,6 +487,22 @@ pub enum Command {
     SetContent {
         id: LayerId,
         content: Content,
+    },
+    /// Changes footage sampling only; keeps the layer range and transform keys.
+    SetVideoSpeed {
+        id: LayerId,
+        speed: f64,
+    },
+    SetVideoSourceIn {
+        id: LayerId,
+        seconds: f64,
+    },
+    ReverseVideo {
+        id: LayerId,
+    },
+    FreezeVideo {
+        id: LayerId,
+        frame: Frame,
     },
     SetEffects {
         id: LayerId,
@@ -695,6 +711,11 @@ impl Editor {
             .any(|l| matches!(l.content, Content::Video { .. }))
         {
             next.project.version = 4;
+        }
+        if next.project.composition.layers.iter().any(|l| {
+            matches!(l.content, Content::Video { playback, .. } if playback != VideoPlayback::default())
+        }) {
+            next.project.version = 5;
         }
         next.project.validate()?;
         if next != self.current {

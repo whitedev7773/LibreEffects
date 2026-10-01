@@ -1293,7 +1293,7 @@ fn serialized_project_roundtrips_animation_and_preserves_ids() {
 fn corrupt_and_future_projects_are_rejected() {
     let editor = editor_with_layer();
     let mut project = editor.project().clone();
-    project.version = 5;
+    project.version = 6;
     assert!(Project::from_json(&project.to_json().unwrap()).is_err());
     project.version = 1;
     project.composition.fps = 0;
@@ -1372,6 +1372,7 @@ fn video_timing_survives_trim_move_split_and_serialization() {
             duration: 2.0,
             source_fps: 24.0,
             start_frame: 10,
+            playback: VideoPlayback::default(),
         },
         width: 3840.0,
         height: 2160.0,
@@ -1426,6 +1427,7 @@ fn video_sampling_uses_preceding_source_frame_and_rejects_invalid_metadata() {
         duration: 1.0,
         source_fps: 24.0,
         start_frame: 10,
+        playback: VideoPlayback::default(),
     };
     assert_eq!(video.video_time(9, 30), None);
     assert_eq!(video.video_time(10, 30), Some(0.0));
@@ -1445,7 +1447,8 @@ fn video_sampling_uses_preceding_source_frame_and_rejects_invalid_metadata() {
                     path: "clip.mp4".into(),
                     duration,
                     source_fps,
-                    start_frame
+                    start_frame,
+                    playback: VideoPlayback::default(),
                 },
                 width: 64.0,
                 height: 48.0,
@@ -1455,4 +1458,181 @@ fn video_sampling_uses_preceding_source_frame_and_rejects_invalid_metadata() {
         );
         assert_eq!(e.project(), &old);
     }
+}
+
+fn editor_with_video() -> Editor {
+    let mut e = Editor::default();
+    e.execute(Command::AddContent {
+        content: Content::Video {
+            path: "source.mp4".into(),
+            duration: 2.0,
+            source_fps: 24.0,
+            start_frame: 10,
+            playback: VideoPlayback::default(),
+        },
+        width: 64.0,
+        height: 48.0,
+        name: "Video".into(),
+    })
+    .unwrap();
+    e
+}
+
+#[test]
+fn playback_speed_and_source_slip_keep_ranges_keys_and_support_undo() {
+    let mut e = editor_with_video();
+    let id = e.selected().unwrap();
+    e.execute(Command::SetLayerRange {
+        id,
+        start: 25,
+        end: 60,
+    })
+    .unwrap();
+    e.execute(Command::ToggleAnimation {
+        id,
+        property: Property::PositionX,
+        frame: 30,
+    })
+    .unwrap();
+    let before = e.project().clone();
+    e.execute(Command::SetVideoSpeed { id, speed: 2.0 })
+        .unwrap();
+    let layer = e.project().composition().layer(id).unwrap();
+    assert_eq!((layer.in_frame(), layer.out_frame(150)), (25, 60));
+    assert_eq!(
+        layer.property(Property::PositionX),
+        before
+            .composition()
+            .layer(id)
+            .unwrap()
+            .property(Property::PositionX)
+    );
+    assert_eq!(layer.content().video_time(25, 30), Some(0.5));
+    assert_eq!(layer.content().video_time(40, 30), Some(1.5));
+    assert_eq!(layer.content().video_time(59, 30), None);
+    e.execute(Command::SetVideoSourceIn { id, seconds: 0.25 })
+        .unwrap();
+    assert_eq!(
+        e.selected_layer().unwrap().content().video_time(40, 30),
+        Some(1.25)
+    );
+    e.undo();
+    e.undo();
+    assert_eq!(e.project(), &before);
+    e.redo();
+    e.redo();
+    let saved = e.project().to_json().unwrap();
+    assert!(saved.contains("\"version\": 5"));
+    assert_eq!(&Project::from_json(&saved).unwrap(), e.project());
+}
+
+#[test]
+fn reverse_matches_visible_frames_and_freeze_survives_split_move_and_trim() {
+    let mut e = editor_with_video();
+    let id = e.selected().unwrap();
+    e.execute(Command::SetLayerRange {
+        id,
+        start: 13,
+        end: 57,
+    })
+    .unwrap();
+    let original = e.selected_layer().unwrap().content().clone();
+    e.execute(Command::ReverseVideo { id }).unwrap();
+    for f in 13..57 {
+        assert_eq!(
+            e.selected_layer().unwrap().content().video_time(f, 30),
+            original.video_time(69 - f, 30)
+        );
+    }
+    e.execute(Command::ReverseVideo { id }).unwrap();
+    for f in 13..57 {
+        assert_eq!(
+            e.selected_layer().unwrap().content().video_time(f, 30),
+            original.video_time(f, 30)
+        );
+    }
+    e.execute(Command::FreezeVideo { id, frame: 41 }).unwrap();
+    let frozen = original.video_time(41, 30);
+    e.execute(Command::SetLayerRange {
+        id,
+        start: 15,
+        end: 60,
+    })
+    .unwrap();
+    e.execute(Command::ShiftLayer { id, delta: -10 }).unwrap();
+    e.execute(Command::SplitLayers {
+        ids: vec![id],
+        frame: 25,
+    })
+    .unwrap();
+    for layer in e.project().composition().layers() {
+        for frame in layer.in_frame()..layer.out_frame(150) {
+            assert_eq!(layer.content().video_time(frame, 30), frozen);
+        }
+    }
+    let right = e.selected().unwrap();
+    e.execute(Command::SetVideoSpeed {
+        id: right,
+        speed: 1.0,
+    })
+    .unwrap();
+    assert_eq!(
+        e.selected_layer().unwrap().content().video_time(25, 30),
+        frozen
+    );
+    assert!(e.selected_layer().unwrap().content().video_time(28, 30) > frozen);
+}
+
+#[test]
+fn playback_edits_reject_invalid_and_locked_inputs_atomically_and_read_legacy_video() {
+    let mut e = editor_with_video();
+    let id = e.selected().unwrap();
+    let legacy = e.project().to_json().unwrap();
+    assert!(!legacy.contains("playback"));
+    let loaded = Project::from_json(&legacy).unwrap();
+    assert_eq!(
+        loaded
+            .composition()
+            .layer(id)
+            .unwrap()
+            .content()
+            .video_time(40, 30),
+        Some(1.0)
+    );
+    let before = e.project().clone();
+    for speed in [f64::NAN, f64::INFINITY, 0.001, -0.001, 100.1, -101.0] {
+        assert!(e.execute(Command::SetVideoSpeed { id, speed }).is_err());
+        assert_eq!(e.project(), &before);
+    }
+    for seconds in [-0.01, 2.0, f64::NAN, f64::INFINITY] {
+        assert!(
+            e.execute(Command::SetVideoSourceIn { id, seconds })
+                .is_err()
+        );
+        assert_eq!(e.project(), &before);
+    }
+    for frame in [9, 70] {
+        assert!(e.execute(Command::FreezeVideo { id, frame }).is_err());
+    }
+    assert!(
+        e.execute(Command::Batch(vec![
+            Command::SetVideoSpeed { id, speed: 2.0 },
+            Command::ReverseVideo { id }, // The final half is outside the source after speeding up.
+        ]))
+        .is_err()
+    );
+    assert_eq!(e.project(), &before);
+    e.execute(Command::ToggleLocked(id)).unwrap();
+    let locked = e.project().clone();
+    for command in [
+        Command::SetVideoSpeed { id, speed: 0.0 },
+        Command::SetVideoSourceIn { id, seconds: 0.5 },
+        Command::FreezeVideo { id, frame: 40 },
+        Command::ReverseVideo { id },
+    ] {
+        assert!(e.execute(command).is_err());
+        assert_eq!(e.project(), &locked);
+    }
+    e.undo();
+    assert_eq!(e.project(), &before);
 }
