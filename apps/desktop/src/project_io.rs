@@ -17,13 +17,18 @@ pub(crate) fn read_project(path: &Path) -> Result<Project, String> {
     if json.len() as u64 > MAX_BYTES {
         return Err("Project exceeds 16 MiB".into());
     }
-    Project::from_json(&json)
+    let project = Project::from_json(&json)?;
+    crate::rendering::validate_images(&project)?;
+    Ok(project)
 }
 
 pub(crate) fn write_project(path: &Path, json: &str) -> Result<(), String> {
     if json.len() as u64 > MAX_BYTES {
         return Err("Project exceeds 16 MiB".into());
     }
+    write_bytes(path, json.as_bytes())
+}
+pub(crate) fn write_bytes(path: &Path, data: &[u8]) -> Result<(), String> {
     let directory = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -32,7 +37,7 @@ pub(crate) fn write_project(path: &Path, json: &str) -> Result<(), String> {
     let mut temporary =
         tempfile::NamedTempFile::new_in(directory).map_err(|error| error.to_string())?;
     temporary
-        .write_all(json.as_bytes())
+        .write_all(data)
         .map_err(|error| error.to_string())?;
     temporary
         .as_file()
@@ -46,6 +51,23 @@ pub(crate) fn write_project(path: &Path, json: &str) -> Result<(), String> {
 mod tests {
     use super::*;
     use libre_effects_core::{Command, Editor};
+
+    #[test]
+    fn opening_corrupt_embedded_image_reports_error() {
+        let mut editor = Editor::default();
+        editor
+            .execute(Command::AddContent {
+                content: libre_effects_core::Content::Image { png: "YWJj".into() },
+                width: 32.0,
+                height: 32.0,
+                name: "Broken image".into(),
+            })
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("broken.lfe.json");
+        write_project(&path, &editor.project().to_json().unwrap()).unwrap();
+        assert!(read_project(&path).unwrap_err().contains("Invalid image"));
+    }
 
     #[test]
     fn save_replaces_existing_project_and_open_recovers_edits() {

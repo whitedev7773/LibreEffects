@@ -139,7 +139,7 @@ impl Render for Browser {
                         "folder-open",
                         "Open project",
                         &self.state,
-                        Action::Open,
+                        Action::RequestOpen,
                         false,
                     ))
                     .child(ui::action_tool(

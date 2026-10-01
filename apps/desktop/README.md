@@ -4,7 +4,7 @@ A Windows-first motion graphics editor built with Rust and GPUI. Its workspace
 and basic editing workflow follow After Effects conventions. It is an early 2D
 editor, not a complete After Effects replacement or an AEP-compatible application.
 
-![Libre Effects workspace with the Curve and Parent Study sample](screenshots/workspace.png)
+![Libre Effects workspace with the Content and Motion Study sample](screenshots/workspace.png)
 
 ## Workspace
 
@@ -17,6 +17,8 @@ editor, not a complete After Effects replacement or an AEP-compatible applicatio
 - Preview controls live in the right dock; Info shows the current composition and time.
 - Drag panel dividers to resize; double-click a divider or choose Window → Reset
   default workspace to restore the layout.
+- The Timeline has compact layer rows, grouped X/Y transform values, a Parent & Link
+  column, and a draggable boundary between its layer list and time area.
 - Wanted Sans and Gravity Icons are embedded in the executable, with their licenses
   under assets/. No system font installation or runtime download is required.
 - Composition settings (Ctrl+K): name, dimensions, integer frame rate and duration
@@ -25,24 +27,38 @@ editor, not a complete After Effects replacement or an AEP-compatible applicatio
 
 ## Editing
 
-- Rectangle layers with stable IDs, rename, duplicate, ordering, visibility and locking.
-- Position, anchor, scale, rotation and opacity; X and Y are separate channels.
+- Rectangle, text and embedded image layers with stable IDs, rename, duplicate,
+  ordering, visibility and locking. Layer → New text uses embedded Wanted Sans.
+  Properties edits the text, font size and hexadecimal fill color.
+- Ctrl+I imports PNG/JPEG images (up to 8 MiB and 4096 × 4096 pixels). Images are
+  re-encoded as PNG and stored inside the project, so moving the original is safe.
+- Position, anchor, scale, rotation and opacity; X and Y remain separate animation
+  channels but share one row. Click X or Y to select the Graph Editor channel.
 - Click a numeric field, type a value, press Enter to apply or Escape to cancel.
   Leaving a field also commits its value. Fields support Unicode text, selection,
   clipboard operations and platform text input.
-- Select and drag a rectangle in the composition to move it. X/Y movement is one
-  undo step. The displayed corner markers indicate selection; resizing/rotation
+- Drag numeric values horizontally to scrub; Shift changes values faster and Alt
+  provides fine adjustment. A gesture commits one undo step, including outside
+  the input's bounds; Escape cancels.
+- Ctrl-click toggles layer selection; Shift-click selects a layer range. Drag empty
+  timeline space to box-select keys or layer bars. Ctrl+A selects all layers, or
+  visible keys when keys are selected. Delete/duplicate act on the layer selection.
+- Drag selected layers in the composition to move them together in one undo step.
+  Selected parent/child groups move once through their selected root ancestors.
+  The displayed corner markers indicate selection; resizing/rotation
   by dragging those markers is not implemented.
 - Hand tool pans the composition. Fit resets pan and scale; zoom controls support
   6.25%–800%. The transparency grid can be toggled.
-- Layer In/Out fields trim visibility in whole frames; Out is exclusive.
+- Drag layer bars to shift the selected layers and their keys; drag bar edges or
+  edit In/Out fields to trim visibility. Out is exclusive. Moves outside the
+  composition and edits to locked layers are rejected atomically.
 - Align offers six composition-edge/center actions for the selected unlocked layer.
   Alignment uses transformed bounds, including rotation and parenting, and commits
   one undo step. Animated position channels receive a key at the current frame.
 
 ## Parenting
 
-Properties → Parent & Link selects a parent or None. Connecting, reparenting and
+Timeline or Properties → Parent & Link selects a parent or None. Connecting, reparenting and
 disconnecting preserve the current frame's full 2D pose, including rotated,
 nonuniform and negative scales. Descendants follow parent transforms and remain
 independent in visibility, opacity and layer timing. Canvas dragging accounts for
@@ -52,7 +68,8 @@ Parent relationships and compensation matrices are saved in the project. Numeric
 transform fields remain local to the layer's compensated coordinate system.
 Disconnecting an animated parent preserves only the current pose, not the parent's
 motion over the whole composition. Cycles and missing parents are rejected; zero
-scale parents cannot be assigned. Unparent children before deleting their parent.
+scale parents cannot be assigned. Deleting a parent detaches surviving children
+while preserving their current pose. A locked affected child prevents the edit.
 
 ## Animation
 
@@ -67,6 +84,11 @@ a diamond to change its timing.
 - Diamonds add/remove a key at the current frame. Click a timeline diamond to
   select and seek to it; drag it to move it; Delete removes the selected key.
 - Moving a key onto an occupied frame is rejected, preserving both keys.
+- Ctrl/Shift-click diamonds or drag a selection box to select multiple keys. Drag
+  selected keys to shift them together across layers/channels in one undo step.
+  Ctrl+C / Ctrl+V copies and pastes their relative timing and interpolation at the
+  playhead. A single source layer pastes to the selected layer; multiple source
+  layers retain their original layer mapping. Clipboard contents are session-local.
 - Linear, Hold and Smooth interpolation. The interpolation belongs to the outgoing
   key. Smooth is smoothstep, not AE temporal Bezier or Easy Ease.
 - Temporal cubic Bezier interpolation, including overshoot. The curve solver
@@ -77,10 +99,10 @@ a diamond to change its timing.
 
 ## Graph Editor
 
-![Bezier value graph and outgoing segment controls](screenshots/graph-editor.png)
+![Opacity value graph in the timeline](screenshots/graph-editor.png)
 
 Click the graph icon in the timeline, use Animation → Toggle Graph Editor, or press
-Shift+F3. Select a transform channel in the persistent layer list. The value graph shares timeline
+Shift+F3. Click a property label or its X/Y channel in the persistent layer list. The value graph shares timeline
 zoom and pan; its vertical range fits the visible curve.
 
 - Click a key to select it; drag to change both frame and value. Release commits
@@ -95,7 +117,7 @@ zoom and pan; its vertical range fits the visible curve.
   X is normalized time (0–1); Y is normalized progress (−2–3). Handles beyond the
   small chart's vertical range remain accessible through numeric fields.
 - This is a single-channel value graph with normalized segment easing. AE's speed
-  graph, spatial Bezier paths, multi-key selection, and linked incoming/outgoing
+  graph, spatial Bezier paths, multi-key graph editing, and linked incoming/outgoing
   velocity handles are not implemented. F9 is not full AE Easy Ease compatibility.
 
 Open `examples/curve-parent-study.lfe.json` for an overshooting Bezier animation
@@ -110,7 +132,9 @@ cargo run -p libre-effects-core --example make_animation_study -- examples/curve
 
 | Shortcut | Action |
 | --- | --- |
-| Ctrl+N / Ctrl+O / Ctrl+S | New / Open / Save as |
+| Ctrl+N / Ctrl+O / Ctrl+S | New / Open / Save |
+| Ctrl+Shift+S / Ctrl+I | Save as / Import image |
+| Ctrl+C / Ctrl+V | Copy / Paste selected keys |
 | Ctrl+Z / Ctrl+Shift+Z | Undo / Redo |
 | Ctrl+Y / Ctrl+D | Add rectangle / Duplicate selected layer |
 | Ctrl+K | Composition settings |
@@ -125,26 +149,57 @@ cargo run -p libre-effects-core --example make_animation_study -- examples/curve
 | J / K | Previous / Next key on the selected layer |
 | B / N | Work area start / end |
 | + / − | Timeline zoom |
-| Delete | Delete selected timeline key, otherwise selected layer |
+| Delete | Delete selected timeline keys, otherwise selected layers |
 
 Help → Keyboard shortcuts lists the controls in the app. Text fields keep typing
-isolated from editor shortcuts. Buttons support Tab and Enter/Space.
+isolated from editor shortcuts; Save, New, Open and Alt+F4 commit the field before
+continuing. Buttons support Tab and Enter/Space.
 
-## Project files and limitations
+## Masks, effects and rendering
+
+Properties provides a rectangular layer-space mask with inversion, Gaussian blur,
+brightness and grayscale. Mask and effect values are currently static. The same
+resvg compositor renders both the composition preview and exported frames,
+including text, images, parenting, interpolation, layer timing and alpha.
+
+File → Export current frame writes a full-resolution RGBA PNG. Render work area
+writes a PNG sequence to a new subfolder of the chosen directory, with frame rate,
+dimensions, frame range and completion status in `sequence.json`. Cancel render
+stops after the current frame and keeps completed files. Export uses a project
+snapshot, so editing during a render does not change its output. The preview is
+limited to 1280 pixels on its longest side; exports support up to 32 megapixels.
+
+Open `examples/content-study.lfe.json` for a text/mask/effects sample.
+Regenerate it with `cargo run -p libre-effects-core --example make_content_study -- examples/content-study.lfe.json`.
+
+## Project files and recovery
 
 Versioned .lfe.json files contain the composition, layer ranges, transforms and
 keyframes. Files from the initial rectangle editor remain readable. Bezier or
-parenting edits upgrade the project to version 2 so older applications reject it
-instead of silently dropping the new behavior. Save as writes
+parenting edits upgrade the project to version 2; text, images, masks or effects
+upgrade it to version 3. Older applications reject unsupported versions. Save writes
 the snapshot captured when clicked using a temporary file before replacement.
-The size limit is 16 MiB. Undo history is capped at 100 edits; New/Open are undoable.
+The size limit is 16 MiB. Undo history is capped at 100 edits and is reset at a
+New/Open document boundary. Failed saves leave the edited project intact.
 
-Save before closing: autosave and unsaved-close protection are not implemented.
-Ctrl+S currently opens Save as, not a silent save to the last path.
+An asterisk in the window title indicates unsaved changes. Ctrl+S saves to the
+current file; Ctrl+Shift+S chooses another path. Closing, New and Open offer
+Save / Discard / Cancel when there are changes. Save and continue proceeds only
+after a successful save. Canceling a file picker does not discard the document.
 
-Still pending: multiple compositions and precompositions, text/media/audio layers,
-masks, effects, 3D, rendering/export, JSX,
-ExtendScript and expressions. The preview currently renders rectangles only.
+Changed unsaved projects are checkpointed every five seconds under
+`%LOCALAPPDATA%/LibreEffects/recovery.lfe.json`. After an interrupted session,
+startup offers Restore or Discard. Restoring creates an unsaved document so the
+original file is not overwritten. This is one recovery slot for one running app
+instance, not a versioned backup system. A normal save/discard close clears it.
+
+## Remaining limitations
+
+Still pending: multiple compositions and precompositions, audio/video footage,
+video encoding, freeform/animated masks, an effect stack and animated effects,
+rich text layout, 3D, JSX, ExtendScript and expressions. Layer marker handles do
+not yet resize/rotate content. Parent links of separately duplicated layers keep
+their original targets. PNG sequences can be assembled in an external video tool.
 There is no claim of AEP or Adobe script compatibility.
 
 ## Development

@@ -4,7 +4,7 @@ use crate::{
     ui,
 };
 use gpui::{Context, Entity, Window, div, prelude::*, px, rgb};
-use libre_effects_core::{Command, Property};
+use libre_effects_core::{Command, Content, Mask, Property};
 
 pub(crate) struct Inspector {
     state: Entity<EditorState>,
@@ -13,6 +13,7 @@ pub(crate) struct Inspector {
     range: Vec<Entity<TextField>>,
     parent_open: bool,
     parent_owner: Option<u64>,
+    extra: Vec<Entity<TextField>>,
 }
 impl Inspector {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
@@ -94,7 +95,81 @@ impl Inspector {
                 })
             })
             .collect();
+        let extra = (0..9)
+            .map(|index| {
+                let edit = state.clone();
+                cx.new(|cx| {
+                    TextField::new(cx, move |text, window, cx| {
+                        edit.update(cx, |s, cx| {
+                            let Some(l) = s.editor.selected_layer() else {
+                                return;
+                            };
+                            let id = l.id();
+                            let number = text.parse::<f64>().ok();
+                            let command = match index {
+                                0 => {
+                                    if let Content::Text { font_size, .. } = l.content() {
+                                        Some(Command::SetContent {
+                                            id,
+                                            content: Content::Text {
+                                                text: text.into(),
+                                                font_size: *font_size,
+                                            },
+                                        })
+                                    } else {
+                                        None
+                                    }
+                                }
+                                1 => {
+                                    if let (Content::Text { text, .. }, Some(font_size)) =
+                                        (l.content(), number)
+                                    {
+                                        Some(Command::SetContent {
+                                            id,
+                                            content: Content::Text {
+                                                text: text.clone(),
+                                                font_size,
+                                            },
+                                        })
+                                    } else {
+                                        None
+                                    }
+                                }
+                                2 => u32::from_str_radix(text.trim().trim_start_matches('#'), 16)
+                                    .ok()
+                                    .map(|color| Command::SetColor { id, color }),
+                                3 | 4 => number.map(|v| {
+                                    let mut effects = l.effects();
+                                    if index == 3 {
+                                        effects.blur = v;
+                                    } else {
+                                        effects.brightness = v;
+                                    }
+                                    Command::SetEffects { id, effects }
+                                }),
+                                _ => l.mask().zip(number).map(|(mut m, v)| {
+                                    match index {
+                                        5 => m.x = v,
+                                        6 => m.y = v,
+                                        7 => m.width = v,
+                                        _ => m.height = v,
+                                    };
+                                    Command::SetMask { id, mask: Some(m) }
+                                }),
+                            };
+                            if let Some(c) = command {
+                                s.dispatch(&Action::Edit(c), window, cx);
+                            } else {
+                                s.status = "Invalid value".into();
+                                cx.notify();
+                            }
+                        })
+                    })
+                })
+            })
+            .collect();
         Self {
+            extra,
             state,
             name,
             fields,
@@ -166,88 +241,212 @@ impl Render for Inspector {
                     .child(ui::icon("chevron-down"))
                     .child("Transform"),
             );
-        for (index, property) in Property::ALL.into_iter().enumerate() {
-            let track = layer.property(property);
-            let value = track.value_at(frame);
-            let key = track.keys().get(&frame);
-            let animated = !track.keys().is_empty();
-            self.fields[index].update(cx, |field, _| {
-                field.sync(format!("{id}-{frame}"), format!("{value:.2}"), window)
-            });
+        for (label, indices) in [
+            ("Anchor Point", vec![2, 3]),
+            ("Position", vec![0, 1]),
+            ("Scale", vec![4, 5]),
+            ("Rotation", vec![6]),
+            ("Opacity", vec![7]),
+        ] {
+            let properties: Vec<_> = indices.iter().map(|i| Property::ALL[*i]).collect();
+            let animated = properties
+                .iter()
+                .any(|p| !layer.property(*p).keys().is_empty());
+            let command = Command::Batch(
+                properties
+                    .iter()
+                    .filter(|p| layer.property(**p).keys().is_empty() == !animated)
+                    .map(|p| Command::ToggleAnimation {
+                        id,
+                        property: *p,
+                        frame,
+                    })
+                    .collect(),
+            );
             let mut row = div()
                 .flex()
                 .items_center()
-                .h(px(34.0))
+                .h(px(30.0))
                 .gap_1()
-                .child(
-                    ui::action_tool(
-                        gpui::SharedString::from(format!("watch-{property:?}")),
-                        "stopwatch",
-                        "Enable / disable animation",
-                        &self.state,
-                        Action::Edit(Command::ToggleAnimation {
-                            id,
-                            property,
-                            frame,
-                        }),
-                        animated,
-                    )
-                    .when(locked, |s| s.opacity(0.35)),
-                )
-                .child(div().flex_1().text_size(px(11.0)).child(property.label()))
-                .child(
+                .child(ui::action_tool(
+                    gpui::SharedString::from(format!("watch-{label}")),
+                    "stopwatch",
+                    "Toggle animation",
+                    &self.state,
+                    Action::Edit(command),
+                    animated,
+                ))
+                .child(div().flex_1().text_size(px(11.0)).child(label));
+            for index in indices {
+                let property = Property::ALL[index];
+                let value = layer.property(property).value_at(frame);
+                self.fields[index].update(cx, |field, _| {
+                    field.set_numeric();
+                    field.sync(format!("{id}-{frame}"), format!("{value:.2}"), window);
+                });
+                row = row.child(
                     div()
-                        .w(px(68.0))
-                        .flex_none()
+                        .w(px(62.0))
                         .when(!locked, |s| s.child(self.fields[index].clone()))
                         .when(locked, |s| s.child(format!("{value:.2}"))),
                 );
-            if animated {
-                row = row.child(ui::action_tool(
-                    gpui::SharedString::from(format!("key-{property:?}")),
-                    "diamond",
-                    "Add / remove keyframe at current time",
-                    &self.state,
-                    Action::Edit(Command::ToggleKeyframe {
-                        id,
-                        property,
-                        frame,
-                    }),
-                    key.is_some(),
-                ));
-            } else {
-                row = row.child(div().w(px(26.0)));
             }
             contents = contents.child(row);
-            if let Some(key) = key {
-                let label = key.interpolation.label();
-                contents = contents.child(
+        }
+        let mut entries = vec![
+            (2, "Fill (hex)", format!("{:06X}", layer.color())),
+            (3, "Gaussian Blur", format!("{:.2}", layer.effects().blur)),
+            (
+                4,
+                "Brightness",
+                format!("{:.2}", layer.effects().brightness),
+            ),
+        ];
+        if let Content::Text { text, font_size } = layer.content() {
+            entries.insert(0, (0, "Text", text.clone()));
+            entries.insert(1, (1, "Font size", font_size.to_string()));
+        }
+        if matches!(layer.content(), Content::Image { .. }) {
+            entries.retain(|(index, _, _)| *index != 2);
+        }
+        contents = contents.child(
+            div()
+                .mt_3()
+                .py_2()
+                .border_t_1()
+                .border_color(rgb(ui::BORDER))
+                .child("Content & Effects"),
+        );
+        for (index, label, value) in entries {
+            self.extra[index].update(cx, |field, _| {
+                if index != 0 && index != 2 {
+                    field.set_numeric();
+                }
+                field.sync(id.to_string(), value.clone(), window);
+            });
+            contents = contents.child(
+                div()
+                    .flex()
+                    .h(px(29.0))
+                    .items_center()
+                    .child(div().w(px(105.0)).child(label))
+                    .child(
+                        div()
+                            .flex_1()
+                            .when(!locked, |s| s.child(self.extra[index].clone()))
+                            .when(locked, |s| s.child(value)),
+                    ),
+            );
+        }
+        let mut effects = layer.effects();
+        effects.grayscale = !effects.grayscale;
+        contents = contents.child(
+            ui::text_button(
+                "grayscale",
+                if layer.effects().grayscale {
+                    "Grayscale: On"
+                } else {
+                    "Grayscale: Off"
+                },
+            )
+            .on_click({
+                let state = self.state.clone();
+                move |_, window, cx| {
+                    state.update(cx, |s, cx| {
+                        s.dispatch(
+                            &Action::Edit(Command::SetEffects { id, effects }),
+                            window,
+                            cx,
+                        )
+                    })
+                }
+            }),
+        );
+        let mask = if layer.mask().is_some() {
+            None
+        } else {
+            Some(Mask {
+                x: layer.width() * 0.25,
+                y: layer.height() * 0.25,
+                width: layer.width() * 0.5,
+                height: layer.height() * 0.5,
+                inverted: false,
+            })
+        };
+        contents = contents.child(
+            div()
+                .mt_3()
+                .border_t_1()
+                .border_color(rgb(ui::BORDER))
+                .child(
                     ui::text_button(
-                        gpui::SharedString::from(format!("interpolation-{property:?}")),
-                        format!("Interpolation: {label}"),
+                        "mask-toggle",
+                        if layer.mask().is_some() {
+                            "Remove rectangle mask"
+                        } else {
+                            "Add rectangle mask"
+                        },
                     )
-                    .text_size(px(10.0))
-                    .text_color(rgb(ui::BLUE))
                     .on_click({
                         let state = self.state.clone();
-                        let interpolation = key.interpolation.next();
                         move |_, window, cx| {
-                            state.update(cx, |state, cx| {
-                                state.dispatch(
-                                    &Action::Edit(Command::SetInterpolation {
-                                        id,
-                                        property,
-                                        frame,
-                                        interpolation,
-                                    }),
-                                    window,
-                                    cx,
-                                )
-                            });
+                            state.update(cx, |s, cx| {
+                                s.dispatch(&Action::Edit(Command::SetMask { id, mask }), window, cx)
+                            })
                         }
                     }),
+                ),
+        );
+        if let Some(mut mask) = layer.mask() {
+            for (index, label, value) in [
+                (5, "Mask X", mask.x),
+                (6, "Mask Y", mask.y),
+                (7, "Mask Width", mask.width),
+                (8, "Mask Height", mask.height),
+            ] {
+                self.extra[index].update(cx, |f, _| {
+                    f.set_numeric();
+                    f.sync(id.to_string(), format!("{value:.2}"), window);
+                });
+                contents = contents.child(
+                    div()
+                        .flex()
+                        .h(px(29.0))
+                        .items_center()
+                        .child(div().flex_1().child(label))
+                        .child(
+                            div()
+                                .w(px(90.0))
+                                .when(!locked, |s| s.child(self.extra[index].clone())),
+                        ),
                 );
             }
+            mask.inverted = !mask.inverted;
+            contents = contents.child(
+                ui::text_button(
+                    "invert-mask",
+                    if mask.inverted {
+                        "Mask: Add"
+                    } else {
+                        "Mask: Subtract"
+                    },
+                )
+                .on_click({
+                    let state = self.state.clone();
+                    move |_, window, cx| {
+                        state.update(cx, |s, cx| {
+                            s.dispatch(
+                                &Action::Edit(Command::SetMask {
+                                    id,
+                                    mask: Some(mask),
+                                }),
+                                window,
+                                cx,
+                            )
+                        })
+                    }
+                }),
+            );
         }
         contents = contents.child(
             div()

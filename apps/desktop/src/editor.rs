@@ -1,10 +1,18 @@
-use std::{path::Path, time::Instant};
+use std::{
+    collections::BTreeSet,
+    path::{Path, PathBuf},
+    time::Instant,
+};
 
 use gpui::{Context, ElementId, Entity, PathPromptOptions, SharedString, Window};
-use libre_effects_core::{Command, Editor, Frame, LayerId, Project, Property};
+use libre_effects_core::{
+    Command, Content, Editor, Frame, KeyCopy, KeyRef, LayerId, Project, Property,
+};
 
 use crate::components::{Button, ButtonSize, ButtonVariant};
 use crate::project_io::{read_project, write_project};
+#[path = "editor_io.rs"]
+mod io;
 
 #[derive(Clone)]
 pub(crate) enum Action {
@@ -17,7 +25,19 @@ pub(crate) enum Action {
     Redo,
     New,
     Open,
+    RequestOpen,
     SaveAs,
+    Save,
+    ImportImage,
+    AddText,
+    ExportFrame,
+    ExportSequence,
+    CancelExport,
+    CopyKeys,
+    PasteKeys,
+    DeleteSelection,
+    DuplicateSelection,
+    SelectMany(LayerId, bool, bool),
     ZoomTimeline(f32),
     PanTimeline(i32),
     ZoomPreview(f32),
@@ -62,6 +82,19 @@ impl PropertyFilter {
 }
 
 pub(crate) struct EditorState {
+    pub selected_layers: BTreeSet<LayerId>,
+    pub selected_keys: BTreeSet<KeyRef>,
+    clipboard: Vec<KeyCopy>,
+    pub path: Option<PathBuf>,
+    saved: Project,
+    pub saving: bool,
+    pub request_open: bool,
+    pub close_after_save: bool,
+    pub recovery: Option<Project>,
+    recovery_ready: bool,
+    recovery_active: std::sync::Arc<std::sync::Mutex<bool>>,
+    pub exporting: bool,
+    export_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub editor: Editor,
     pub frame: Frame,
     pub playing: bool,
@@ -85,6 +118,19 @@ pub(crate) struct EditorState {
 impl Default for EditorState {
     fn default() -> Self {
         Self {
+            selected_layers: BTreeSet::new(),
+            selected_keys: BTreeSet::new(),
+            clipboard: Vec::new(),
+            path: None,
+            saved: Project::default(),
+            saving: false,
+            request_open: false,
+            close_after_save: false,
+            recovery: None,
+            recovery_ready: false,
+            recovery_active: std::sync::Arc::new(std::sync::Mutex::new(true)),
+            exporting: false,
+            export_cancel: Default::default(),
             editor: Editor::default(),
             frame: 0,
             playing: false,
@@ -114,6 +160,17 @@ impl EditorState {
             .max(2)
     }
     fn normalize(&mut self) {
+        let comp = self.editor.project().composition();
+        self.selected_layers.retain(|id| comp.layer(*id).is_some());
+        self.selected_keys.retain(|k| {
+            comp.layer(k.id)
+                .is_some_and(|l| l.property(k.property).keys().contains_key(&k.frame))
+        });
+        if self.selected_layers.is_empty()
+            && let Some(id) = self.editor.selected()
+        {
+            self.selected_layers.insert(id);
+        }
         if self.graph_key.is_some_and(|(id, frame)| {
             self.editor.selected() != Some(id)
                 || !self
@@ -141,6 +198,165 @@ impl EditorState {
 
     pub fn dispatch(&mut self, action: &Action, window: &mut Window, cx: &mut Context<Self>) {
         match action {
+            Action::SelectMany(id, toggle, range) => {
+                let comp = self.editor.project().composition();
+                if *range {
+                    let a = comp
+                        .layers()
+                        .iter()
+                        .position(|l| Some(l.id()) == self.editor.selected());
+                    let b = comp.layers().iter().position(|l| l.id() == *id);
+                    if let (Some(a), Some(b)) = (a, b) {
+                        self.selected_layers
+                            .extend(comp.layers()[a.min(b)..=a.max(b)].iter().map(|l| l.id()));
+                    }
+                } else if *toggle {
+                    if !self.selected_layers.remove(id) {
+                        self.selected_layers.insert(*id);
+                    }
+                } else {
+                    self.selected_layers.clear();
+                    self.selected_layers.insert(*id);
+                }
+                if self.selected_layers.contains(id) {
+                    self.editor.select(*id);
+                } else if let Some(id) = self.selected_layers.first() {
+                    self.editor.select(*id);
+                } else {
+                    self.editor.clear_selection();
+                }
+                self.selected_keys.clear();
+            }
+            Action::CopyKeys => {
+                self.clipboard = self
+                    .selected_keys
+                    .iter()
+                    .filter_map(|k| {
+                        self.editor
+                            .project()
+                            .composition()
+                            .layer(k.id)?
+                            .property(k.property)
+                            .keys()
+                            .get(&k.frame)
+                            .map(|data| KeyCopy {
+                                key: *k,
+                                data: data.clone(),
+                            })
+                    })
+                    .collect();
+                self.status = format!("Copied {} keyframes", self.clipboard.len());
+            }
+            Action::PasteKeys => {
+                let single = self
+                    .clipboard
+                    .iter()
+                    .map(|k| k.key.id)
+                    .collect::<BTreeSet<_>>()
+                    .len()
+                    == 1;
+                let target = if single { self.editor.selected() } else { None };
+                let first = self.clipboard.iter().map(|k| k.key.frame).min();
+                let command = Command::PasteKeys {
+                    keys: self.clipboard.clone(),
+                    frame: self.frame,
+                    target,
+                };
+                self.dispatch(&Action::Edit(command), window, cx);
+                if self.status.starts_with("Edited")
+                    && let Some(first) = first
+                {
+                    self.selected_keys = self
+                        .clipboard
+                        .iter()
+                        .map(|k| KeyRef {
+                            id: target.unwrap_or(k.key.id),
+                            property: k.key.property,
+                            frame: self.frame + (k.key.frame - first),
+                        })
+                        .collect();
+                    self.selected_layers = self.selected_keys.iter().map(|k| k.id).collect();
+                }
+            }
+            Action::DeleteSelection => {
+                let command = if !self.selected_keys.is_empty() {
+                    Command::DeleteKeys(self.selected_keys.iter().copied().collect())
+                } else {
+                    // Detach children first, including selected ones, to keep deletion atomic.
+                    let mut commands = Vec::new();
+                    for l in self.editor.project().composition().layers() {
+                        if l.parent()
+                            .is_some_and(|id| self.selected_layers.contains(&id))
+                        {
+                            commands.push(Command::SetParent {
+                                id: l.id(),
+                                parent: None,
+                                frame: self.frame,
+                            });
+                        }
+                    }
+                    commands.extend(
+                        self.selected_layers
+                            .iter()
+                            .copied()
+                            .map(Command::RemoveLayer),
+                    );
+                    Command::Batch(commands)
+                };
+                self.dispatch(&Action::Edit(command), window, cx);
+            }
+            Action::DuplicateSelection => {
+                let original: BTreeSet<_> = self
+                    .editor
+                    .project()
+                    .composition()
+                    .layers()
+                    .iter()
+                    .map(|l| l.id())
+                    .collect();
+                self.dispatch(
+                    &Action::Edit(Command::Batch(
+                        self.selected_layers
+                            .iter()
+                            .copied()
+                            .map(Command::DuplicateLayer)
+                            .collect(),
+                    )),
+                    window,
+                    cx,
+                );
+                if self.status.starts_with("Edited") {
+                    self.selected_layers = self
+                        .editor
+                        .project()
+                        .composition()
+                        .layers()
+                        .iter()
+                        .map(|l| l.id())
+                        .filter(|id| !original.contains(id))
+                        .collect();
+                    self.selected_keys.clear();
+                }
+            }
+            Action::AddText => self.dispatch(
+                &Action::Edit(Command::AddContent {
+                    content: Content::Text {
+                        text: "Text".into(),
+                        font_size: 72.0,
+                    },
+                    width: 640.0,
+                    height: 120.0,
+                    name: "Text".into(),
+                }),
+                window,
+                cx,
+            ),
+            Action::ImportImage => self.import(cx),
+            Action::ExportFrame => self.export(false, cx),
+            Action::ExportSequence => self.export(true, cx),
+            Action::CancelExport => self
+                .export_cancel
+                .store(true, std::sync::atomic::Ordering::Relaxed),
             Action::ToggleGraph => self.graph_open = !self.graph_open,
             Action::ZoomTimeline(factor) => {
                 self.timeline_zoom = (self.timeline_zoom * factor).clamp(1.0, 64.0);
@@ -198,12 +414,21 @@ impl EditorState {
             }
             Action::Edit(command) => {
                 self.stop();
+                let before = self.editor.selected();
                 self.status = match self.editor.execute(command.clone()) {
-                    Ok(()) => "Edited — use Save as to keep your changes.".into(),
+                    Ok(()) => "Edited".into(),
                     Err(error) => error,
                 };
+                if before != self.editor.selected() {
+                    self.selected_layers.clear();
+                }
             }
-            Action::Select(id) => self.editor.select(*id),
+            Action::Select(id) => {
+                self.editor.select(*id);
+                self.selected_layers.clear();
+                self.selected_layers.insert(*id);
+                self.selected_keys.clear();
+            }
             Action::Seek(frame) => {
                 self.stop();
                 self.frame = (*frame).min(self.editor.project().composition().duration() - 1);
@@ -238,23 +463,30 @@ impl EditorState {
                 self.frame = self
                     .frame
                     .min(self.editor.project().composition().duration() - 1);
-                self.status = "History updated — use Save as to keep your changes.".into();
+                self.status = "History updated".into();
             }
             Action::New => {
                 self.stop();
                 match self.editor.replace_project(Project::default()) {
                     Ok(()) => {
+                        self.path = None;
+                        self.saved = Project::default();
+                        self.editor.clear_history();
+                        self.selected_layers.clear();
+                        self.selected_keys.clear();
                         self.frame = 0;
                         self.work_start = 0;
                         self.work_end = 150;
                         self.timeline_start = 0;
-                        self.status = "New composition. Undo restores the previous project.".into();
+                        self.status = "New composition".into();
                     }
                     Err(error) => self.status = error,
                 }
             }
             Action::Open => self.open(cx),
+            Action::RequestOpen => self.request_open = true,
             Action::SaveAs => self.save_as(cx),
+            Action::Save => self.save(cx),
         }
         self.normalize();
         cx.notify();
@@ -277,89 +509,6 @@ impl EditorState {
                 state.schedule_frame(generation, window, cx);
             }
         });
-    }
-
-    fn open(&mut self, cx: &mut Context<Self>) {
-        self.stop();
-        let prompt = cx.prompt_for_paths(PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: false,
-            prompt: Some("Open Libre Effects project (.lfe.json)".into()),
-        });
-        cx.spawn(async move |entity, cx| {
-            let path = match prompt.await {
-                Ok(Ok(Some(paths))) => paths.into_iter().next(),
-                Ok(Ok(None)) => return,
-                error => {
-                    let _ = entity.update(cx, |state, cx| {
-                        state.status = format!("Could not open file picker: {error:?}");
-                        cx.notify();
-                    });
-                    return;
-                }
-            };
-            let Some(path) = path else {
-                return;
-            };
-            let result = cx
-                .background_executor()
-                .spawn(async move { read_project(&path) })
-                .await;
-            let _ = entity.update(cx, |state, cx| {
-                match result.and_then(|project| state.editor.replace_project(project)) {
-                    Ok(()) => {
-                        state.stop();
-                        state.frame = 0;
-                        state.work_start = 0;
-                        state.work_end = state.editor.project().composition().duration();
-                        state.timeline_start = 0;
-                        state.status = "Project opened. Undo restores the previous project.".into();
-                    }
-                    Err(error) => state.status = format!("Open failed: {error}"),
-                }
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
-    fn save_as(&mut self, cx: &mut Context<Self>) {
-        self.stop();
-        let json = match self.editor.project().to_json() {
-            Ok(json) => json,
-            Err(error) => {
-                self.status = error;
-                return;
-            }
-        };
-        let directory = std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf());
-        let prompt = cx.prompt_for_new_path(&directory, Some("Untitled.lfe.json"));
-        cx.spawn(async move |entity, cx| {
-            let path = match prompt.await {
-                Ok(Ok(Some(path))) => path,
-                Ok(Ok(None)) => return,
-                error => {
-                    let _ = entity.update(cx, |state, cx| {
-                        state.status = format!("Could not open save dialog: {error:?}");
-                        cx.notify();
-                    });
-                    return;
-                }
-            };
-            let result = cx
-                .background_executor()
-                .spawn(async move { write_project(&path, &json) })
-                .await;
-            let _ = entity.update(cx, |state, cx| {
-                state.status = match result {
-                    Ok(()) => "Saved the project snapshot from when Save as was clicked.".into(),
-                    Err(error) => format!("Save failed: {error}"),
-                };
-                cx.notify();
-            });
-        })
-        .detach();
     }
 }
 

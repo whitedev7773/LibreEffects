@@ -7,6 +7,7 @@ mod components;
 mod editor;
 mod panels;
 mod project_io;
+mod rendering;
 mod shell;
 mod theme;
 mod ui;

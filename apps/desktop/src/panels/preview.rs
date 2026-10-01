@@ -15,11 +15,29 @@ struct MoveGesture {
     start: Point<Pixels>,
     delta: Point<Pixels>,
     layer: Option<LayerId>,
-    position: [f64; 2],
+    targets: Vec<(LayerId, [f64; 2], Affine)>,
     frame: u32,
     zoom: f32,
     pan: Point<Pixels>,
-    inverse_space: Affine,
+}
+fn move_command(g: &MoveGesture) -> Command {
+    Command::Batch(
+        g.targets
+            .iter()
+            .map(|(id, position, space)| {
+                let d = space.vector([
+                    f32::from(g.delta.x) as f64 / g.zoom as f64,
+                    f32::from(g.delta.y) as f64 / g.zoom as f64,
+                ]);
+                Command::SetPosition {
+                    id: *id,
+                    frame: g.frame,
+                    x: position[0] + d[0],
+                    y: position[1] + d[1],
+                }
+            })
+            .collect(),
+    )
 }
 pub(crate) struct Preview {
     state: Entity<EditorState>,
@@ -27,6 +45,12 @@ pub(crate) struct Preview {
     pan: Point<Pixels>,
     gesture: Option<MoveGesture>,
     focus: FocusHandle,
+    renderer: crate::rendering::Renderer,
+    cached: Option<(
+        libre_effects_core::Project,
+        u32,
+        std::sync::Arc<gpui::RenderImage>,
+    )>,
 }
 fn point_in_quad(p: [f64; 2], corners: [[f64; 2]; 4]) -> bool {
     let mut positive = false;
@@ -69,6 +93,8 @@ impl Preview {
             pan: point(px(0.0), px(0.0)),
             gesture: None,
             focus: cx.focus_handle(),
+            renderer: crate::rendering::Renderer::new(),
+            cached: None,
         }
     }
     fn down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -97,7 +123,7 @@ impl Preview {
                     .corners_at(layer.id(), frame)
                     .is_some_and(|corners| point_in_quad(p, corners))
         });
-        let (layer, position) = hit.map_or((None, [0.0, 0.0]), |layer| {
+        let (layer, _) = hit.map_or((None, [0.0, 0.0]), |layer| {
             (
                 Some(layer.id()),
                 [
@@ -113,21 +139,54 @@ impl Preview {
         if !hand && inverse_space.is_none() {
             return;
         }
+        if !hand && let Some(id) = layer {
+            self.state.update(cx, |s, cx| {
+                if event.modifiers.control
+                    || event.modifiers.shift
+                    || !s.selected_layers.contains(&id)
+                {
+                    s.dispatch(
+                        &Action::SelectMany(id, event.modifiers.control, event.modifiers.shift),
+                        window,
+                        cx,
+                    );
+                }
+            });
+        }
+        let state = self.state.read(cx);
+        let comp = state.editor.project().composition();
+        let candidates: Vec<_> = comp
+            .layers()
+            .iter()
+            .filter(|l| state.selected_layers.contains(&l.id()) && !l.locked())
+            .collect();
+        let targets = candidates
+            .iter()
+            .filter(|l| {
+                !candidates.iter().any(|parent| {
+                    parent.id() != l.id() && !comp.can_parent(parent.id(), Some(l.id()))
+                })
+            })
+            .filter_map(|l| {
+                Some((
+                    l.id(),
+                    [
+                        l.property(Property::PositionX).value_at(frame),
+                        l.property(Property::PositionY).value_at(frame),
+                    ],
+                    comp.position_space(l.id(), frame)?.inverse()?,
+                ))
+            })
+            .collect();
         if hand || layer.is_some() {
             self.gesture = Some(MoveGesture {
                 start: event.position,
                 delta: point(px(0.0), px(0.0)),
                 layer: if hand { None } else { layer },
-                position,
+                targets,
                 frame,
                 zoom,
                 pan: self.pan,
-                inverse_space: inverse_space.unwrap_or_default(),
-            });
-        }
-        if !hand && let Some(id) = layer {
-            self.state.update(cx, |state, cx| {
-                state.dispatch(&Action::Select(id), window, cx)
             });
         }
         cx.notify();
@@ -146,38 +205,23 @@ impl Preview {
     }
     fn up(&mut self, _: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(gesture) = self.gesture.take() {
-            if let Some(id) = gesture.layer.filter(|_| {
-                f32::from(gesture.delta.x).abs() + f32::from(gesture.delta.y).abs() > 1.0
-            }) {
-                let delta = gesture.inverse_space.vector([
-                    f32::from(gesture.delta.x) as f64 / gesture.zoom as f64,
-                    f32::from(gesture.delta.y) as f64 / gesture.zoom as f64,
-                ]);
-                let x = gesture.position[0] + delta[0];
-                let y = gesture.position[1] + delta[1];
-                self.state.update(cx, |state, cx| {
-                    state.dispatch(
-                        &Action::Edit(Command::SetPosition {
-                            id,
-                            frame: gesture.frame,
-                            x,
-                            y,
-                        }),
-                        window,
-                        cx,
-                    )
-                });
+            if gesture.layer.is_some()
+                && f32::from(gesture.delta.x).abs() + f32::from(gesture.delta.y).abs() > 1.0
+            {
+                let command = move_command(&gesture);
+                self.state
+                    .update(cx, |s, cx| s.dispatch(&Action::Edit(command), window, cx));
             }
             cx.notify();
         }
     }
 }
 impl Render for Preview {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.state.read(cx);
         let comp = state.editor.project().composition().clone();
         let frame = state.frame;
-        let selected = state.editor.selected();
+        let selected = state.selected_layers.clone();
         let zoom = state.preview_zoom;
         let checker = state.checkerboard;
         let hand = state.tool == Tool::Hand;
@@ -185,6 +229,37 @@ impl Render for Preview {
         let time = timecode(frame, comp.fps());
         let pan = self.pan;
         let gesture = self.gesture.clone();
+        let mut render_project = state.editor.project().clone();
+        if let Some(g) = &gesture
+            && g.layer.is_some()
+        {
+            let mut temporary = libre_effects_core::Editor::default();
+            let _ = temporary.replace_project(render_project.clone());
+            let _ = temporary.execute(move_command(g));
+            render_project = temporary.project().clone();
+        }
+        if self
+            .cached
+            .as_ref()
+            .is_none_or(|(p, f, _)| p != &render_project || *f != frame)
+        {
+            if let Some((_, _, old)) = self.cached.take() {
+                let _ = window.drop_image(old);
+            }
+            if let Ok(mut pixels) = self.renderer.render(&render_project, frame, 1280) {
+                for pixel in pixels.pixels_mut() {
+                    pixel.0.swap(0, 2);
+                }
+                self.cached = Some((
+                    render_project,
+                    frame,
+                    std::sync::Arc::new(gpui::RenderImage::new(vec![image::Frame::new(pixels)])),
+                ));
+            } else {
+                self.cached = None;
+            }
+        }
+        let rendered = self.cached.as_ref().map(|(_, _, image)| image.clone());
         let measured = self.bounds.clone();
         div()
             .flex()
@@ -283,6 +358,15 @@ impl Render for Preview {
                                                     }
                                                 }
                                             }
+                                            if let Some(image) = rendered.clone() {
+                                                let _ = window.paint_image(
+                                                    stage,
+                                                    Default::default(),
+                                                    image,
+                                                    0,
+                                                    false,
+                                                );
+                                            }
                                             for layer in
                                                 comp.layers().iter().rev().filter(|layer| {
                                                     layer.active_at(frame, comp.duration())
@@ -292,8 +376,8 @@ impl Render for Preview {
                                                     .as_ref()
                                                     // Descendants move with a dragged parent, including hidden parents.
                                                     .filter(|g| {
-                                                        g.layer.is_some_and(|id| {
-                                                            !comp.can_parent(id, Some(layer.id()))
+                                                        g.targets.iter().any(|(id, _, _)| {
+                                                            !comp.can_parent(*id, Some(layer.id()))
                                                         })
                                                     })
                                                     .map_or(point(px(0.0), px(0.0)), |g| g.delta);
@@ -310,23 +394,7 @@ impl Render for Preview {
                                                                 + delta.y,
                                                         )
                                                     });
-                                                let mut shape = PathBuilder::fill();
-                                                shape.move_to(corners[0]);
-                                                for p in &corners[1..] {
-                                                    shape.line_to(*p);
-                                                }
-                                                shape.close();
-                                                let mut color = rgb(layer.color());
-                                                color.a = (layer
-                                                    .property(Property::Opacity)
-                                                    .value_at(frame)
-                                                    .clamp(0.0, 100.0)
-                                                    / 100.0)
-                                                    as f32;
-                                                if let Ok(path) = shape.build() {
-                                                    window.paint_path(path, color);
-                                                }
-                                                if selected == Some(layer.id()) {
+                                                if selected.contains(&layer.id()) {
                                                     let mut outline = PathBuilder::stroke(px(1.0));
                                                     outline.move_to(corners[0]);
                                                     for p in &corners[1..] {

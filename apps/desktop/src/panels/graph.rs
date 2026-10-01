@@ -384,12 +384,19 @@ impl Graph {
             }
             self.state.update(cx, |s, cx| {
                 s.graph_key = Some((id, frame));
+                s.selected_keys = std::iter::once(libre_effects_core::KeyRef {
+                    id,
+                    property,
+                    frame,
+                })
+                .collect();
                 s.dispatch(&Action::Seek(frame), window, cx);
             });
         } else {
             let (frame, _) = view.value(bounds, event.position);
             self.state.update(cx, |s, cx| {
                 s.graph_key = None;
+                s.selected_keys.clear();
                 s.dispatch(&Action::Seek(frame.max(0.0).round() as u32), window, cx);
             });
         }

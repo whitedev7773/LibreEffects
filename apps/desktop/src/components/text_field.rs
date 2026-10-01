@@ -8,6 +8,9 @@ use std::{ops::Range, rc::Rc};
 
 type Commit = Rc<dyn Fn(&str, &mut Window, &mut App)>;
 
+struct ActiveField(gpui::WeakEntity<TextField>);
+impl gpui::Global for ActiveField {}
+
 /// Single-line Unicode input. Changes are committed together on Enter/blur;
 /// Escape restores the original value without an editing command.
 pub(crate) struct TextField {
@@ -21,9 +24,18 @@ pub(crate) struct TextField {
     bounds: Option<Bounds<Pixels>>,
     blur: Option<Subscription>,
     commit: Commit,
+    numeric: bool,
+    scrub: Option<(Pixels, f64)>,
+    scrubbed: bool,
 }
 
 impl TextField {
+    pub fn commit_active(window: &mut Window, cx: &mut App) {
+        let field = cx.try_global::<ActiveField>().map(|f| f.0.clone());
+        if let Some(field) = field {
+            let _ = field.update(cx, |field, cx| field.submit(window, cx));
+        }
+    }
     pub fn new(
         cx: &mut Context<Self>,
         commit: impl Fn(&str, &mut Window, &mut App) + 'static,
@@ -39,7 +51,17 @@ impl TextField {
             bounds: None,
             blur: None,
             commit: Rc::new(commit),
+            numeric: false,
+            scrub: None,
+            scrubbed: false,
         }
+    }
+    pub fn numeric(mut self) -> Self {
+        self.numeric = true;
+        self
+    }
+    pub fn set_numeric(&mut self) {
+        self.numeric = true;
     }
     pub fn sync(&mut self, binding: String, value: String, window: &Window) {
         if binding != self.binding || !self.focus.is_focused(window) {
@@ -52,6 +74,23 @@ impl TextField {
     }
     pub fn value(&self) -> &str {
         &self.content
+    }
+    fn scrub_to(&mut self, x: Pixels, shift: bool, alt: bool) {
+        if let Some((origin, value)) = self.scrub {
+            let delta = f32::from(x - origin) as f64;
+            if delta.abs() > 3.0 || self.scrubbed {
+                self.scrubbed = true;
+                let step = if shift {
+                    10.0
+                } else if alt {
+                    0.1
+                } else {
+                    1.0
+                };
+                self.content = format!("{:.2}", value + delta * step);
+                self.selection = 0..self.content.len();
+            }
+        }
     }
     fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.content != self.original {
@@ -91,7 +130,18 @@ impl TextField {
     }
     fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let key = event.keystroke.key.as_str();
+        if key == "escape" {
+            self.scrub = None;
+            self.scrubbed = false;
+        }
         let control = event.keystroke.modifiers.control || event.keystroke.modifiers.platform;
+        if (control && matches!(key, "s" | "o" | "n"))
+            || (event.keystroke.modifiers.alt && key == "f4")
+        {
+            self.submit(window, cx);
+            window.blur();
+            return;
+        }
         cx.stop_propagation();
         if control {
             match key {
@@ -275,6 +325,9 @@ impl EntityInputHandler for TextField {
 
 impl Render for TextField {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.focus.is_focused(window) {
+            cx.set_global(ActiveField(cx.entity().downgrade()));
+        }
         if self.blur.is_none() {
             self.blur = Some(cx.on_blur(&self.focus.clone(), window, |this, window, cx| {
                 this.submit(window, cx)
@@ -296,12 +349,28 @@ impl Render for TextField {
             .focus(|s| s.border_color(rgb(ui::BLUE)))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _, window, cx| {
+                cx.listener(|this, event: &gpui::MouseDownEvent, window, cx| {
                     window.focus(&this.focus);
+                    cx.set_global(ActiveField(cx.entity().downgrade()));
+                    if this.numeric {
+                        this.scrub = this
+                            .content
+                            .parse::<f64>()
+                            .ok()
+                            .map(|v| (event.position.x, v));
+                        this.scrubbed = false;
+                    }
                     this.selection = 0..this.content.len();
+                    cx.stop_propagation();
                     cx.notify();
                 }),
             )
+            .on_mouse_down_out(cx.listener(|this, _: &gpui::MouseDownEvent, window, cx| {
+                // Commit during capture, before another control changes the bound layer.
+                if this.focus.is_focused(window) {
+                    this.submit(window, cx);
+                }
+            }))
             .on_key_down(cx.listener(Self::key))
             .child(
                 canvas(
@@ -354,6 +423,54 @@ impl Render for TextField {
                             field.line = Some(line);
                             field.bounds = Some(bounds);
                         });
+                        // Register even before a gesture starts: a fast drag can deliver
+                        // move/up before the next paint after mouse-down.
+                        {
+                            let moving = input.clone();
+                            window.on_mouse_event(
+                                move |event: &gpui::MouseMoveEvent, phase, _, cx| {
+                                    if !phase.bubble()
+                                        || event.pressed_button != Some(MouseButton::Left)
+                                    {
+                                        return;
+                                    }
+                                    moving.update(cx, |this, cx| {
+                                        if this.scrub.is_some() {
+                                            this.scrub_to(
+                                                event.position.x,
+                                                event.modifiers.shift,
+                                                event.modifiers.alt,
+                                            );
+                                            cx.notify();
+                                        }
+                                    });
+                                },
+                            );
+                            let ending = input.clone();
+                            window.on_mouse_event(
+                                move |event: &gpui::MouseUpEvent, phase, window, cx| {
+                                    if !phase.bubble() || event.button != MouseButton::Left {
+                                        return;
+                                    }
+                                    ending.update(cx, |this, cx| {
+                                        if this.scrub.is_none() {
+                                            return;
+                                        }
+                                        this.scrub_to(
+                                            event.position.x,
+                                            event.modifiers.shift,
+                                            event.modifiers.alt,
+                                        );
+                                        this.scrub = None;
+                                        if this.scrubbed {
+                                            this.scrubbed = false;
+                                            this.submit(window, cx);
+                                        }
+                                        cx.notify();
+                                    });
+                                },
+                            );
+                        }
                     },
                 )
                 .size_full(),

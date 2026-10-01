@@ -20,6 +20,10 @@ pub(crate) struct Shell {
     settings_error: String,
     fields: Vec<Entity<TextField>>,
     help: bool,
+    closing: bool,
+    pending_document: Option<Action>,
+    pending_save: bool,
+    modal_active: bool,
 }
 
 impl Shell {
@@ -66,9 +70,29 @@ impl Shell {
                 .map(|_| cx.new(|cx| TextField::new(cx, |_, _, _| {})))
                 .collect(),
             help: false,
+            closing: false,
+            pending_document: None,
+            pending_save: false,
+            modal_active: false,
         }
     }
-    fn dispatch(&self, action: Action, window: &mut Window, cx: &mut Context<Self>) {
+    fn dispatch(&mut self, action: Action, window: &mut Window, cx: &mut Context<Self>) {
+        if matches!(action, Action::New | Action::Open) {
+            if self.state.read(cx).saving {
+                self.state.update(cx, |s, cx| {
+                    s.status = "Wait for the current save to finish.".into();
+                    cx.notify();
+                });
+                return;
+            }
+            if self.state.read(cx).dirty() {
+                self.pending_document = Some(action);
+                self.pending_save = false;
+                self.menu = None;
+                cx.notify();
+                return;
+            }
+        }
         self.state
             .update(cx, |state, cx| state.dispatch(&action, window, cx));
     }
@@ -132,6 +156,10 @@ impl Shell {
         let key = event.keystroke.key.as_str();
         let m = event.keystroke.modifiers;
         if key == "escape" {
+            self.closing = false;
+            self.pending_document = None;
+            self.pending_save = false;
+            self.state.update(cx, |s, _| s.close_after_save = false);
             self.menu = None;
             self.settings = false;
             self.help = false;
@@ -139,18 +167,29 @@ impl Shell {
             cx.notify();
             return;
         }
-        if self.settings || self.help {
+        if self.settings
+            || self.help
+            || self.closing
+            || self.pending_document.is_some()
+            || self.state.read(cx).recovery.is_some()
+        {
             return;
         }
-        let selected = self.state.read(cx).editor.selected();
         let action = if m.control {
             match key {
                 "n" => Some(Action::New),
                 "o" => Some(Action::Open),
-                "s" => Some(Action::SaveAs),
+                "s" => Some(if m.shift {
+                    Action::SaveAs
+                } else {
+                    Action::Save
+                }),
+                "i" => Some(Action::ImportImage),
+                "c" => Some(Action::CopyKeys),
+                "v" => Some(Action::PasteKeys),
                 "z" => Some(if m.shift { Action::Redo } else { Action::Undo }),
                 "y" => Some(Action::Edit(Command::AddRectangle)),
-                "d" => selected.map(|id| Action::Edit(Command::DuplicateLayer(id))),
+                "d" => Some(Action::DuplicateSelection),
                 "k" => {
                     self.open_settings(window, cx);
                     None
@@ -174,7 +213,7 @@ impl Shell {
                 )),
                 "pageup" => Some(Action::Step(if m.shift { -10 } else { -1 })),
                 "pagedown" => Some(Action::Step(if m.shift { 10 } else { 1 })),
-                "delete" | "backspace" => selected.map(|id| Action::Edit(Command::RemoveLayer(id))),
+                "delete" | "backspace" => Some(Action::DeleteSelection),
                 "v" => Some(Action::SetTool(Tool::Select)),
                 "h" => Some(Action::SetTool(Tool::Hand)),
                 "p" => Some(Action::Filter(Some(PropertyFilter::Position))),
@@ -202,12 +241,63 @@ impl Shell {
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !self.initialized {
+            self.state.update(cx, |s, cx| s.start_recovery(cx));
+            let weak = cx.entity().downgrade();
+            window.on_window_should_close(cx, move |window, cx| {
+                TextField::commit_active(window, cx);
+                // Commit an active field on blur before deciding whether the document
+                // can close. Otherwise an uncommitted typed value could be lost.
+                if weak.update(cx, |s, _| window.focus(&s.focus)).is_err() {
+                    return true;
+                }
+                let weak = weak.clone();
+                window.defer(cx, move |window, cx| {
+                    let _ = weak.update(cx, |s, cx| {
+                        if s.state.read(cx).dirty() || s.state.read(cx).saving {
+                            s.closing = true;
+                            cx.notify();
+                        } else {
+                            s.state.read(cx).clear_recovery();
+                            window.remove_window();
+                        }
+                    });
+                });
+                false
+            });
             window.focus(&self.focus);
             cx.on_focus_lost(window, |this, window, _| window.focus(&this.focus))
                 .detach();
             self.initialized = true;
         }
+        if self.state.read(cx).request_open {
+            self.state.update(cx, |s, _| s.request_open = false);
+            self.dispatch(Action::Open, window, cx);
+        }
+        if self.pending_save && !self.state.read(cx).saving {
+            self.pending_save = false;
+            if !self.state.read(cx).dirty() {
+                if let Some(action) = self.pending_document.take() {
+                    self.state
+                        .update(cx, |s, cx| s.dispatch(&action, window, cx));
+                }
+            }
+        }
         let state = self.state.read(cx);
+        let title = format!(
+            "{}{} — Libre Effects",
+            if state.dirty() { "* " } else { "" },
+            state
+                .path
+                .as_ref()
+                .and_then(|p| p.file_name())
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or("Untitled".into())
+        );
+        window.set_window_title(&title);
+        if state.close_after_save && !state.saving && !state.dirty() {
+            state.clear_recovery();
+            window.remove_window();
+        }
         let selected = state.editor.selected();
         let tool = state.tool;
         let status = state.status.clone();
@@ -313,9 +403,9 @@ impl Render for Shell {
                     .child(ui::action_tool(
                         "save",
                         "floppy-disk",
-                        "Save project as (Ctrl+S)",
+                        "Save project (Ctrl+S)",
                         &self.state,
-                        Action::SaveAs,
+                        Action::Save,
                         false,
                     ))
                     .child(div().flex_1())
@@ -346,23 +436,31 @@ impl Render for Shell {
                 "File" => vec![
                     ("New project", "Ctrl+N", Some(Action::New)),
                     ("Open project…", "Ctrl+O", Some(Action::Open)),
-                    ("Save project as…", "Ctrl+S", Some(Action::SaveAs)),
+                    ("Save", "Ctrl+S", Some(Action::Save)),
+                    ("Save as…", "Ctrl+Shift+S", Some(Action::SaveAs)),
+                    ("Import image…", "Ctrl+I", Some(Action::ImportImage)),
+                    ("Export current frame (PNG)…", "", Some(Action::ExportFrame)),
+                    (
+                        "Render work area (PNG sequence)…",
+                        "",
+                        Some(Action::ExportSequence),
+                    ),
+                    ("Cancel render", "", Some(Action::CancelExport)),
                 ],
                 "Edit" => vec![
+                    ("Copy keyframes", "Ctrl+C", Some(Action::CopyKeys)),
+                    ("Paste keyframes", "Ctrl+V", Some(Action::PasteKeys)),
                     ("Undo", "Ctrl+Z", Some(Action::Undo)),
                     ("Redo", "Ctrl+Shift+Z", Some(Action::Redo)),
                     (
                         "Duplicate layer",
                         "Ctrl+D",
-                        selected.map(|id| Action::Edit(Command::DuplicateLayer(id))),
+                        selected.map(|_| Action::DuplicateSelection),
                     ),
-                    (
-                        "Delete layer",
-                        "Delete",
-                        selected.map(|id| Action::Edit(Command::RemoveLayer(id))),
-                    ),
+                    ("Delete selection", "Delete", Some(Action::DeleteSelection)),
                 ],
                 "Layer" => vec![
+                    ("New text", "", Some(Action::AddText)),
                     (
                         "New rectangle",
                         "Ctrl+Y",
@@ -371,7 +469,7 @@ impl Render for Shell {
                     (
                         "Duplicate layer",
                         "Ctrl+D",
-                        selected.map(|id| Action::Edit(Command::DuplicateLayer(id))),
+                        selected.map(|_| Action::DuplicateSelection),
                     ),
                     (
                         "Toggle visibility",
@@ -546,6 +644,11 @@ impl Render for Shell {
                     "V / H — Selection / Hand tool",
                     "Ctrl+Y — New rectangle    Ctrl+D — Duplicate",
                     "Ctrl+Z / Ctrl+Shift+Z — Undo / Redo",
+                    "Ctrl+S / Ctrl+Shift+S — Save / Save as",
+                    "Ctrl+I — Import image    Ctrl+C / Ctrl+V — Copy / Paste keys",
+                    "Ctrl / Shift click — Toggle / Range select layers",
+                    "Drag empty time area — Box select keys or layers",
+                    "Drag a number — Scrub value (Shift: faster, Alt: finer)",
                     "Ctrl+K — Composition settings",
                     "Space — Play / Pause    Home / End — Seek",
                     "Page Up / Down — Step frame (Shift: 10 frames)",
@@ -580,6 +683,91 @@ impl Render for Shell {
                         .child(dialog),
                 )
                 .with_priority(3),
+            );
+        }
+        let recovering = self.state.read(cx).recovery.is_some();
+        let modal = self.closing || self.pending_document.is_some() || recovering;
+        if modal && !self.modal_active {
+            window.focus(&self.focus);
+        }
+        self.modal_active = modal;
+        if modal {
+            let mut dialog = div()
+                .w(px(450.0))
+                .p_5()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .bg(rgb(ui::PANEL))
+                .border_1()
+                .border_color(rgb(ui::BLUE))
+                .child(if recovering {
+                    "An autosaved project is available."
+                } else if self.closing {
+                    "Save changes before closing?"
+                } else {
+                    "Save changes before switching projects?"
+                });
+            if recovering {
+                for (label, restore) in [("Restore autosave", true), ("Discard autosave", false)] {
+                    dialog = dialog.child(ui::text_button(label, label).on_click(cx.listener(
+                        move |this, _, _, cx| this.state.update(cx, |s, cx| s.recover(restore, cx)),
+                    )));
+                }
+            } else {
+                dialog = dialog
+                    .child(ui::text_button("close-save", "Save and continue").on_click(
+                        cx.listener(|this, _, window, cx| {
+                            this.pending_save = this.pending_document.is_some();
+                            this.state.update(cx, |s, cx| {
+                                s.close_after_save = this.closing;
+                                s.dispatch(&Action::Save, window, cx);
+                            });
+                        }),
+                    ))
+                    .child(
+                        ui::text_button("close-discard", "Discard changes").on_click(cx.listener(
+                            |this, _, window, cx| {
+                                if this.state.read(cx).saving {
+                                    return;
+                                }
+                                if this.closing {
+                                    this.state.read(cx).clear_recovery();
+                                    window.remove_window();
+                                } else if let Some(action) = this.pending_document.take() {
+                                    this.pending_save = false;
+                                    this.state
+                                        .update(cx, |s, cx| s.dispatch(&action, window, cx));
+                                }
+                                cx.notify();
+                            },
+                        )),
+                    )
+                    .child(
+                        ui::text_button("close-cancel", "Cancel").on_click(cx.listener(
+                            |this, _, _, cx| {
+                                this.closing = false;
+                                this.pending_document = None;
+                                this.pending_save = false;
+                                this.state.update(cx, |s, _| s.close_after_save = false);
+                                cx.notify();
+                            },
+                        )),
+                    );
+            }
+            root = root.child(
+                gpui::deferred(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(gpui::rgba(0x00000090))
+                        .occlude()
+                        .child(dialog),
+                )
+                .with_priority(5),
             );
         }
         root
