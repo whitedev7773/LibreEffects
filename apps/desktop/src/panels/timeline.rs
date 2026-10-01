@@ -7,7 +7,9 @@ use gpui::{
     Bounds, Context, Entity, FocusHandle, MouseButton, MouseMoveEvent, MouseUpEvent, Pixels,
     SharedString, Window, canvas, div, fill, point, prelude::*, px, relative, rgb, size,
 };
-use libre_effects_core::{Command, KeyRef, LayerId, LayerSwitch, Property};
+use libre_effects_core::{
+    Command, KeyRef, LayerId, LayerSwitch, Property, PropertyPath, TrackEdit,
+};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::{cell::Cell, rc::Rc};
@@ -21,7 +23,7 @@ struct KeyDrag {
 pub(crate) struct Timeline {
     left: f32,
     resizing: bool,
-    fields: BTreeMap<(LayerId, Property), Entity<TextField>>,
+    fields: BTreeMap<(LayerId, PropertyPath), Entity<TextField>>,
     parent_open: Option<LayerId>,
     bar_drag: Option<(Vec<LayerId>, i32, u32, i64)>,
     marquee: Option<(gpui::Point<Pixels>, gpui::Point<Pixels>)>,
@@ -35,7 +37,7 @@ pub(crate) struct Timeline {
     focus: FocusHandle,
     scrubbing: bool,
     drag: Option<KeyDrag>,
-    selected_key: Option<(LayerId, Property, u32)>,
+    selected_key: Option<(LayerId, PropertyPath, u32)>,
 }
 fn frame_at(x: f32, left: f32, width: f32, start: u32, visible: u32, duration: u32) -> u32 {
     (start + (((x - left) / width.max(1.0)).clamp(0.0, 1.0) * visible as f32).round() as u32)
@@ -217,6 +219,13 @@ impl Timeline {
                             k
                         })
                         .collect();
+                    s.graph_key = s
+                        .selected_keys
+                        .iter()
+                        .find(|key| {
+                            key.property == s.graph_property && s.editor.selected() == Some(key.id)
+                        })
+                        .map(|key| (key.id, key.frame));
                 }
             });
         }
@@ -266,6 +275,8 @@ impl Render for Timeline {
         let selected_layers = state.selected_layers.clone();
         let selected_keys = state.selected_keys.clone();
         let comp = state.editor.project().composition().clone();
+        self.fields
+            .retain(|(id, p), _| comp.layer(*id).is_some_and(|l| l.track(*p).is_some()));
         let graph_open = state.graph_open;
         let graph_property = state.graph_property;
         let frame = state.frame;
@@ -628,60 +639,132 @@ impl Render for Timeline {
                     .when(!graph_open, |s| s.child(time_area)),
             );
             if selected_row && expanded {
-                rows = rows.child(
-                    div()
-                        .flex()
-                        .h(px(24.0))
-                        .flex_none()
-                        .child(
-                            div()
-                                .w(px(left))
-                                .flex_none()
-                                .pl(px(128.0))
-                                .flex()
-                                .gap_2()
-                                .items_center()
-                                .text_color(rgb(ui::MUTED))
-                                .child(ui::icon("chevron-down"))
-                                .child("Transform"),
-                        )
-                        .child(
-                            div()
-                                .relative()
-                                .flex_1()
-                                .h_full()
-                                .child(grid(start, visible, frame)),
-                        ),
-                );
-                for (label, properties) in [
+                if filter != Some(PropertyFilter::Animated)
+                    || Property::ALL
+                        .into_iter()
+                        .any(|p| !layer.property(p).keys().is_empty())
+                {
+                    rows = rows.child(
+                        div()
+                            .flex()
+                            .h(px(24.0))
+                            .flex_none()
+                            .child(
+                                div()
+                                    .w(px(left))
+                                    .flex_none()
+                                    .pl(px(128.0))
+                                    .flex()
+                                    .gap_2()
+                                    .items_center()
+                                    .text_color(rgb(ui::MUTED))
+                                    .child(ui::icon("chevron-down"))
+                                    .child("Transform"),
+                            )
+                            .child(
+                                div()
+                                    .relative()
+                                    .flex_1()
+                                    .h_full()
+                                    .child(grid(start, visible, frame)),
+                            ),
+                    );
+                }
+                let mut groups: Vec<(String, Vec<PropertyPath>)> = [
                     ("Anchor Point", vec![Property::AnchorX, Property::AnchorY]),
                     ("Position", vec![Property::PositionX, Property::PositionY]),
                     ("Scale", vec![Property::ScaleX, Property::ScaleY]),
                     ("Rotation", vec![Property::Rotation]),
                     ("Opacity", vec![Property::Opacity]),
-                ] {
+                ]
+                .into_iter()
+                .map(|(label, properties)| {
+                    (
+                        label.to_string(),
+                        properties.into_iter().map(Into::into).collect(),
+                    )
+                })
+                .collect();
+                for effect in layer.effect_stack() {
+                    for param in effect.kind().parameters() {
+                        groups.push((
+                            param.label.to_string(),
+                            vec![PropertyPath::Effect {
+                                effect: effect.id(),
+                                parameter: param.parameter,
+                            }],
+                        ));
+                    }
+                }
+                let mut last_effect = None;
+                for (label, properties) in groups {
                     if filter.is_some_and(|f| {
                         !properties.iter().any(|p| {
-                            f.includes(*p)
-                                && (f != PropertyFilter::Animated
-                                    || !layer.property(*p).keys().is_empty())
+                            (match p {
+                                PropertyPath::Transform(p) => f.includes(*p),
+                                PropertyPath::Effect { .. } => f == PropertyFilter::Animated,
+                            }) && (f != PropertyFilter::Animated
+                                || !layer.track(*p).expect("visible property").keys().is_empty())
                         })
                     }) {
                         continue;
                     }
-                    let prop_id =
-                        |suffix: &str| SharedString::from(format!("prop-{id}-{label}-{suffix}"));
+                    if let PropertyPath::Effect { effect, .. } = properties[0] {
+                        if last_effect != Some(effect) {
+                            last_effect = Some(effect);
+                            let name = layer
+                                .effect_stack()
+                                .iter()
+                                .find(|e| e.id() == effect)
+                                .map(|e| e.name())
+                                .unwrap_or("Effect");
+                            rows = rows.child(
+                                div()
+                                    .flex()
+                                    .h(px(24.0))
+                                    .flex_none()
+                                    .child(
+                                        div()
+                                            .w(px(left))
+                                            .flex_none()
+                                            .pl(px(128.0))
+                                            .text_color(rgb(ui::MUTED))
+                                            .overflow_hidden()
+                                            .child(format!("Effects · {name}")),
+                                    )
+                                    .when(!graph_open, |s| {
+                                        s.child(
+                                            div()
+                                                .relative()
+                                                .flex_1()
+                                                .h_full()
+                                                .child(grid(start, visible, frame)),
+                                        )
+                                    }),
+                            );
+                        }
+                    }
+                    let prop_id = |suffix: &str| {
+                        SharedString::from(format!("prop-{id}-{:?}-{suffix}", properties[0]))
+                    };
                     let animated = properties
                         .iter()
-                        .any(|p| !layer.property(*p).keys().is_empty());
+                        .any(|p| !layer.track(*p).expect("visible property").keys().is_empty());
                     let watch = Command::Batch(
                         properties
                             .iter()
-                            .filter(|p| layer.property(**p).keys().is_empty() == !animated)
-                            .map(|p| Command::ToggleAnimation {
+                            .filter(|p| {
+                                layer
+                                    .track(**p)
+                                    .expect("visible property")
+                                    .keys()
+                                    .is_empty()
+                                    == !animated
+                            })
+                            .map(|p| Command::EditTrack {
                                 id,
                                 property: *p,
-                                frame,
+                                edit: TrackEdit::ToggleAnimation { frame },
                             })
                             .collect(),
                     );
@@ -702,7 +785,9 @@ impl Render for Timeline {
                             animated,
                         ))
                         .child(
-                            ui::text_button(prop_id("label"), label)
+                            ui::text_button(prop_id("label"), label.clone())
+                                .min_w_0()
+                                .overflow_hidden()
                                 .flex_1()
                                 .justify_start()
                                 .text_size(px(11.0))
@@ -729,11 +814,13 @@ impl Render for Timeline {
                                         edit.update(cx, |s, cx| {
                                             if let Ok(value) = text.parse::<f64>() {
                                                 s.dispatch(
-                                                    &Action::Edit(Command::SetValue {
+                                                    &Action::Edit(Command::EditTrack {
                                                         id,
                                                         property,
-                                                        frame: s.frame,
-                                                        value,
+                                                        edit: TrackEdit::Value {
+                                                            frame: s.frame,
+                                                            value,
+                                                        },
                                                     }),
                                                     window,
                                                     cx,
@@ -751,7 +838,13 @@ impl Render for Timeline {
                         input.update(cx, |field, _| {
                             field.sync(
                                 format!("{id}-{frame}"),
-                                format!("{:.2}", layer.property(property).value_at(frame)),
+                                format!(
+                                    "{:.2}",
+                                    layer
+                                        .track(property)
+                                        .expect("visible property")
+                                        .value_at(frame)
+                                ),
                                 window,
                             )
                         });
@@ -762,19 +855,23 @@ impl Render for Timeline {
                                     if properties.len() == 2 {
                                         if matches!(
                                             property,
-                                            Property::PositionX
-                                                | Property::AnchorX
-                                                | Property::ScaleX
+                                            PropertyPath::Transform(
+                                                Property::PositionX
+                                                    | Property::AnchorX
+                                                    | Property::ScaleX
+                                            )
                                         ) {
                                             "X"
                                         } else {
                                             "Y"
                                         }
                                     } else {
-                                        if property == Property::Opacity {
+                                        if property == Property::Opacity.into() {
                                             "%"
-                                        } else {
+                                        } else if property == Property::Rotation.into() {
                                             "°"
+                                        } else {
+                                            ""
                                         }
                                     },
                                 )
@@ -801,14 +898,23 @@ impl Render for Timeline {
                                     .when(layer.locked(), |s| {
                                         s.child(format!(
                                             "{:.1}",
-                                            layer.property(property).value_at(frame)
+                                            layer
+                                                .track(property)
+                                                .expect("visible property")
+                                                .value_at(frame)
                                         ))
                                     }),
                             );
                     }
                     let at_frame: Vec<_> = properties
                         .iter()
-                        .filter(|p| layer.property(**p).keys().contains_key(&frame))
+                        .filter(|p| {
+                            layer
+                                .track(**p)
+                                .expect("visible property")
+                                .keys()
+                                .contains_key(&frame)
+                        })
                         .copied()
                         .collect();
                     let toggle = if at_frame.is_empty() {
@@ -824,10 +930,10 @@ impl Render for Timeline {
                         Action::Edit(Command::Batch(
                             toggle
                                 .into_iter()
-                                .map(|property| Command::ToggleKeyframe {
+                                .map(|property| Command::EditTrack {
                                     id,
                                     property,
-                                    frame,
+                                    edit: TrackEdit::ToggleKey { frame },
                                 })
                                 .collect(),
                         )),
@@ -841,12 +947,25 @@ impl Render for Timeline {
                         .child(grid(start, visible, frame));
                     let frames: BTreeSet<_> = properties
                         .iter()
-                        .flat_map(|p| layer.property(*p).keys().keys().copied())
+                        .flat_map(|p| {
+                            layer
+                                .track(*p)
+                                .expect("visible property")
+                                .keys()
+                                .keys()
+                                .copied()
+                        })
                         .collect();
                     for key_frame in frames {
                         let key_refs: Vec<_> = properties
                             .iter()
-                            .filter(|p| layer.property(**p).keys().contains_key(&key_frame))
+                            .filter(|p| {
+                                layer
+                                    .track(**p)
+                                    .expect("visible property")
+                                    .keys()
+                                    .contains_key(&key_frame)
+                            })
                             .map(|p| KeyRef {
                                 id,
                                 property: *p,

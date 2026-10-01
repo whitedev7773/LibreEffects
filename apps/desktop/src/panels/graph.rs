@@ -8,7 +8,9 @@ use gpui::{
     MouseUpEvent, PathBuilder, Pixels, Point, SharedString, Window, canvas, div, fill, point,
     prelude::*, px, relative, rgb, size,
 };
-use libre_effects_core::{AnimatedProperty, Bezier, Command, Interpolation, LayerId, Property};
+use libre_effects_core::{
+    AnimatedProperty, Bezier, Command, Interpolation, LayerId, PropertyPath, TrackEdit,
+};
 use std::{cell::Cell, rc::Rc};
 
 #[derive(Clone, Copy)]
@@ -110,7 +112,7 @@ impl HandleSpace {
 enum Drag {
     Key {
         id: LayerId,
-        property: Property,
+        property: PropertyPath,
         from: u32,
         to: u32,
         value: f64,
@@ -121,7 +123,7 @@ enum Drag {
     },
     Handle {
         id: LayerId,
-        property: Property,
+        property: PropertyPath,
         frame: u32,
         index: usize,
         curve: Bezier,
@@ -139,7 +141,7 @@ pub(crate) struct Graph {
     fields: Vec<Entity<TextField>>,
     details: bool,
 }
-fn selected(state: &EditorState) -> Option<(LayerId, u32, Property)> {
+fn selected(state: &EditorState) -> Option<(LayerId, u32, PropertyPath)> {
     let (id, frame) = state.graph_key?;
     (state.editor.selected() == Some(id)
         && state
@@ -147,7 +149,7 @@ fn selected(state: &EditorState) -> Option<(LayerId, u32, Property)> {
             .project()
             .composition()
             .layer(id)?
-            .property(state.graph_property)
+            .track(state.graph_property)?
             .keys()
             .contains_key(&frame))
     .then_some((id, frame, state.graph_property))
@@ -159,7 +161,7 @@ fn curve_at(state: &EditorState) -> Option<Bezier> {
         .project()
         .composition()
         .layer(id)?
-        .property(property);
+        .track(property)?;
     track.keys().range(frame + 1..).next()?;
     Some(match track.keys()[&frame].interpolation {
         Interpolation::Bezier(b) => b,
@@ -183,6 +185,13 @@ fn dispatch_key(
 ) {
     state.dispatch(&Action::Edit(command), window, cx);
     if state.status.starts_with("Edited") {
+        state.selected_layers = [id].into();
+        state.selected_keys = [libre_effects_core::KeyRef {
+            id,
+            property: state.graph_property,
+            frame: to,
+        }]
+        .into();
         state.graph_key = Some((id, to));
         state.frame = to;
         cx.notify();
@@ -244,7 +253,8 @@ impl Graph {
                                     .composition()
                                     .layer(id)
                                     .unwrap()
-                                    .property(property);
+                                    .track(property)
+                                    .expect("selected graph track");
                                 let to = if index == 0 { value as u32 } else { frame };
                                 let value = if index == 1 {
                                     value
@@ -253,12 +263,14 @@ impl Graph {
                                 };
                                 dispatch_key(
                                     state,
-                                    Command::EditKeyframe {
+                                    Command::EditTrack {
                                         id,
                                         property,
-                                        from: frame,
-                                        to,
-                                        value,
+                                        edit: TrackEdit::Keyframe {
+                                            from: frame,
+                                            to,
+                                            value,
+                                        },
                                     },
                                     id,
                                     to,
@@ -273,11 +285,13 @@ impl Graph {
                                     _ => curve.y2 = value,
                                 };
                                 state.dispatch(
-                                    &Action::Edit(Command::SetInterpolation {
+                                    &Action::Edit(Command::EditTrack {
                                         id,
                                         property,
-                                        frame,
-                                        interpolation: Interpolation::Bezier(curve),
+                                        edit: TrackEdit::Interpolate {
+                                            frame,
+                                            interpolation: Interpolation::Bezier(curve),
+                                        },
                                     }),
                                     window,
                                     cx,
@@ -302,11 +316,13 @@ impl Graph {
         self.state.update(cx, |state, cx| {
             if let Some((id, frame, property)) = selected(state) {
                 state.dispatch(
-                    &Action::Edit(Command::SetInterpolation {
+                    &Action::Edit(Command::EditTrack {
                         id,
                         property,
-                        frame,
-                        interpolation,
+                        edit: TrackEdit::Interpolate {
+                            frame,
+                            interpolation,
+                        },
                     }),
                     window,
                     cx,
@@ -325,7 +341,9 @@ impl Graph {
         };
         let id = layer.id();
         let property = state.graph_property;
-        let track = layer.property(property);
+        let Some(track) = layer.track(property) else {
+            return;
+        };
         let view = view(track, state.timeline_start, state.visible_frames());
         let hit = track
             .keys()
@@ -535,12 +553,10 @@ impl Graph {
                     ..
                 } => dispatch_key(
                     state,
-                    Command::EditKeyframe {
+                    Command::EditTrack {
                         id,
                         property,
-                        from,
-                        to,
-                        value,
+                        edit: TrackEdit::Keyframe { from, to, value },
                     },
                     id,
                     to,
@@ -554,11 +570,13 @@ impl Graph {
                     curve,
                     ..
                 } => state.dispatch(
-                    &Action::Edit(Command::SetInterpolation {
+                    &Action::Edit(Command::EditTrack {
                         id,
                         property,
-                        frame,
-                        interpolation: Interpolation::Bezier(curve),
+                        edit: TrackEdit::Interpolate {
+                            frame,
+                            interpolation: Interpolation::Bezier(curve),
+                        },
                     }),
                     window,
                     cx,
@@ -631,10 +649,10 @@ impl Render for Graph {
                     this.state.update(cx, |state, cx| {
                         if let Some((id, frame, property)) = selected(state) {
                             state.dispatch(
-                                &Action::Edit(Command::ToggleKeyframe {
+                                &Action::Edit(Command::EditTrack {
                                     id,
                                     property,
-                                    frame,
+                                    edit: TrackEdit::ToggleKey { frame },
                                 }),
                                 window,
                                 cx,
@@ -657,12 +675,14 @@ impl Render for Graph {
                 "diamond",
                 "Add / remove key at current frame",
                 &self.state,
-                Action::Edit(Command::ToggleKeyframe {
+                Action::Edit(Command::EditTrack {
                     id: layer.id(),
                     property,
-                    frame: current,
+                    edit: TrackEdit::ToggleKey { frame: current },
                 }),
-                layer.property(property).keys().contains_key(&current),
+                layer
+                    .track(property)
+                    .is_some_and(|t| t.keys().contains_key(&current)),
             ));
         }
         for (label, interpolation) in [
@@ -711,7 +731,9 @@ impl Render for Graph {
                     .child("Select a layer in the timeline to edit its animation."),
             );
         };
-        let track = layer.property(property).clone();
+        let Some(track) = layer.track(property).cloned() else {
+            return root.child(div().p_4().child("Select a property in the timeline."));
+        };
         let mut graph_view = view(&track, start, span);
         if let Some(Drag::Key { view, .. }) = &self.drag {
             graph_view = *view;
@@ -1018,7 +1040,17 @@ impl Render for Graph {
                 },
             )),
         );
-        root.child(chart).child(toolbar).when(self.details, |s| {
+        root.child(
+            div()
+                .h(px(23.0))
+                .flex_none()
+                .px_2()
+                .text_color(rgb(ui::MUTED))
+                .child(layer.track_label(property).unwrap_or_default()),
+        )
+        .child(chart)
+        .child(toolbar)
+        .when(self.details, |s| {
             s.child(gpui::deferred(
                 easing.absolute().right_0().bottom(px(30.0)).occlude(),
             ))

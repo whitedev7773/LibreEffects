@@ -18,8 +18,10 @@ mod geometry;
 mod layer_workflow;
 pub use layer_workflow::{LayerClipboard, LayerSwitch};
 mod precompositions;
+mod tracks;
 pub use editing::{Content, Effects, KeyCopy, KeyRef, Mask, VideoPlayback};
 pub use geometry::{Affine, Bezier};
+pub use tracks::{PropertyPath, TrackEdit};
 
 #[derive(Clone, Copy, Debug)]
 pub enum Alignment {
@@ -581,6 +583,11 @@ impl Project {
 /// The future scripting bridge and native controls both dispatch these commands.
 #[derive(Clone, Debug)]
 pub enum Command {
+    EditTrack {
+        id: LayerId,
+        property: PropertyPath,
+        edit: TrackEdit,
+    },
     Batch(Vec<Command>),
     Effect {
         id: LayerId,
@@ -926,6 +933,9 @@ impl Editor {
 }
 
 fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
+    if let Command::EditTrack { id, property, edit } = command {
+        return apply(state, tracks::command(id, property, edit));
+    }
     if let Command::Effect { id, edit } = command {
         return effects::apply(state, id, edit);
     }

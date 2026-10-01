@@ -111,13 +111,14 @@ pub struct Mask {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct KeyRef {
     pub id: LayerId,
-    pub property: Property,
+    pub property: PropertyPath,
     pub frame: Frame,
 }
 #[derive(Clone, Debug)]
 pub struct KeyCopy {
     pub key: KeyRef,
     pub data: Keyframe,
+    pub effect_kind: Option<EffectKind>,
 }
 
 pub(super) fn validate_content(
@@ -573,10 +574,7 @@ pub(super) fn apply_extended(
                 let duration = state.project.composition.duration;
                 let mut removed = Vec::new();
                 for key in keys.iter().copied().collect::<BTreeSet<_>>() {
-                    let track = editable(state, key.id)?
-                        .properties
-                        .get_mut(&key.property)
-                        .unwrap();
+                    let track = editable(state, key.id)?.track_mut(key.property)?;
                     let data = track
                         .keys
                         .remove(&key.frame)
@@ -585,10 +583,7 @@ pub(super) fn apply_extended(
                 }
                 for (key, data) in removed {
                     let to = shifted(key.frame, *delta, duration, false)?;
-                    let track = editable(state, key.id)?
-                        .properties
-                        .get_mut(&key.property)
-                        .unwrap();
+                    let track = editable(state, key.id)?.track_mut(key.property)?;
                     if track.keys.contains_key(&to) {
                         return Err("Destination already contains a key".into());
                     }
@@ -597,10 +592,7 @@ pub(super) fn apply_extended(
             }
             Command::DeleteKeys(keys) => {
                 for key in keys.iter().copied().collect::<BTreeSet<_>>() {
-                    let track = editable(state, key.id)?
-                        .properties
-                        .get_mut(&key.property)
-                        .unwrap();
+                    let track = editable(state, key.id)?.track_mut(key.property)?;
                     let value = track.value_at(key.frame);
                     track
                         .keys
@@ -624,10 +616,18 @@ pub(super) fn apply_extended(
                 let duration = state.project.composition.duration;
                 for key in keys {
                     let to = shifted(key.key.frame, *frame as i64 - first as i64, duration, false)?;
-                    let track = editable(state, target.unwrap_or(key.key.id))?
-                        .properties
-                        .get_mut(&key.key.property)
-                        .unwrap();
+                    let layer = editable(state, target.unwrap_or(key.key.id))?;
+                    if let PropertyPath::Effect { effect, .. } = key.key.property {
+                        let kind = layer
+                            .effect_stack
+                            .iter()
+                            .find(|e| e.id() == effect)
+                            .map(|e| e.kind());
+                        if kind.is_none() || kind != key.effect_kind {
+                            return Err("Paste requires a matching effect instance and kind on the target layer".into());
+                        }
+                    }
+                    let track = layer.track_mut(key.key.property)?;
                     if track.keys.contains_key(&to) {
                         return Err("Paste would overwrite a keyframe".into());
                     }

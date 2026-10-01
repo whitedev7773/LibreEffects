@@ -251,10 +251,16 @@ uses shaped glyph bounds so applying effects does not crop long or multiline tex
 Open `examples/effect-study.lfe.json` for animated blur, shadow and glow on point text.
 Regenerate it with `cargo run -p libre-effects-core --example make_effect_study -- examples/effect-study.lfe.json`.
 
-Mask values remain static. Effect parameter curves are edited in Effect Controls;
-the main timeline graph still shows transform channels. Preset saving, keyframe
-clipboard for effect parameters, Curves, Gradient and additional effect families
-remain in the backlog. The same
+Mask values remain static. Effect parameters also appear under their effect names
+in the timeline and participate in animated-property filtering, marquee selection,
+key dragging, Copy/Cut/Paste, Delete and previous/next key navigation. Click an
+Effect Controls parameter label to open its value graph. Graph key time/value and
+outgoing Bezier handles use the same validated commands as transform properties.
+Copying effect keys to another layer requires the same effect instance ID and kind;
+a missing or mismatched destination is rejected atomically. Effect IDs remain stable
+when the stack is reordered. Removing an effect clears stale key/graph selections.
+Preset saving, Curves, Gradient and additional effect families remain in the backlog.
+The same
 resvg compositor renders both the composition preview and exported frames,
 including text, images, parenting, interpolation, layer timing and alpha.
 

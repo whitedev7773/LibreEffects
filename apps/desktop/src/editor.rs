@@ -7,6 +7,7 @@ use std::{
 use gpui::{Context, ElementId, Entity, PathPromptOptions, SharedString, Window};
 use libre_effects_core::{
     Command, CompositionId, Content, Editor, Frame, KeyCopy, KeyRef, LayerId, Project, Property,
+    PropertyPath,
 };
 
 use crate::components::{Button, ButtonSize, ButtonVariant};
@@ -82,6 +83,7 @@ pub(crate) enum Action {
     ToggleExpanded,
     Filter(Option<PropertyFilter>),
     ToggleGraph,
+    GraphProperty(LayerId, PropertyPath),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -150,7 +152,7 @@ pub(crate) struct EditorState {
     pub property_filter: Option<PropertyFilter>,
     pub graph_open: bool,
     pub effect_controls_open: bool,
-    pub graph_property: Property,
+    pub graph_property: PropertyPath,
     pub graph_key: Option<(LayerId, Frame)>,
     playback_origin: Option<(Instant, Frame)>,
     playback_generation: u64,
@@ -194,7 +196,7 @@ impl Default for EditorState {
             property_filter: None,
             graph_open: false,
             effect_controls_open: false,
-            graph_property: Property::PositionX,
+            graph_property: Property::PositionX.into(),
             graph_key: None,
             playback_origin: None,
             playback_generation: 0,
@@ -229,13 +231,23 @@ impl EditorState {
         let comp = self.editor.project().composition();
         self.selected_layers.retain(|id| comp.layer(*id).is_some());
         self.selected_keys.retain(|k| {
-            comp.layer(k.id)
-                .is_some_and(|l| l.property(k.property).keys().contains_key(&k.frame))
+            comp.layer(k.id).is_some_and(|l| {
+                l.track(k.property)
+                    .is_some_and(|t| t.keys().contains_key(&k.frame))
+            })
         });
         if self.selected_layers.is_empty()
             && let Some(id) = self.editor.selected()
         {
             self.selected_layers.insert(id);
+        }
+        if self
+            .editor
+            .selected_layer()
+            .is_some_and(|l| l.track(self.graph_property).is_none())
+        {
+            self.graph_property = Property::PositionX.into();
+            self.graph_key = None;
         }
         if self.graph_key.is_some_and(|(id, frame)| {
             self.editor.selected() != Some(id)
@@ -244,7 +256,10 @@ impl EditorState {
                     .project()
                     .composition()
                     .layer(id)
-                    .is_some_and(|l| l.property(self.graph_property).keys().contains_key(&frame))
+                    .is_some_and(|l| {
+                        l.track(self.graph_property)
+                            .is_some_and(|t| t.keys().contains_key(&frame))
+                    })
         }) {
             self.graph_key = None;
         }
@@ -313,6 +328,23 @@ impl EditorState {
             window.blur();
         }
         match action {
+            Action::GraphProperty(id, property) => {
+                if self
+                    .editor
+                    .project()
+                    .composition()
+                    .layer(*id)
+                    .is_some_and(|l| l.track(*property).is_some())
+                {
+                    self.editor.select(*id);
+                    self.selected_layers = [*id].into();
+                    self.selected_keys.clear();
+                    self.graph_key = None;
+                    self.graph_property = *property;
+                    self.graph_open = true;
+                    self.expanded = true;
+                }
+            }
             Action::ToggleSelectedSwitch(switch) => {
                 let layers: Vec<_> = self
                     .editor
@@ -439,13 +471,7 @@ impl EditorState {
                             .project()
                             .composition()
                             .layer(k.id)?
-                            .property(k.property)
-                            .keys()
-                            .get(&k.frame)
-                            .map(|data| KeyCopy {
-                                key: *k,
-                                data: data.clone(),
-                            })
+                            .copy_key(k.property, k.frame)
                     })
                     .collect();
                 self.status = format!("Copied {} keyframes", self.clipboard.len());
@@ -663,9 +689,12 @@ impl EditorState {
                     .selected_layer()
                     .into_iter()
                     .flat_map(|layer| {
-                        libre_effects_core::Property::ALL
-                            .into_iter()
-                            .flat_map(|property| layer.property(property).keys().keys().copied())
+                        layer.track_paths().into_iter().flat_map(|p| {
+                            layer
+                                .track(p)
+                                .into_iter()
+                                .flat_map(|t| t.keys().keys().copied())
+                        })
                     })
                     .filter(|frame| {
                         if next {
@@ -834,6 +863,50 @@ pub(crate) fn timecode(frame: Frame, fps: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn removed_effect_keys_do_not_leave_stale_graph_or_selection_addresses() {
+        use libre_effects_core::{EffectEdit, EffectKind, EffectParam, TrackEdit};
+        let mut state = EditorState::default();
+        state.editor.execute(Command::AddRectangle).unwrap();
+        state
+            .editor
+            .execute(Command::Effect {
+                id: 1,
+                edit: EffectEdit::Add(EffectKind::GaussianBlur),
+            })
+            .unwrap();
+        let property = PropertyPath::Effect {
+            effect: 1,
+            parameter: EffectParam::Radius,
+        };
+        state
+            .editor
+            .execute(Command::EditTrack {
+                id: 1,
+                property,
+                edit: TrackEdit::ToggleKey { frame: 0 },
+            })
+            .unwrap();
+        state.graph_property = property;
+        state.graph_key = Some((1, 0));
+        state.selected_keys = [KeyRef {
+            id: 1,
+            property,
+            frame: 0,
+        }]
+        .into();
+        state
+            .editor
+            .execute(Command::Effect {
+                id: 1,
+                edit: EffectEdit::Remove(1),
+            })
+            .unwrap();
+        state.normalize();
+        assert!(state.selected_keys.is_empty());
+        assert_eq!(state.graph_key, None);
+        assert_eq!(state.graph_property, Property::PositionX.into());
+    }
     #[test]
     fn composition_navigation_is_not_dirty_and_history_resets_timeline() {
         let mut state = EditorState::default();

@@ -278,7 +278,33 @@ impl Render for EffectControls {
                             },
                             animated,
                         ))
-                        .child(div().flex_1().min_w_0().child(spec.label))
+                        .child(
+                            ui::text_button(
+                                SharedString::from(format!("{param_prefix}-graph")),
+                                spec.label,
+                            )
+                            .flex_1()
+                            .min_w_0()
+                            .justify_start()
+                            .on_click({
+                                let state = self.state.clone();
+                                move |_, window, cx| {
+                                    state.update(cx, |s, cx| {
+                                        s.dispatch(
+                                            &Action::GraphProperty(
+                                                id,
+                                                libre_effects_core::PropertyPath::Effect {
+                                                    effect: effect_id,
+                                                    parameter,
+                                                },
+                                            ),
+                                            window,
+                                            cx,
+                                        )
+                                    })
+                                }
+                            }),
+                        )
                         .child(
                             div()
                                 .w(px(63.0))

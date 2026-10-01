@@ -174,6 +174,9 @@ impl EffectInstance {
     pub fn parameter(&self, param: EffectParam) -> Option<&AnimatedProperty> {
         self.parameters.get(&param)
     }
+    pub(super) fn parameter_mut(&mut self, param: EffectParam) -> Option<&mut AnimatedProperty> {
+        self.parameters.get_mut(&param)
+    }
     pub fn value_at(&self, param: EffectParam, frame: Frame) -> f64 {
         let spec = self
             .kind
@@ -203,6 +206,13 @@ impl EffectInstance {
 
 #[derive(Clone, Debug)]
 pub enum EffectEdit {
+    EditKeyframe {
+        effect: EffectId,
+        parameter: EffectParam,
+        from: Frame,
+        to: Frame,
+        value: f64,
+    },
     Add(EffectKind),
     ConvertLegacy,
     Remove(EffectId),
@@ -318,6 +328,44 @@ pub(super) fn apply(state: &mut Snapshot, id: LayerId, edit: EffectEdit) -> Resu
         return Err("Null objects have no rendered pixels to affect".into());
     }
     match edit {
+        EffectEdit::EditKeyframe {
+            effect,
+            parameter,
+            from,
+            to,
+            value,
+        } => {
+            if to >= duration {
+                return Err("Effect keyframe is outside the composition".into());
+            }
+            let effect = layer
+                .effect_stack
+                .iter_mut()
+                .find(|e| e.id == effect)
+                .ok_or("Effect not found")?;
+            let spec = effect
+                .kind
+                .parameters()
+                .into_iter()
+                .find(|s| s.parameter == parameter)
+                .ok_or("Parameter not found")?;
+            if !spec.accepts(value) {
+                return Err(format!(
+                    "{} must be between {} and {}",
+                    spec.label, spec.min, spec.max
+                ));
+            }
+            let track = effect
+                .parameters
+                .get_mut(&parameter)
+                .ok_or("Parameter not found")?;
+            if from != to && track.keys.contains_key(&to) {
+                return Err("Destination already contains a key".into());
+            }
+            let mut key = track.keys.remove(&from).ok_or("Keyframe not found")?;
+            key.value = value;
+            track.keys.insert(to, key);
+        }
         EffectEdit::Add(kind) => {
             add(layer, kind)?;
         }

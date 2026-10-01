@@ -284,7 +284,7 @@ fn batch_key_move_handles_overlapping_sources_and_rolls_back_collisions() {
     let keys: Vec<_> = [10, 20]
         .map(|frame| KeyRef {
             id: 1,
-            property: Property::PositionX,
+            property: Property::PositionX.into(),
             frame,
         })
         .into();
@@ -340,9 +340,10 @@ fn key_clipboard_preserves_timing_interpolation_and_is_atomic() {
         .keys()[&10]
         .clone();
     let key = KeyCopy {
+        effect_kind: None,
         key: KeyRef {
             id: 1,
-            property: Property::PositionX,
+            property: Property::PositionX.into(),
             frame: 10,
         },
         data: data.clone(),
