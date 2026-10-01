@@ -29,6 +29,59 @@ impl Drop for Preview {
     }
 }
 impl Preview {
+    pub(super) fn watch_media(cx: &mut Context<Self>) {
+        cx.spawn(async move |entity, cx| {
+            let mut previous = None;
+            loop {
+                gpui::Timer::after(std::time::Duration::from_secs(1)).await;
+                let Ok((project, revision)) = entity.update(cx, |s, cx| {
+                    let state = s.state.read(cx);
+                    (state.editor.project().clone(), state.preview_revision)
+                }) else {
+                    return;
+                };
+                let snapshot = project.clone();
+                let stamp = cx
+                    .background_executor()
+                    .spawn(async move { crate::preview_cache::media_stamp(&snapshot) })
+                    .await;
+                let changed = previous
+                    .as_ref()
+                    .is_some_and(|(p, r, old)| p == &project && *r == revision && old != &stamp);
+                if changed {
+                    let _ = entity.update(cx, |s, cx| {
+                        s.state.update(cx, |state, cx| {
+                            if state.editor.project() == &project
+                                && state.preview_revision == revision
+                            {
+                                state.preview_revision = state.preview_revision.wrapping_add(1);
+                                cx.notify();
+                            }
+                        });
+                    });
+                }
+                previous = Some((project, revision, stamp));
+            }
+        })
+        .detach();
+    }
+    fn finish_warming(&mut self, message: &str, cx: &mut Context<Self>) {
+        self.warming = None;
+        self.state.update(cx, |s, cx| {
+            s.preview_caching = false;
+            s.status = message.to_string();
+            cx.notify();
+        });
+    }
+    fn publish_cache(&self, cx: &mut Context<Self>) {
+        let summary = self.ram.summary();
+        if self.state.read(cx).preview_cache != summary {
+            self.state.update(cx, |s, cx| {
+                s.preview_cache = summary;
+                cx.notify();
+            });
+        }
+    }
     pub(super) fn update_render(
         &mut self,
         request: Request,
@@ -37,97 +90,161 @@ impl Preview {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.revision != request.revision {
-            self.revision = request.revision;
+        let state = self.state.read(cx);
+        let limit = state.preview_cache_limit;
+        let caching = state.preview_caching;
+        let work = state.work_start..state.work_end;
+        let changed =
+            self.ram
+                .configure(&request.project, request.dimension, request.revision, limit);
+        if changed {
             self.failed = None;
+            self.raw = None;
             if let Some((_, _, _, old)) = self.cached.take() {
                 let _ = window.drop_image(old);
             }
         }
+        if !caching {
+            self.warming = None;
+        } else if self
+            .warming
+            .as_ref()
+            .is_some_and(|r| !r.same_context(&request))
+        {
+            self.finish_warming("RAM caching stopped after preview changed", cx);
+        } else if self.warming.is_none() {
+            self.warming = Some(request.clone());
+        }
         if let Some(pending) = &self.pending {
-            if !request.accepts(pending, playing) {
+            let prefill = self.warming.is_some() && request.same_context(pending);
+            if !prefill && !request.accepts(pending, playing) {
                 self.cancel.store(true, Ordering::Release);
             }
         }
         if let Some((ready, result)) = self.ready.take() {
-            if request.accepts(&ready, playing) {
+            if request.same_context(&ready) {
                 match result {
                     Ok(pixels) => {
-                        self.cache_pixels(
-                            ready.project,
-                            ready.frame,
-                            ready.dimension,
-                            pixels,
-                            channel,
-                            window,
-                        );
+                        let pixels = std::sync::Arc::new(pixels);
+                        self.ram.insert(ready.frame, pixels.clone());
+                        if request.accepts(&ready, playing) {
+                            self.cache_pixels(
+                                ready.project,
+                                ready.frame,
+                                ready.dimension,
+                                pixels,
+                                channel,
+                                window,
+                            );
+                        }
                         self.failed = None;
                     }
                     Err(error) => {
-                        if let Some((_, _, _, old)) = self.cached.take() {
-                            let _ = window.drop_image(old);
+                        if ready.frame == request.frame {
+                            self.raw = None;
+                            if let Some((_, _, _, old)) = self.cached.take() {
+                                let _ = window.drop_image(old);
+                            }
+                        }
+                        if self.warming.is_some() {
+                            self.finish_warming(
+                                &format!("RAM caching failed at frame {}: {error}", ready.frame),
+                                cx,
+                            );
                         }
                         self.failed = Some((ready.project, ready.frame, ready.dimension, error));
                     }
                 }
             }
         }
-        let current = self.cached.as_ref().is_some_and(|(p, f, d, _)| {
+        let mut current = self.cached.as_ref().is_some_and(|(p, f, d, _)| {
             p == &request.project && *f == request.frame && *d == request.dimension
         });
         if !current {
-            if self
-                .cached
-                .as_ref()
-                .is_some_and(|(p, _, d, _)| p != &request.project || *d != request.dimension)
-            {
-                if let Some((_, _, _, old)) = self.cached.take() {
-                    let _ = window.drop_image(old);
-                }
-            }
-            let failed = self.failed.as_ref().is_some_and(|(p, f, d, _)| {
-                p == &request.project && *f == request.frame && *d == request.dimension
-            });
-            if self.pending.is_none() && !failed {
-                self.pending = Some(request.clone());
-                self.cancel.store(false, Ordering::Release);
-                let renderer = self.renderer.clone();
-                let cancel = self.cancel.clone();
-                let reset = self.decoder_revision != request.revision;
-                self.decoder_revision = request.revision;
-                cx.spawn(async move |entity, cx| {
-                    let job = request.clone();
-                    let result = cx
-                        .background_executor()
-                        .spawn(async move {
-                            if reset {
-                                renderer.clear_decoders();
-                            }
-                            let result =
-                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                    renderer.render_preview(&job.project, job.frame, job.dimension)
-                                }))
-                                .unwrap_or_else(|_| Err("Composition preview failed".into()));
-                            if cancel.load(Ordering::Acquire) {
-                                renderer.clear_decoders();
-                            }
-                            result
-                        })
-                        .await;
-                    let _ = entity.update(cx, |s, cx| {
-                        s.pending = None;
-                        // A quality/gesture change can return to the original
-                        // request before cancellation finishes. Never cache a
-                        // canceled result as that now-valid request's error.
-                        if !s.cancel.load(Ordering::Acquire) {
-                            s.ready = Some((request, result));
-                        }
-                        cx.notify();
-                    });
-                })
-                .detach();
+            if let Some(pixels) = self.ram.get(request.frame) {
+                self.cache_pixels(
+                    request.project.clone(),
+                    request.frame,
+                    request.dimension,
+                    pixels,
+                    channel,
+                    window,
+                );
+                current = true;
             }
         }
+        self.publish_cache(cx);
+        if self.pending.is_some() {
+            return;
+        }
+        let failed = self.failed.as_ref().is_some_and(|(p, f, d, _)| {
+            p == &request.project && *f == request.frame && *d == request.dimension
+        });
+        let job = if !current && !failed {
+            Some(request)
+        } else if self.warming.is_some() {
+            match self.ram.next_missing(work) {
+                None => {
+                    self.finish_warming("Work area cached in RAM", cx);
+                    None
+                }
+                Some(frame) => {
+                    let bytes = self.raw.as_ref().map_or(usize::MAX, |p| p.as_raw().len());
+                    if self.ram.can_prefill(bytes) {
+                        Some(Request { frame, ..request })
+                    } else {
+                        self.finish_warming(
+                            "RAM cache full; reduce preview resolution or increase budget",
+                            cx,
+                        );
+                        None
+                    }
+                }
+            }
+        } else {
+            None
+        };
+        if let Some(request) = job {
+            self.start_render(request, cx);
+        }
+    }
+    fn start_render(&mut self, request: Request, cx: &mut Context<Self>) {
+        self.pending = Some(request.clone());
+        self.cancel.store(false, Ordering::Release);
+        let renderer = self.renderer.clone();
+        let cancel = self.cancel.clone();
+        let reset = self.decoder_revision != request.revision;
+        self.decoder_revision = request.revision;
+        cx.spawn(async move |entity, cx| {
+            let job = request.clone();
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    if reset {
+                        renderer.clear_decoders();
+                    }
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        renderer.render_preview(&job.project, job.frame, job.dimension)
+                    }))
+                    .unwrap_or_else(|_| Err("Composition preview failed".into()));
+                    if cancel.load(Ordering::Acquire) {
+                        renderer.clear_decoders();
+                    }
+                    result
+                })
+                .await;
+            let _ = entity.update(cx, |s, cx| {
+                s.pending = None;
+                // A quality/gesture change can return to the original
+                // request before cancellation finishes. Never cache a
+                // canceled result as that now-valid request's error.
+                if !s.cancel.load(Ordering::Acquire) {
+                    s.ready = Some((request, result));
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 }
 

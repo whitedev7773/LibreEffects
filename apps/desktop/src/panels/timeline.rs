@@ -387,6 +387,7 @@ impl Render for Timeline {
         let show_modes = left >= 540.0;
         let show_mattes = left >= 750.0;
         let state = self.state.read(cx);
+        let cached_ranges = state.preview_cache.ranges.clone();
         let selected_layers = state.selected_layers.clone();
         let selected_keys = state.selected_keys.clone();
         let comp = state.editor.project().composition().clone();
@@ -1687,6 +1688,19 @@ impl Render for Timeline {
                                         (start as f32 + visible as f32 * tick as f32 / 10.0)
                                             / comp.fps().as_f64() as f32
                                     ))
+                            }))
+                            .children(cached_ranges.iter().filter_map(|range| {
+                                let first = range.start.max(start);
+                                let end = range.end.min(start.saturating_add(visible));
+                                (first < end).then(|| {
+                                    div()
+                                        .absolute()
+                                        .left(relative((first - start) as f32 / visible as f32))
+                                        .w(relative((end - first) as f32 / visible as f32))
+                                        .bottom_0()
+                                        .h(px(3.0))
+                                        .bg(rgb(0x58bf96))
+                                })
                             }))
                             .when(frame >= start && frame <= start + visible, |s| {
                                 s.child(

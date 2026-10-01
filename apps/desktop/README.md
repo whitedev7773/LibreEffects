@@ -505,7 +505,8 @@ controls to put footage below a title, then save the project and render MP4/MOV.
   File size/mtime, source FPS and decoded dimensions participate in the cache key.
   Refresh footage and document/view revision changes clear preview decoders.
 - Playback may skip preview frames; output renders every frame. Whole-composition
-  RAM/disk caching and stable cached playback remain J02. A source-frame wait has
+  RAM frames can be prepared using Cache work area (see below); disk caching and
+  measured display latency remain J02/J03. A source-frame wait has
   a 15-second deadline, and cancellation/drop closes its pipe and reaps FFmpeg.
   Preview resolution does not reduce output quality. Thumbnail/import validation
   retains the separate one-shot decoder and 32 MiB / 24-frame cache.
@@ -513,6 +514,32 @@ controls to put footage below a title, then save the project and render MP4/MOV.
   Color processing is 8-bit RGBA and is
   not an HDR/color-managed workflow. Source files must stay unchanged during export;
   project snapshots preserve edits, not the external file bytes.
+
+### RAM preview cache
+
+The Preview panel offers **Cache work area**, **Stop caching**, **Clear**, and a
+RAM budget button cycling through 256 MiB (default), 512 MiB, Off, and 64 MiB.
+Playback and seeking also retain completed composition RGBA frames automatically.
+Green strips below the timeline ruler show resident frames, with exclusive end
+positions matching the work area. The panel reports frame count, pixel memory,
+and cache hits. Cache preparation does not advance the playhead or start audio;
+press Space to play when ready. Editing, seeking or starting playback cancels preparation.
+Clear removes resident frames and regenerates the current displayed frame.
+Preparation stops at capacity instead of evicting its own beginning. Reduce preview
+resolution or increase the budget for longer ranges. On-demand playback uses LRU.
+
+The limit applies to cached RGBA pixel buffers (also capped at 4096 frames), not
+total process memory: current display/channel buffers, GPU images, documents,
+source decoders and transient compositor allocations are separate. Raw frames
+are shared with the displayed sample, and preserve alpha across channel changes.
+Full-project edits, Undo/Redo, composition/document changes, preview quality and
+Refresh footage invalidate composition frames. Linked file size/mtime and missing
+files are scanned off the UI thread once per second after each completed scan;
+large sequence folders or network media can take longer. Use Refresh footage for
+replacements preserving both size and mtime. Cache contents, counters and the RAM
+budget are session-only and do not affect project history, saved output settings
+or final render quality. There is no disk cache yet. Cached playback still performs
+channel conversion/GPU upload; it is not a guarantee of realtime FPS or A/V latency.
 
 ### Decoder validation and performance
 
@@ -1143,7 +1170,7 @@ block meters are described below. MP4/MOV include the offline mix. Per-layer aud
 level/pan/fade animation and a measured-range meter are described below. Existing
 visual rendering and PNG output remain unchanged.
 
-Validation includes 232 ordinary tests plus 29 FFmpeg integration tests; the physical audio-device test is separate. Audio
+Validation includes 238 ordinary tests plus 29 FFmpeg integration tests; the physical audio-device test is separate. Audio
 coverage includes opposite-phase stereo, silence, chunk boundaries, delayed video
 sound, WAV/FLAC/MP3/AAC imports, mixed version-25 document serialization, timing and
 shared relinking. Native QA covered mixed import, audio-source composition creation,
@@ -1185,7 +1212,7 @@ size/modification changes between new chunks abort the job. Prepared mixed audio
 uses an automatically removed temporary file, up to 384,000 bytes per second of
 output (about 33.2 GB for 24 hours); disk/write failures leave the destination
 unchanged. The UI shows mixing progress before video frames. This is not yet the
-Windows device transport in H02 and persistent video decoding in J01; whole-composition RAM caching remains J02.
+Windows device transport in H02 and persistent video decoding in J01; whole-composition RAM caching is available in J02; disk caching remains pending.
 
 Current arbitrary-time sampling uses linear interpolation between 48 kHz PCM
 samples. High-speed retiming can alias: band-limited variable-rate resampling and
@@ -1288,7 +1315,7 @@ meters, not intersample true-peak or peak-hold measurements.
 Rational loop boundaries carry their sample remainder across repetitions. Preview
 and export share the source clock, but video decoding and display refresh still
 determine the latency of actual displayed images. Persistent video decoding is
-implemented in J01; RAM video preview remains J02. Device selection, hot-plug auto-recovery,
+implemented in J01; bounded RAM video preview is available in J02. Device selection, hot-plug auto-recovery,
 non-Windows audio backends and remembered preview preferences remain extensions.
 The current mixer still uses linear interpolation for arbitrary source times.
 

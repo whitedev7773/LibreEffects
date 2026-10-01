@@ -81,12 +81,13 @@ pub(crate) struct Preview {
     channels_open: bool,
     menu_focus: FocusHandle,
     menu_index: usize,
-    raw: Option<image::RgbaImage>,
+    raw: Option<std::sync::Arc<image::RgbaImage>>,
+    ram: crate::preview_cache::Cache,
+    warming: Option<Request>,
     display_channel: Channel,
     renderer: std::sync::Arc<crate::rendering::Renderer>,
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pending: Option<Request>,
-    revision: u64,
     decoder_revision: u64,
     ready: Option<(Request, Result<image::RgbaImage, String>)>,
     failed: Option<(libre_effects_core::Project, u32, u32, String)>,
@@ -162,6 +163,7 @@ impl Preview {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
         let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        Self::watch_media(cx);
         Self {
             state,
             bounds: Rc::new(Cell::new(None)),
@@ -173,12 +175,13 @@ impl Preview {
             menu_focus: cx.focus_handle(),
             menu_index: 0,
             raw: None,
+            ram: Default::default(),
+            warming: None,
             display_channel: Channel::Rgb,
             renderer: std::sync::Arc::new(crate::rendering::Renderer::with_cancel(cancel.clone())),
             cancel,
             pending: None,
             decoder_revision: 0,
-            revision: 0,
             ready: None,
             failed: None,
             cached: None,
@@ -227,7 +230,7 @@ impl Preview {
         project: libre_effects_core::Project,
         frame: u32,
         dimension: u32,
-        pixels: image::RgbaImage,
+        pixels: std::sync::Arc<image::RgbaImage>,
         channel: Channel,
         window: &mut Window,
     ) {

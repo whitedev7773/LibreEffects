@@ -55,6 +55,9 @@ pub(crate) enum Action {
     PreviewAudio,
     PreviewScrub,
     PreviewLoop,
+    CacheWorkArea,
+    CycleCacheBudget,
+    PurgePreviewCache,
     Undo,
     Redo,
     New,
@@ -191,6 +194,9 @@ pub(crate) struct EditorState {
     pub preview_audio: bool,
     pub preview_scrub: bool,
     pub preview_loop: bool,
+    pub preview_caching: bool,
+    pub preview_cache_limit: usize,
+    pub preview_cache: crate::preview_cache::Summary,
     pub audio_status: crate::audio_playback::Status,
     audio_session: Option<crate::audio_playback::Session>,
     pub status: String,
@@ -258,6 +264,9 @@ impl Default for EditorState {
             preview_audio: true,
             preview_scrub: false,
             preview_loop: true,
+            preview_caching: false,
+            preview_cache_limit: 256 * crate::preview_cache::MIB,
+            preview_cache: Default::default(),
             audio_status: crate::audio_playback::Status {
                 phase: crate::audio_playback::Phase::Ended,
                 ..Default::default()
@@ -388,6 +397,7 @@ impl EditorState {
             .min(duration.saturating_sub(self.visible_frames()));
     }
     fn stop(&mut self) {
+        self.preview_caching = false;
         self.audio_session = None;
         self.audio_status.phase = crate::audio_playback::Phase::Ended;
         self.audio_status.levels = Default::default();
@@ -1071,6 +1081,33 @@ impl EditorState {
                     i64::from(self.editor.project().composition().duration() - 1),
                 ) as Frame;
                 self.queue_scrub(window, cx);
+            }
+            Action::CacheWorkArea => {
+                let was_caching = self.preview_caching;
+                self.stop();
+                self.preview_caching = !was_caching && self.preview_cache_limit > 0;
+                self.status = if self.preview_caching {
+                    "Caching work area…"
+                } else {
+                    "RAM caching stopped"
+                }
+                .into();
+            }
+            Action::CycleCacheBudget => {
+                self.stop();
+                let mib = crate::preview_cache::MIB;
+                self.preview_cache_limit = match self.preview_cache_limit / mib {
+                    0 => 64 * mib,
+                    64 => 256 * mib,
+                    256 => 512 * mib,
+                    _ => 0,
+                };
+            }
+            Action::PurgePreviewCache => {
+                self.stop();
+                self.preview_revision = self.preview_revision.wrapping_add(1);
+                self.preview_cache = Default::default();
+                self.status = "RAM preview cache cleared".into();
             }
             Action::PreviewAudio => {
                 self.stop();

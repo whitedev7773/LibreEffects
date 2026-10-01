@@ -94,56 +94,134 @@ impl Render for Sidebar {
                         .child(self.catalog.clone())
                         .into_any_element(),
                     _ => div()
-                        .p_3()
-                        .flex()
-                        .flex_col()
-                        .gap_2()
+                        .id("preview-scroll")
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_y_scroll()
                         .child(
                             div()
+                                .p_3()
                                 .flex()
-                                .gap_1()
-                                .child(ui::action_tool(
-                                    "preview-first",
-                                    "arrow-left",
-                                    "First frame (Home)",
-                                    &self.state,
-                                    Action::Seek(0),
-                                    false,
-                                ))
-                                .child(ui::action_tool(
-                                    "preview-back",
-                                    "arrow-left",
-                                    "Previous frame",
-                                    &self.state,
-                                    Action::Step(-1),
-                                    false,
-                                ))
-                                .child(ui::action_tool(
-                                    "preview-play",
-                                    if playing { "pause" } else { "play" },
-                                    "Play / Pause (Space)",
-                                    &self.state,
-                                    Action::Play,
-                                    playing,
-                                ))
-                                .child(ui::action_tool(
-                                    "preview-next",
-                                    "arrow-right",
-                                    "Next frame",
-                                    &self.state,
-                                    Action::Step(1),
-                                    false,
-                                )),
+                                .flex_col()
+                                .gap_2()
+                                .child(
+                                    div()
+                                        .flex()
+                                        .gap_1()
+                                        .child(ui::action_tool(
+                                            "preview-first",
+                                            "arrow-left",
+                                            "First frame (Home)",
+                                            &self.state,
+                                            Action::Seek(0),
+                                            false,
+                                        ))
+                                        .child(ui::action_tool(
+                                            "preview-back",
+                                            "arrow-left",
+                                            "Previous frame",
+                                            &self.state,
+                                            Action::Step(-1),
+                                            false,
+                                        ))
+                                        .child(ui::action_tool(
+                                            "preview-play",
+                                            if playing { "pause" } else { "play" },
+                                            "Play / Pause (Space)",
+                                            &self.state,
+                                            Action::Play,
+                                            playing,
+                                        ))
+                                        .child(ui::action_tool(
+                                            "preview-next",
+                                            "arrow-right",
+                                            "Next frame",
+                                            &self.state,
+                                            Action::Step(1),
+                                            false,
+                                        )),
+                                )
+                                .child("Shortcut: Space")
+                                .child(work.clone())
+                                .child(preview_cache_controls(&self.state, cx))
+                                .child(preview_audio_controls(&self.state, cx)),
                         )
-                        .child("Shortcut: Space")
-                        .child(work.clone())
-                        .child(preview_audio_controls(&self.state, cx))
                         .into_any_element(),
                 });
             }
         }
         panel
     }
+}
+fn cache_button(
+    id: &'static str,
+    label: impl Into<gpui::SharedString>,
+    state: &Entity<EditorState>,
+    action: Action,
+) -> impl IntoElement {
+    let pointer_state = state.clone();
+    ui::text_button(id, label)
+        .justify_start()
+        .on_click(move |_, window, cx| {
+            pointer_state.update(cx, |s, cx| s.dispatch(&action, window, cx));
+        })
+        .on_key_down(|event, _, cx| {
+            // GPUI generates one keyboard click on key-up. Only suppress the
+            // shell's Space transport binding here; dispatching twice cancels
+            // cache preparation immediately.
+            if !event.keystroke.modifiers.modified()
+                && matches!(event.keystroke.key.as_str(), "enter" | "space")
+            {
+                cx.stop_propagation();
+            }
+        })
+}
+fn preview_cache_controls(state: &Entity<EditorState>, cx: &gpui::App) -> impl IntoElement {
+    let s = state.read(cx);
+    let controls = div()
+        .flex()
+        .gap_1()
+        .child(cache_button(
+            "cache-work-area",
+            if s.preview_caching {
+                "Stop caching"
+            } else {
+                "Cache work area"
+            },
+            state,
+            Action::CacheWorkArea,
+        ))
+        .child(cache_button(
+            "purge-preview-cache",
+            "Clear",
+            state,
+            Action::PurgePreviewCache,
+        ));
+    let limit = s.preview_cache_limit / crate::preview_cache::MIB;
+    let budget = if limit == 0 {
+        "RAM cache: Off".to_string()
+    } else {
+        format!("RAM cache: {limit} MiB")
+    };
+    let summary = format!(
+        "{} frames · {:.1} MiB · {} hits",
+        s.preview_cache.frames,
+        s.preview_cache.bytes as f64 / crate::preview_cache::MIB as f64,
+        s.preview_cache.hits
+    );
+    div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .text_size(px(10.0))
+        .child(controls)
+        .child(cache_button(
+            "preview-cache-budget",
+            budget,
+            state,
+            Action::CycleCacheBudget,
+        ))
+        .child(summary)
 }
 pub(crate) struct Align {
     state: Entity<EditorState>,

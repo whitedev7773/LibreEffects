@@ -23,6 +23,7 @@ mod matte_render;
 mod media_io;
 mod output_settings;
 mod panels;
+mod preview_cache;
 mod project_browser;
 mod project_io;
 mod recovery;
