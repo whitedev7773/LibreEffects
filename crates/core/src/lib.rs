@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 pub type Frame = u32;
 pub type LayerId = u64;
 
+mod editing;
 mod geometry;
+pub use editing::{Content, Effects, KeyCopy, KeyRef, Mask};
 pub use geometry::{Affine, Bezier};
 
 #[derive(Clone, Copy, Debug)]
@@ -159,6 +161,12 @@ impl AnimatedProperty {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Layer {
+    #[serde(default)]
+    content: Content,
+    #[serde(default)]
+    effects: Effects,
+    #[serde(default)]
+    mask: Option<Mask>,
     id: LayerId,
     name: String,
     visible: bool,
@@ -179,6 +187,21 @@ pub struct Layer {
 }
 
 impl Layer {
+    pub fn content(&self) -> &Content {
+        &self.content
+    }
+    pub fn effects(&self) -> Effects {
+        self.effects
+    }
+    pub fn mask(&self) -> Option<Mask> {
+        self.mask
+    }
+    pub fn width(&self) -> f64 {
+        self.width
+    }
+    pub fn height(&self) -> f64 {
+        self.height
+    }
     pub fn parent(&self) -> Option<LayerId> {
         self.parent
     }
@@ -374,7 +397,7 @@ impl Project {
 
     fn validate(&self) -> Result<(), String> {
         let comp = &self.composition;
-        if !(1..=2).contains(&self.version) {
+        if !(1..=3).contains(&self.version) {
             return Err("Unsupported project version".into());
         }
         if !(1..=16_384).contains(&comp.width)
@@ -389,6 +412,7 @@ impl Project {
         }
         let mut ids = BTreeSet::new();
         for layer in &comp.layers {
+            editing::validate_content(&layer.content, layer.effects, layer.mask)?;
             if layer.id == 0
                 || !layer.transform_offset.valid()
                 || !comp.can_parent(layer.id, layer.parent)
@@ -432,6 +456,43 @@ impl Project {
 /// The future scripting bridge and native controls both dispatch these commands.
 #[derive(Clone, Debug)]
 pub enum Command {
+    Batch(Vec<Command>),
+    AddContent {
+        content: Content,
+        width: f64,
+        height: f64,
+        name: String,
+    },
+    SetContent {
+        id: LayerId,
+        content: Content,
+    },
+    SetEffects {
+        id: LayerId,
+        effects: Effects,
+    },
+    SetMask {
+        id: LayerId,
+        mask: Option<Mask>,
+    },
+    SetColor {
+        id: LayerId,
+        color: u32,
+    },
+    ShiftLayer {
+        id: LayerId,
+        delta: i64,
+    },
+    MoveKeys {
+        keys: Vec<KeyRef>,
+        delta: i64,
+    },
+    DeleteKeys(Vec<KeyRef>),
+    PasteKeys {
+        keys: Vec<KeyCopy>,
+        frame: Frame,
+        target: Option<LayerId>,
+    },
     AddRectangle,
     AlignLayer {
         id: LayerId,
@@ -539,8 +600,15 @@ impl Editor {
             self.current.selected = Some(id);
         }
     }
+    pub fn clear_selection(&mut self) {
+        self.current.selected = None;
+    }
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()
+    }
+    pub fn clear_history(&mut self) {
+        self.undo.clear();
+        self.redo.clear();
     }
     pub fn can_redo(&self) -> bool {
         !self.redo.is_empty()
@@ -593,6 +661,12 @@ impl Editor {
         }) {
             next.project.version = 2;
         }
+        if next.project.composition.layers.iter().any(|l| {
+            l.content != Content::Rectangle || l.effects != Effects::default() || l.mask.is_some()
+        }) {
+            next.project.version = 3;
+        }
+        next.project.validate()?;
         if next != self.current {
             let previous = std::mem::replace(&mut self.current, next);
             self.record(previous);
@@ -602,6 +676,9 @@ impl Editor {
 }
 
 fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
+    if let Some(result) = editing::apply_extended(state, &command) {
+        return result;
+    }
     if let Command::AlignLayer {
         id,
         frame,
@@ -765,6 +842,9 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
         comp.layers.insert(
             0,
             Layer {
+                content: Content::default(),
+                effects: Effects::default(),
+                mask: None,
                 id,
                 name: format!("Rectangle {id}"),
                 visible: true,
@@ -814,6 +894,7 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
         | Command::AddRectangle
         | Command::ConfigureComposition { .. }
         | Command::SetPosition { .. } => unreachable!(),
+        _ => unreachable!("extended command handled above"),
     };
     let index = comp
         .layers
@@ -988,6 +1069,7 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
         | Command::AddRectangle
         | Command::ConfigureComposition { .. }
         | Command::SetPosition { .. } => unreachable!(),
+        _ => unreachable!("extended command handled above"),
     }
     Ok(())
 }

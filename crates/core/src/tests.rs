@@ -1,6 +1,189 @@
 use super::*;
 
 #[test]
+fn batch_key_move_handles_overlapping_sources_and_rolls_back_collisions() {
+    let mut e = editor_with_layer();
+    for frame in [10, 20, 40] {
+        e.execute(Command::ToggleKeyframe {
+            id: 1,
+            property: Property::PositionX,
+            frame,
+        })
+        .unwrap();
+    }
+    let keys: Vec<_> = [10, 20]
+        .map(|frame| KeyRef {
+            id: 1,
+            property: Property::PositionX,
+            frame,
+        })
+        .into();
+    let before = e.project().clone();
+    e.execute(Command::MoveKeys {
+        keys: keys.clone(),
+        delta: 10,
+    })
+    .unwrap();
+    assert_eq!(
+        e.selected_layer()
+            .unwrap()
+            .property(Property::PositionX)
+            .keys()
+            .keys()
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![20, 30, 40]
+    );
+    e.undo();
+    assert_eq!(e.project(), &before);
+    assert!(
+        e.execute(Command::MoveKeys {
+            keys: keys.clone(),
+            delta: 20
+        })
+        .is_err()
+    );
+    assert_eq!(e.project(), &before);
+    assert!(e.execute(Command::MoveKeys { keys, delta: -11 }).is_err());
+    assert_eq!(e.project(), &before);
+}
+#[test]
+fn key_clipboard_preserves_timing_interpolation_and_is_atomic() {
+    let mut e = editor_with_layer();
+    e.execute(Command::ToggleKeyframe {
+        id: 1,
+        property: Property::PositionX,
+        frame: 10,
+    })
+    .unwrap();
+    e.execute(Command::SetInterpolation {
+        id: 1,
+        property: Property::PositionX,
+        frame: 10,
+        interpolation: Interpolation::Bezier(Bezier::default()),
+    })
+    .unwrap();
+    let data = e
+        .selected_layer()
+        .unwrap()
+        .property(Property::PositionX)
+        .keys()[&10]
+        .clone();
+    let key = KeyCopy {
+        key: KeyRef {
+            id: 1,
+            property: Property::PositionX,
+            frame: 10,
+        },
+        data: data.clone(),
+    };
+    e.execute(Command::PasteKeys {
+        keys: vec![key.clone()],
+        frame: 60,
+        target: Some(1),
+    })
+    .unwrap();
+    assert_eq!(
+        e.selected_layer()
+            .unwrap()
+            .property(Property::PositionX)
+            .keys()[&60],
+        data
+    );
+    let before = e.project().clone();
+    assert!(
+        e.execute(Command::PasteKeys {
+            keys: vec![key],
+            frame: 60,
+            target: None
+        })
+        .is_err()
+    );
+    assert_eq!(e.project(), &before);
+}
+#[test]
+fn layer_shift_moves_keys_and_range_once_and_rejects_overflow() {
+    let mut e = editor_with_layer();
+    e.execute(Command::SetLayerRange {
+        id: 1,
+        start: 10,
+        end: 100,
+    })
+    .unwrap();
+    e.execute(Command::ToggleKeyframe {
+        id: 1,
+        property: Property::Rotation,
+        frame: 20,
+    })
+    .unwrap();
+    let before = e.project().clone();
+    e.execute(Command::ShiftLayer { id: 1, delta: 20 }).unwrap();
+    let l = e.selected_layer().unwrap();
+    assert_eq!(l.in_frame(), 30);
+    assert_eq!(l.out_frame(150), 120);
+    assert!(l.property(Property::Rotation).keys().contains_key(&40));
+    e.undo();
+    assert_eq!(e.project(), &before);
+    assert!(e.execute(Command::ShiftLayer { id: 1, delta: 80 }).is_err());
+    assert_eq!(e.project(), &before);
+}
+#[test]
+fn text_effect_mask_roundtrip_and_locked_batch_rollback() {
+    let mut e = editor_with_layer();
+    e.execute(Command::AddContent {
+        content: Content::Text {
+            text: "한글 & <Text>".into(),
+            font_size: 40.0,
+        },
+        width: 400.0,
+        height: 80.0,
+        name: "Title".into(),
+    })
+    .unwrap();
+    e.execute(Command::SetMask {
+        id: 2,
+        mask: Some(Mask {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 50.0,
+            inverted: true,
+        }),
+    })
+    .unwrap();
+    e.execute(Command::SetEffects {
+        id: 2,
+        effects: Effects {
+            blur: 2.0,
+            brightness: 0.5,
+            grayscale: true,
+        },
+    })
+    .unwrap();
+    assert_eq!(e.project().version, 3);
+    assert_eq!(
+        Project::from_json(&e.project().to_json().unwrap()).unwrap(),
+        *e.project()
+    );
+    e.execute(Command::ToggleLocked(2)).unwrap();
+    let before = e.project().clone();
+    assert!(
+        e.execute(Command::Batch(vec![
+            Command::RenameLayer {
+                id: 1,
+                name: "Changed".into()
+            },
+            Command::SetColor {
+                id: 2,
+                color: 0xff0000
+            }
+        ]))
+        .is_err()
+    );
+    assert_eq!(e.project(), &before);
+}
+
+#[test]
 fn alignment_uses_world_bounds_with_parenting_and_one_undo_step() {
     let mut editor = editor_with_layer();
     editor.execute(Command::AddRectangle).unwrap();
@@ -840,7 +1023,7 @@ fn serialized_project_roundtrips_animation_and_preserves_ids() {
 fn corrupt_and_future_projects_are_rejected() {
     let editor = editor_with_layer();
     let mut project = editor.project().clone();
-    project.version = 3;
+    project.version = 4;
     assert!(Project::from_json(&project.to_json().unwrap()).is_err());
     project.version = 1;
     project.composition.fps = 0;
@@ -867,6 +1050,20 @@ fn replacing_project_can_be_undone() {
     editor.undo();
     assert_eq!(editor.project(), &previous);
     assert_eq!(editor.selected(), Some(1));
+}
+
+#[test]
+fn document_boundary_clears_history_without_changing_loaded_project() {
+    let mut editor = editor_with_layer();
+    editor.replace_project(Project::default()).unwrap();
+    editor.clear_history();
+    assert!(!editor.can_undo());
+    assert!(!editor.can_redo());
+    editor.undo();
+    assert!(editor.project().composition().layers().is_empty());
+    editor.execute(Command::AddRectangle).unwrap();
+    editor.undo();
+    assert!(editor.project().composition().layers().is_empty());
 }
 
 #[test]
