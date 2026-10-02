@@ -18,6 +18,17 @@
 - **후속 고급 기능:** 패널 도킹·소스 뷰어·최근 프로젝트, 타임라인 고급 시간 편집/검색/가상화, 공간 경로·프리셋·표현식, Shape 연산/SVG·Text Animator, 추가 효과·모션 블러, 고정밀 색/HDR·Proxy/GPU, 템플릿, 설치/업데이트·한글화와 UI 회귀 자동화.
 - **별도 대형 단계:** 3D/카메라/라이트·모델, 추적·로토/Puppet, 플러그인/교환 포맷 연구, 웹/API 제품 범위. AEP/MOGRT 호환은 구현되지 않았다.
 
+### 자동·연속 시간 보간 — 2026-10-02
+
+- D02의 스칼라 Auto Bezier / Continuous / Independent 모드를 Graph → Keyframe...에 연결했다. Auto는 주변 키의 값·시간 변경 때 접선을 다시 계산한다. 수동 속도/영향도 편집은 Continuous로 전환하며, 양쪽 속도는 연결하고 각 영향도는 독립적으로 유지한다. Independent로 바꾸면 현재 자동 접선을 고정한다.
+- Auto 계산은 단조 구간의 가중 조화평균, 극값·평탄 접합점의 0 기울기, 끝점의 인접 할선, 영향도 1/3을 사용한다. AE의 내부 수치 알고리즘과 동일하다는 의미가 아니다. 동작 구분은 [Adobe의 키프레임 보간 설명](https://helpx.adobe.com/uk/after-effects/desktop/animate-in-after-effects/animation-keyframes/keyframe-interpolation.html)을 참조했다.
+- Continuous 선택 시 기존 양쪽 유한 기울기의 평균으로 연결한다. 키 이동/값 편집은 수동 기울기를 유지한다. Linear/Hold는 관련 두 끝점의 자동 접선을 고정한 뒤 선택 구간을 초기화하며, Ease/Ease In/Ease Out은 연결을 해제한 뒤 지정 방향만 적용한다. Speed Graph의 속도 드래그도 같은 명령을 사용한다.
+- 모드는 Undo/Redo·키/레이어 복사·저장·효과 프리셋에 보존한다. FPS 변환은 초당 수동 속도를 유지한다. 연결 모드는 프로젝트 v36 / 효과 프리셋 v3으로 보호하며, 기존 v35 독립 핸들과 구형 곡선은 그대로 읽는다.
+- 검증: 코어 154개 + 데스크톱 169개 통과, 외부 미디어/장치 30개 제외. 자동 접선의 이웃 재계산·단조/평탄/감소·끝점, Continuous 연동·독립 영향도, 저장/구버전 거부·잠금 원자성, FPS 환산, Speed Graph 드래그와 한 번의 Undo, Preview/출력/재열기 픽셀을 검사했다. Cargo check/fmt/test/release 사용(Moon/proto 미설치).
+- 실제 Windows에서 Auto 적용 → outgoing −300/s 입력 → Continuous 전환과 양쪽 −300/s → Undo/Redo → incoming 영향도 70% / outgoing 33.333333% 유지 → 별도 QA 저장을 확인했다. 긴 Auto 안내문이 닫기 버튼을 밀어내던 부분은 한 줄로 줄였다.
+- 최종 릴리스 재실행·재열기에서 모드/속도/영향도 복원을 확인했다. Ease In은 Independent로 바꾸고 incoming만 0/s로 만들며 outgoing −300/s를 유지한다. Auto 안내문과 닫기 버튼도 같은 팝업에 표시된다. QA 사본 `target/qa/modes-auto-native.lfe.json`, `target/qa/modes-native.lfe.json`의 20/50프레임 출력 중심은 독립 계산값(Auto 825/825px, Continuous 1016.422454/800px)과 출력 해상도 1px 이내로 일치했다. 실제 50프레임 미리보기도 Position X 800px다. 작업 창 하나와 사용자 보존 원본 SHA256 불변을 확인했다.
+- 남음: 다중 키/채널 그래프 편집, 영향도 포인터 핸들, 공간 경로와 다차원 속도, AE의 수치 보간 동등성. D02/D03 전체 완료로 표시하지 않는다.
+
 ### Speed Graph와 속도 핸들 드래그 — 2026-10-02
 
 - D03의 단일 스칼라 Speed Graph를 구현했다. 기존 타임라인 그래프 영역에서 Value Graph / Speed Graph로 전환하며, 선택 채널의 실제 보간을 미분한 초당 부호 있는 속도를 표시한다. 별도 Position X/Y는 스칼라 채널이며 결합 공간 경로의 속력과 구분한다.

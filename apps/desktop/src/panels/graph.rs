@@ -10,7 +10,8 @@ use gpui::{
     prelude::*, px, relative, rgb, size,
 };
 use libre_effects_core::{
-    AnimatedProperty, Bezier, Command, Interpolation, LayerId, PropertyPath, TrackEdit,
+    AnimatedProperty, Bezier, Command, Interpolation, LayerId, PropertyPath, TemporalMode,
+    TrackEdit,
 };
 use std::{cell::Cell, rc::Rc};
 
@@ -180,7 +181,11 @@ fn curve_at(state: &EditorState) -> Option<Bezier> {
         .layer(id)?
         .track(property)?;
     let (_, next) = track.keys().range(frame + 1..).next()?;
-    if track.keys()[&frame].temporal.outgoing.is_some() || next.temporal.incoming.is_some() {
+    if track.keys()[&frame].temporal.outgoing.is_some()
+        || next.temporal.incoming.is_some()
+        || !track.keys()[&frame].temporal.mode.is_independent()
+        || !next.temporal.mode.is_independent()
+    {
         return None;
     }
     Some(match track.keys()[&frame].interpolation {
@@ -388,7 +393,7 @@ impl Graph {
                     .unwrap()
                     .track(property)
                     .unwrap();
-                let commands = [
+                let mut commands = [
                     (
                         true,
                         incoming && track.keys().range(..frame).next_back().is_some(),
@@ -412,6 +417,15 @@ impl Graph {
                 })
                 .collect::<Vec<_>>();
                 if !commands.is_empty() {
+                    commands.insert(
+                        0,
+                        Command::SetTemporalMode {
+                            id,
+                            property,
+                            frame,
+                            mode: TemporalMode::Independent,
+                        },
+                    );
                     state.dispatch(&Action::Edit(Command::Batch(commands)), window, cx);
                 }
             }
@@ -1145,6 +1159,55 @@ impl Render for Graph {
                 );
             }
             if !matches!(property, PropertyPath::Path(_)) {
+                let mut modes = div().flex().mt_1();
+                for mode in [
+                    TemporalMode::Independent,
+                    TemporalMode::Continuous,
+                    TemporalMode::Auto,
+                ] {
+                    let state = self.state.clone();
+                    modes = modes.child(
+                        ui::text_button(
+                            SharedString::from(format!("temporal-{mode:?}")),
+                            mode.label(),
+                        )
+                        .text_size(px(10.0))
+                        .px_1()
+                        .when(key.temporal.mode == mode, |s| s.bg(rgb(0x34495c)))
+                        .when(locked, |s| s.opacity(0.4))
+                        .on_click(move |_, window, cx| {
+                            state.update(cx, |state, cx| {
+                                if let Some((id, frame, property)) = selected(state) {
+                                    state.dispatch(
+                                        &Action::Edit(Command::SetTemporalMode {
+                                            id,
+                                            property,
+                                            frame,
+                                            mode,
+                                        }),
+                                        window,
+                                        cx,
+                                    );
+                                }
+                            });
+                        }),
+                    );
+                }
+                easing = easing.child(modes).child(
+                    div().text_size(px(10.0)).text_color(rgb(ui::MUTED)).child(
+                        match key.temporal.mode {
+                            TemporalMode::Auto => {
+                                "Auto follows neighbors; edits switch to Continuous."
+                            }
+                            TemporalMode::Continuous => {
+                                "Velocities are linked; influences stay independent."
+                            }
+                            TemporalMode::Independent => {
+                                "Incoming and outgoing velocities are independent."
+                            }
+                        },
+                    ),
+                );
                 for incoming in [true, false] {
                     let exists = if incoming {
                         track.keys().range(..frame).next_back().is_some()
@@ -1338,6 +1401,60 @@ impl Render for Graph {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn speed_drag_converts_auto_to_continuous_and_undo_restores_auto() {
+        use libre_effects_core::{Editor, Property, TemporalHandle};
+        let mut e = Editor::default();
+        e.execute(Command::AddRectangle).unwrap();
+        for frame in [0, 30, 60] {
+            e.execute(Command::ToggleKeyframe {
+                id: 1,
+                property: Property::PositionX,
+                frame,
+            })
+            .unwrap();
+        }
+        e.execute(Command::SetTemporalMode {
+            id: 1,
+            property: Property::PositionX.into(),
+            frame: 30,
+            mode: TemporalMode::Auto,
+        })
+        .unwrap();
+        let before = e.project().clone();
+        let value = e
+            .selected_layer()
+            .unwrap()
+            .property(Property::PositionX)
+            .keys()[&30]
+            .value;
+        e.execute(key_drag_command(
+            1,
+            Property::PositionX.into(),
+            30,
+            35,
+            value,
+            Some((
+                false,
+                TemporalHandle {
+                    slope: 4.0,
+                    influence: 1.0 / 3.0,
+                },
+                30.0,
+            )),
+        ))
+        .unwrap();
+        let key = &e
+            .selected_layer()
+            .unwrap()
+            .property(Property::PositionX)
+            .keys()[&35];
+        assert_eq!(key.temporal.mode, TemporalMode::Continuous);
+        assert_eq!(key.temporal.incoming.unwrap().slope, 4.0);
+        assert_eq!(key.temporal.outgoing.unwrap().slope, 4.0);
+        e.undo();
+        assert_eq!(e.project(), &before);
+    }
     #[test]
     fn speed_drag_changes_time_and_velocity_without_changing_value_and_is_one_undo() {
         use libre_effects_core::{Editor, Property, TemporalHandle};

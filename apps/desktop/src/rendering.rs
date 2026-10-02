@@ -940,7 +940,7 @@ mod tests {
         }
     }
     #[test]
-    fn independent_temporal_handles_match_preview_output_and_saved_pixels() {
+    fn temporal_modes_match_preview_output_and_saved_pixels() {
         use libre_effects_core::TemporalHandle;
         let mut e = Editor::default();
         e.execute(Command::ConfigureComposition {
@@ -994,6 +994,29 @@ mod tests {
             } else {
                 assert_eq!(output, renderer.render(&original, frame, 200).unwrap());
             }
+        }
+        for mode in [
+            libre_effects_core::TemporalMode::Auto,
+            libre_effects_core::TemporalMode::Continuous,
+        ] {
+            let before = e.project().clone();
+            e.execute(Command::SetTemporalMode {
+                id: 1,
+                property: Property::PositionX.into(),
+                frame: 30,
+                mode,
+            })
+            .unwrap();
+            let saved = Project::from_json(&e.project().to_json().unwrap()).unwrap();
+            for frame in [15, 45] {
+                let output = renderer.render_output(&saved, frame, 200, 120).unwrap();
+                assert_eq!(output, renderer.render(e.project(), frame, 200).unwrap());
+                assert_ne!(output, renderer.render(&original, frame, 200).unwrap());
+            }
+            e.undo();
+            assert_eq!(e.project(), &before);
+            e.redo();
+            assert_eq!(e.project(), &saved);
         }
     }
     #[test]

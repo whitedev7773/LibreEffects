@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-const PROJECT_VERSION: u32 = 35;
+const PROJECT_VERSION: u32 = 36;
 pub type Frame = u32;
 pub type LayerId = u64;
 pub type CompositionId = u64;
@@ -56,7 +56,7 @@ mod text_style;
 pub use shapes::{Shape, ShapeKind};
 pub use text_style::{TextAlign, TextFont, TextStrokeJoin, TextStyle};
 mod temporal;
-pub use temporal::{TemporalHandle, TemporalHandles};
+pub use temporal::{TemporalHandle, TemporalHandles, TemporalMode};
 mod tracks;
 pub use editing::{Content, Effects, KeyCopy, KeyRef, Mask, VideoPlayback};
 pub use geometry::{Affine, Bezier};
@@ -201,9 +201,17 @@ impl AnimatedProperty {
             (Some((start, a)), Some((end, b))) if start != end => {
                 let t = (frame - *start as f64) / (end - start) as f64;
                 if a.interpolation != Interpolation::Hold
-                    && (a.temporal.outgoing.is_some() || b.temporal.incoming.is_some())
+                    && (a.temporal.outgoing.is_some()
+                        || b.temporal.incoming.is_some()
+                        || a.temporal.mode == TemporalMode::Auto
+                        || b.temporal.mode == TemporalMode::Auto)
                 {
-                    return temporal::sample(a, b, (end - start) as f64, t);
+                    return temporal::sample(
+                        &self.resolved_key(*start),
+                        &self.resolved_key(*end),
+                        (end - start) as f64,
+                        t,
+                    );
                 }
                 let t = match a.interpolation {
                     Interpolation::Linear => t,
@@ -619,11 +627,12 @@ impl Project {
                     if let Some(track) = layer.track(path) {
                         for key in track.keys.values() {
                             if !key.temporal.valid()
+                                || (self.version < 36 && !key.temporal.mode.is_independent())
                                 || (!key.temporal.is_empty()
                                     && (self.version < 35 || matches!(path, PropertyPath::Path(_))))
                             {
                                 return Err(
-                                    "Invalid temporal handles or project version (requires 35)"
+                                    "Invalid temporal handles or project version (handles require 35, linked modes require 36)"
                                         .into(),
                                 );
                             }
@@ -886,6 +895,12 @@ pub enum Command {
         frame: Frame,
         incoming: bool,
         handle: TemporalHandle,
+    },
+    SetTemporalMode {
+        id: LayerId,
+        property: PropertyPath,
+        frame: Frame,
+        mode: TemporalMode,
     },
     EditTrack {
         id: LayerId,
@@ -1431,6 +1446,16 @@ impl Editor {
             })
         }) {
             next.project.version = next.project.version.max(35);
+        }
+        if next.project.compositions().into_iter().any(|(_, c)| {
+            c.layers.iter().any(|l| {
+                l.track_paths()
+                    .iter()
+                    .filter_map(|p| l.track(*p))
+                    .any(|t| t.keys.values().any(|k| !k.temporal.mode.is_independent()))
+            })
+        }) {
+            next.project.version = next.project.version.max(36);
         }
         next.project.validate()?;
         if next != self.current {

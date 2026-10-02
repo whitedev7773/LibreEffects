@@ -68,6 +68,12 @@ impl EffectPreset {
             version: if effects
                 .iter()
                 .flat_map(|e| e.parameters.values())
+                .any(|t| t.keys.values().any(|k| !k.temporal.mode.is_independent()))
+            {
+                3
+            } else if effects
+                .iter()
+                .flat_map(|e| e.parameters.values())
                 .any(|t| t.keys.values().any(|k| !k.temporal.is_empty()))
             {
                 2
@@ -104,7 +110,7 @@ impl EffectPreset {
         Ok(preset)
     }
     fn validate(&self) -> Result<(), String> {
-        if !(1..=2).contains(&self.version) {
+        if !(1..=3).contains(&self.version) {
             return Err("Unsupported effect preset version".into());
         }
         if self.name.trim().is_empty()
@@ -130,7 +136,10 @@ impl EffectPreset {
             .flat_map(|e| e.parameters.values())
             .flat_map(|t| t.keys.values())
         {
-            if !key.temporal.valid() || (self.version < 2 && !key.temporal.is_empty()) {
+            if !key.temporal.valid()
+                || (self.version < 2 && !key.temporal.is_empty())
+                || (self.version < 3 && !key.temporal.mode.is_independent())
+            {
                 return Err("Invalid preset temporal handles or version".into());
             }
         }

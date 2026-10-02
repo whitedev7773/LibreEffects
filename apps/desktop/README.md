@@ -470,15 +470,27 @@ zoom and pan; its vertical range fits the visible curve.
 - Tangents follow keys through value edits, moves, copying, Undo/Redo and saving.
   Layer clipboard and effect preset FPS conversion preserves velocity per second.
   These handles require project version 35 (effect preset version 2 when present).
-- This is still a single-channel value graph. Auto/Continuous Bezier linking,
-  spatial paths, multi-key graph editing, influence-handle dragging and full AE
+- Keyframe... also selects Independent, Continuous or Auto Bezier. Continuous links
+  the two signed velocities while keeping each influence independent. Selecting
+  Continuous averages the existing finite slopes; moving keys retains that slope.
+  Auto recomputes a scalar tangent from neighboring keys; editing its velocity or
+  influence converts it to Continuous. Independent freezes the current handles.
+  Ease commands break the link before applying their requested sides; Linear/Hold
+  freeze affected endpoint modes before replacing the selected segment.
+- Auto uses a weighted harmonic mean on monotone runs, zero at extrema/flat
+  joins, adjacent secants at endpoints, and one-third influence. This is a
+  shape-preserving scalar policy, not a claim of numerical parity with AE's Auto.
+  Linked modes require project version 36 / effect preset version 3. Old independent
+  handles and legacy files retain their existing representation and samples.
+- This is still a single-channel value graph. Spatial paths, multi-key graph
+  editing, influence-handle dragging and full AE
   Easy Ease compatibility remain unfinished.
   Geometry path timing tracks do not yet support these scalar velocity handles.
 
 Use **Value Graph / Speed Graph** in the graph toolbar to switch views. Speed
 Graph shows the signed derivative of the selected scalar channel in property
 units per second (a decreasing value has negative velocity). It uses the same
-Linear/Smooth/Bezier/independent tangent curve as playback, with FPS conversion.
+Linear/Smooth/Bezier/independent/linked/automatic curve as playback, with FPS conversion.
 Separate strokes represent each segment; Hold jumps and vertical tangents are
 gaps rather than artificial finite spikes. The zero axis remains visible.
 
@@ -493,7 +505,7 @@ This is a scalar channel graph (including separate Position X/Y), not the
 magnitude of a combined spatial path or the derivative of final composited
 pixels. Property/effect output clamping can therefore differ from raw track
 velocity. Multi-channel selection, vector speed, automatic graph type selection,
-linked tangent modes and persisted graph preferences remain open work.
+and persisted graph preferences remain open work.
 
 Open `examples/curve-parent-study.lfe.json` for an overshooting Bezier animation
 with a child layer. The source generator is
