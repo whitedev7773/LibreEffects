@@ -39,6 +39,9 @@ pub(crate) struct VideoJob {
 
 #[derive(Clone)]
 pub(crate) enum Action {
+    BeginText(Option<LayerId>, [f64; 2]),
+    CommitText,
+    CancelText,
     Preset(presets::PresetAction),
     OpenColor(crate::color_edit::Target),
     ApplyColor,
@@ -131,6 +134,7 @@ pub(crate) enum Action {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Tool {
+    Text,
     Select,
     Hand,
     Zoom,
@@ -163,6 +167,7 @@ impl PropertyFilter {
 }
 
 pub(crate) struct EditorState {
+    pub text_session: Option<crate::text_edit::Session>,
     pub presets: crate::effect_presets::Library,
     pub colors: crate::color_edit::Workflow,
     pub queue: Option<std::sync::Arc<std::sync::Mutex<crate::render_queue::Queue>>>,
@@ -246,6 +251,7 @@ impl Default for EditorState {
             colors.load(&path);
         }
         Self {
+            text_session: None,
             presets: Default::default(),
             colors,
             queue: None,
@@ -323,8 +329,41 @@ impl Default for EditorState {
 }
 
 impl EditorState {
+    pub(crate) fn finish_text(&mut self, commit: bool, cx: &mut Context<Self>) {
+        let Some(session) = self.text_session.take() else {
+            return;
+        };
+        if commit && session.changed() {
+            if !session.valid(self.editor.project(), self.document_revision, self.frame) {
+                self.status = "Text edit canceled because its document or time changed".into();
+            } else {
+                self.status = match self.editor.execute(session.command()) {
+                    Ok(()) => {
+                        self.editor.select(session.id);
+                        self.selected_layers = [session.id].into();
+                        self.composition_started = true;
+                        "Text edited".into()
+                    }
+                    Err(e) => e,
+                };
+            }
+        } else {
+            self.status = "Text edit finished".into();
+        }
+        self.normalize();
+        cx.notify();
+    }
+    pub(crate) fn text_project(&self) -> Project {
+        self.text_session
+            .as_ref()
+            .filter(|s| s.valid(self.editor.project(), self.document_revision, self.frame))
+            .and_then(|s| s.project().ok())
+            .unwrap_or_else(|| self.editor.project().clone())
+    }
     pub fn welcome(&self) -> bool {
-        !self.composition_started
+        self.text_session.is_none()
+            && self.tool != Tool::Text
+            && !self.composition_started
             && self.path.is_none()
             && !self.dirty()
             && self.editor.project().composition().layers().is_empty()
@@ -469,6 +508,9 @@ impl EditorState {
     }
 
     pub fn dispatch(&mut self, action: &Action, window: &mut Window, cx: &mut Context<Self>) {
+        if !matches!(action, Action::CancelText | Action::CommitText) {
+            self.finish_text(true, cx);
+        }
         if self.colors.session.is_some()
             && !matches!(
                 action,
@@ -520,6 +562,29 @@ impl EditorState {
             window.blur();
         }
         match action {
+            Action::BeginText(id, position) => {
+                self.stop();
+                match crate::text_edit::Session::new(
+                    self.editor.project(),
+                    self.document_revision,
+                    self.frame,
+                    *id,
+                    *position,
+                ) {
+                    Ok(mut session) => {
+                        if let Some(id) = id {
+                            self.editor.select(*id);
+                            self.selected_layers = [*id].into();
+                            session.buffer.all();
+                        }
+                        self.text_session = Some(session);
+                        self.status = "Edit text · Ctrl+Enter finishes · Esc cancels".into();
+                    }
+                    Err(e) => self.status = e,
+                }
+            }
+            Action::CommitText => self.finish_text(true, cx),
+            Action::CancelText => self.finish_text(false, cx),
             Action::Preset(action) => self.preset_action(action, window, cx),
             Action::OpenColor(target) => {
                 self.stop();
@@ -1014,19 +1079,17 @@ impl EditorState {
                     }
                 }
             }
-            Action::AddText => self.dispatch(
-                &Action::Edit(Command::AddContent {
-                    content: Content::Text {
-                        text: "Text".into(),
-                        font_size: 72.0,
-                    },
-                    width: 640.0,
-                    height: 120.0,
-                    name: "Text".into(),
-                }),
-                window,
-                cx,
-            ),
+            Action::AddText => {
+                let comp = self.editor.project().composition();
+                self.dispatch(
+                    &Action::BeginText(
+                        None,
+                        [comp.width() as f64 / 2.0, comp.height() as f64 / 2.0],
+                    ),
+                    window,
+                    cx,
+                );
+            }
             Action::ImportImage => self.import_assets(false, false, cx),
             Action::CompositionFromFootage => self.import_assets(false, true, cx),
             Action::ImportImageSequence => self.import_assets(true, false, cx),

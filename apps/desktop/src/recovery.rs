@@ -191,6 +191,31 @@ mod tests {
     use super::*;
     use libre_effects_core::{Command, Editor};
     #[test]
+    fn uncommitted_canvas_text_roundtrips_recovery_without_mutating_document() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut recovery, _, _) = Session::in_directory(root.path()).unwrap();
+        let base = Project::default();
+        let mut text = crate::text_edit::Session::new(&base, 0, 0, None, [10.0, 20.0]).unwrap();
+        text.buffer
+            .replace(None, "복구할\nText draft", false, None)
+            .unwrap();
+        let draft = text.project().unwrap();
+        recovery
+            .checkpoint(recovery.generation, Some(&draft))
+            .unwrap();
+        assert_eq!(read_project(&recovery.slot.path).unwrap(), draft);
+        assert!(base.composition().layers().is_empty());
+        let mut editor = Editor::default();
+        editor.execute(text.command()).unwrap();
+        recovery.preserve_for_replacement(editor.project()).unwrap();
+        recovery.checkpoint(0, Some(&base)).unwrap();
+        drop(recovery);
+        let (_, candidates, warnings) = Session::in_directory(root.path()).unwrap();
+        assert!(warnings.is_empty());
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].project, draft);
+    }
+    #[test]
     fn replacement_preserves_latest_edits_against_late_autosave() {
         let root = tempfile::tempdir().unwrap();
         let (mut session, _, _) = Session::in_directory(root.path()).unwrap();

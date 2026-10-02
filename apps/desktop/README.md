@@ -76,8 +76,33 @@ installing fonts. Missing fonts/styles keep their saved identity and show a
 Character warning. Missing families render with Wanted Sans; missing styles use
 the closest available face. External fonts are not embedded or collected. Use
 the same installed font versions for portable output. Variable font axes, glyph
-coverage diagnostics, document-wide missing-font replacement, per-character
-styling and direct canvas text editing remain future work.
+coverage diagnostics, document-wide missing-font replacement and per-character
+styling remain future work.
+
+## Editing text in the Composition
+
+Ctrl+T selects the Text tool. Click to create point text or edit visible text;
+double-click text with the Selection tool to select its contents. Layer → New
+text starts an empty draft at the composition center. Enter adds a line;
+Ctrl+Enter finishes and Escape restores the original text (or discards a new
+draft). Clicking another panel, changing tools, saving or closing also finishes
+the edit. Empty new drafts do not create a layer.
+
+Drag or Shift+arrows selects text; Home/End, Ctrl+Home/End and Ctrl+arrows move
+within lines, the document and words. Clipboard shortcuts and local Undo/Redo
+work while editing. Backspace/Delete respect Unicode grapheme clusters. A
+finished edit, including creation, is one document Undo step. Live drafts enter
+recovery checkpoints; editor replacement commits them before preserving recovery.
+Text is limited to 16 KiB; oversized input is rejected without changing the draft.
+
+The native input handler exposes UTF-16 selections and marked composition text.
+Model tests cover Korean composition updates, surrogate pairs and joined emoji;
+actual Windows IME, focus and pointer behavior still require native verification.
+Caret shaping
+uses the selected face; fallback glyphs, complex bidirectional text and ligature
+positions can differ from rendered glyphs. Paragraph boxes, per-character styles,
+Text Animator and caret blinking are not implemented. Existing AE-style panel
+geometry is unchanged.
 
 ## Effect presets
 
@@ -154,13 +179,13 @@ future work.
   composition to draw, Shift constrains proportions, Alt draws from the center,
   and Escape cancels. Each completed drag is one undo step. Properties controls
   fill, stroke RGB/width, corner roundness, points and star inner radius.
-- Z zooms in at the viewer; Alt-click zooms out. Ctrl+T adds a Wanted Sans text
-  layer. Character edits font size, leading in pixels, tracking in thousandths
+- Z zooms in at the viewer; Alt-click zooms out. Ctrl+T selects the Text tool.
+  Character edits font size, leading in pixels, tracking in thousandths
   of an em and color. Paragraph aligns within the text layer's source width.
-  These are whole-layer settings; per-character styles and on-canvas text entry
-  are not implemented. Shape/text styling uses the same preview/export renderer.
+  These are whole-layer settings; per-character styles are not implemented.
+  Shape/text styling uses the same preview/export renderer.
 - Effects & Presets groups the twelve built-in effects into searchable folders.
-  Applying an effect opens its Effect Controls. User preset storage is pending.
+  Applying an effect opens its Effect Controls. User presets can be saved there.
 
 
 - Rectangle, text and embedded image layers with stable IDs, rename, duplicate,
@@ -373,7 +398,7 @@ cargo run -p libre-effects-core --example make_animation_study -- examples/curve
 | --- | --- |
 | Ctrl+N / Ctrl+Alt+N | New composition / New project |
 | Ctrl+O / Ctrl+S | Open / Save |
-| Q / Z / Ctrl+T | Cycle shape tool / Zoom tool / New text layer |
+| Q / Z / Ctrl+T | Cycle shape tool / Zoom tool / Text tool |
 | Ctrl+Shift+S / Ctrl+I | Save as / Import footage into Project |
 | Ctrl+Shift+I | Import video footage |
 | Ctrl+C / Ctrl+V | Copy / Paste selected keys |

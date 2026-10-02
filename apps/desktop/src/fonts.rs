@@ -119,7 +119,7 @@ pub(crate) fn label(weight: u16, italic: bool) -> String {
     };
     format!("{name} ({weight}){}", if italic { " Italic" } else { "" })
 }
-fn matched(style: &TextStyle) -> &'static resvg::usvg::fontdb::FaceInfo {
+pub(crate) fn matched(style: &TextStyle) -> &'static resvg::usvg::fontdb::FaceInfo {
     let name = family(&style.font_family).unwrap_or("Wanted Sans");
     let db = &catalog().db;
     if !style.font_face.is_empty() {

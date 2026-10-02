@@ -20,6 +20,8 @@ mod preview_render;
 mod shape_gesture;
 use preview_render::Request;
 use shape_gesture::ShapeGesture;
+#[path = "text_input.rs"]
+mod text_input;
 
 #[derive(Clone)]
 struct GuideGesture {
@@ -76,6 +78,8 @@ fn move_command(g: &MoveGesture) -> Command {
 }
 pub(crate) struct Preview {
     state: Entity<EditorState>,
+    text_dragging: bool,
+    text_was_active: bool,
     bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     gesture: Option<MoveGesture>,
     drawing: Option<ShapeGesture>,
@@ -171,6 +175,8 @@ impl Preview {
         Self::watch_media(cx);
         Self {
             state,
+            text_dragging: false,
+            text_was_active: false,
             bounds: Rc::new(Cell::new(None)),
             gesture: None,
             drawing: None,
@@ -437,6 +443,56 @@ impl Preview {
             cx.notify();
             return;
         }
+        if state.text_session.is_some() {
+            self.text_pointer(event.position, event.modifiers.shift, cx);
+            self.text_dragging = true;
+            cx.stop_propagation();
+            return;
+        }
+        if state.tool == Tool::Text || (state.tool == Tool::Select && event.click_count == 2) {
+            let id = comp
+                .layers()
+                .iter()
+                .find(|l| {
+                    let libre_effects_core::Content::Text { text, font_size } = l.content() else {
+                        return false;
+                    };
+                    !l.locked()
+                        && comp.layer_active(l, frame, true)
+                        && comp
+                            .world_transform(l.id(), frame)
+                            .and_then(|m| m.inverse())
+                            .is_some_and(|m| {
+                                if text.is_empty() {
+                                    let local = m.point(p);
+                                    (0.0..=l.width()).contains(&local[0])
+                                        && (0.0..=l.height()).contains(&local[1])
+                                } else {
+                                    crate::text_edit::layout::Layout::shape(
+                                        text,
+                                        *font_size,
+                                        l.width(),
+                                        &l.text_style(),
+                                    )
+                                    .contains(m.point(p))
+                                }
+                            })
+                })
+                .map(|l| l.id());
+            if id.is_some() || state.tool == Tool::Text {
+                let place_caret = state.tool == Tool::Text && id.is_some();
+                crate::components::TextField::commit_active(window, cx);
+                self.state.update(cx, |s, cx| {
+                    s.dispatch(&Action::BeginText(id, p), window, cx)
+                });
+                if place_caret {
+                    self.text_pointer(event.position, false, cx);
+                    self.text_dragging = true;
+                }
+                cx.stop_propagation();
+                return;
+            }
+        }
         if state.tool == Tool::Pen {
             let command = self.pen.down(
                 state,
@@ -586,7 +642,7 @@ impl Preview {
             Tool::Select => {
                 handle_hit.and_then(|(_, handle)| TransformGesture::scale(comp, id, frame, handle))
             }
-            Tool::Hand | Tool::Zoom | Tool::Shape(_) | Tool::Pen => None,
+            Tool::Text | Tool::Hand | Tool::Zoom | Tool::Shape(_) | Tool::Pen => None,
         });
         let transform = if let Some(transform) = transform {
             match transform.with_selection(
@@ -658,6 +714,13 @@ impl Preview {
         cx.notify();
     }
     fn moving(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if self.text_dragging
+            && self.state.read(cx).text_session.is_some()
+            && event.pressed_button == Some(MouseButton::Left)
+        {
+            self.text_pointer(event.position, true, cx);
+            return;
+        }
         self.sample_pointer(event.position, cx);
         if self.state.read(cx).colors.session.is_some() {
             return;
@@ -710,6 +773,10 @@ impl Preview {
         }
     }
     fn up(&mut self, event: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.text_dragging {
+            self.text_dragging = false;
+            return;
+        }
         if self.state.read(cx).colors.session.is_some() {
             return;
         }
@@ -795,8 +862,25 @@ impl Preview {
 }
 impl Render for Preview {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self
+            .state
+            .read(cx)
+            .text_session
+            .as_ref()
+            .is_some_and(|session| {
+                let state = self.state.read(cx);
+                !session.valid(state.editor.project(), state.document_revision, state.frame)
+            })
+        {
+            self.state.update(cx, |s, cx| s.finish_text(false, cx));
+            self.text_dragging = false;
+        }
         let state = self.state.read(cx);
         self.pen.reset_if_stale(state);
+        if state.text_session.is_some() && !self.text_was_active {
+            window.focus(&self.focus);
+        }
+        self.text_was_active = state.text_session.is_some();
         if state.welcome() {
             let create = self.state.clone();
             let import = self.state.clone();
@@ -884,7 +968,10 @@ impl Render for Preview {
         let time = comp.timecode(frame);
         let pan = point(px(state.preview_pan[0]), px(state.preview_pan[1]));
         let gesture = self.gesture.clone();
-        let mut render_project = state.editor.project().clone();
+        let mut render_project = state.text_project();
+        let text_session = state.text_session.clone();
+        let text_input = cx.entity();
+        let text_focus = self.focus.clone();
         if let Some(g) = &gesture
             && g.layer.is_some()
         {
@@ -1002,7 +1089,7 @@ impl Render for Preview {
                     .child(format!(
                         "{}  ›  Active Camera{}",
                         comp.name(),
-                        if self.state.read(cx).colors.picking() { "  ·  Pick composition color · click to sample · Esc to return" } else if pen_active { "  ·  Pen: click / drag · Enter finish · Esc cancel · Delete vertex" } else if self.pending.is_some() {
+                        if text_session.is_some() { "  ·  Text: Ctrl+Enter finish · Esc cancel" } else if self.state.read(cx).colors.picking() { "  ·  Pick composition color · click to sample · Esc to return" } else if pen_active { "  ·  Pen: click / drag · Enter finish · Esc cancel · Delete vertex" } else if self.pending.is_some() {
                             "  ·  Rendering…"
                         } else {
                             ""
@@ -1014,6 +1101,7 @@ impl Render for Preview {
                     .id("composition-canvas")
                     .track_focus(&self.focus)
                     .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+                        if this.text_key(event,window,cx) {return;}
                         if this.state.read(cx).colors.session.is_some() { return; }
                         if this.state.read(cx).tool == Tool::Pen {
                             let (handled, command) = this.pen.key(&event.keystroke.key, this.state.read(cx));
@@ -1042,8 +1130,10 @@ impl Render for Preview {
                     .w_full()
                     .overflow_hidden()
                     .when(hand, |s| s.cursor_grab())
-                    .when(!hand, |s| s.cursor_crosshair())
+                    .when(!hand && text_session.is_none(), |s| s.cursor_crosshair())
+                    .when(text_session.is_some(), |s| s.cursor_text())
                     .on_mouse_down(MouseButton::Left, cx.listener(Self::down))
+                    .on_mouse_down_out(cx.listener(|this, _: &MouseDownEvent, _, cx| {this.state.update(cx,|s,cx|s.finish_text(true,cx));}))
                     .on_mouse_move(cx.listener(Self::moving))
                     .on_mouse_up(MouseButton::Left, cx.listener(Self::up))
                     .on_mouse_up_out(MouseButton::Left, cx.listener(Self::up))
@@ -1218,6 +1308,7 @@ impl Render for Preview {
                                         },
                                     );
                                     super::pen::paint(&pen_overlay, origin, zoom, window);
+                                    if let Some(session)=&text_session {text_input::paint(session,origin,zoom,bounds,&text_focus,text_input.clone(),window,cx);}
                                     viewer_tools::paint(&overlay_options,&guides,bounds,stage,zoom,window,cx);
                                 });
                             },

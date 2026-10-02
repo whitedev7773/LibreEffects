@@ -4,6 +4,7 @@ use std::time::Duration;
 
 impl EditorState {
     pub fn prepare_replacement(&mut self, cx: &mut Context<Self>) {
+        self.finish_text(true, cx);
         self.stop();
         self.export_cancel
             .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -27,7 +28,8 @@ impl EditorState {
             .preserve_for_replacement(self.editor.project())
     }
     pub fn dirty(&self) -> bool {
-        !self.editor.project().same_document(&self.saved)
+        self.text_session.as_ref().is_some_and(|s| s.changed())
+            || !self.editor.project().same_document(&self.saved)
     }
     pub fn recover(&mut self, restore: bool, cx: &mut Context<Self>) {
         let Some(candidate) = self.recovery.as_ref() else {
@@ -135,7 +137,7 @@ impl EditorState {
                 let Ok(snapshot) = entity.update(cx, |s, _| {
                     let generation = session.lock().ok()?.generation;
                     s.recovery_ready
-                        .then(|| (generation, s.dirty().then(|| s.editor.project().clone())))
+                        .then(|| (generation, s.dirty().then(|| s.text_project())))
                 }) else {
                     return;
                 };

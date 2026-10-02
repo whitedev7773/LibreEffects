@@ -2944,10 +2944,13 @@ dependencies = [
  "libre-effects-core",
  "raw-window-handle",
  "resvg",
+ "rustybuzz 0.20.1",
  "same-file",
  "serde",
  "serde_json",
  "tempfile",
+ "unicode-bidi",
+ "unicode-segmentation",
  "windows 0.61.3",
 ]
 

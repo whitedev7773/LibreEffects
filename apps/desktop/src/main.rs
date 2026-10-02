@@ -36,6 +36,7 @@ mod rendering;
 mod shell;
 mod single_instance;
 mod source_render;
+mod text_edit;
 mod theme;
 #[cfg(test)]
 mod time_remap_render;

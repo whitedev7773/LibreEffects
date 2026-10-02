@@ -342,7 +342,7 @@ impl Shell {
                     crate::viewer_tools::ViewOption::Rulers,
                 )),
                 "t" if m.alt => Some(Action::ToggleTimeRemap),
-                "t" => Some(Action::AddText),
+                "t" => Some(Action::SetTool(Tool::Text)),
                 "k" => {
                     self.open_settings(window, cx);
                     None
@@ -471,6 +471,7 @@ impl Render for Shell {
                 let weak = weak.clone();
                 window.defer(cx, move |window, cx| {
                     let _ = weak.update(cx, |s, cx| {
+                        s.state.update(cx, |state,cx|state.finish_text(true,cx));
                         if s.state.read(cx).exporting {
                             s.state.update(cx, |s, cx| { s.status = "A render is running. Cancel it or wait for completion before closing.".into(); cx.notify(); });
                         } else if s.state.read(cx).dirty() || s.state.read(cx).saving {
@@ -634,7 +635,7 @@ impl Render for Shell {
                     .child(ui::action_tool("shape-tool", match tool { Tool::Shape(libre_effects_core::ShapeKind::Ellipse) => "circle", Tool::Shape(libre_effects_core::ShapeKind::Star) => "star", Tool::Shape(libre_effects_core::ShapeKind::Polygon) => "triangle-up", _ => "square" }, "Shape tool (Q cycles shapes) · Drag to draw · Shift constrains · Alt draws from center", &self.state, Action::SetTool(match tool {Tool::Shape(_) => tool, _ => Tool::Shape(libre_effects_core::ShapeKind::Rectangle)}), matches!(tool, Tool::Shape(_))))
                     .child(ui::text_button("shape-menu", "▾").on_click(cx.listener(|this, _, window, cx| {window.focus(&this.focus); this.menu = if this.menu == Some("Shape") {None} else {Some("Shape")}; cx.notify();})))
                     .child(ui::action_tool("pen-tool", "pen", "Pen (G) · Click vertices, drag curves · Close at first point / Enter · Alt converts corners or breaks handles · Ctrl draws a mask on a shape", &self.state, Action::SetTool(Tool::Pen), tool == Tool::Pen))
-                    .child(ui::action_tool("text-tool", "text", "New text layer (Ctrl+T)", &self.state, Action::AddText, false))
+                    .child(ui::action_tool("text-tool", "text", "Text tool (Ctrl+T) · Click to create or edit text", &self.state, Action::SetTool(Tool::Text), tool == Tool::Text))
                     .child(div().mx_2().w(px(1.0)).h(px(20.0)).bg(rgb(0x414141)))
                     .child(ui::text_button("toolbar-snapping", if self.state.read(cx).snapping {"☑ Snapping"} else {"☐ Snapping"}).on_click(cx.listener(|this,_,window,cx| {let _ = window; this.state.update(cx, |s,cx| {s.snapping = !s.snapping; cx.notify();});})))
                     .child(div().flex_1())
@@ -1316,6 +1317,7 @@ impl Render for Shell {
                 for line in [
                     "V / H / W / Y — Selection / Hand / Rotation / Anchor",
                     "Ctrl+Y — New solid    Ctrl+Alt+Y — Adjustment    Ctrl+D — Duplicate",
+                    "Ctrl+T — Text tool · Click text to edit · Ctrl+Enter finish · Esc cancel",
                     "Ctrl+Shift+D — Split layers at playhead",
                     "Alt+[ / Alt+] — Trim In / Out to playhead",
                     "Arrow keys — Move selected layers 1 px (Shift: 10 px)",
