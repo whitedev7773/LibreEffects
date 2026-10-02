@@ -9,6 +9,7 @@ mod footage_interpretation;
 mod graph;
 mod inspector;
 mod markers;
+mod mask_values;
 mod matte;
 mod parent_drag;
 mod path_masks;
@@ -26,3 +27,5 @@ pub(crate) use preview::Preview;
 pub(crate) use timeline::Timeline;
 
 pub(crate) mod render_queue;
+
+mod path_controls;

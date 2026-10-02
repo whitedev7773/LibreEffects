@@ -944,6 +944,21 @@ impl Render for Timeline {
                 if layer.time_remap().is_some() {
                     groups.push(("Time Remap".into(), vec![PropertyPath::TimeRemap]));
                 }
+                let shape_path = PropertyPath::Path(libre_effects_core::PathTarget::Shape);
+                if layer.track(shape_path).is_some() {
+                    groups.push(("Shape Path".into(), vec![shape_path]));
+                }
+                for mask in layer.path_masks() {
+                    let path = PropertyPath::Path(libre_effects_core::PathTarget::Mask(mask.id));
+                    groups.push((layer.track_label(path).unwrap(), vec![path]));
+                    for parameter in libre_effects_core::MaskParam::ALL {
+                        let path = PropertyPath::Mask {
+                            mask: mask.id,
+                            parameter,
+                        };
+                        groups.push((layer.track_label(path).unwrap(), vec![path]));
+                    }
+                }
                 for effect in layer.effect_stack() {
                     for param in effect.kind().parameters() {
                         groups.push((
@@ -955,13 +970,15 @@ impl Render for Timeline {
                         ));
                     }
                 }
-                let mut last_effect = None;
+                let mut last_section = None;
                 for (label, properties) in groups {
                     if filter.is_some_and(|f| {
                         !properties.iter().any(|p| {
                             (match p {
                                 PropertyPath::Transform(p) => f.includes(*p),
-                                PropertyPath::Audio(_)
+                                PropertyPath::Path(_)
+                                | PropertyPath::Mask { .. }
+                                | PropertyPath::Audio(_)
                                 | PropertyPath::Effect { .. }
                                 | PropertyPath::TimeRemap => f == PropertyFilter::Animated,
                             }) && (f != PropertyFilter::Animated
@@ -970,15 +987,40 @@ impl Render for Timeline {
                     }) {
                         continue;
                     }
-                    if let PropertyPath::Effect { effect, .. } = properties[0] {
-                        if last_effect != Some(effect) {
-                            last_effect = Some(effect);
-                            let name = layer
-                                .effect_stack()
-                                .iter()
-                                .find(|e| e.id() == effect)
-                                .map(|e| e.name())
-                                .unwrap_or("Effect");
+                    let section = match properties[0] {
+                        PropertyPath::Path(libre_effects_core::PathTarget::Shape) => {
+                            Some(((0, 0), "Contents · Path".to_string()))
+                        }
+                        PropertyPath::Path(libre_effects_core::PathTarget::Mask(mask))
+                        | PropertyPath::Mask { mask, .. } => Some((
+                            (1, mask),
+                            format!(
+                                "Masks · Mask {}",
+                                layer
+                                    .path_masks()
+                                    .iter()
+                                    .position(|m| m.id == mask)
+                                    .unwrap()
+                                    + 1
+                            ),
+                        )),
+                        PropertyPath::Effect { effect, .. } => Some((
+                            (2, effect),
+                            format!(
+                                "Effects · {}",
+                                layer
+                                    .effect_stack()
+                                    .iter()
+                                    .find(|e| e.id() == effect)
+                                    .map(|e| e.name())
+                                    .unwrap_or("Effect")
+                            ),
+                        )),
+                        _ => None,
+                    };
+                    if let Some((section_id, name)) = section {
+                        if last_section != Some(section_id) {
+                            last_section = Some(section_id);
                             rows = rows.child(
                                 div()
                                     .flex()
@@ -991,7 +1033,7 @@ impl Render for Timeline {
                                             .pl(px(128.0))
                                             .text_color(rgb(ui::MUTED))
                                             .overflow_hidden()
-                                            .child(format!("Effects · {name}")),
+                                            .child(name),
                                     )
                                     .when(!graph_open, |s| {
                                         s.child(
@@ -1059,12 +1101,27 @@ impl Render for Timeline {
                                     channel_state.update(cx, |s, cx| {
                                         s.editor.select(id);
                                         s.graph_property = channel;
+                                        if matches!(channel, PropertyPath::Path(_)) {
+                                            s.graph_open = false;
+                                            s.tool = crate::editor::Tool::Pen;
+                                        }
                                         s.graph_key = None;
                                         cx.notify();
                                     });
                                 }),
                         );
                     for property in properties.iter().copied() {
+                        if matches!(property, PropertyPath::Path(_)) {
+                            controls = controls.child(ui::action_tool(
+                                prop_id("edit-path"),
+                                "pen",
+                                "Edit path vertices at current time",
+                                &self.state,
+                                Action::GraphProperty(id, property),
+                                false,
+                            ));
+                            continue;
+                        }
                         let input = self
                             .fields
                             .entry((id, property))

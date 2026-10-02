@@ -140,7 +140,7 @@ impl Renderer {
         } else {
             String::new()
         };
-        let (path_defs, path_mask) = crate::path_mask_render::mask(layer, id);
+        let (path_defs, path_mask) = crate::path_mask_render::mask(layer, id, frame);
         region.push_str(&path_defs);
         region.push_str(&format!("<g transform='{forward}'><rect width='{}' height='{}' fill='white' opacity='{opacity}' {clip} {path_mask}/></g>",layer.width(),layer.height()));
         let mut coverage = self.raster_canvas(&region, width, height, max_dimension)?;
@@ -330,6 +330,7 @@ mod tests {
                 },
                 mode: PathMaskMode::Add,
                 inverted: false,
+                ..Default::default()
             }],
         })
         .unwrap();

@@ -337,8 +337,17 @@ impl Layer {
     pub(super) fn all_tracks_mut(&mut self) -> impl Iterator<Item = &mut AnimatedProperty> {
         self.properties
             .values_mut()
+            .chain(match &mut self.content {
+                Content::Shape(s) => Some(&mut s.path_animation.timing),
+                _ => None,
+            })
             .chain(self.time_remap.iter_mut())
             .chain(self.audio_controls.parameters.values_mut())
+            .chain(self.path_masks.iter_mut().flat_map(|m| {
+                m.parameters
+                    .values_mut()
+                    .chain(std::iter::once(&mut m.animation.timing))
+            }))
             .chain(
                 self.effect_stack
                     .iter_mut()

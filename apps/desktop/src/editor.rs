@@ -599,7 +599,10 @@ impl EditorState {
                     self.selected_keys.clear();
                     self.graph_key = None;
                     self.graph_property = *property;
-                    self.graph_open = true;
+                    self.graph_open = !matches!(property, PropertyPath::Path(_));
+                    if matches!(property, PropertyPath::Path(_)) {
+                        self.tool = Tool::Pen;
+                    }
                     self.expanded = true;
                 }
             }

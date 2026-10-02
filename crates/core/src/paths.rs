@@ -120,10 +120,27 @@ impl PathMaskMode {
     }
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct PathMask {
+    #[serde(default, skip_serializing_if = "crate::PathAnimation::is_default")]
+    pub animation: crate::PathAnimation,
+    pub id: u64,
+    pub parameters: std::collections::BTreeMap<crate::MaskParam, crate::AnimatedProperty>,
     pub path: VectorPath,
     pub mode: PathMaskMode,
     pub inverted: bool,
+}
+impl Default for PathMask {
+    fn default() -> Self {
+        Self {
+            id: 0,
+            animation: Default::default(),
+            parameters: crate::mask_animation::defaults(),
+            path: VectorPath::default(),
+            mode: PathMaskMode::Add,
+            inverted: false,
+        }
+    }
 }
 impl PathMask {
     pub fn valid(&self) -> bool {
@@ -163,6 +180,7 @@ mod tests {
             path: triangle(),
             mode: PathMaskMode::Subtract,
             inverted: true,
+            ..Default::default()
         };
         e.execute(Command::SetPathMasks {
             id: 1,
@@ -191,7 +209,7 @@ mod tests {
         let old = saved
             .to_json()
             .unwrap()
-            .replace("\"version\": 29", "\"version\": 28");
+            .replace("\"version\": 30", "\"version\": 29");
         assert!(Project::from_json(&old).is_err());
     }
     #[test]

@@ -30,6 +30,8 @@ impl ShapeKind {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Shape {
+    #[serde(default, skip_serializing_if = "crate::PathAnimation::is_default")]
+    pub path_animation: crate::PathAnimation,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<crate::VectorPath>,
     pub kind: ShapeKind,
@@ -44,6 +46,7 @@ impl Default for Shape {
     fn default() -> Self {
         Self {
             path: None,
+            path_animation: Default::default(),
             kind: ShapeKind::Rectangle,
             fill: true,
             stroke_color: 0xffffff,
@@ -67,6 +70,15 @@ impl Shape {
             && (0.0..=100.0).contains(&self.inner_radius)
     }
     pub fn svg(&self, width: f64, height: f64, color: u32) -> String {
+        self.svg_with_path(width, height, color, self.path.as_ref())
+    }
+    pub(super) fn svg_with_path(
+        &self,
+        width: f64,
+        height: f64,
+        color: u32,
+        path: Option<&crate::VectorPath>,
+    ) -> String {
         let fill = if self.fill {
             format!("#{color:06x}")
         } else {
@@ -76,7 +88,7 @@ impl Shape {
             "fill='{fill}' stroke='#{:06x}' stroke-width='{}' stroke-linejoin='round'",
             self.stroke_color, self.stroke_width
         );
-        if let Some(path) = &self.path {
+        if let Some(path) = path {
             return format!("<path d='{}' {style}/>", path.svg_data());
         }
         match self.kind {

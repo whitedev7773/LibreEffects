@@ -614,6 +614,10 @@ impl Render for Graph {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.state.read(cx);
         let property = state.graph_property;
+        if matches!(property, PropertyPath::Path(_)) {
+            return div().id("path-graph-help").size_full().p_4().child("Path geometry is edited in the Composition viewer. Move, copy and ease its keyframes in the timeline.")
+                .child(ui::action_tool("path-return-timeline", "pen", "Return to path timeline", &self.state, Action::GraphProperty(state.editor.selected().unwrap_or(0),property), false));
+        }
         let layer = state.editor.selected_layer().cloned();
         let start = state.timeline_start;
         let span = state.visible_frames();

@@ -4,8 +4,8 @@ use crate::{
 };
 use gpui::{Bounds, PathBuilder, Pixels, Point, Window, fill, point, px, rgb, size};
 use libre_effects_core::{
-    Affine, Command, Content, LayerId, PathMask, PathMaskMode, PathVertex, Project, Shape,
-    VectorPath,
+    Affine, Command, Content, LayerId, PathMask, PathMaskMode, PathTarget, PathVertex, Project,
+    Shape, VectorPath,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -48,18 +48,12 @@ impl Session {
                 height: self.project.composition().height() as f64,
                 name: "Shape Path".into(),
             }),
-            Target::Shape(id) => {
-                let Content::Shape(mut shape) =
-                    self.project.composition().layer(id)?.content().clone()
-                else {
-                    return None;
-                };
-                shape.path = Some(self.path.clone());
-                Some(Command::SetContent {
-                    id,
-                    content: Content::Shape(shape),
-                })
-            }
+            Target::Shape(id) => Some(Command::EditPath {
+                id,
+                target: PathTarget::Shape,
+                frame: self.frame,
+                path: self.path.clone(),
+            }),
             Target::Mask(id, index) => {
                 if !self.path.closed {
                     return None;
@@ -70,9 +64,15 @@ impl Session {
                         path: self.path.clone(),
                         mode: PathMaskMode::Add,
                         inverted: false,
+                        ..Default::default()
                     });
                 } else {
-                    masks.get_mut(index)?.path = self.path.clone();
+                    return Some(Command::EditPath {
+                        id,
+                        target: PathTarget::Mask(masks.get(index)?.id),
+                        frame: self.frame,
+                        path: self.path.clone(),
+                    });
                 }
                 Some(Command::SetPathMasks { id, masks })
             }
@@ -133,7 +133,7 @@ fn paths(s: &EditorState) -> Vec<(Target, VectorPath, Affine)> {
     };
     let mut paths = Vec::new();
     if let Content::Shape(shape) = l.content()
-        && let Some(path) = &shape.path
+        && let Some(path) = shape.path_at(s.frame)
     {
         paths.push((Target::Shape(l.id()), path.clone(), world));
     }
@@ -141,7 +141,7 @@ fn paths(s: &EditorState) -> Vec<(Target, VectorPath, Affine)> {
         l.path_masks()
             .iter()
             .enumerate()
-            .map(|(i, m)| (Target::Mask(l.id(), i), m.path.clone(), world)),
+            .map(|(i, m)| (Target::Mask(l.id(), i), m.path_at(s.frame), world)),
     );
     paths
 }
@@ -547,6 +547,45 @@ mod tests {
         ] {
             click(pen, s, p);
         }
+    }
+    #[test]
+    fn pen_uses_interpolated_geometry_and_commits_one_undoable_path_key() {
+        use libre_effects_core::{PropertyPath, TrackEdit};
+        let mut s = state();
+        let mut pen = Pen::default();
+        closed(&mut pen, &mut s);
+        let target = PathTarget::Shape;
+        s.editor
+            .execute(Command::AnimatePath {
+                id: 1,
+                target,
+                edit: TrackEdit::ToggleAnimation { frame: 0 },
+            })
+            .unwrap();
+        s.frame = 20;
+        pen.down(&s, [20.0, 20.0], 1.0, false, false);
+        pen.moving([60.0, 40.0], false, false);
+        s.editor.execute(pen.up(&s).unwrap()).unwrap();
+        s.frame = 10;
+        assert_eq!(paths(&s)[0].1.vertices[0].position, [40.0, 30.0]);
+        let before = s.editor.project().clone();
+        pen.down(&s, [40.0, 30.0], 1.0, false, false);
+        pen.moving([45.0, 55.0], false, false);
+        s.editor.execute(pen.up(&s).unwrap()).unwrap();
+        assert_eq!(paths(&s)[0].1.vertices[0].position, [45.0, 55.0]);
+        assert_eq!(
+            s.editor
+                .selected_layer()
+                .unwrap()
+                .track(PropertyPath::Path(target))
+                .unwrap()
+                .keys()
+                .len(),
+            3
+        );
+        s.editor.undo();
+        assert_eq!(*s.editor.project(), before);
+        assert_eq!(paths(&s)[0].1.vertices[0].position, [40.0, 30.0]);
     }
     #[test]
     fn draft_close_cancel_open_and_curve_creation_are_atomic() {

@@ -257,7 +257,7 @@ impl Renderer {
             svg.push_str(&format!("<clipPath id='mask{id}'><path clip-rule='evenodd' d='{}M{} {}h{}v{}h{}z'/></clipPath>", if m.inverted { format!("M0 0h{}v{}h{}z ",l.width(),l.height(),-l.width()) } else { String::new() },m.x,m.y,m.width,m.height,-m.width));
         }
         svg.push_str("</defs>");
-        let (path_defs, path_mask) = crate::path_mask_render::mask(l, &id);
+        let (path_defs, path_mask) = crate::path_mask_render::mask(l, &id, frame);
         svg.push_str(&path_defs);
         let a = matrix.0;
         svg.push_str(&format!(
@@ -291,7 +291,9 @@ impl Renderer {
                 l.width(),
                 l.height()
             )),
-            Content::Shape(shape) => svg.push_str(&shape.svg(l.width(), l.height(), l.color())),
+            Content::Shape(shape) => {
+                svg.push_str(&shape.svg_at(l.width(), l.height(), l.color(), frame))
+            }
             Content::Text { text, font_size } => {
                 svg.push_str(&text_svg(
                     text,

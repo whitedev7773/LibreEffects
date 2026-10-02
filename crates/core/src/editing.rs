@@ -151,6 +151,7 @@ pub struct KeyRef {
 }
 #[derive(Clone, Debug)]
 pub struct KeyCopy {
+    pub path_pose: Option<VectorPath>,
     pub key: KeyRef,
     pub data: Keyframe,
     pub effect_kind: Option<EffectKind>,
@@ -720,7 +721,9 @@ pub(super) fn apply_extended(
                 layer.footage_interpretation = Default::default();
             }
             Command::SetEffects { id, effects } => editable(state, *id)?.effects = *effects,
-            Command::SetPathMasks { id, masks } => editable(state, *id)?.path_masks = masks.clone(),
+            Command::SetPathMasks { id, masks } => {
+                mask_animation::set(editable(state, *id)?, masks)?
+            }
             Command::SetMask { id, mask } => editable(state, *id)?.mask = *mask,
             Command::SetColor { id, color } => editable(state, *id)?.color = *color,
             Command::ShiftLayer { id, delta } => {
@@ -804,11 +807,20 @@ pub(super) fn apply_extended(
                             return Err("Paste requires a matching effect instance and kind on the target layer".into());
                         }
                     }
+                    let mut data = key.data.clone();
+                    if let PropertyPath::Path(target) = key.key.property {
+                        data.value = layer.paste_path_pose(
+                            target,
+                            key.path_pose
+                                .as_ref()
+                                .ok_or("Missing path geometry in clipboard")?,
+                        )?;
+                    }
                     let track = layer.track_mut(key.key.property)?;
                     if track.keys.contains_key(&to) {
                         return Err("Paste would overwrite a keyframe".into());
                     }
-                    track.keys.insert(to, key.data.clone());
+                    track.keys.insert(to, data);
                 }
             }
             _ => unreachable!(),

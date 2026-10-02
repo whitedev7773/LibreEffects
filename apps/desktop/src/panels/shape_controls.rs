@@ -52,6 +52,15 @@ impl Render for ShapeControls {
             return root;
         };
         let id = layer.id();
+        let frame = self.state.read(cx).frame;
+        let path_row = shape.path.as_ref().map(|_| {
+            super::path_controls::row(
+                &self.state,
+                layer,
+                libre_effects_core::PathTarget::Shape,
+                frame,
+            )
+        });
         let locked = layer.locked();
         let mut next = shape.clone();
         next.fill = !next.fill;
@@ -74,10 +83,13 @@ impl Render for ShapeControls {
                     })
                 }),
         );
+        if let Some(row) = path_row {
+            root = root.child(row);
+        }
         if let Some(path) = &shape.path {
             let mut changed = shape.clone();
             changed.path.as_mut().unwrap().closed = !path.closed;
-            if path.vertices.len() >= 3 {
+            if path.vertices.len() >= 3 && shape.path_animation.is_default() {
                 let state = self.state.clone();
                 root = root.child(
                     ui::text_button(

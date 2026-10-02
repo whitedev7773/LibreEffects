@@ -3,6 +3,11 @@ use super::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PropertyPath {
+    Path(PathTarget),
+    Mask {
+        mask: u64,
+        parameter: MaskParam,
+    },
     Audio(AudioParam),
     TimeRemap,
     Transform(Property),
@@ -41,6 +46,18 @@ pub enum TrackEdit {
 impl Layer {
     pub fn track_label(&self, path: PropertyPath) -> Option<String> {
         Some(match path {
+            PropertyPath::Path(target) => match target {
+                PathTarget::Shape => "Shape Path".into(),
+                PathTarget::Mask(id) => format!(
+                    "Mask {} · Path",
+                    self.path_masks.iter().position(|m| m.id == id)? + 1
+                ),
+            },
+            PropertyPath::Mask { mask, parameter } => format!(
+                "Mask {} · {}",
+                self.path_masks.iter().position(|m| m.id == mask)? + 1,
+                parameter.label().trim_start_matches("Mask ")
+            ),
             PropertyPath::Audio(p) => p.label().into(),
             PropertyPath::TimeRemap => "Time Remap (s)".into(),
             PropertyPath::Transform(p) => p.label().to_string(),
@@ -57,6 +74,13 @@ impl Layer {
     }
     pub fn track(&self, path: PropertyPath) -> Option<&AnimatedProperty> {
         match path {
+            PropertyPath::Path(target) => self.path_animation(target).map(|(_, a)| &a.timing),
+            PropertyPath::Mask { mask, parameter } => self
+                .path_masks
+                .iter()
+                .find(|m| m.id == mask)?
+                .parameters
+                .get(&parameter),
             PropertyPath::Audio(p) => self
                 .can_audio()
                 .then(|| &self.audio_controls.parameters[&p]),
@@ -71,6 +95,12 @@ impl Layer {
     }
     pub fn track_value(&self, path: PropertyPath, frame: Frame) -> Option<f64> {
         Some(match path {
+            PropertyPath::Path(_) => return None,
+            PropertyPath::Mask { mask, parameter } => self
+                .path_masks
+                .iter()
+                .find(|m| m.id == mask)?
+                .value_at(parameter, frame),
             PropertyPath::Audio(p) => self
                 .track(path)?
                 .value_at(frame)
@@ -95,6 +125,23 @@ impl Layer {
                     .filter(|_| self.can_audio())
                     .map(PropertyPath::Audio),
             )
+            .chain(
+                self.path_animation(PathTarget::Shape)
+                    .map(|_| PropertyPath::Path(PathTarget::Shape)),
+            )
+            .chain(
+                self.path_masks
+                    .iter()
+                    .map(|m| PropertyPath::Path(PathTarget::Mask(m.id))),
+            )
+            .chain(self.path_masks.iter().flat_map(|m| {
+                MaskParam::ALL
+                    .into_iter()
+                    .map(move |parameter| PropertyPath::Mask {
+                        mask: m.id,
+                        parameter,
+                    })
+            }))
             .chain(self.effect_stack.iter().flat_map(|e| {
                 e.kind()
                     .parameters()
@@ -109,7 +156,11 @@ impl Layer {
     pub fn copy_key(&self, property: PropertyPath, frame: Frame) -> Option<KeyCopy> {
         let data = self.track(property)?.keys().get(&frame)?.clone();
         let effect_kind = match property {
-            PropertyPath::Audio(_) | PropertyPath::Transform(_) | PropertyPath::TimeRemap => None,
+            PropertyPath::Path(_)
+            | PropertyPath::Mask { .. }
+            | PropertyPath::Audio(_)
+            | PropertyPath::Transform(_)
+            | PropertyPath::TimeRemap => None,
             PropertyPath::Effect { effect, .. } => {
                 Some(self.effect_stack.iter().find(|e| e.id() == effect)?.kind())
             }
@@ -122,6 +173,11 @@ impl Layer {
             },
             data,
             effect_kind,
+            path_pose: if let PropertyPath::Path(target) = property {
+                self.copy_path_pose(target, frame)
+            } else {
+                None
+            },
         })
     }
     pub(super) fn track_mut(
@@ -129,6 +185,14 @@ impl Layer {
         path: PropertyPath,
     ) -> Result<&mut AnimatedProperty, String> {
         match path {
+            PropertyPath::Path(target) => {
+                self.path_animation_mut(target).map(|(_, a)| &mut a.timing)
+            }
+            PropertyPath::Mask { mask, parameter } => self
+                .path_masks
+                .iter_mut()
+                .find(|m| m.id == mask)
+                .and_then(|m| m.parameters.get_mut(&parameter)),
             PropertyPath::Audio(p) => {
                 if self.can_audio() {
                     self.audio_controls.parameters.get_mut(&p)
@@ -400,6 +464,13 @@ mod tests {
 
 pub(super) fn command(id: LayerId, property: PropertyPath, edit: TrackEdit) -> Command {
     match property {
+        PropertyPath::Path(target) => Command::AnimatePath { id, target, edit },
+        PropertyPath::Mask { mask, parameter } => Command::EditMask {
+            id,
+            mask,
+            parameter,
+            edit,
+        },
         PropertyPath::Audio(parameter) => Command::EditAudio {
             id,
             parameter,

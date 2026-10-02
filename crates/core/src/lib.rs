@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
+const PROJECT_VERSION: u32 = 31;
 pub type Frame = u32;
 pub type LayerId = u64;
 pub type CompositionId = u64;
@@ -43,6 +44,10 @@ pub use image_sequence::MissingFramePolicy;
 mod time;
 mod time_remap;
 pub use assets::{AssetId, AssetLibrary, FolderId, MediaAsset, ProjectFolder, ProjectItem};
+mod path_animation;
+pub use path_animation::{PathAnimation, PathTarget};
+mod mask_animation;
+pub use mask_animation::MaskParam;
 mod paths;
 pub use paths::{PathMask, PathMaskMode, PathVertex, VectorPath};
 mod shapes;
@@ -237,6 +242,8 @@ pub struct Layer {
     mask: Option<Mask>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     path_masks: Vec<PathMask>,
+    #[serde(default = "effects::first_effect_id")]
+    next_mask_id: u64,
     id: LayerId,
     name: String,
     visible: bool,
@@ -553,13 +560,14 @@ impl Project {
     pub fn from_json(json: &str) -> Result<Self, String> {
         let mut project = document::decode(json)?;
         project.validate()?;
+        mask_animation::migrate(&mut project);
         project.sync_assets()?;
         project.validate()?;
         Ok(project)
     }
 
     fn validate(&self) -> Result<(), String> {
-        if !(1..=29).contains(&self.version) {
+        if !(1..=PROJECT_VERSION).contains(&self.version) {
             return Err("Unsupported project version".into());
         }
         if self.version < 9
@@ -689,6 +697,8 @@ impl Project {
                 {
                     return Err("Invalid or unsupported text style".into());
                 }
+                mask_animation::validate(layer, comp.duration, self.version)?;
+                path_animation::validate(layer, comp.duration, self.version)?;
                 audio_controls::validate(layer, comp.duration, self.version)?;
                 layer.markers.validate(comp.duration)?;
                 effects::validate(layer, comp.duration)?;
@@ -925,6 +935,23 @@ pub enum Command {
     SetEffects {
         id: LayerId,
         effects: Effects,
+    },
+    EditMask {
+        id: LayerId,
+        mask: u64,
+        parameter: MaskParam,
+        edit: TrackEdit,
+    },
+    EditPath {
+        id: LayerId,
+        target: PathTarget,
+        frame: Frame,
+        path: VectorPath,
+    },
+    AnimatePath {
+        id: LayerId,
+        target: PathTarget,
+        edit: TrackEdit,
     },
     SetPathMasks {
         id: LayerId,
@@ -1309,6 +1336,22 @@ impl Editor {
         }) {
             next.project.version = next.project.version.max(29);
         }
+        if next
+            .project
+            .compositions()
+            .into_iter()
+            .any(|(_, c)| c.layers.iter().any(|l| !l.path_masks.is_empty()))
+        {
+            next.project.version = next.project.version.max(30);
+        }
+        if next.project.compositions().into_iter().any(|(_, c)| {
+            c.layers.iter().any(|l| {
+                matches!(&l.content,Content::Shape(s) if !s.path_animation.is_default())
+                    || l.path_masks.iter().any(|m| !m.animation.is_default())
+            })
+        }) {
+            next.project.version = next.project.version.max(31);
+        }
         next.project.validate()?;
         if next != self.current {
             let previous = std::mem::replace(&mut self.current, next);
@@ -1319,6 +1362,12 @@ impl Editor {
 }
 
 fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
+    if let Some(result) = path_animation::apply(state, &command) {
+        return result;
+    }
+    if let Some(result) = mask_animation::apply(state, &command) {
+        return result;
+    }
     if let Some(result) = audio_controls::apply(state, &command) {
         return result;
     }
@@ -1590,6 +1639,7 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
                 next_effect_id: 1,
                 mask: None,
                 path_masks: Vec::new(),
+                next_mask_id: 1,
                 id,
                 name: format!("Rectangle {id}"),
                 visible: true,

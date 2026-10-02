@@ -1382,3 +1382,41 @@ showed changing picture/time and live meters with zero underruns, pause held
 frame 136, Loop off stopped at the work area's final frame 149, and a scrub at
 frame 90 returned to Stopped without advancing the picture. Audio off retained
 visual playback. These preview switches left the document clean.
+
+## Mask and path animation
+
+Each vector mask has stable identity, animated Opacity, Feather and Expansion.
+Controls are grouped per mask in Properties; the same scalar tracks appear in
+the Timeline and Value Graph. Mask reordering preserves animation targets.
+Feather uses uniform Gaussian blur; Expansion uses SVG morphology, so its corner
+behavior is not a pixel-identical implementation of After Effects.
+
+Enable the Path stopwatch on a shape or mask, change time and drag its vertices
+or handles with Pen (G). The gesture creates or updates one undoable geometry key.
+Path keys support timeline selection, move, clipboard, delete, easing, layer
+retiming and serialization. Turning animation off bakes the evaluated shape.
+Corresponding vertices and tangents interpolate; animated topology must retain
+the same vertex count and closed state. Turn off Path animation before inserting
+or deleting vertices. Path geometry is edited on the canvas, not as numeric values
+in the graph. Grouped Contents, shape operators, variable feather, roto tools and
+multiple-vertex selection remain future work.
+
+Version 29 masks migrate to stable IDs; scalar mask tracks use version 30 and
+path animation uses version 31. Compact image and sequence decoding now accepts
+all supported versions, fixing saved mixed-media documents from versions 27–29.
+Tests cover legacy migration, mixed-media round trips, key history/clipboard,
+Pen gestures, interpolated shape/mask pixels and soft mask edge alpha.
+
+Native QA opened the v29 path fixture, enabled Path and Feather at frame 0,
+set Feather to 60 and moved a vertex at frame 30, and checked the halfway
+geometry with Feather 30 at frame 15. Pen Undo/Redo, path key copy to frame 60,
+scalar graph time/value dragging and Undo, U filtering and v31 Save As worked.
+CLI PNG frames 0/15/30 preserved the Subtract hole at alpha 0 while the outer
+mask gained soft edges. The editor continued to replace the previous instance
+through the application protocol; one actual work window remained.
+
+The final release was restarted and the saved fixture reopened: all three Path
+keys and both Feather keys remained. Timeline groups keep each mask's Path and
+scalar properties together. Validation passed 133 core and 130 desktop tests
+with 30 external media/device tests excluded, Cargo check, rustfmt and release
+build. Moon/proto were not on PATH, so Cargo equivalents were used.
