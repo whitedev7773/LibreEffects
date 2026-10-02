@@ -1,5 +1,8 @@
 //! Ordered effect instances with bounded, animated scalar parameters.
 use super::*;
+#[path = "effect_presets.rs"]
+mod presets;
+pub use presets::EffectPreset;
 
 pub type EffectId = u64;
 
@@ -283,6 +286,10 @@ impl EffectInstance {
 
 #[derive(Clone, Debug)]
 pub enum EffectEdit {
+    ApplyPreset {
+        preset: EffectPreset,
+        frame: Frame,
+    },
     EditKeyframe {
         effect: EffectId,
         parameter: EffectParam,
@@ -359,13 +366,16 @@ pub(super) fn first_effect_id() -> EffectId {
     1
 }
 pub(super) fn validate(layer: &Layer, duration: Frame) -> Result<(), String> {
-    if layer.effect_stack.len() > 64 || layer.next_effect_id == 0 {
+    validate_stack(&layer.effect_stack, layer.next_effect_id, duration)
+}
+fn validate_stack(stack: &[EffectInstance], next: EffectId, duration: Frame) -> Result<(), String> {
+    if stack.len() > 64 || next == 0 {
         return Err("A layer supports up to 64 effects".into());
     }
     let mut ids = BTreeSet::new();
-    for effect in &layer.effect_stack {
+    for effect in stack {
         if effect.id == 0
-            || effect.id >= layer.next_effect_id
+            || effect.id >= next
             || !ids.insert(effect.id)
             || effect.name.trim().is_empty()
             || effect.name.len() > 256
@@ -406,6 +416,7 @@ fn add(layer: &mut Layer, kind: EffectKind) -> Result<EffectId, String> {
 }
 pub(super) fn apply(state: &mut Snapshot, id: LayerId, edit: EffectEdit) -> Result<(), String> {
     let duration = state.project.composition.duration;
+    let fps = state.project.composition.fps;
     let layer = state
         .project
         .composition
@@ -420,6 +431,7 @@ pub(super) fn apply(state: &mut Snapshot, id: LayerId, edit: EffectEdit) -> Resu
         return Err("Null objects have no rendered pixels to affect".into());
     }
     match edit {
+        EffectEdit::ApplyPreset { preset, frame } => preset.apply(layer, frame, fps, duration)?,
         EffectEdit::EditKeyframe {
             effect,
             parameter,

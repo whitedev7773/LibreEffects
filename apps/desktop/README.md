@@ -58,6 +58,32 @@ channel display and overlays. It uses the current preview resolution; it is not
 an OS screen eyedropper or a color-managed HDR sampler. At partial alpha,
 premultiplication roundtrips can differ from source RGB by one byte.
 
+## Effect presets
+
+In Effect Controls, **Save effect preset…** exports the selected layer's ordered
+stack; **Save this effect…** exports one instance. Use a `.lfe-preset.json` file
+name. The file stem becomes its name in **Effects & Presets → User Presets**.
+Saving also installs a local copy; **Import preset…** installs a portable file.
+Identical imports are deduplicated. Refresh reloads the local library. Search
+matches preset names and the effect types they contain.
+
+Click a preset to append its effects to all selected layers in one Undo. Names,
+order, bypass state, color space, values, keys and interpolation are preserved;
+new effect IDs are assigned on each layer. The first saved key starts at the
+playhead. Other key times preserve elapsed seconds across FPS differences,
+rounded to the nearest destination frame. Key collisions or out-of-range keys
+reject the entire application, including multi-layer selections. Static effects
+apply throughout the layer. Pixel coordinates and radii retain their original
+units; layer dimensions, transforms, masks and text are not included.
+
+Convert legacy effects to an ordered stack before exporting the entire stack.
+This is Libre Effects' own versioned JSON format, not Adobe FFX compatibility.
+The local library lives in `LibreEffects/effect-presets` in the user data folder
+and loads at most 200 presets / 32 MiB; files are limited to 8 MiB and 40,000 keys.
+Invalid files are skipped with a visible warning. Preset rename/delete UI and
+broader animation presets for selected transform/mask/text properties remain
+future work.
+
 ## Workspace
 
 - Compact menu bar and toolbar; Project and Composition above the Timeline, with a

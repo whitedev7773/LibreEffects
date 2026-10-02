@@ -17,6 +17,7 @@ mod cli;
 mod color_edit;
 mod components;
 mod editor;
+mod effect_presets;
 mod effect_render;
 mod footage;
 mod image_sequence;

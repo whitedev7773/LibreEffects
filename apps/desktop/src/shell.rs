@@ -458,6 +458,7 @@ impl Render for Shell {
             self.state.update(cx, |s, cx| {
                 s.start_recovery(cx);
                 s.load_queue(cx);
+                s.load_presets(cx);
             });
             let weak = cx.entity().downgrade();
             window.on_window_should_close(cx, move |window, cx| {

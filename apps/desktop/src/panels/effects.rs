@@ -1,3 +1,4 @@
+use crate::editor::presets::PresetAction;
 use crate::{
     components::TextField,
     editor::{Action, EditorState},
@@ -78,6 +79,14 @@ impl Render for EffectControls {
                 .text_color(rgb(ui::BLUE))
                 .child(layer.name().to_string()),
         );
+        if !layer.effect_stack().is_empty() || layer.effects() != Effects::default() {
+            body = body.child(preset_button(
+                "save-effect-stack",
+                "Save effect preset…",
+                &self.state,
+                PresetAction::Save(None),
+            ));
+        }
         if locked {
             body = body.child("Unlock this layer to edit its effects.");
         }
@@ -225,6 +234,12 @@ impl Render for EffectControls {
                         false,
                     )),
             );
+            section = section.child(preset_button(
+                SharedString::from(format!("{prefix}-save-preset")),
+                "Save this effect…",
+                &self.state,
+                PresetAction::Save(Some(effect_id)),
+            ));
             let mut shown_curve = None;
             if effect.kind() == EffectKind::Curves {
                 if !self.curves.contains_key(&key) {
@@ -483,7 +498,76 @@ impl Render for EffectCatalog {
                     .child("Select an unlocked image, text, shape or composition layer."),
             );
         }
-        let mut count = 0;
+        list = list.child(
+            div()
+                .flex()
+                .gap_1()
+                .child(preset_button(
+                    "import-effect-preset",
+                    "Import preset…",
+                    &self.state,
+                    PresetAction::Import,
+                ))
+                .child(preset_button(
+                    "refresh-effect-presets",
+                    "Refresh",
+                    &self.state,
+                    PresetAction::Reload,
+                )),
+        );
+        let library = &self.state.read(cx).presets;
+        if library.busy {
+            list = list.child("Loading presets…");
+        }
+        if !library.message.is_empty() {
+            list = list.child(
+                div()
+                    .text_size(px(10.0))
+                    .text_color(rgb(0xffaa88))
+                    .child(library.message.clone()),
+            );
+        }
+        let entries: Vec<_> = library
+            .entries
+            .iter()
+            .filter(|e| {
+                query.is_empty()
+                    || e.preset.name().to_lowercase().contains(&query)
+                    || e.preset
+                        .effects()
+                        .iter()
+                        .any(|fx| fx.kind().label().to_lowercase().contains(&query))
+            })
+            .cloned()
+            .collect();
+        let mut count = entries.len();
+        if !entries.is_empty() {
+            list = list.child(div().py_1().child("User Presets"));
+            for (i, entry) in entries.into_iter().enumerate() {
+                let label = entry.preset.name().to_string();
+                let detail = format!(
+                    "{} effects · {} keys · {} fps. First key starts at the playhead. Appends to selected layers in one Undo.",
+                    entry.preset.effects().len(),
+                    entry.preset.key_count(),
+                    entry.preset.fps()
+                );
+                list = list.child(
+                    preset_button(
+                        SharedString::from(format!("user-preset-{i}")),
+                        label,
+                        &self.state,
+                        PresetAction::Apply(entry.id),
+                    )
+                    .justify_start()
+                    .h(px(24.0))
+                    .flex_none()
+                    .ml_3()
+                    .when(selected.is_none(), |d| d.opacity(0.5))
+                    .tooltip(move |_, cx| cx.new(|_| ui::Tip(detail.clone().into())).into()),
+                );
+            }
+        }
+
         for (category, kinds) in [
             ("Blur & Sharpen", vec![EffectKind::GaussianBlur]),
             (
@@ -580,4 +664,25 @@ impl Render for EffectCatalog {
         }
         list
     }
+}
+
+fn preset_button(
+    id: impl Into<gpui::ElementId>,
+    label: impl Into<SharedString>,
+    state: &Entity<EditorState>,
+    action: PresetAction,
+) -> gpui::Stateful<gpui::Div> {
+    let state = state.clone();
+    ui::text_button(id, label)
+        .on_click(move |_, w, cx| {
+            TextField::commit_active(w, cx);
+            state.update(cx, |s, cx| {
+                s.dispatch(&Action::Preset(action.clone()), w, cx)
+            });
+        })
+        .on_key_down(|e, _, cx| {
+            if matches!(e.keystroke.key.as_str(), "enter" | "space") {
+                cx.stop_propagation();
+            }
+        })
 }

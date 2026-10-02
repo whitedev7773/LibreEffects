@@ -21,6 +21,8 @@ mod io;
 mod media;
 #[path = "editor_playback.rs"]
 mod playback;
+#[path = "editor_presets.rs"]
+pub(crate) mod presets;
 #[path = "editor_queue.rs"]
 pub(crate) mod queue;
 #[path = "editor_video.rs"]
@@ -37,6 +39,7 @@ pub(crate) struct VideoJob {
 
 #[derive(Clone)]
 pub(crate) enum Action {
+    Preset(presets::PresetAction),
     OpenColor(crate::color_edit::Target),
     ApplyColor,
     CancelColor,
@@ -160,6 +163,7 @@ impl PropertyFilter {
 }
 
 pub(crate) struct EditorState {
+    pub presets: crate::effect_presets::Library,
     pub colors: crate::color_edit::Workflow,
     pub queue: Option<std::sync::Arc<std::sync::Mutex<crate::render_queue::Queue>>>,
     pub queue_open: bool,
@@ -242,6 +246,7 @@ impl Default for EditorState {
             colors.load(&path);
         }
         Self {
+            presets: Default::default(),
             colors,
             queue: None,
             queue_open: false,
@@ -515,6 +520,7 @@ impl EditorState {
             window.blur();
         }
         match action {
+            Action::Preset(action) => self.preset_action(action, window, cx),
             Action::OpenColor(target) => {
                 self.stop();
                 match crate::color_edit::Session::new(

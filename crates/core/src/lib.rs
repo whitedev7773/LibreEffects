@@ -17,7 +17,8 @@ mod document;
 mod editing;
 mod effects;
 pub use effects::{
-    EffectColorSpace, EffectEdit, EffectId, EffectInstance, EffectKind, EffectParam, ParameterSpec,
+    EffectColorSpace, EffectEdit, EffectId, EffectInstance, EffectKind, EffectParam, EffectPreset,
+    ParameterSpec,
 };
 mod geometry;
 mod layer_workflow;
