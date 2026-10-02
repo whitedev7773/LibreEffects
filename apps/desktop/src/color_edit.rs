@@ -75,7 +75,11 @@ impl Session {
                             rgb: shape.stroke_color,
                             opacity: 100.0,
                         },
-                        _ => return Err("Select a shape layer".into()),
+                        Content::Text { .. } => Color {
+                            rgb: layer.text_style().stroke_color,
+                            opacity: 100.0,
+                        },
+                        _ => return Err("Select a shape or text layer".into()),
                     },
                     _ => Color {
                         rgb: layer.color(),
@@ -194,15 +198,19 @@ impl Session {
                 }
             }
             Target::Stroke(id) if self.color.rgb != self.original.rgb => {
-                if let Some(layer) = self.origin.composition().layer(id)
-                    && let Content::Shape(shape) = layer.content()
-                {
-                    let mut shape = shape.clone();
-                    shape.stroke_color = self.color.rgb;
-                    commands.push(Command::SetContent {
-                        id,
-                        content: Content::Shape(shape),
-                    });
+                if let Some(layer) = self.origin.composition().layer(id) {
+                    if matches!(layer.content(), Content::Text { .. }) {
+                        let mut style = layer.text_style();
+                        style.stroke_color = self.color.rgb;
+                        commands.push(Command::SetTextStyle { id, style });
+                    } else if let Content::Shape(shape) = layer.content() {
+                        let mut shape = shape.clone();
+                        shape.stroke_color = self.color.rgb;
+                        commands.push(Command::SetContent {
+                            id,
+                            content: Content::Shape(shape),
+                        });
+                    }
                 }
             }
             _ => {}
@@ -432,6 +440,36 @@ mod tests {
             .unwrap();
         let saved = Project::from_json(&e.project().to_json().unwrap()).unwrap();
         assert_eq!(saved.composition().background_color(), 0x112233);
+        e.undo();
+        assert_eq!(e.project(), &before);
+    }
+    #[test]
+    fn text_stroke_picker_preserves_fill_and_undo_restores_style() {
+        let mut e = Editor::default();
+        e.execute(Command::AddContent {
+            content: Content::Text {
+                text: "Title".into(),
+                font_size: 72.0,
+            },
+            width: 500.0,
+            height: 100.0,
+            name: "Title".into(),
+        })
+        .unwrap();
+        let before = e.project().clone();
+        let mut s = Session::new(Target::Stroke(1), e.project(), 0, 0).unwrap();
+        assert!(!s.target.alpha());
+        s.input(0, "f08020").unwrap();
+        assert_eq!(e.project(), &before);
+        e.execute(s.command().unwrap()).unwrap();
+        let l = e.selected_layer().unwrap();
+        assert_eq!(l.text_style().stroke_color, 0xf08020);
+        assert!(!l.text_style().stroke_enabled);
+        assert_eq!(l.color(), before.composition().layer(1).unwrap().color());
+        assert_eq!(
+            l.content(),
+            before.composition().layer(1).unwrap().content()
+        );
         e.undo();
         assert_eq!(e.project(), &before);
     }

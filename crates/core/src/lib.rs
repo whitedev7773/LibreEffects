@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-const PROJECT_VERSION: u32 = 33;
+const PROJECT_VERSION: u32 = 34;
 pub type Frame = u32;
 pub type LayerId = u64;
 pub type CompositionId = u64;
@@ -54,7 +54,7 @@ pub use paths::{PathMask, PathMaskMode, PathVertex, VectorPath};
 mod shapes;
 mod text_style;
 pub use shapes::{Shape, ShapeKind};
-pub use text_style::{TextAlign, TextStyle};
+pub use text_style::{TextAlign, TextStrokeJoin, TextStyle};
 mod tracks;
 pub use editing::{Content, Effects, KeyCopy, KeyRef, Mask, VideoPlayback};
 pub use geometry::{Affine, Bezier};
@@ -694,6 +694,8 @@ impl Project {
             for layer in &comp.layers {
                 time_remap::validate(layer, comp.duration, self.version)?;
                 if !layer.text_style.valid()
+                    || (layer.text_style.has_paint_override()
+                        && (self.version < 34 || !matches!(layer.content, Content::Text { .. })))
                     || (layer.text_style.paragraph
                         && (self.version < 33 || !matches!(layer.content, Content::Text { .. })))
                     || (layer.text_style.has_font_override() && self.version < 32)
@@ -1376,6 +1378,14 @@ impl Editor {
             .any(|(_, c)| c.layers.iter().any(|l| l.text_style.paragraph))
         {
             next.project.version = next.project.version.max(33);
+        }
+        if next
+            .project
+            .compositions()
+            .into_iter()
+            .any(|(_, c)| c.layers.iter().any(|l| l.text_style.has_paint_override()))
+        {
+            next.project.version = next.project.version.max(34);
         }
         next.project.validate()?;
         if next != self.current {

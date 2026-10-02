@@ -7,6 +7,13 @@ pub enum TextAlign {
     Center,
     Right,
 }
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TextStrokeJoin {
+    #[default]
+    Miter,
+    Round,
+    Bevel,
+}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TextStyle {
@@ -22,6 +29,14 @@ pub struct TextStyle {
     pub align: TextAlign,
     /// Wrap and clip source text inside the layer's width and height.
     pub paragraph: bool,
+    pub fill_enabled: bool,
+    pub stroke_enabled: bool,
+    pub stroke_color: u32,
+    /// Centered on glyph outlines, in source pixels; does not affect advances.
+    pub stroke_width: f64,
+    /// Whole-layer paint order, including overlaps between lines and characters.
+    pub stroke_over_fill: bool,
+    pub stroke_join: TextStrokeJoin,
 }
 impl Default for TextStyle {
     fn default() -> Self {
@@ -34,6 +49,12 @@ impl Default for TextStyle {
             tracking: 0.0,
             align: TextAlign::Left,
             paragraph: false,
+            fill_enabled: true,
+            stroke_enabled: false,
+            stroke_color: 0,
+            stroke_width: 1.0,
+            stroke_over_fill: false,
+            stroke_join: TextStrokeJoin::Miter,
         }
     }
 }
@@ -52,6 +73,17 @@ impl TextStyle {
             && (0.1..=10.0).contains(&self.leading)
             && self.tracking.is_finite()
             && (-1000.0..=10000.0).contains(&self.tracking)
+            && self.stroke_color <= 0xffffff
+            && self.stroke_width.is_finite()
+            && (0.0..=1000.0).contains(&self.stroke_width)
+    }
+    pub fn has_paint_override(&self) -> bool {
+        !self.fill_enabled
+            || self.stroke_enabled
+            || self.stroke_color != 0
+            || self.stroke_width != 1.0
+            || self.stroke_over_fill
+            || self.stroke_join != TextStrokeJoin::Miter
     }
     pub fn has_font_override(&self) -> bool {
         self.font_family != "Wanted Sans"
@@ -65,6 +97,78 @@ impl TextStyle {
 mod tests {
     use super::*;
     use crate::{Command, Content, Editor, Project};
+    #[test]
+    fn text_paint_roundtrip_version_history_and_validation() {
+        let mut e = Editor::default();
+        e.execute(Command::AddContent {
+            content: Content::Text {
+                text: "Stroke 한글".into(),
+                font_size: 48.0,
+            },
+            width: 500.0,
+            height: 100.0,
+            name: "Title".into(),
+        })
+        .unwrap();
+        let id = e.selected().unwrap();
+        let before = e.project().clone();
+        let style = TextStyle {
+            fill_enabled: false,
+            stroke_enabled: true,
+            stroke_width: 12.5,
+            stroke_color: 0xabcdef,
+            stroke_over_fill: true,
+            stroke_join: TextStrokeJoin::Bevel,
+            ..Default::default()
+        };
+        e.execute(Command::SetTextStyle {
+            id,
+            style: style.clone(),
+        })
+        .unwrap();
+        let after = e.project().clone();
+        let json = after.to_json().unwrap();
+        assert_eq!(Project::from_json(&json).unwrap(), after);
+        let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["version"], 34);
+        value["version"] = 33.into();
+        assert!(Project::from_json(&value.to_string()).is_err());
+        for bad in [
+            TextStyle {
+                stroke_width: -1.0,
+                ..style.clone()
+            },
+            TextStyle {
+                stroke_width: f64::NAN,
+                ..style.clone()
+            },
+            TextStyle {
+                stroke_width: 1000.01,
+                ..style.clone()
+            },
+            TextStyle {
+                stroke_color: 0x1000000,
+                ..style.clone()
+            },
+        ] {
+            assert!(e.execute(Command::SetTextStyle { id, style: bad }).is_err());
+            assert_eq!(e.project(), &after);
+        }
+        e.undo();
+        assert_eq!(e.project(), &before);
+        e.redo();
+        assert_eq!(e.project(), &after);
+        e.execute(Command::ToggleLocked(id)).unwrap();
+        assert!(
+            e.execute(Command::SetTextStyle {
+                id,
+                style: Default::default()
+            })
+            .is_err()
+        );
+        let legacy: TextStyle = serde_json::from_str("{}").unwrap();
+        assert!(legacy.fill_enabled && !legacy.stroke_enabled && !legacy.has_paint_override());
+    }
     #[test]
     fn paragraph_box_versions_history_and_resize_preserve_source_and_transform() {
         let mut e = Editor::default();

@@ -38,10 +38,45 @@ fn layer_text_svg(
     height: f64,
     style: libre_effects_core::TextStyle,
 ) -> String {
-    if !style.paragraph {
-        return text_svg(text, size, color, width, style);
+    let fill = if style.fill_enabled {
+        text_geometry_svg(text, size, color, width, height, &style)
+    } else {
+        String::new()
+    };
+    if !style.stroke_enabled || style.stroke_width == 0.0 {
+        return fill;
     }
-    let lines = crate::text_flow::lines(text, size, width, &style);
+    let join = match style.stroke_join {
+        libre_effects_core::TextStrokeJoin::Miter => "miter",
+        libre_effects_core::TextStrokeJoin::Round => "round",
+        libre_effects_core::TextStrokeJoin::Bevel => "bevel",
+    };
+    let stroke = format!(
+        "<g stroke='#{:06x}' stroke-width='{}' stroke-linejoin='{join}' stroke-miterlimit='4'>{}</g>",
+        style.stroke_color,
+        style.stroke_width,
+        text_geometry_svg(text, size, "none", width, height, &style)
+    );
+    if style.stroke_over_fill {
+        format!("{fill}{stroke}")
+    } else {
+        format!("{stroke}{fill}")
+    }
+}
+// Keep paint out of shaping and caret metrics. Separate whole-layer passes also
+// preserve the chosen ordering when characters or lines overlap.
+fn text_geometry_svg(
+    text: &str,
+    size: f64,
+    color: &str,
+    width: f64,
+    height: f64,
+    style: &libre_effects_core::TextStyle,
+) -> String {
+    if !style.paragraph {
+        return text_svg(text, size, color, width, style.clone());
+    }
+    let lines = crate::text_flow::lines(text, size, width, style);
     let mut svg = format!("<svg width='{width}' height='{height}' overflow='hidden'>");
     for (i, line) in lines
         .iter()
@@ -262,7 +297,7 @@ impl Renderer {
             );
             let measured =
                 resvg::usvg::Tree::from_str(&source, &self.options).map_err(|e| e.to_string())?;
-            let bounds = measured.root().bounding_box();
+            let bounds = measured.root().stroke_bounding_box();
             let left = f64::from(bounds.left()).min(0.0);
             let top = f64::from(bounds.top()).min(0.0);
             effect_bounds = [
@@ -556,6 +591,185 @@ pub(crate) fn import_image(path: &Path) -> Result<(Content, u32, u32), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn paragraph_strokes_clip_and_join_styles_change_outline_pixels() {
+        use libre_effects_core::{Command, Editor, TextStrokeJoin};
+        let mut e = Editor::default();
+        e.execute(Command::ConfigureComposition {
+            name: "Stroke bounds".into(),
+            width: 400,
+            height: 300,
+            fps: 30,
+            duration: 90,
+        })
+        .unwrap();
+        let mut draft =
+            crate::text_edit::Session::new_box(e.project(), 0, 0, [40.0, 30.0, 190.0, 180.0])
+                .unwrap();
+        draft.font_size = 120.0;
+        draft.buffer.replace(None, "AV", false, None).unwrap();
+        draft.style.stroke_enabled = true;
+        draft.style.stroke_width = 30.0;
+        draft.style.fill_enabled = false;
+        e.execute(draft.command()).unwrap();
+        let renderer = super::Renderer::new();
+        let mut images = vec![];
+        for join in [
+            TextStrokeJoin::Miter,
+            TextStrokeJoin::Round,
+            TextStrokeJoin::Bevel,
+        ] {
+            let mut style = draft.style.clone();
+            style.stroke_join = join;
+            e.execute(Command::SetTextStyle {
+                id: draft.id,
+                style,
+            })
+            .unwrap();
+            let pixels = renderer.render_output(e.project(), 0, 400, 300).unwrap();
+            assert!(pixels.pixels().any(|p| p[3] > 0));
+            for (x, y, p) in pixels.enumerate_pixels() {
+                if !(40..230).contains(&x) || !(30..210).contains(&y) {
+                    assert_eq!(p[3], 0);
+                }
+            }
+            images.push(pixels);
+        }
+        assert_ne!(images[0], images[1]);
+        assert_ne!(images[1], images[2]);
+        let mut style = draft.style.clone();
+        style.stroke_width = 0.0;
+        e.execute(Command::SetTextStyle {
+            id: draft.id,
+            style,
+        })
+        .unwrap();
+        assert!(
+            renderer
+                .render(e.project(), 0, 400)
+                .unwrap()
+                .pixels()
+                .all(|p| p[3] == 0)
+        );
+    }
+    #[test]
+    fn text_paint_passes_preserve_layout_and_roundtrip_pixels() {
+        use libre_effects_core::{Command, Editor, Project, TextStyle};
+        let mut e = Editor::default();
+        e.execute(Command::ConfigureComposition {
+            name: "Paint".into(),
+            width: 480,
+            height: 300,
+            fps: 30,
+            duration: 90,
+        })
+        .unwrap();
+        let mut draft =
+            crate::text_edit::Session::new(e.project(), 0, 0, None, [50.0, 50.0]).unwrap();
+        draft.font_size = 64.0;
+        draft
+            .buffer
+            .replace(None, "AVA 한글\nAV", false, None)
+            .unwrap();
+        draft.style.tracking = -150.0;
+        draft.style.leading = 0.6;
+        e.execute(draft.command()).unwrap();
+        let base = e.project().clone();
+        let id = e.selected().unwrap();
+        let mut style = e.selected_layer().unwrap().text_style();
+        let layout =
+            crate::text_edit::layout::Layout::shape(&draft.buffer.text, 64.0, draft.width, &style);
+        let renderer = super::Renderer::new();
+        let fill = renderer.render(&base, 0, 480).unwrap();
+        style.stroke_enabled = true;
+        style.stroke_width = 16.0;
+        style.stroke_color = 0xff0000;
+        e.execute(Command::SetTextStyle {
+            id,
+            style: style.clone(),
+        })
+        .unwrap();
+        let behind = renderer.render(e.project(), 0, 480).unwrap();
+        assert_ne!(fill, behind);
+        assert!(
+            behind
+                .pixels()
+                .zip(fill.pixels())
+                .any(|(a, b)| a[3] > 0 && b[3] == 0)
+        );
+        let shaped =
+            crate::text_edit::layout::Layout::shape(&draft.buffer.text, 64.0, draft.width, &style);
+        assert_eq!(layout.carets, shaped.carets);
+        let saved = Project::from_json(&e.project().to_json().unwrap()).unwrap();
+        assert_eq!(renderer.render_preview(&saved, 0, 480).unwrap(), behind);
+        assert_eq!(renderer.render(&saved, 0, 480).unwrap(), behind);
+        e.undo();
+        assert_eq!(e.project(), &base);
+        e.redo();
+        assert_eq!(renderer.render(e.project(), 0, 480).unwrap(), behind);
+        style.stroke_over_fill = true;
+        e.execute(Command::SetTextStyle {
+            id,
+            style: style.clone(),
+        })
+        .unwrap();
+        let above = renderer.render(e.project(), 0, 480).unwrap();
+        assert_ne!(above, behind);
+        style.fill_enabled = false;
+        e.execute(Command::SetTextStyle {
+            id,
+            style: style.clone(),
+        })
+        .unwrap();
+        let stroke = renderer.render(e.project(), 0, 480).unwrap();
+        assert!(stroke.pixels().any(|p| p[3] > 0));
+        assert!(
+            stroke
+                .pixels()
+                .all(|p| p[3] == 0 || (p[0] > 240 && p[1] == 0 && p[2] == 0))
+        );
+        // Independent image compositing checks whole-layer order, including
+        // overlaps between adjacent glyphs and between lines.
+        for (mut reference, top, actual) in [
+            (stroke.clone(), &fill, &behind),
+            (fill.clone(), &stroke, &above),
+        ] {
+            image::imageops::overlay(&mut reference, top, 0, 0);
+            assert!(
+                reference.pixels().zip(actual.pixels()).all(|(a, b)| a
+                    .0
+                    .iter()
+                    .zip(b.0)
+                    .all(|(a, b)| a.abs_diff(b) <= 2))
+            );
+        }
+        style.stroke_enabled = false;
+        e.execute(Command::SetTextStyle { id, style }).unwrap();
+        assert!(
+            renderer
+                .render(e.project(), 0, 480)
+                .unwrap()
+                .pixels()
+                .all(|p| p[3] == 0)
+        );
+        // Paint changes do not change paragraph source ranges or overflow.
+        let text = "한글 AVA words wrap into lines";
+        let plain = TextStyle {
+            paragraph: true,
+            ..Default::default()
+        };
+        let painted = TextStyle {
+            stroke_enabled: true,
+            stroke_width: 40.0,
+            ..plain.clone()
+        };
+        let a = crate::text_flow::lines(text, 48.0, 180.0, &plain);
+        let b = crate::text_flow::lines(text, 48.0, 180.0, &painted);
+        assert_eq!(
+            a.iter().map(|l| (&l.range, l.bottom)).collect::<Vec<_>>(),
+            b.iter().map(|l| (&l.range, l.bottom)).collect::<Vec<_>>()
+        );
+    }
     use super::*;
     use libre_effects_core::LayerSwitch;
     #[test]

@@ -81,6 +81,17 @@ styling remain future work.
 
 ## Editing text in the Composition
 
+Character supports whole-layer fill and stroke switches, stroke color (HEX or
+the shared color dialog), a centered 0–1000 px stroke and Miter/Round/Bevel joins.
+The paint-order button cycles all fills over all strokes / all strokes over all
+fills; the join button cycles the three joins. Both support Enter/Space.
+These settings use project version 34 and participate in Undo/Redo. Stroke width
+does not change glyph advances, caret positions or paragraph line breaks. Paint
+is clipped to paragraph bounds; point-text effect bounds include the stroke.
+The miter limit is currently fixed at 4. Per-character paint, paint animation,
+per-character compositing order and color/bitmap-font stroke parity remain
+unimplemented or unverified; this is not full Character-panel parity.
+
 Ctrl+T selects the Text tool. Click to create point text or edit visible text;
 double-click text with the Selection tool to select its contents. Layer → New
 text starts an empty draft at the composition center. Enter adds a line;

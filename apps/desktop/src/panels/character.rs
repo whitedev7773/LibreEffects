@@ -19,7 +19,7 @@ pub(crate) struct Character {
 impl Character {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
-        let fields = (0..4)
+        let fields = (0..6)
             .map(|i| {
                 let state = state.clone();
                 cx.new(|cx| {
@@ -46,6 +46,11 @@ impl Character {
                                         color: ui::parse_hex_color(text)?.into(),
                                     });
                                 }
+                                if i == 5 {
+                                    let mut style = l.text_style();
+                                    style.stroke_color = ui::parse_hex_color(text)?.into();
+                                    return Ok(Command::SetTextStyle { id, style });
+                                }
                                 let v = text
                                     .trim()
                                     .parse::<f64>()
@@ -62,8 +67,10 @@ impl Character {
                                 let mut style = l.text_style();
                                 if i == 1 {
                                     style.leading = v / font_size;
-                                } else {
+                                } else if i == 2 {
                                     style.tracking = v;
+                                } else {
+                                    style.stroke_width = v;
                                 }
                                 Ok(Command::SetTextStyle { id, style })
                             })();
@@ -300,10 +307,19 @@ impl Render for Character {
             format!("{:.2}", l.text_style().leading * font_size),
             l.text_style().tracking.to_string(),
             format!("{:06X}", l.color()),
+            format!("{:.2}", style.stroke_width),
+            format!("{:06X}", style.stroke_color),
         ];
-        for (i, label) in ["Font size (px)", "Leading (px)", "Tracking", "Fill (hex)"]
-            .into_iter()
-            .enumerate()
+        for (i, label) in [
+            "Font size (px)",
+            "Leading (px)",
+            "Tracking",
+            "Fill (hex)",
+            "Stroke (px)",
+            "Stroke (hex)",
+        ]
+        .into_iter()
+        .enumerate()
         {
             self.fields[i].update(cx, |f, _| f.sync(l.id().to_string(), values[i].clone(), w));
             panel = panel.child(
@@ -320,6 +336,15 @@ impl Render for Character {
                             &self.state,
                         ))
                     })
+                    .when(i == 5, |d| {
+                        d.child(super::color_picker::swatch(
+                            "text-stroke-color",
+                            style.stroke_color,
+                            crate::color_edit::Target::Stroke(l.id()),
+                            l.locked(),
+                            &self.state,
+                        ))
+                    })
                     .child(
                         div()
                             .flex_1()
@@ -329,7 +354,97 @@ impl Render for Character {
                     ),
             );
         }
+        let mut switches = div().flex().gap_2();
+        for (fill, enabled, label) in [
+            (true, style.fill_enabled, "Fill"),
+            (false, style.stroke_enabled, "Stroke"),
+        ] {
+            let state = self.state.clone();
+            switches = switches.child(
+                ui::text_button(
+                    label,
+                    format!("{label}: {}", if enabled { "On" } else { "Off" }),
+                )
+                .when(enabled, |b| b.text_color(rgb(ui::BLUE)))
+                .when(!l.locked(), |b| {
+                    b.on_click(move |_, w, cx| {
+                        TextField::commit_active(w, cx);
+                        state.update(cx, |s, cx| {
+                            let Some(l) = s.editor.selected_layer() else {
+                                return;
+                            };
+                            let mut style = l.text_style();
+                            if fill {
+                                style.fill_enabled = !style.fill_enabled;
+                            } else {
+                                style.stroke_enabled = !style.stroke_enabled;
+                            }
+                            s.dispatch(
+                                &Action::Edit(Command::SetTextStyle { id: l.id(), style }),
+                                w,
+                                cx,
+                            );
+                        });
+                    })
+                }),
+            );
+        }
+        let state = self.state.clone();
+        let order = if style.stroke_over_fill {
+            "All strokes over fills"
+        } else {
+            "All fills over strokes"
+        };
+        let join_state = self.state.clone();
         panel
+            .child(switches)
+            .child(
+                ui::text_button("text-paint-order", format!("{order} ▾")).when(!l.locked(), |b| {
+                    b.on_click(move |_, w, cx| {
+                        TextField::commit_active(w, cx);
+                        state.update(cx, |s, cx| {
+                            let Some(l) = s.editor.selected_layer() else {
+                                return;
+                            };
+                            let mut style = l.text_style();
+                            style.stroke_over_fill = !style.stroke_over_fill;
+                            s.dispatch(
+                                &Action::Edit(Command::SetTextStyle { id: l.id(), style }),
+                                w,
+                                cx,
+                            );
+                        });
+                    })
+                }),
+            )
+            .child(
+                ui::text_button(
+                    "text-stroke-join",
+                    format!("Join: {:?} ▾", style.stroke_join),
+                )
+                .when(!l.locked(), |b| {
+                    b.on_click(move |_, w, cx| {
+                        TextField::commit_active(w, cx);
+                        join_state.update(cx, |s, cx| {
+                            let Some(l) = s.editor.selected_layer() else {
+                                return;
+                            };
+                            let mut style = l.text_style();
+                            use libre_effects_core::TextStrokeJoin::*;
+                            style.stroke_join = match style.stroke_join {
+                                Miter => Round,
+                                Round => Bevel,
+                                Bevel => Miter,
+                            };
+                            s.dispatch(
+                                &Action::Edit(Command::SetTextStyle { id: l.id(), style }),
+                                w,
+                                cx,
+                            );
+                        });
+                    })
+                }),
+            )
     }
 }
 pub(crate) struct Paragraph {
