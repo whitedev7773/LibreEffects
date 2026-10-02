@@ -178,6 +178,7 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                     track.keys.insert(
                         frame,
                         Keyframe {
+                            temporal: TemporalHandles::default(),
                             value,
                             interpolation: Interpolation::Linear,
                         },

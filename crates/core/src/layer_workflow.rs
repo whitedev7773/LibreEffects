@@ -186,7 +186,10 @@ fn paste(state: &mut Snapshot, clipboard: &LayerClipboard) -> Result<(), String>
                             .into(),
                     );
                 }
-                if keys.insert(frame, key.clone()).is_some() {
+                let mut key = key.clone();
+                key.temporal
+                    .rescale(clipboard.fps.as_f64() / comp.fps.as_f64());
+                if keys.insert(frame, key).is_some() {
                     return Err(
                         "Destination frame rate merges copied keyframes; use a higher frame rate"
                             .into(),

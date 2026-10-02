@@ -162,7 +162,10 @@ fn curve_at(state: &EditorState) -> Option<Bezier> {
         .composition()
         .layer(id)?
         .track(property)?;
-    track.keys().range(frame + 1..).next()?;
+    let (_, next) = track.keys().range(frame + 1..).next()?;
+    if track.keys()[&frame].temporal.outgoing.is_some() || next.temporal.incoming.is_some() {
+        return None;
+    }
     Some(match track.keys()[&frame].interpolation {
         Interpolation::Bezier(b) => b,
         Interpolation::Linear => Bezier {
@@ -214,7 +217,7 @@ impl Graph {
             cx.notify();
         })
         .detach();
-        let fields = (0..6)
+        let fields = (0..10)
             .map(|index| {
                 let edit = state.clone();
                 cx.new(|cx| {
@@ -277,6 +280,32 @@ impl Graph {
                                     window,
                                     cx,
                                 );
+                            } else if index >= 6 {
+                                let incoming = index < 8;
+                                let comp = state.editor.project().composition();
+                                let track = comp.layer(id).unwrap().track(property).unwrap();
+                                let mut handle = track.temporal_handle(frame, incoming).unwrap_or(
+                                    libre_effects_core::TemporalHandle {
+                                        slope: 0.0,
+                                        influence: 1.0 / 3.0,
+                                    },
+                                );
+                                if index % 2 == 0 {
+                                    handle.slope = value / comp.fps().as_f64();
+                                } else {
+                                    handle.influence = value / 100.0;
+                                }
+                                state.dispatch(
+                                    &Action::Edit(Command::SetTemporalHandle {
+                                        id,
+                                        property,
+                                        frame,
+                                        incoming,
+                                        handle,
+                                    }),
+                                    window,
+                                    cx,
+                                );
                             } else if let Some(mut curve) = curve_at(state) {
                                 match index {
                                     2 => curve.x1 = value,
@@ -327,6 +356,46 @@ impl Graph {
                     window,
                     cx,
                 );
+            }
+        });
+    }
+    fn ease(&self, incoming: bool, outgoing: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.state.update(cx, |state, cx| {
+            if let Some((id, frame, property)) = selected(state) {
+                let track = state
+                    .editor
+                    .project()
+                    .composition()
+                    .layer(id)
+                    .unwrap()
+                    .track(property)
+                    .unwrap();
+                let commands = [
+                    (
+                        true,
+                        incoming && track.keys().range(..frame).next_back().is_some(),
+                    ),
+                    (
+                        false,
+                        outgoing && track.keys().range(frame + 1..).next().is_some(),
+                    ),
+                ]
+                .into_iter()
+                .filter(|(_, enabled)| *enabled)
+                .map(|(incoming, _)| Command::SetTemporalHandle {
+                    id,
+                    property,
+                    frame,
+                    incoming,
+                    handle: libre_effects_core::TemporalHandle {
+                        slope: 0.0,
+                        influence: 1.0 / 3.0,
+                    },
+                })
+                .collect::<Vec<_>>();
+                if !commands.is_empty() {
+                    state.dispatch(&Action::Edit(Command::Batch(commands)), window, cx);
+                }
             }
         });
     }
@@ -622,6 +691,7 @@ impl Render for Graph {
         let start = state.timeline_start;
         let span = state.visible_frames();
         let current = state.frame;
+        let fps = state.editor.project().composition().fps().as_f64();
         let selection = selected(state);
         let curve = curve_at(state);
         let locked = layer.as_ref().is_none_or(|l| l.locked());
@@ -646,7 +716,7 @@ impl Render for Graph {
                     cx.notify();
                 }
                 if key == "f9" {
-                    this.preset(Interpolation::Bezier(Bezier::default()), window, cx);
+                    this.ease(true, true, window, cx);
                     cx.stop_propagation();
                 }
                 if matches!(key, "delete" | "backspace") {
@@ -692,31 +762,25 @@ impl Render for Graph {
         for (label, interpolation) in [
             ("Linear", Interpolation::Linear),
             ("Hold", Interpolation::Hold),
-            ("Ease (F9)", Interpolation::Bezier(Bezier::default())),
-            (
-                "Ease In",
-                Interpolation::Bezier(Bezier {
-                    x1: 0.42,
-                    y1: 0.0,
-                    x2: 1.0,
-                    y2: 1.0,
-                }),
-            ),
-            (
-                "Ease Out",
-                Interpolation::Bezier(Bezier {
-                    x1: 0.0,
-                    y1: 0.0,
-                    x2: 0.58,
-                    y2: 1.0,
-                }),
-            ),
         ] {
             toolbar = toolbar.child(
                 ui::text_button(SharedString::from(format!("preset-{label}")), label)
                     .when(selection.is_none() || locked, |s| s.opacity(0.4))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.preset(interpolation, window, cx)
+                    })),
+            );
+        }
+        for (label, incoming, outgoing) in [
+            ("Ease (F9)", true, true),
+            ("Ease In", true, false),
+            ("Ease Out", false, true),
+        ] {
+            toolbar = toolbar.child(
+                ui::text_button(SharedString::from(format!("ease-{label}")), label)
+                    .when(selection.is_none() || locked, |s| s.opacity(0.4))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.ease(incoming, outgoing, window, cx)
                     })),
             );
         }
@@ -889,7 +953,7 @@ impl Render for Graph {
         let mut easing = div()
             .id("easing-controls")
             .w(px(280.0))
-            .h(px(290.0))
+            .h(px(420.0))
             .bg(rgb(ui::PANEL))
             .border_1()
             .border_color(rgb(0x555555))
@@ -898,11 +962,7 @@ impl Render for Graph {
             .border_l_1()
             .border_color(rgb(ui::BORDER))
             .px_2()
-            .child(
-                div()
-                    .h(px(20.0))
-                    .child("Outgoing segment · temporal Bezier"),
-            );
+            .child(div().h(px(20.0)).child("Keyframe timing and velocity"));
         if let Some((id, frame, _)) = selection {
             let key = &track.keys()[&frame];
             for (index, (label, value)) in [
@@ -935,6 +995,63 @@ impl Render for Graph {
                                 .when(locked, |s| s.child("Locked")),
                         ),
                 );
+            }
+            if !matches!(property, PropertyPath::Path(_)) {
+                for incoming in [true, false] {
+                    let exists = if incoming {
+                        track.keys().range(..frame).next_back().is_some()
+                    } else {
+                        track.keys().range(frame + 1..).next().is_some()
+                    };
+                    easing =
+                        easing.child(div().mt_2().text_color(rgb(ui::MUTED)).child(if incoming {
+                            "Incoming"
+                        } else {
+                            "Outgoing"
+                        }));
+                    if exists {
+                        let handle = track.temporal_handle(frame, incoming);
+                        for (offset, label) in
+                            ["Velocity /s", "Influence %"].into_iter().enumerate()
+                        {
+                            let index = if incoming { 6 } else { 8 } + offset;
+                            let value = handle.map(|h| {
+                                if offset == 0 {
+                                    h.slope * fps
+                                } else {
+                                    h.influence * 100.0
+                                }
+                            });
+                            self.fields[index].update(cx, |field, _| {
+                                field.sync(
+                                    format!("{id}-{property:?}-{frame}"),
+                                    value.map_or_else(|| "—".into(), |v| format!("{v:.6}")),
+                                    window,
+                                )
+                            });
+                            easing = easing.child(
+                                div()
+                                    .h(px(25.0))
+                                    .flex()
+                                    .items_center()
+                                    .child(div().w(px(85.0)).child(label))
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .when(!locked, |s| s.child(self.fields[index].clone()))
+                                            .when(locked, |s| s.child("Locked")),
+                                    ),
+                            );
+                        }
+                    } else {
+                        easing = easing.child(
+                            div()
+                                .text_color(rgb(ui::MUTED))
+                                .child("No adjacent segment"),
+                        );
+                    }
+                }
+                easing = easing.child(div().mt_2().text_size(px(10.0)).text_color(rgb(ui::MUTED)).child("Velocity is signed; influence is 0.1–100%. For Hold or vertical tangents (—), editing starts from 0 velocity / 33.33%."));
             }
             if let Some(mut curve) = curve {
                 if let Some(Drag::Handle { curve: preview, .. }) = &self.drag {
@@ -1031,7 +1148,7 @@ impl Render for Graph {
                     if track.keys().range(frame + 1..).next().is_none() {
                         "Last key: no outgoing segment."
                     } else {
-                        "Hold segment: choose an easing preset to enable handles."
+                        "Use the velocity fields above. Linear or Hold resets the outgoing segment."
                     },
                 ));
             }

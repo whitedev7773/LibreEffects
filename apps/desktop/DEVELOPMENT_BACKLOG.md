@@ -18,6 +18,16 @@
 - **후속 고급 기능:** 패널 도킹·소스 뷰어·최근 프로젝트, 타임라인 고급 시간 편집/검색/가상화, 공간 경로·프리셋·표현식, Shape 연산/SVG·Text Animator, 추가 효과·모션 블러, 고정밀 색/HDR·Proxy/GPU, 템플릿, 설치/업데이트·한글화와 UI 회귀 자동화.
 - **별도 대형 단계:** 3D/카메라/라이트·모델, 추적·로토/Puppet, 플러그인/교환 포맷 연구, 웹/API 제품 범위. AEP/MOGRT 호환은 구현되지 않았다.
 
+### 양방향 키프레임 속도와 영향도 — 2026-10-02
+
+- D02의 독립 incoming/outgoing 시간 핸들을 구현했다. Graph → Keyframe...에서 부호 있는 초당 속도와 영향도(0.1–100%)를 각 방향별로 입력한다. 마지막 키의 incoming과 양 끝값이 같은 구간의 오버슈트도 지원한다. Transform·효과·Time Remap·오디오·마스크 숫자 트랙이 같은 모델을 사용하며 경로 포즈 트랙은 제외한다.
+- F9/Ease는 선택한 키의 양쪽, Ease In은 incoming, Ease Out은 outgoing에 속도 0·영향도 1/3을 한 번의 Undo로 적용한다. Linear/Hold는 선택한 outgoing 구간의 두 끝 핸들만 초기화한다. 기존 파일의 Linear/Hold/Smooth/Bezier 샘플은 편집 전까지 그대로 유지하며, 독립 핸들을 사용한 구간은 다른 곡선을 보여줄 수 있는 기존 정규화 핸들 편집기를 숨긴다.
+- 키의 값 변경·이동·복사·Undo/Redo·저장 복원에 핸들을 포함한다. 레이어 붙여넣기와 효과 프리셋의 FPS 변환은 초당 속도를 보존한다. 프로젝트 v35/핸들이 있는 효과 프리셋 v2로 보호하며, 구버전 표기·잘못된 값·잠금/없는 구간 편집은 원자적으로 거부한다.
+- 실제 Windows에서 중간 키 F9 → Undo/Redo, incoming 영향도 70%, outgoing 속도 −900 입력·독립 그래프 변화·저장을 확인했다. QA 사본 `target/qa/temporal-native.lfe.json`을 CLI로 렌더하여 15/45프레임 도형 중심이 독립 계산값(891.989583/712.5px)과 출력 해상도 1px 이내로 일치함을 확인했다.
+- 검증: 코어 146개 + 데스크톱 165개 통과, 외부 미디어/장치 30개 제외. 기존 보간의 정확한 샘플, 평탄 구간 오버슈트·끝점 미분, 저장 버전·잠금 원자성, 편집·복사·FPS 환산, Preview/출력/저장 복원 픽셀을 검사했다. Cargo check/fmt/test/release build 통과(Moon/proto 미설치). 사용자 보존 원본 SHA256 불변을 확인했다.
+- 최종 릴리스 재실행·재열기 뒤 그래프 곡선과 incoming 70%/outgoing −900 값을 실제 창에서 확인했다. 미리보기의 15/45프레임 Position X도 891.99/712.50으로 출력 계산과 일치했다. 후속 실행 시 이전 작업 창이 닫히고 작업 창은 하나만 남는다.
+- 남음: Auto/Continuous 연결, Speed Graph·다중 키/채널 편집, 독립 핸들 포인터 드래그, 경로 시간 핸들, AE의 다차원 속도·전체 Easy Ease 호환성. D02/D03 전체 완료로 표시하지 않는다. 속도·영향도 기준은 [Adobe 문서](https://helpx.adobe.com/after-effects/desktop/animate-in-after-effects/speed-between-keyframes/speed.html)를 참조한다.
+
 ### 명령 검색과 실행 — 2026-10-02
 
 - Ctrl+Shift+P 또는 Help → Find command로 명령 검색을 연다. 메뉴·명령 이름·표시 단축키의 대소문자 구분 없는 단어 검색, 편집 도구/Shape/기본 Preview 명령, 비활성 결과 표시, 상하 선택·Ctrl+Home/End·Enter 실행·Escape/바깥 클릭 취소를 제공한다. 기존 패널 배치를 바꾸지 않는다.

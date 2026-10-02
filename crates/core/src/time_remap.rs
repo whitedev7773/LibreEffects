@@ -127,6 +127,7 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                         track.keys.insert(
                             frame,
                             Keyframe {
+                                temporal: TemporalHandles::default(),
                                 value: layer.source_time(frame, fps).unwrap(),
                                 interpolation: Interpolation::Linear,
                             },
@@ -162,6 +163,7 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                 track.keys.insert(
                     *frame,
                     Keyframe {
+                        temporal: TemporalHandles::default(),
                         value: seconds,
                         interpolation: Interpolation::Hold,
                     },
@@ -214,6 +216,10 @@ pub(super) fn edit_track(
                 track.keys.insert(
                     frame,
                     Keyframe {
+                        temporal: track
+                            .keys
+                            .get(&frame)
+                            .map_or(TemporalHandles::default(), |k| k.temporal),
                         value,
                         interpolation,
                     },
@@ -240,6 +246,7 @@ pub(super) fn edit_track(
                 track.keys.insert(
                     frame,
                     Keyframe {
+                        temporal: TemporalHandles::default(),
                         value,
                         interpolation: Interpolation::Linear,
                     },
@@ -253,6 +260,7 @@ pub(super) fn edit_track(
                 track.keys.insert(
                     frame,
                     Keyframe {
+                        temporal: TemporalHandles::default(),
                         value: track.value,
                         interpolation: Interpolation::Linear,
                     },
@@ -266,11 +274,7 @@ pub(super) fn edit_track(
             if !interpolation.valid() {
                 return Err("Invalid interpolation".into());
             }
-            track
-                .keys
-                .get_mut(&frame)
-                .ok_or("Add a keyframe first")?
-                .interpolation = interpolation;
+            track.set_interpolation(frame, interpolation)?;
         }
     }
     Ok(())

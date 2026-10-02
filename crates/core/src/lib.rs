@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-const PROJECT_VERSION: u32 = 34;
+const PROJECT_VERSION: u32 = 35;
 pub type Frame = u32;
 pub type LayerId = u64;
 pub type CompositionId = u64;
@@ -55,6 +55,8 @@ mod shapes;
 mod text_style;
 pub use shapes::{Shape, ShapeKind};
 pub use text_style::{TextAlign, TextFont, TextStrokeJoin, TextStyle};
+mod temporal;
+pub use temporal::{TemporalHandle, TemporalHandles};
 mod tracks;
 pub use editing::{Content, Effects, KeyCopy, KeyRef, Mask, VideoPlayback};
 pub use geometry::{Affine, Bezier};
@@ -157,6 +159,8 @@ impl Property {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Keyframe {
+    #[serde(default, skip_serializing_if = "TemporalHandles::is_empty")]
+    pub temporal: TemporalHandles,
     pub value: f64,
     /// Controls the segment leaving this keyframe.
     pub interpolation: Interpolation,
@@ -196,6 +200,11 @@ impl AnimatedProperty {
         match (left, right) {
             (Some((start, a)), Some((end, b))) if start != end => {
                 let t = (frame - *start as f64) / (end - start) as f64;
+                if a.interpolation != Interpolation::Hold
+                    && (a.temporal.outgoing.is_some() || b.temporal.incoming.is_some())
+                {
+                    return temporal::sample(a, b, (end - start) as f64, t);
+                }
                 let t = match a.interpolation {
                     Interpolation::Linear => t,
                     Interpolation::Hold => 0.0,
@@ -606,6 +615,21 @@ impl Project {
         }
         for (_, comp) in self.compositions() {
             for layer in &comp.layers {
+                for path in layer.track_paths() {
+                    if let Some(track) = layer.track(path) {
+                        for key in track.keys.values() {
+                            if !key.temporal.valid()
+                                || (!key.temporal.is_empty()
+                                    && (self.version < 35 || matches!(path, PropertyPath::Path(_))))
+                            {
+                                return Err(
+                                    "Invalid temporal handles or project version (requires 35)"
+                                        .into(),
+                                );
+                            }
+                        }
+                    }
+                }
                 let has_path = matches!(&layer.content, Content::Shape(s) if s.path.is_some());
                 if (has_path || !layer.path_masks.is_empty()) && self.version < 29 {
                     return Err("Vector paths require project version 29".into());
@@ -855,6 +879,13 @@ pub enum Command {
     Marker {
         target: MarkerTarget,
         edit: MarkerEdit,
+    },
+    SetTemporalHandle {
+        id: LayerId,
+        property: PropertyPath,
+        frame: Frame,
+        incoming: bool,
+        handle: TemporalHandle,
     },
     EditTrack {
         id: LayerId,
@@ -1391,6 +1422,16 @@ impl Editor {
         {
             next.project.version = next.project.version.max(34);
         }
+        if next.project.compositions().into_iter().any(|(_, c)| {
+            c.layers.iter().any(|l| {
+                l.track_paths()
+                    .iter()
+                    .filter_map(|p| l.track(*p))
+                    .any(|t| t.keys.values().any(|k| !k.temporal.is_empty()))
+            })
+        }) {
+            next.project.version = next.project.version.max(35);
+        }
         next.project.validate()?;
         if next != self.current {
             let previous = std::mem::replace(&mut self.current, next);
@@ -1401,6 +1442,9 @@ impl Editor {
 }
 
 fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
+    if let Some(result) = temporal::apply(state, &command) {
+        return result;
+    }
     if let Some(result) = path_animation::apply(state, &command) {
         return result;
     }
@@ -1804,6 +1848,7 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
                 track.keys.insert(
                     frame,
                     Keyframe {
+                        temporal: TemporalHandles::default(),
                         value,
                         interpolation: Interpolation::Linear,
                     },
@@ -1855,6 +1900,10 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
                 track.keys.insert(
                     frame,
                     Keyframe {
+                        temporal: track
+                            .keys
+                            .get(&frame)
+                            .map_or(TemporalHandles::default(), |k| k.temporal),
                         value,
                         interpolation,
                     },
@@ -1881,6 +1930,7 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
                 track.keys.insert(
                     frame,
                     Keyframe {
+                        temporal: TemporalHandles::default(),
                         value,
                         interpolation: Interpolation::Linear,
                     },
@@ -1896,12 +1946,11 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
             if !interpolation.valid() {
                 return Err("Invalid Bezier handles".into());
             }
-            let key = layer
+            layer
                 .properties
                 .get_mut(&property)
-                .and_then(|track| track.keys.get_mut(&frame))
-                .ok_or("Select a frame containing a keyframe")?;
-            key.interpolation = interpolation;
+                .ok_or("Property not found")?
+                .set_interpolation(frame, interpolation)?;
         }
         Command::AlignLayer { .. }
         | Command::SetParent { .. }

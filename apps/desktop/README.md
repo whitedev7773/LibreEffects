@@ -453,15 +453,27 @@ zoom and pan; its vertical range fits the visible curve.
 - Keyframe... opens a compact popup with Frame and Value fields for precise edits.
   Escape or Close dismisses it. Delete removes only the selected
   graph key. The diamond adds/removes a key at the playhead.
-- Linear, Hold, Ease, Ease In and Ease Out presets affect the selected key's
-  outgoing segment. F9 applies Ease while the graph has focus.
-- Drag the two blue handles directly on the value graph, or use the outgoing
-  segment chart and X1/Y1/X2/Y2 fields in the popup. Flat segments use the popup.
-  X is normalized time (0–1); Y is normalized progress (−2–3). Handles beyond the
-  small chart's vertical range remain accessible through numeric fields.
-- This is a single-channel value graph with normalized segment easing. AE's speed
-  graph, spatial Bezier paths, multi-key graph editing, and linked incoming/outgoing
-  velocity handles are not implemented. F9 is not full AE Easy Ease compatibility.
+- Linear and Hold replace the selected key's outgoing segment, clearing its outgoing
+  handle and the next key's incoming handle. Other segments remain unchanged.
+- Ease (F9) sets zero velocity and one-third influence on both sides of the selected
+  key; Ease In affects only the incoming side, Ease Out only the outgoing side.
+  Missing endpoint segments are skipped, and each operation is one Undo step.
+- Keyframe... exposes independent incoming/outgoing signed velocity (property units
+  per second) and influence (0.1–100%). A last key can edit its incoming segment.
+  Equal-valued endpoints can overshoot. Editing a Hold segment converts it to a
+  continuous curve. A dash identifies Hold or a vertical legacy tangent; entering
+  a value initializes that side from zero velocity / one-third influence.
+- Unedited legacy curves retain their original samples. Their normalized handles
+  remain draggable on the value graph or editable through X1/Y1/X2/Y2 in the popup.
+  Once independent velocity handles affect a segment, use the velocity fields;
+  the legacy normalized handle editor is hidden to avoid showing a different curve.
+- Tangents follow keys through value edits, moves, copying, Undo/Redo and saving.
+  Layer clipboard and effect preset FPS conversion preserves velocity per second.
+  These handles require project version 35 (effect preset version 2 when present).
+- This is still a single-channel value graph. Auto/Continuous Bezier linking,
+  speed graphs, spatial paths, multi-key graph editing, pointer dragging of the
+  independent tangents and full AE Easy Ease compatibility remain unfinished.
+  Geometry path timing tracks do not yet support these scalar velocity handles.
 
 Open `examples/curve-parent-study.lfe.json` for an overshooting Bezier animation
 with a child layer. The source generator is

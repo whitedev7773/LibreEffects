@@ -65,7 +65,15 @@ impl EffectPreset {
             }
         }
         let result = Self {
-            version: 1,
+            version: if effects
+                .iter()
+                .flat_map(|e| e.parameters.values())
+                .any(|t| t.keys.values().any(|k| !k.temporal.is_empty()))
+            {
+                2
+            } else {
+                1
+            },
             name: name.trim().into(),
             fps,
             effects,
@@ -96,7 +104,7 @@ impl EffectPreset {
         Ok(preset)
     }
     fn validate(&self) -> Result<(), String> {
-        if self.version != 1 {
+        if !(1..=2).contains(&self.version) {
             return Err("Unsupported effect preset version".into());
         }
         if self.name.trim().is_empty()
@@ -115,6 +123,16 @@ impl EffectPreset {
             .any(|(i, e)| e.id != i as u64 + 1)
         {
             return Err("Invalid preset effect identities".into());
+        }
+        for key in self
+            .effects
+            .iter()
+            .flat_map(|e| e.parameters.values())
+            .flat_map(|t| t.keys.values())
+        {
+            if !key.temporal.valid() || (self.version < 2 && !key.temporal.is_empty()) {
+                return Err("Invalid preset temporal handles or version".into());
+            }
         }
         validate_stack(
             &self.effects,
@@ -155,7 +173,9 @@ impl EffectPreset {
                     if at >= duration {
                         return Err("Preset keys exceed the composition. Extend its duration or apply earlier.".into());
                     }
-                    if keys.insert(at, key.clone()).is_some() {
+                    let mut key = key.clone();
+                    key.temporal.rescale(self.fps.as_f64() / fps.as_f64());
+                    if keys.insert(at, key).is_some() {
                         return Err(
                             "Destination FPS merges preset keys. Use a higher frame rate.".into(),
                         );

@@ -940,6 +940,63 @@ mod tests {
         }
     }
     #[test]
+    fn independent_temporal_handles_match_preview_output_and_saved_pixels() {
+        use libre_effects_core::TemporalHandle;
+        let mut e = Editor::default();
+        e.execute(Command::ConfigureComposition {
+            name: "Velocity".into(),
+            width: 200,
+            height: 120,
+            fps: 30,
+            duration: 90,
+        })
+        .unwrap();
+        e.execute(Command::AddContent {
+            content: Content::Rectangle,
+            width: 20.0,
+            height: 20.0,
+            name: "Moving".into(),
+        })
+        .unwrap();
+        for (frame, value) in [(0, 40.0), (30, 100.0), (60, 40.0)] {
+            e.execute(Command::ToggleKeyframe {
+                id: 1,
+                property: Property::PositionX,
+                frame,
+            })
+            .unwrap();
+            e.execute(Command::SetValue {
+                id: 1,
+                property: Property::PositionX,
+                frame,
+                value,
+            })
+            .unwrap();
+        }
+        let original = e.project().clone();
+        for (incoming, slope, influence) in [(true, 0.0, 0.7), (false, -5.0, 1.0 / 3.0)] {
+            e.execute(Command::SetTemporalHandle {
+                id: 1,
+                property: Property::PositionX.into(),
+                frame: 30,
+                incoming,
+                handle: TemporalHandle { slope, influence },
+            })
+            .unwrap();
+        }
+        let saved = Project::from_json(&e.project().to_json().unwrap()).unwrap();
+        let renderer = Renderer::new();
+        for frame in [0, 15, 30, 45, 60] {
+            let output = renderer.render_output(&saved, frame, 200, 120).unwrap();
+            assert_eq!(output, renderer.render(e.project(), frame, 200).unwrap());
+            if frame == 15 || frame == 45 {
+                assert_ne!(output, renderer.render(&original, frame, 200).unwrap());
+            } else {
+                assert_eq!(output, renderer.render(&original, frame, 200).unwrap());
+            }
+        }
+    }
+    #[test]
     fn nested_instances_sample_different_times_and_ignore_source_background() {
         let mut e = scene();
         e.execute(Command::ConfigureComposition {

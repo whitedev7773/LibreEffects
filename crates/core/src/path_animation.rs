@@ -215,6 +215,7 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                 animation.timing.keys.insert(
                     *frame,
                     Keyframe {
+                        temporal: TemporalHandles::default(),
                         value,
                         interpolation,
                     },
@@ -260,6 +261,7 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                 animation.timing.keys.insert(
                     frame,
                     Keyframe {
+                        temporal: TemporalHandles::default(),
                         value,
                         interpolation: Interpolation::Linear,
                     },

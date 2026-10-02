@@ -622,6 +622,10 @@ pub(super) fn apply(state: &mut Snapshot, id: LayerId, edit: EffectEdit) -> Resu
                         track.keys.insert(
                             frame,
                             Keyframe {
+                                temporal: track
+                                    .keys
+                                    .get(&frame)
+                                    .map_or(TemporalHandles::default(), |k| k.temporal),
                                 value,
                                 interpolation,
                             },
@@ -633,6 +637,7 @@ pub(super) fn apply(state: &mut Snapshot, id: LayerId, edit: EffectEdit) -> Resu
                         track.keys.insert(
                             frame,
                             Keyframe {
+                                temporal: TemporalHandles::default(),
                                 value: track.value,
                                 interpolation: Interpolation::Linear,
                             },
@@ -648,6 +653,7 @@ pub(super) fn apply(state: &mut Snapshot, id: LayerId, edit: EffectEdit) -> Resu
                         track.keys.insert(
                             frame,
                             Keyframe {
+                                temporal: TemporalHandles::default(),
                                 value,
                                 interpolation: Interpolation::Linear,
                             },
@@ -657,11 +663,7 @@ pub(super) fn apply(state: &mut Snapshot, id: LayerId, edit: EffectEdit) -> Resu
                     }
                 }
                 EffectEdit::Interpolate { interpolation, .. } => {
-                    track
-                        .keys
-                        .get_mut(&frame)
-                        .ok_or("Place the playhead on a parameter keyframe")?
-                        .interpolation = interpolation;
+                    track.set_interpolation(frame, interpolation)?;
                 }
                 _ => unreachable!(),
             }
