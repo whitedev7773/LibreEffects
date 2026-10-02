@@ -1,5 +1,58 @@
 use serde::{Deserialize, Serialize};
 
+/// Only the font identity; replacing it preserves paint, paragraph and spacing.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TextFont {
+    pub family: String,
+    pub face: String,
+    pub weight: u16,
+    pub italic: bool,
+}
+impl TextFont {
+    pub fn of(style: &TextStyle) -> Self {
+        Self {
+            family: style.font_family.clone(),
+            face: style.font_face.clone(),
+            weight: style.weight,
+            italic: style.italic,
+        }
+    }
+    pub fn apply(&self, style: &mut TextStyle) {
+        style.font_family = self.family.clone();
+        style.font_face = self.face.clone();
+        style.weight = self.weight;
+        style.italic = self.italic;
+    }
+    pub fn style(&self) -> TextStyle {
+        let mut style = TextStyle::default();
+        self.apply(&mut style);
+        style
+    }
+}
+pub(crate) fn replace_font(
+    state: &mut crate::Snapshot,
+    from: TextFont,
+    to: TextFont,
+) -> Result<(), String> {
+    if !from.style().valid() || !to.style().valid() || from == to {
+        return Err("Choose a different valid replacement font".into());
+    }
+    let mut count = 0;
+    for layer in state.project.compositions_mut().flat_map(|c| &mut c.layers) {
+        if !layer.locked
+            && matches!(layer.content, crate::Content::Text { .. })
+            && TextFont::of(&layer.text_style) == from
+        {
+            to.apply(&mut layer.text_style);
+            count += 1;
+        }
+    }
+    if count == 0 {
+        return Err("No unlocked text layers use this font".into());
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TextAlign {
     #[default]
@@ -97,6 +150,108 @@ impl TextStyle {
 mod tests {
     use super::*;
     use crate::{Command, Content, Editor, Project};
+    #[test]
+    fn replace_font_across_compositions_is_atomic_and_preserves_locked_layers() {
+        let mut e = Editor::default();
+        e.execute(Command::AddContent {
+            content: Content::Text {
+                text: "Original 한글\nTitle".into(),
+                font_size: 48.0,
+            },
+            width: 500.0,
+            height: 200.0,
+            name: "Text".into(),
+        })
+        .unwrap();
+        let style = TextStyle {
+            font_family: "Missing Font".into(),
+            font_face: "Missing-Bold".into(),
+            weight: 700,
+            paragraph: true,
+            leading: 1.5,
+            tracking: 45.0,
+            stroke_enabled: true,
+            stroke_color: 0x123456,
+            stroke_width: 8.0,
+            ..Default::default()
+        };
+        e.execute(Command::SetTextStyle {
+            id: 1,
+            style: style.clone(),
+        })
+        .unwrap();
+        e.execute(Command::DuplicateComposition).unwrap();
+        e.execute(Command::DuplicateLayer(2)).unwrap();
+        e.execute(Command::ToggleLocked(3)).unwrap();
+        let before = e.project().clone();
+        let selected = e.selected();
+        let from = TextFont::of(&style);
+        let to = TextFont {
+            family: "Wanted Sans".into(),
+            face: "WantedSans-Bold".into(),
+            weight: 700,
+            italic: false,
+        };
+        e.execute(Command::ReplaceTextFont {
+            from: from.clone(),
+            to: to.clone(),
+        })
+        .unwrap();
+        let after = e.project().clone();
+        assert_eq!(e.selected(), selected);
+        assert_eq!(
+            after.active_composition_id(),
+            before.active_composition_id()
+        );
+        let mut changed = 0;
+        for ((a_id, a), (b_id, b)) in after.compositions().into_iter().zip(before.compositions()) {
+            assert_eq!(a_id, b_id);
+            for (actual, old) in a.layers().iter().zip(b.layers()) {
+                let mut expected = old.clone();
+                if !old.locked() {
+                    to.apply(&mut expected.text_style);
+                    changed += 1;
+                }
+                assert_eq!(actual, &expected);
+            }
+        }
+        assert_eq!(changed, 2);
+        assert_eq!(
+            Project::from_json(&after.to_json().unwrap()).unwrap(),
+            after
+        );
+        e.undo();
+        assert_eq!(e.project(), &before);
+        e.redo();
+        assert_eq!(e.project(), &after);
+        assert!(
+            e.execute(Command::ReplaceTextFont {
+                from: from.clone(),
+                to: to.clone()
+            })
+            .is_err()
+        );
+        assert_eq!(e.project(), &after);
+        e.undo();
+        let mut invalid = to.clone();
+        invalid.family.clear();
+        assert!(
+            e.execute(Command::ReplaceTextFont {
+                from: from.clone(),
+                to: invalid
+            })
+            .is_err()
+        );
+        assert_eq!(e.project(), &before);
+        assert!(
+            e.execute(Command::ReplaceTextFont {
+                from: from.clone(),
+                to: from
+            })
+            .is_err()
+        );
+        assert_eq!(e.project(), &before);
+    }
     #[test]
     fn text_paint_roundtrip_version_history_and_validation() {
         let mut e = Editor::default();

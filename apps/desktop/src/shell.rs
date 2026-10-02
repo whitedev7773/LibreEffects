@@ -12,6 +12,7 @@ mod media;
 pub(crate) struct Shell {
     state: Entity<EditorState>,
     color_picker: Entity<crate::panels::color_picker::ColorPicker>,
+    font_manager: Entity<crate::panels::font_manager::FontManager>,
     layout: Entity<ResizablePanelGroup>,
     middle: Entity<ResizablePanelGroup>,
     upper: Entity<ResizablePanelGroup>,
@@ -38,6 +39,8 @@ impl Shell {
         let color_picker =
             cx.new(|cx| crate::panels::color_picker::ColorPicker::new(state.clone(), cx));
         let browser = cx.new(|cx| Browser::new(state.clone(), cx));
+        let font_manager =
+            cx.new(|cx| crate::panels::font_manager::FontManager::new(state.clone(), cx));
         let preview = cx.new(|cx| Preview::new(state.clone(), cx));
         let sidebar = cx.new(|cx| Sidebar::new(state.clone(), cx));
         let align = cx.new(|cx| Align::new(state.clone(), cx));
@@ -84,6 +87,7 @@ impl Shell {
         Self {
             state,
             color_picker,
+            font_manager,
             layout,
             middle,
             upper,
@@ -284,6 +288,7 @@ impl Shell {
                 s.close_after_save = false;
                 s.marker_selection = None;
                 s.media_open = false;
+                s.fonts_open = false;
             });
             self.menu = None;
             self.settings = false;
@@ -295,6 +300,7 @@ impl Shell {
         if self.settings
             || self.help
             || self.state.read(cx).media_open
+            || self.state.read(cx).fonts_open
             || self.closing
             || self.pending_document.is_some()
             || self.state.read(cx).recovery.is_some()
@@ -762,6 +768,7 @@ impl Render for Shell {
                     ),
                     ("Import video…", "Ctrl+Shift+I", Some(Action::ImportVideo)),
                     ("Manage project media…", "", Some(Action::ManageMedia)),
+                    ("Manage project fonts…", "", Some(Action::ManageFonts)),
                     ("Relink selected video…", "", Some(Action::RelinkVideo)),
                     ("Refresh footage", "", Some(Action::RefreshFootage)),
                     (
@@ -1378,6 +1385,22 @@ impl Render for Shell {
                         .bg(gpui::rgba(0x00000080))
                         .occlude()
                         .child(self.media_dialog(cx)),
+                )
+                .with_priority(3),
+            );
+        }
+        if self.state.read(cx).fonts_open {
+            root = root.child(
+                gpui::deferred(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(gpui::rgba(0x00000080))
+                        .occlude()
+                        .child(self.font_manager.clone()),
                 )
                 .with_priority(3),
             );

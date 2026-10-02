@@ -79,6 +79,7 @@ pub(crate) enum Action {
     CollectFiles,
     CancelCollection,
     ManageMedia,
+    ManageFonts,
     RefreshMedia,
     RelinkSource(String),
     RelinkMissing,
@@ -168,6 +169,7 @@ impl PropertyFilter {
 }
 
 pub(crate) struct EditorState {
+    pub fonts_open: bool,
     pub text_session: Option<crate::text_edit::Session>,
     pub presets: crate::effect_presets::Library,
     pub colors: crate::color_edit::Workflow,
@@ -254,6 +256,7 @@ impl Default for EditorState {
         Self {
             text_session: None,
             presets: Default::default(),
+            fonts_open: false,
             colors,
             queue: None,
             queue_open: false,
@@ -603,6 +606,10 @@ impl EditorState {
             Action::CommitText => self.finish_text(true, cx),
             Action::CancelText => self.finish_text(false, cx),
             Action::Preset(action) => self.preset_action(action, window, cx),
+            Action::ManageFonts => {
+                self.stop();
+                self.fonts_open = true;
+            }
             Action::OpenColor(target) => {
                 self.stop();
                 match crate::color_edit::Session::new(

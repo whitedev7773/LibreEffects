@@ -207,7 +207,10 @@ impl EditorState {
                         s.load_views(views);
                         s.selected_layers.clear();
                         s.selected_keys.clear();
-                        s.status = "Project opened".into();
+                        let missing = crate::font_usage::missing_count(s.editor.project());
+                        s.status = if missing == 0 { "Project opened".into() } else {
+                            format!("Project opened · {missing} text layer(s) use unavailable fonts/styles · File → Manage project fonts")
+                        };
                         s.normalize();
                     }
                     Err(e) => s.status = format!("Open failed: {e}"),

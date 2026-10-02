@@ -54,7 +54,7 @@ pub use paths::{PathMask, PathMaskMode, PathVertex, VectorPath};
 mod shapes;
 mod text_style;
 pub use shapes::{Shape, ShapeKind};
-pub use text_style::{TextAlign, TextStrokeJoin, TextStyle};
+pub use text_style::{TextAlign, TextFont, TextStrokeJoin, TextStyle};
 mod tracks;
 pub use editing::{Content, Effects, KeyCopy, KeyRef, Mask, VideoPlayback};
 pub use geometry::{Affine, Bezier};
@@ -848,6 +848,10 @@ pub enum Command {
         color: u32,
     },
     RelinkMedia(Vec<MediaReplacement>),
+    ReplaceTextFont {
+        from: TextFont,
+        to: TextFont,
+    },
     Marker {
         target: MarkerTarget,
         edit: MarkerEdit,
@@ -1428,6 +1432,9 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
     }
     if let Command::RelinkMedia(replacements) = command {
         return media::relink(state, replacements);
+    }
+    if let Command::ReplaceTextFont { from, to } = command {
+        return text_style::replace_font(state, from, to);
     }
     if let Command::ConfigureComposition {
         name,

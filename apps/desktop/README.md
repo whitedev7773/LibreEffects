@@ -76,8 +76,19 @@ installing fonts. Missing fonts/styles keep their saved identity and show a
 Character warning. Missing families render with Wanted Sans; missing styles use
 the closest available face. External fonts are not embedded or collected. Use
 the same installed font versions for portable output. Variable font axes, glyph
-coverage diagnostics, document-wide missing-font replacement and per-character
-styling remain future work.
+coverage diagnostics and per-character styling remain future work.
+
+File → Manage project fonts lists every saved family/face/weight/slant reference
+across all compositions, its text-layer usages, availability and primary resolved
+preview/output face. Opening a project with unavailable fonts/styles also shows
+a status warning. Choose a source group, search for an installed replacement
+family and choose its real style, then replace all matching unlocked layers.
+Locked layers retain their original reference. One Undo restores the whole
+replacement, including changes in other compositions. Text, spacing, paint,
+paragraph boxes and animation properties are preserved; a different font can
+still change glyph widths and paragraph wrapping. The list refreshes after edits
+and document changes. Fonts are not embedded, and the primary face report is not
+a glyph-by-glyph fallback or missing-character diagnostic.
 
 ## Editing text in the Composition
 

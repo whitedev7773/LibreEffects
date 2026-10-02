@@ -19,6 +19,7 @@ mod components;
 mod editor;
 mod effect_presets;
 mod effect_render;
+mod font_usage;
 mod fonts;
 mod footage;
 mod image_sequence;

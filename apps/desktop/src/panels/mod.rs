@@ -31,3 +31,4 @@ pub(crate) mod render_queue;
 mod path_controls;
 
 pub(crate) mod color_picker;
+pub(crate) mod font_manager;
