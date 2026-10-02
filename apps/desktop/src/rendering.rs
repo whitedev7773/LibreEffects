@@ -22,12 +22,13 @@ fn text_svg(
     width: f64,
     style: libre_effects_core::TextStyle,
 ) -> String {
+    let style = crate::fonts::resolved(&style);
     let (x, anchor) = match style.align {
         libre_effects_core::TextAlign::Left => (0.0, "start"),
         libre_effects_core::TextAlign::Center => (width / 2.0, "middle"),
         libre_effects_core::TextAlign::Right => (width, "end"),
     };
-    text.lines().enumerate().map(|(line,s)| format!("<text x='{x}' y='{}' text-anchor='{anchor}' letter-spacing='{}' font-family='Wanted Sans' font-size='{font_size}' fill='{color}' xml:space='preserve'>{}</text>",font_size * (1.0 + style.leading * line as f64),style.tracking * font_size / 1000.0,xml(s))).collect()
+    text.lines().enumerate().map(|(line,s)| format!("<text x='{x}' y='{}' text-anchor='{anchor}' letter-spacing='{}' font-family='{}' font-weight='{}' font-style='{}' font-size='{font_size}' fill='{color}' xml:space='preserve'>{}</text>",font_size * (1.0 + style.leading * line as f64),style.tracking * font_size / 1000.0,xml(crate::fonts::svg_family(&style)),style.weight, if style.italic { "italic" } else { "normal" },xml(s))).collect()
 }
 /// Flatten straight RGBA over a solid RGB matte, including partially transparent edges.
 pub(crate) fn composite_background(pixels: &mut image::RgbaImage, color: u32) {
@@ -92,8 +93,7 @@ impl Renderer {
     }
     pub fn with_cancel(cancel: Arc<std::sync::atomic::AtomicBool>) -> Self {
         let mut options = resvg::usvg::Options::default();
-        Arc::make_mut(&mut options.fontdb)
-            .load_font_data(include_bytes!("../assets/fonts/WantedSans-Regular.ttf").to_vec());
+        options.fontdb = crate::fonts::database();
         options.font_family = "Wanted Sans".into();
         Self {
             options,
@@ -1015,6 +1015,7 @@ mod tests {
                 leading: 2.0,
                 tracking: 150.0,
                 align: TextAlign::Right,
+                ..Default::default()
             },
         })
         .unwrap();

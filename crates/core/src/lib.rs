@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-const PROJECT_VERSION: u32 = 31;
+const PROJECT_VERSION: u32 = 32;
 pub type Frame = u32;
 pub type LayerId = u64;
 pub type CompositionId = u64;
@@ -272,7 +272,7 @@ pub struct Layer {
 
 impl Layer {
     pub fn text_style(&self) -> TextStyle {
-        self.text_style
+        self.text_style.clone()
     }
 
     pub fn blend_mode(&self) -> BlendMode {
@@ -694,6 +694,7 @@ impl Project {
             for layer in &comp.layers {
                 time_remap::validate(layer, comp.duration, self.version)?;
                 if !layer.text_style.valid()
+                    || (layer.text_style.has_font_override() && self.version < 32)
                     || (!layer.text_style.is_default() && self.version < 28)
                 {
                     return Err("Invalid or unsupported text style".into());
@@ -1352,6 +1353,14 @@ impl Editor {
             })
         }) {
             next.project.version = next.project.version.max(31);
+        }
+        if next
+            .project
+            .compositions()
+            .into_iter()
+            .any(|(_, c)| c.layers.iter().any(|l| l.text_style.has_font_override()))
+        {
+            next.project.version = next.project.version.max(32);
         }
         next.project.validate()?;
         if next != self.current {

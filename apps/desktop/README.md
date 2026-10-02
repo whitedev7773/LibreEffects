@@ -58,6 +58,27 @@ channel display and overlays. It uses the current preview resolution; it is not
 an OS screen eyedropper or a color-managed HDR sampler. At partial alpha,
 premultiplication roundtrips can differ from source RGB by one byte.
 
+## Text fonts and styles
+
+Character has a searchable installed-font selector and a menu of real styles.
+Both menus float over the workspace without changing panel sizes. The default
+text and application UI remain Wanted Sans. Its seven static styles are bundled;
+the source revision and license are documented in `assets/fonts/README.md`.
+
+Font family, PostScript face name, weight and italic state are layer-wide
+properties with Undo/Redo, saved in project version 32. Older text styles default
+to Wanted Sans Regular. An explicit face name distinguishes styles that declare
+the same weight, including Wanted Sans Black and ExtraBlack. Preview, effect
+bounds, PNG and video output resolve the same face from one shared font catalog.
+
+The catalog discovers system fonts once per application run; restart after
+installing fonts. Missing fonts/styles keep their saved identity and show a
+Character warning. Missing families render with Wanted Sans; missing styles use
+the closest available face. External fonts are not embedded or collected. Use
+the same installed font versions for portable output. Variable font axes, glyph
+coverage diagnostics, document-wide missing-font replacement, per-character
+styling and direct canvas text editing remain future work.
+
 ## Effect presets
 
 In Effect Controls, **Save effect preset…** exports the selected layer's ordered

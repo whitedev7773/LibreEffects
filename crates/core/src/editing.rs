@@ -712,7 +712,7 @@ pub(super) fn apply_extended(
                         "Text style requires a text layer and valid leading/tracking".into(),
                     );
                 }
-                layer.text_style = *style;
+                layer.text_style = style.clone();
             }
             Command::SetContent { id, content } => {
                 let layer = editable(state, *id)?;
