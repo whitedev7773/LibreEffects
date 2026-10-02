@@ -30,6 +30,14 @@ pub(crate) struct TextField {
 }
 
 impl TextField {
+    pub fn is_composing(window: &Window, cx: &App) -> bool {
+        cx.try_global::<ActiveField>()
+            .and_then(|active| active.0.upgrade())
+            .is_some_and(|field| {
+                let field = field.read(cx);
+                field.focus.is_focused(window) && field.marked.is_some()
+            })
+    }
     pub fn commit_active(window: &mut Window, cx: &mut App) {
         let field = cx.try_global::<ActiveField>().map(|f| f.0.clone());
         if let Some(field) = field {

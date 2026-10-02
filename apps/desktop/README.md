@@ -15,6 +15,22 @@ Command-line renders remain independent of the interactive editor.
 
 ![Libre Effects workspace with the Content and Motion Study sample](screenshots/workspace.png)
 
+## Keyboard menus
+
+Press F10 to open File, Left/Right to switch menus and Up/Down to select an
+enabled item. Home/End select the first/last enabled item; a letter cycles
+through items starting with that letter. Enter or Space executes the highlighted
+command. Escape, F10 or Tab closes the menu and restores the previous focus.
+Long menus scroll to keep the keyboard selection visible. File begins with
+project creation/open/save; rendering commands follow the import/export items.
+
+Mouse and keyboard execute the same commands, including Composition settings,
+workspace reset and Help. While a menu is open, document shortcuts and movement
+keys are captured by the menu. F10 does not open a menu during a marked IME
+composition or a workspace modal. Opening a menu commits a normal field/text
+draft first. Native F10 opening/highlight has been checked; full Windows
+keyboard, IME and DPI regression remains to be completed.
+
 ## Pen and path masks
 
 Use **G** for the Pen tool. Click to add corners, drag to create Bezier handles,

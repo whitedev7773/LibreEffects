@@ -8,6 +8,8 @@ use gpui::{Context, Entity, FocusHandle, KeyDownEvent, Window, div, prelude::*, 
 use libre_effects_core::{Command, FrameRate};
 #[path = "shell_media.rs"]
 mod media;
+#[path = "shell_menu.rs"]
+mod menu;
 
 pub(crate) struct Shell {
     state: Entity<EditorState>,
@@ -20,6 +22,9 @@ pub(crate) struct Shell {
     focus: FocusHandle,
     initialized: bool,
     menu: Option<&'static str>,
+    menu_cursor: Option<usize>,
+    menu_return_focus: Option<FocusHandle>,
+    menu_scroll: gpui::ScrollHandle,
     settings: bool,
     settings_new: bool,
     settings_error: String,
@@ -95,6 +100,9 @@ impl Shell {
             focus: cx.focus_handle(),
             initialized: false,
             menu: None,
+            menu_cursor: None,
+            menu_return_focus: None,
+            menu_scroll: gpui::ScrollHandle::new(),
             settings: false,
             settings_new: false,
             settings_error: String::new(),
@@ -264,6 +272,109 @@ impl Shell {
             window.focus(&self.focus);
         } else {
             self.settings_error = status;
+        }
+        cx.notify();
+    }
+    fn open_menu(&mut self, name: &'static str, window: &mut Window, cx: &mut Context<Self>) {
+        if self.menu.is_none() {
+            self.menu_return_focus = window.focused(cx);
+        }
+        TextField::commit_active(window, cx);
+        self.state.update(cx, |s, cx| s.finish_text(true, cx));
+        window.focus(&self.focus);
+        self.menu = Some(name);
+        self.menu_cursor = menu::initial(&menu::items(name, self.state.read(cx)), false);
+        self.menu_scroll.set_offset(gpui::point(px(0.0), px(0.0)));
+        cx.notify();
+    }
+    fn close_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.menu = None;
+        self.menu_cursor = None;
+        if let Some(focus) = self.menu_return_focus.take() {
+            window.focus(&focus);
+        } else {
+            window.focus(&self.focus);
+        }
+        cx.notify();
+    }
+    fn run_menu(&mut self, target: menu::Target, window: &mut Window, cx: &mut Context<Self>) {
+        self.menu = None;
+        self.menu_cursor = None;
+        self.menu_return_focus = None;
+        window.focus(&self.focus);
+        match target {
+            menu::Target::Action(action) => self.dispatch(action, window, cx),
+            menu::Target::NewComposition => self.new_composition(window, cx),
+            menu::Target::Settings => self.open_settings(window, cx),
+            menu::Target::ResetWorkspace => self.reset_layout(cx),
+            menu::Target::Help => self.help = true,
+        }
+        cx.notify();
+    }
+    fn menu_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let key = event.keystroke.key.as_str();
+        let m = event.keystroke.modifiers;
+        let state = self.state.read(cx);
+        if self.settings
+            || self.help
+            || self.closing
+            || self.pending_document.is_some()
+            || state.media_open
+            || state.fonts_open
+            || state.recovery.is_some()
+            || state.colors.session.is_some()
+        {
+            return;
+        }
+        if self.menu.is_none() {
+            if key == "f10"
+                && !m.control
+                && !m.alt
+                && !m.shift
+                && !m.platform
+                && !TextField::is_composing(window, cx)
+                && !state
+                    .text_session
+                    .as_ref()
+                    .is_some_and(|s| s.buffer.marked.is_some())
+            {
+                self.open_menu("File", window, cx);
+                cx.stop_propagation();
+                window.prevent_default();
+            }
+            return;
+        }
+        if m.alt && key == "f4" {
+            self.close_menu(window, cx);
+            return;
+        }
+        // Capture before focused children or the editor can interpret arrows,
+        // Space, Delete or shortcuts as document edits while a menu is open.
+        cx.stop_propagation();
+        window.prevent_default();
+        let name = self.menu.unwrap();
+        let items = menu::items(name, self.state.read(cx));
+        match key {
+            "escape" | "f10" | "tab" => self.close_menu(window, cx),
+            "left" | "right" => self.open_menu(menu::adjacent(name, key == "right"), window, cx),
+            "up" | "down" => self.menu_cursor = menu::step(&items, self.menu_cursor, key == "down"),
+            "home" | "end" => self.menu_cursor = menu::initial(&items, key == "end"),
+            "enter" | "space" => {
+                if let Some(target) = self
+                    .menu_cursor
+                    .and_then(|i| items.get(i))
+                    .and_then(|i| i.target.clone())
+                {
+                    self.run_menu(target, window, cx);
+                }
+            }
+            _ if !m.control && !m.alt && !m.platform => {
+                self.menu_cursor = menu::letter(&items, self.menu_cursor, key)
+            }
+            _ => {}
+        }
+        if let Some(index) = self.menu_cursor {
+            self.menu_scroll.scroll_to_item(index);
         }
         cx.notify();
     }
@@ -540,7 +651,6 @@ impl Render for Shell {
             state.clear_recovery();
             window.remove_window();
         }
-        let selected = state.editor.selected();
         let tool = state.tool;
         let status = state.status.clone();
         let video_job = state.video_job.clone();
@@ -556,6 +666,7 @@ impl Render for Shell {
             .text_size(px(12.0))
             .text_color(rgb(ui::TEXT))
             .bg(rgb(ui::BG))
+            .capture_key_down(cx.listener(Self::menu_key))
             .on_key_down(cx.listener(Self::key))
             .child(
                 div()
@@ -566,29 +677,14 @@ impl Render for Shell {
                     .border_b_1()
                     .border_color(rgb(ui::BORDER))
                     .children(
-                        [
-                            "File",
-                            "Edit",
-                            "Composition",
-                            "Layer",
-                            "Effect",
-                            "Animation",
-                            "View",
-                            "Window",
-                            "Help",
-                        ]
+                        menu::MENUS
                         .into_iter()
                         .map(|name| {
                             ui::text_button(name, name)
                                 .when(self.menu == Some(name), |s| s.bg(rgb(0x353535)))
                                 .on_click(cx.listener(move |this, _, window, cx| {
-                                    window.focus(&this.focus);
-                                    this.menu = if this.menu == Some(name) {
-                                        None
-                                    } else {
-                                        Some(name)
-                                    };
-                                    cx.notify();
+                                    if this.menu == Some(name) { this.close_menu(window, cx); }
+                                    else { this.open_menu(name, window, cx); }
                                 }))
                         }),
                     ),
@@ -639,7 +735,7 @@ impl Render for Shell {
                     ))
                     .child(div().mx_2().w(px(1.0)).h(px(20.0)).bg(rgb(0x414141)))
                     .child(ui::action_tool("shape-tool", match tool { Tool::Shape(libre_effects_core::ShapeKind::Ellipse) => "circle", Tool::Shape(libre_effects_core::ShapeKind::Star) => "star", Tool::Shape(libre_effects_core::ShapeKind::Polygon) => "triangle-up", _ => "square" }, "Shape tool (Q cycles shapes) · Drag to draw · Shift constrains · Alt draws from center", &self.state, Action::SetTool(match tool {Tool::Shape(_) => tool, _ => Tool::Shape(libre_effects_core::ShapeKind::Rectangle)}), matches!(tool, Tool::Shape(_))))
-                    .child(ui::text_button("shape-menu", "▾").on_click(cx.listener(|this, _, window, cx| {window.focus(&this.focus); this.menu = if this.menu == Some("Shape") {None} else {Some("Shape")}; cx.notify();})))
+                    .child(ui::text_button("shape-menu", "▾").on_click(cx.listener(|this, _, window, cx| {if this.menu == Some("Shape") {this.close_menu(window,cx);} else {this.open_menu("Shape",window,cx);}})))
                     .child(ui::action_tool("pen-tool", "pen", "Pen (G) · Click vertices, drag curves · Close at first point / Enter · Alt converts corners or breaks handles · Ctrl draws a mask on a shape", &self.state, Action::SetTool(Tool::Pen), tool == Tool::Pen))
                     .child(ui::action_tool("text-tool", "text", "Text tool (Ctrl+T) · Click point text · Drag a paragraph box", &self.state, Action::SetTool(Tool::Text), tool == Tool::Text))
                     .child(div().mx_2().w(px(1.0)).h(px(20.0)).bg(rgb(0x414141)))
@@ -733,279 +829,7 @@ impl Render for Shell {
             );
 
         if let Some(menu) = self.menu {
-            let items: Vec<(&str, &str, Option<Action>)> = match menu {
-                "File" => vec![
-                    (
-                        "Render work area — MP4…",
-                        "",
-                        Some(Action::ExportVideo(crate::video_export::VideoPreset::H264)),
-                    ),
-                    (
-                        "Render work area — MOV with alpha…",
-                        "",
-                        Some(Action::ExportVideo(
-                            crate::video_export::VideoPreset::ProResAlpha,
-                        )),
-                    ),
-                    ("New project", "Ctrl+Alt+N", Some(Action::New)),
-                    ("Open project…", "Ctrl+O", Some(Action::Open)),
-                    ("Save", "Ctrl+S", Some(Action::Save)),
-                    ("Save as…", "Ctrl+Shift+S", Some(Action::SaveAs)),
-                    ("Collect project files…", "", Some(Action::CollectFiles)),
-                    (
-                        "Cancel file collection",
-                        "",
-                        self.state
-                            .read(cx)
-                            .collecting
-                            .then_some(Action::CancelCollection),
-                    ),
-                    ("Import footage…", "Ctrl+I", Some(Action::ImportImage)),
-                    (
-                        "Import image sequence…",
-                        "",
-                        Some(Action::ImportImageSequence),
-                    ),
-                    ("Import video…", "Ctrl+Shift+I", Some(Action::ImportVideo)),
-                    ("Manage project media…", "", Some(Action::ManageMedia)),
-                    ("Manage project fonts…", "", Some(Action::ManageFonts)),
-                    ("Relink selected video…", "", Some(Action::RelinkVideo)),
-                    ("Refresh footage", "", Some(Action::RefreshFootage)),
-                    (
-                        "Export current frame (PNG, alpha)…",
-                        "",
-                        Some(Action::ExportFrame),
-                    ),
-                    (
-                        "Export current frame (PNG, background)…",
-                        "",
-                        Some(Action::ExportFrameBackground),
-                    ),
-                    (
-                        "Render work area (PNG sequence, alpha)…",
-                        "",
-                        Some(Action::ExportSequence),
-                    ),
-                    (
-                        "Render work area (PNG sequence, background)…",
-                        "",
-                        Some(Action::ExportSequenceBackground),
-                    ),
-                    ("Cancel render", "", Some(Action::CancelExport)),
-                ],
-                "Edit" => vec![
-                    ("Copy selection", "Ctrl+C", Some(Action::CopySelection)),
-                    ("Cut selection", "Ctrl+X", Some(Action::CutSelection)),
-                    ("Paste", "Ctrl+V", Some(Action::PasteSelection)),
-                    ("Copy layers", "", Some(Action::CopyLayers)),
-                    ("Paste layers", "", Some(Action::PasteLayers)),
-                    ("Undo", "Ctrl+Z", Some(Action::Undo)),
-                    ("Redo", "Ctrl+Shift+Z", Some(Action::Redo)),
-                    (
-                        "Duplicate layer",
-                        "Ctrl+D",
-                        selected.map(|_| Action::DuplicateSelection),
-                    ),
-                    ("Delete selection", "Delete", Some(Action::DeleteSelection)),
-                    (
-                        "Split layers",
-                        "Ctrl+Shift+D",
-                        selected.map(|_| Action::SplitSelection),
-                    ),
-                ],
-                "Layer" => vec![
-                    (
-                        if state
-                            .editor
-                            .selected_layer()
-                            .is_some_and(|l| l.time_remap().is_some())
-                        {
-                            "Disable Time Remapping"
-                        } else {
-                            "Enable Time Remapping"
-                        },
-                        "Ctrl+Alt+T",
-                        state
-                            .editor
-                            .selected_layer()
-                            .filter(|l| l.can_time_remap() && !l.locked())
-                            .map(|_| Action::ToggleTimeRemap),
-                    ),
-                    (
-                        "Freeze frame with Time Remap",
-                        "",
-                        state
-                            .editor
-                            .selected_layer()
-                            .filter(|l| l.can_time_remap() && !l.locked())
-                            .map(|_| Action::FreezeTimeRemap),
-                    ),
-                    (
-                        "Pre-compose selection",
-                        "Ctrl+Shift+C",
-                        selected.map(|_| Action::PrecomposeSelection),
-                    ),
-                    (
-                        "Trim In to playhead",
-                        "Alt+[",
-                        selected.map(|_| Action::TrimSelection(true)),
-                    ),
-                    (
-                        "Trim Out to playhead",
-                        "Alt+]",
-                        selected.map(|_| Action::TrimSelection(false)),
-                    ),
-                    ("New text", "", Some(Action::AddText)),
-                    ("New null object", "", Some(Action::Edit(Command::AddNull))),
-                    ("New solid", "Ctrl+Y", Some(Action::Edit(Command::AddSolid))),
-                    (
-                        "New adjustment layer",
-                        "Ctrl+Alt+Y",
-                        Some(Action::Edit(Command::AddAdjustment)),
-                    ),
-                    (
-                        "Solo selected layers",
-                        "",
-                        selected.map(|_| {
-                            Action::ToggleSelectedSwitch(libre_effects_core::LayerSwitch::Solo)
-                        }),
-                    ),
-                    (
-                        "Shy selected layers",
-                        "",
-                        selected.map(|_| {
-                            Action::ToggleSelectedSwitch(libre_effects_core::LayerSwitch::Shy)
-                        }),
-                    ),
-                    (
-                        "Guide selected layers",
-                        "",
-                        selected.map(|_| {
-                            Action::ToggleSelectedSwitch(libre_effects_core::LayerSwitch::Guide)
-                        }),
-                    ),
-                    (
-                        "New background solid",
-                        "",
-                        Some(Action::Edit(Command::AddBackgroundSolid)),
-                    ),
-                    (
-                        "New rectangle",
-                        "",
-                        Some(Action::Edit(Command::AddRectangle)),
-                    ),
-                    (
-                        "Duplicate layer",
-                        "Ctrl+D",
-                        selected.map(|_| Action::DuplicateSelection),
-                    ),
-                    (
-                        "Toggle visibility",
-                        "",
-                        selected.map(|id| Action::Edit(Command::ToggleVisible(id))),
-                    ),
-                    (
-                        "Toggle lock",
-                        "",
-                        selected.map(|id| Action::Edit(Command::ToggleLocked(id))),
-                    ),
-                ],
-                "Shape" => libre_effects_core::ShapeKind::ALL
-                    .into_iter()
-                    .map(|kind| (kind.label(), "Q", Some(Action::SetTool(Tool::Shape(kind)))))
-                    .collect(),
-                "Effect" => libre_effects_core::EffectKind::ALL
-                    .into_iter()
-                    .map(|kind| {
-                        (
-                            kind.label(),
-                            "",
-                            state
-                                .editor
-                                .selected_layer()
-                                .filter(|l| {
-                                    !l.locked()
-                                        && !matches!(l.content(), libre_effects_core::Content::Null)
-                                })
-                                .map(|l| {
-                                    Action::Edit(Command::Effect {
-                                        id: l.id(),
-                                        edit: libre_effects_core::EffectEdit::Add(kind),
-                                    })
-                                }),
-                        )
-                    })
-                    .collect(),
-                "Window" => vec![(
-                    "Render Queue",
-                    "",
-                    Some(Action::Queue(crate::editor::queue::QueueAction::Show(true))),
-                )],
-                "Animation" => vec![
-                    ("Toggle Graph Editor", "Shift+F3", Some(Action::ToggleGraph)),
-                    ("Previous keyframe", "J", Some(Action::PreviousKey)),
-                    ("Next keyframe", "K", Some(Action::NextKey)),
-                    (
-                        "Reveal animated properties",
-                        "U",
-                        Some(Action::Filter(Some(PropertyFilter::Animated))),
-                    ),
-                    ("Reveal all properties", "", Some(Action::Filter(None))),
-                ],
-                "View" => vec![
-                    ("Fit composition", "", Some(Action::FitPreview)),
-                    ("Zoom in", "", Some(Action::ZoomPreview(2.0))),
-                    ("Zoom out", "", Some(Action::ZoomPreview(0.5))),
-                    ("Transparency grid", "", Some(Action::Checkerboard)),
-                    (
-                        "Rulers",
-                        "Ctrl+R",
-                        Some(Action::ViewerOption(
-                            crate::viewer_tools::ViewOption::Rulers,
-                        )),
-                    ),
-                    (
-                        "Grid",
-                        "",
-                        Some(Action::ViewerOption(crate::viewer_tools::ViewOption::Grid)),
-                    ),
-                    (
-                        "Guides",
-                        "",
-                        Some(Action::ViewerOption(
-                            crate::viewer_tools::ViewOption::Guides,
-                        )),
-                    ),
-                    (
-                        "Title / Action Safe",
-                        "",
-                        Some(Action::ViewerOption(crate::viewer_tools::ViewOption::Safe)),
-                    ),
-                    (
-                        "Snap to guides",
-                        "",
-                        Some(Action::ViewerOption(
-                            crate::viewer_tools::ViewOption::SnapGuides,
-                        )),
-                    ),
-                    (
-                        "Snap to grid",
-                        "",
-                        Some(Action::ViewerOption(
-                            crate::viewer_tools::ViewOption::SnapGrid,
-                        )),
-                    ),
-                    (
-                        "Lock guides",
-                        "",
-                        Some(Action::ViewerOption(
-                            crate::viewer_tools::ViewOption::LockGuides,
-                        )),
-                    ),
-                    ("Clear guides", "", Some(Action::ClearGuides)),
-                ],
-                _ => Vec::new(),
-            };
+            let items = menu::items(menu, self.state.read(cx));
             let mut dropdown = div()
                 .id("main-menu")
                 .absolute()
@@ -1023,6 +847,9 @@ impl Render for Shell {
                     _ => 460.0,
                 }))
                 .w(px(285.0))
+                .max_h((window.viewport_size().height - px(90.0)).max(px(100.0)))
+                .overflow_y_scroll()
+                .track_scroll(&self.menu_scroll)
                 .p_1()
                 .bg(rgb(0x2b2b2b))
                 .border_1()
@@ -1031,106 +858,47 @@ impl Render for Shell {
                 .occlude()
                 .on_mouse_down_out(cx.listener(|this, _, _, cx| {
                     this.menu = None;
+                    this.menu_cursor = None;
+                    this.menu_return_focus = None;
                     cx.notify();
                 }));
-            for (index, (label, shortcut, action)) in items.into_iter().enumerate() {
-                let label = if let Some(Action::ViewerOption(option)) = &action {
+            for (index, item) in items.into_iter().enumerate() {
+                let label = if let Some(menu::Target::Action(Action::ViewerOption(option))) =
+                    &item.target
+                {
                     format!(
-                        "{} {label}",
+                        "{} {}",
                         if self.state.read(cx).viewer.enabled(*option) {
                             "✓"
                         } else {
                             "  "
-                        }
+                        },
+                        item.label
                     )
                 } else {
-                    label.to_string()
+                    item.label.to_string()
                 };
+                let enabled = item.target.is_some();
                 dropdown = dropdown.child(
                     ui::text_button(("menu-action", index), "")
                         .w_full()
                         .justify_between()
-                        .when(action.is_none(), |s| s.opacity(0.4))
-                        .child(label.to_string())
-                        .child(div().text_color(rgb(ui::MUTED)).child(shortcut.to_string()))
+                        .flex_none()
+                        .when(!enabled, |s| s.opacity(0.4))
+                        .when(self.menu_cursor == Some(index), |s| s.bg(rgb(0x164a7b)))
+                        .child(label)
+                        .child(div().text_color(rgb(ui::MUTED)).child(item.shortcut))
+                        .on_hover(cx.listener(move |this, hovered, _, cx| {
+                            if *hovered && enabled {
+                                this.menu_cursor = Some(index);
+                                cx.notify();
+                            }
+                        }))
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.menu = None;
-                            if let Some(action) = &action {
-                                this.dispatch(action.clone(), window, cx);
+                            if let Some(target) = item.target.clone() {
+                                this.run_menu(target, window, cx);
                             }
-                            cx.notify();
                         })),
-                );
-            }
-            if menu == "Composition" {
-                dropdown = dropdown.child(
-                    ui::text_button("queue-comp", "Add to Render Queue    Ctrl+M").on_click(
-                        cx.listener(|this, _, window, cx| {
-                            this.menu = None;
-                            this.dispatch(
-                                Action::Queue(crate::editor::queue::QueueAction::Add),
-                                window,
-                                cx,
-                            )
-                        }),
-                    ),
-                );
-                for (id, label, command) in [
-                    (
-                        "composition-new",
-                        "New composition",
-                        Command::NewComposition,
-                    ),
-                    (
-                        "composition-duplicate",
-                        "Duplicate composition",
-                        Command::DuplicateComposition,
-                    ),
-                    (
-                        "composition-delete",
-                        "Delete composition",
-                        Command::DeleteComposition,
-                    ),
-                ] {
-                    dropdown = dropdown.child(ui::text_button(id, label).on_click(cx.listener(
-                        move |this, _, window, cx| {
-                            this.menu = None;
-                            if matches!(command, Command::NewComposition) {
-                                this.new_composition(window, cx);
-                            } else {
-                                this.dispatch(Action::Edit(command.clone()), window, cx);
-                            }
-                            cx.notify();
-                        },
-                    )));
-                }
-                dropdown = dropdown.child(
-                    ui::text_button("composition-settings", "Composition settings…    Ctrl+K")
-                        .on_click(
-                            cx.listener(|this, _, window, cx| this.open_settings(window, cx)),
-                        ),
-                );
-            }
-            if menu == "Window" {
-                dropdown = dropdown.child(
-                    ui::text_button("workspace-reset-menu", "Reset default workspace").on_click(
-                        cx.listener(|this, _, _, cx| {
-                            this.menu = None;
-                            this.reset_layout(cx);
-                            cx.notify();
-                        }),
-                    ),
-                );
-            }
-            if menu == "Help" {
-                dropdown = dropdown.child(
-                    ui::text_button("keyboard-help", "Keyboard shortcuts").on_click(cx.listener(
-                        |this, _, _, cx| {
-                            this.menu = None;
-                            this.help = true;
-                            cx.notify();
-                        },
-                    )),
                 );
             }
             root = root.child(gpui::deferred(dropdown).with_priority(2));
@@ -1344,6 +1112,8 @@ impl Render for Shell {
                     "Ctrl+Shift+C — Pre-compose selected layers",
                     "Shift+F3 — Graph Editor    F9 — Ease selected graph segment",
                     "B / N — Work area start / end    + / − — Timeline zoom",
+                    "F10 — Menus · ←/→ menu · ↑/↓ item · Enter run · Esc close",
+                    "Menu Home/End — First/last · Letter — Next matching item",
                     "Enter — Commit field    Escape — Cancel field",
                     "Drag time ruler to scrub; drag diamonds to move keys.",
                     "Double-click panel dividers to restore their size.",
