@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-const PROJECT_VERSION: u32 = 32;
+const PROJECT_VERSION: u32 = 33;
 pub type Frame = u32;
 pub type LayerId = u64;
 pub type CompositionId = u64;
@@ -694,6 +694,8 @@ impl Project {
             for layer in &comp.layers {
                 time_remap::validate(layer, comp.duration, self.version)?;
                 if !layer.text_style.valid()
+                    || (layer.text_style.paragraph
+                        && (self.version < 33 || !matches!(layer.content, Content::Text { .. })))
                     || (layer.text_style.has_font_override() && self.version < 32)
                     || (!layer.text_style.is_default() && self.version < 28)
                 {
@@ -913,6 +915,11 @@ pub enum Command {
     SetTextStyle {
         id: LayerId,
         style: TextStyle,
+    },
+    SetTextBox {
+        id: LayerId,
+        width: f64,
+        height: f64,
     },
     SetContent {
         id: LayerId,
@@ -1361,6 +1368,14 @@ impl Editor {
             .any(|(_, c)| c.layers.iter().any(|l| l.text_style.has_font_override()))
         {
             next.project.version = next.project.version.max(32);
+        }
+        if next
+            .project
+            .compositions()
+            .into_iter()
+            .any(|(_, c)| c.layers.iter().any(|l| l.text_style.paragraph))
+        {
+            next.project.version = next.project.version.max(33);
         }
         next.project.validate()?;
         if next != self.current {

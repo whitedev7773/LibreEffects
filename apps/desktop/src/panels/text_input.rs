@@ -4,6 +4,22 @@ use gpui::{App, ClipboardItem, ElementInputHandler, EntityInputHandler, UTF16Sel
 use std::ops::Range;
 
 impl Preview {
+    pub(super) fn resize_text(&mut self, p: Point<Pixels>, cx: &mut Context<Self>) {
+        let Some(p) = self.text_point(p, cx) else {
+            return;
+        };
+        self.state.update(cx, |s, cx| {
+            if let Some(session) = &mut s.text_session {
+                if session.style.paragraph {
+                    session.width = p[0].clamp(1.0, 16384.0);
+                    session.height = p[1].clamp(1.0, 16384.0);
+                    session.preferred_x = None;
+                    session.caret_hint = None;
+                    cx.notify();
+                }
+            }
+        });
+    }
     fn text_point(&self, p: Point<Pixels>, cx: &Context<Self>) -> Option<[f64; 2]> {
         let s = self.state.read(cx);
         let session = s.text_session.as_ref()?;
@@ -27,9 +43,10 @@ impl Preview {
         };
         self.state.update(cx, |s, cx| {
             if let Some(session) = &mut s.text_session {
-                let at = Layout::new(session).hit(p);
+                let (at, point) = Layout::new(session).hit_caret(p);
                 session.preferred_x = None;
                 session.buffer.select(at, extend);
+                session.caret_hint = Some((at, point));
                 cx.notify();
             }
         });
@@ -83,6 +100,7 @@ impl Preview {
                 )
             });
             self.text_dragging = false;
+            self.text_resizing = false;
             return true;
         }
         self.state.update(cx, |s, cx| {
@@ -92,6 +110,9 @@ impl Preview {
             let mut error = None;
             if !matches!(key, "up" | "down") {
                 session.preferred_x = None;
+                if !matches!(key, "home" | "end") {
+                    session.caret_hint = None;
+                }
             }
             if ctrl {
                 match key {
@@ -114,7 +135,7 @@ impl Preview {
                             error = session.buffer.replace(None, &text, false, None).err();
                         }
                     }
-                    "home" | "end" => session.buffer.line_edge(key == "end", true, shift),
+                    "home" | "end" => session.line_edge(key == "end", true, shift),
                     "left" | "right" => session.buffer.word(key == "right", shift),
                     "backspace" | "delete" => {
                         if session.buffer.selection().is_empty() {
@@ -127,12 +148,24 @@ impl Preview {
             } else {
                 match key {
                     "enter" if session.buffer.marked.is_none() => {
-                        error = session.buffer.replace(None, "\n", false, None).err()
+                        error = session
+                            .buffer
+                            .replace(
+                                None,
+                                if shift && session.style.paragraph {
+                                    "\u{2028}"
+                                } else {
+                                    "\n"
+                                },
+                                false,
+                                None,
+                            )
+                            .err()
                     }
                     "tab" => error = session.buffer.replace(None, "    ", false, None).err(),
                     "backspace" | "delete" => error = session.buffer.delete(key == "delete").err(),
                     "left" | "right" => session.buffer.step(key == "right", shift),
-                    "home" | "end" => session.buffer.line_edge(key == "end", false, shift),
+                    "home" | "end" => session.line_edge(key == "end", false, shift),
                     "up" | "down" => {
                         session.vertical(key == "down", shift);
                     }
@@ -157,6 +190,7 @@ impl Preview {
         self.state.update(cx, |s, cx| {
             if let Some(session) = &mut s.text_session {
                 session.preferred_x = None;
+                session.caret_hint = None;
                 if let Err(e) = session.buffer.replace(range, text, mark, selected) {
                     s.status = e;
                 }
@@ -242,7 +276,13 @@ impl EntityInputHandler for Preview {
             point(px(state.preview_pan[0]), px(state.preview_pan[1])),
             state.viewer.rulers,
         );
-        let at = Layout::new(s).caret(s.buffer.byte(r.start));
+        let layout = Layout::new(s);
+        let index = s.buffer.byte(r.start);
+        let at = if index == s.buffer.caret {
+            s.caret_position(&layout)
+        } else {
+            layout.caret(index)
+        };
         let corners = [
             at,
             [at[0] + 1.0, at[1]],
@@ -288,6 +328,7 @@ pub(super) fn paint(
     bounds: Bounds<Pixels>,
     focus: &FocusHandle,
     input: Entity<Preview>,
+    resize_handle: &Rc<Cell<Option<Bounds<Pixels>>>>,
     w: &mut Window,
     cx: &mut App,
 ) {
@@ -299,6 +340,20 @@ pub(super) fn paint(
         origin + point(px(p[0] as f32 * zoom), px(p[1] as f32 * zoom))
     };
     let mut quad = |x1: f64, x2: f64, y: f64, height: f64, color: gpui::Hsla| {
+        let (x1, x2, y, height) = if session.style.paragraph {
+            let top = y.clamp(0.0, session.height);
+            (
+                x1.clamp(0.0, session.width),
+                x2.clamp(0.0, session.width),
+                top,
+                (y + height).clamp(0.0, session.height) - top,
+            )
+        } else {
+            (x1, x2, y, height)
+        };
+        if height <= 0.0 || x1 == x2 {
+            return;
+        }
         let points = [[x1, y], [x2, y], [x2, y + height], [x1, y + height]].map(to_screen);
         let mut path = PathBuilder::fill();
         path.move_to(points[0]);
@@ -335,7 +390,7 @@ pub(super) fn paint(
             );
         }
     }
-    let p = layout.caret(session.buffer.caret);
+    let p = session.caret_position(&layout);
     quad(
         p[0],
         p[0] + 1.5 / zoom as f64,
@@ -343,4 +398,50 @@ pub(super) fn paint(
         session.font_size * 1.2,
         rgb(0xffffff).into(),
     );
+    if session.style.paragraph {
+        let corner = to_screen([session.width, session.height]);
+        resize_handle.set(Some(Bounds::new(
+            corner - point(px(7.0), px(7.0)),
+            gpui::size(px(14.0), px(14.0)),
+        )));
+        w.paint_quad(gpui::fill(
+            Bounds::new(
+                corner - point(px(3.0), px(3.0)),
+                gpui::size(px(6.0), px(6.0)),
+            ),
+            rgb(ui::BLUE),
+        ));
+        let corners = [
+            [0.0, 0.0],
+            [session.width, 0.0],
+            [session.width, session.height],
+            [0.0, session.height],
+        ]
+        .map(to_screen);
+        let mut path = PathBuilder::stroke(px(1.0));
+        path.move_to(corners[0]);
+        for p in &corners[1..] {
+            path.line_to(*p);
+        }
+        path.close();
+        if let Ok(path) = path.build() {
+            w.paint_path(path, rgb(ui::BLUE));
+        }
+        let flow = crate::text_flow::lines(
+            &session.buffer.text,
+            session.font_size,
+            session.width,
+            &session.style,
+        );
+        if crate::text_flow::composed_count(&flow, session.height) < flow.len() {
+            let position = to_screen([session.width, session.height]);
+            w.paint_quad(gpui::fill(
+                Bounds::new(
+                    position - point(px(4.0), px(4.0)),
+                    gpui::size(px(8.0), px(8.0)),
+                ),
+                rgb(0xef7755),
+            ));
+        }
+    }
 }

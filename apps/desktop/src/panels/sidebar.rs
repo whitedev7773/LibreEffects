@@ -9,6 +9,7 @@ use libre_effects_core::{AlignTarget, Alignment, Command};
 pub(crate) struct Sidebar {
     state: Entity<EditorState>,
     character: Entity<super::character::Character>,
+    paragraph: Entity<super::character::Paragraph>,
     inspector: Entity<Inspector>,
     catalog: Entity<super::effects::EffectCatalog>,
 }
@@ -17,6 +18,7 @@ impl Sidebar {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
         Self {
             character: cx.new(|cx| super::character::Character::new(state.clone(), cx)),
+            paragraph: cx.new(|cx| super::character::Paragraph::new(state.clone(), cx)),
             inspector: cx.new(|cx| Inspector::new(state.clone(), cx)),
             catalog: cx.new(|cx| super::effects::EffectCatalog::new(state.clone(), cx)),
             state,
@@ -123,7 +125,10 @@ impl Render for Sidebar {
                         .flex_none()
                         .child(self.character.clone())
                         .into_any_element(),
-                    6 => super::character::paragraph(&self.state, cx).into_any_element(),
+                    6 => div()
+                        .flex_none()
+                        .child(self.paragraph.clone())
+                        .into_any_element(),
                     3 => div()
                         .flex_1()
                         .min_h_0()

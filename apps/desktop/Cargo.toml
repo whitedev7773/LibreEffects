@@ -24,6 +24,7 @@ unicode-segmentation = "1.13"
 rustybuzz = "0.20.1"
 unicode-bidi = "0.3.18"
 unicode-script = "0.5.8"
+unicode-linebreak = "0.1.5"
 
 [target.'cfg(windows)'.dependencies]
 raw-window-handle = "0.6"

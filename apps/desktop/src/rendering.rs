@@ -30,6 +30,39 @@ pub(crate) fn text_svg(
     };
     text.lines().enumerate().map(|(line,s)| format!("<text x='{x}' y='{}' text-anchor='{anchor}' letter-spacing='{}' font-family='{}' font-weight='{}' font-style='{}' font-size='{font_size}' fill='{color}' xml:space='preserve'>{}</text>",font_size * (1.0 + style.leading * line as f64),style.tracking * font_size / 1000.0,xml(crate::fonts::svg_family(&style)),style.weight, if style.italic { "italic" } else { "normal" },xml(s))).collect()
 }
+fn layer_text_svg(
+    text: &str,
+    size: f64,
+    color: &str,
+    width: f64,
+    height: f64,
+    style: libre_effects_core::TextStyle,
+) -> String {
+    if !style.paragraph {
+        return text_svg(text, size, color, width, style);
+    }
+    let lines = crate::text_flow::lines(text, size, width, &style);
+    let mut svg = format!("<svg width='{width}' height='{height}' overflow='hidden'>");
+    for (i, line) in lines
+        .iter()
+        .take(crate::text_flow::composed_count(&lines, height))
+        .enumerate()
+    {
+        let y = i as f64 * size * style.leading;
+        svg.push_str(&format!(
+            "<g transform='translate(0 {y})'>{}</g>",
+            text_svg(
+                &text[line.range.start..line.visible_end],
+                size,
+                color,
+                width,
+                style.clone()
+            )
+        ));
+    }
+    svg.push_str("</svg>");
+    svg
+}
 /// Flatten straight RGBA over a solid RGB matte, including partially transparent edges.
 pub(crate) fn composite_background(pixels: &mut image::RgbaImage, color: u32) {
     let background = [(color >> 16) & 255, (color >> 8) & 255, color & 255];
@@ -218,7 +251,14 @@ impl Renderer {
                 "<svg xmlns='http://www.w3.org/2000/svg' width='{}' height='{}'>{}</svg>",
                 l.width(),
                 l.height(),
-                text_svg(text, *font_size, "white", l.width(), l.text_style())
+                layer_text_svg(
+                    text,
+                    *font_size,
+                    "white",
+                    l.width(),
+                    l.height(),
+                    l.text_style()
+                )
             );
             let measured =
                 resvg::usvg::Tree::from_str(&source, &self.options).map_err(|e| e.to_string())?;
@@ -293,11 +333,12 @@ impl Renderer {
                 svg.push_str(&shape.svg_at(l.width(), l.height(), l.color(), frame))
             }
             Content::Text { text, font_size } => {
-                svg.push_str(&text_svg(
+                svg.push_str(&layer_text_svg(
                     text,
                     *font_size,
                     &color,
                     l.width(),
+                    l.height(),
                     l.text_style(),
                 ));
             }

@@ -40,6 +40,7 @@ pub(crate) struct VideoJob {
 #[derive(Clone)]
 pub(crate) enum Action {
     BeginText(Option<LayerId>, [f64; 2]),
+    BeginParagraph([f64; 4]),
     CommitText,
     CancelText,
     Preset(presets::PresetAction),
@@ -562,6 +563,22 @@ impl EditorState {
             window.blur();
         }
         match action {
+            Action::BeginParagraph(rect) => {
+                self.stop();
+                match crate::text_edit::Session::new_box(
+                    self.editor.project(),
+                    self.document_revision,
+                    self.frame,
+                    *rect,
+                ) {
+                    Ok(session) => {
+                        self.text_session = Some(session);
+                        self.status =
+                            "Edit paragraph text · Ctrl+Enter finishes · Esc cancels".into();
+                    }
+                    Err(e) => self.status = e,
+                }
+            }
             Action::BeginText(id, position) => {
                 self.stop();
                 match crate::text_edit::Session::new(

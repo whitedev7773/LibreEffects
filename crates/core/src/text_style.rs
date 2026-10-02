@@ -20,6 +20,8 @@ pub struct TextStyle {
     /// Tracking in thousandths of an em, as in the Character panel.
     pub tracking: f64,
     pub align: TextAlign,
+    /// Wrap and clip source text inside the layer's width and height.
+    pub paragraph: bool,
 }
 impl Default for TextStyle {
     fn default() -> Self {
@@ -31,6 +33,7 @@ impl Default for TextStyle {
             leading: 1.2,
             tracking: 0.0,
             align: TextAlign::Left,
+            paragraph: false,
         }
     }
 }
@@ -62,6 +65,94 @@ impl TextStyle {
 mod tests {
     use super::*;
     use crate::{Command, Content, Editor, Project};
+    #[test]
+    fn paragraph_box_versions_history_and_resize_preserve_source_and_transform() {
+        let mut e = Editor::default();
+        e.execute(Command::AddContent {
+            content: Content::Text {
+                text: "one two 한글".into(),
+                font_size: 48.0,
+            },
+            width: 640.0,
+            height: 120.0,
+            name: "Text".into(),
+        })
+        .unwrap();
+        let id = e.selected().unwrap();
+        let before = e.project().clone();
+        assert!(
+            e.execute(Command::SetTextBox {
+                id,
+                width: 200.0,
+                height: 300.0
+            })
+            .is_err()
+        );
+        e.execute(Command::Batch(vec![
+            Command::SetTextStyle {
+                id,
+                style: TextStyle {
+                    paragraph: true,
+                    ..Default::default()
+                },
+            },
+            Command::SetTextBox {
+                id,
+                width: 200.0,
+                height: 300.0,
+            },
+        ]))
+        .unwrap();
+        let after = e.project().clone();
+        let layer = after.composition().layer(id).unwrap();
+        assert_eq!((layer.width(), layer.height()), (200.0, 300.0));
+        assert_eq!(
+            layer.content(),
+            before.composition().layer(id).unwrap().content()
+        );
+        assert_eq!(
+            after.composition().world_transform(id, 0),
+            before.composition().world_transform(id, 0)
+        );
+        let json = after.to_json().unwrap();
+        assert_eq!(Project::from_json(&json).unwrap(), after);
+        let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["version"], 33);
+        value["version"] = 32.into();
+        assert!(Project::from_json(&value.to_string()).is_err());
+        for width in [0.0, 16385.0, f64::NAN] {
+            assert!(
+                e.execute(Command::SetTextBox {
+                    id,
+                    width,
+                    height: 100.0
+                })
+                .is_err()
+            );
+            assert_eq!(e.project(), &after);
+        }
+        e.undo();
+        assert_eq!(e.project(), &before);
+        e.redo();
+        assert_eq!(e.project(), &after);
+        e.execute(Command::SetTextStyle {
+            id,
+            style: TextStyle::default(),
+        })
+        .unwrap();
+        assert_eq!(e.selected_layer().unwrap().content(), layer.content());
+        e.undo();
+        assert_eq!(e.project(), &after);
+        e.execute(Command::ToggleLocked(id)).unwrap();
+        assert!(
+            e.execute(Command::SetTextBox {
+                id,
+                width: 80.0,
+                height: 80.0
+            })
+            .is_err()
+        );
+    }
     #[test]
     fn font_selection_versions_history_and_invalid_edits() {
         let mut e = Editor::default();

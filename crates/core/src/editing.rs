@@ -298,6 +298,7 @@ pub(super) fn apply_extended(
             | Command::AddContent { .. }
             | Command::SetContent { .. }
             | Command::SetTextStyle { .. }
+            | Command::SetTextBox { .. }
             | Command::SetVideoSpeed { .. }
             | Command::SetVideoSourceIn { .. }
             | Command::ReverseVideo { .. }
@@ -704,6 +705,19 @@ pub(super) fn apply_extended(
                     l.properties.get_mut(&Property::ScaleX).unwrap().value = scale;
                     l.properties.get_mut(&Property::ScaleY).unwrap().value = scale;
                 }
+            }
+            Command::SetTextBox { id, width, height } => {
+                let layer = editable(state, *id)?;
+                if !matches!(layer.content, Content::Text { .. })
+                    || !layer.text_style.paragraph
+                    || ![width, height]
+                        .into_iter()
+                        .all(|v| v.is_finite() && (1.0..=16384.0).contains(v))
+                {
+                    return Err("Paragraph box dimensions must be 1–16384 pixels".into());
+                }
+                layer.width = *width;
+                layer.height = *height;
             }
             Command::SetTextStyle { id, style } => {
                 let layer = editable(state, *id)?;

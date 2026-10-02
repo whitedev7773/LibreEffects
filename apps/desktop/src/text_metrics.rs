@@ -30,7 +30,7 @@ fn spaced(c: char) -> bool {
     )
 }
 
-pub(super) struct Cluster {
+pub(crate) struct Cluster {
     pub range: Range<usize>,
     pub x: f64,
     pub end: f64,
@@ -117,7 +117,20 @@ fn find_text(group: &usvg::Group) -> Option<&usvg::Text> {
         _ => None,
     })
 }
-pub(super) fn clusters(
+pub(crate) fn line_bottom(text: &str, size: f64, width: f64, style: &TextStyle) -> f64 {
+    let text = if text.is_empty() { " " } else { text };
+    let svg = format!(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='{}' height='{}'>{}</svg>",
+        width.max(1.0),
+        size * 2.0,
+        crate::rendering::text_svg(text, size, "white", width, style.clone())
+    );
+    usvg::Tree::from_str(&svg, &crate::fonts::render_options())
+        .ok()
+        .and_then(|tree| find_text(tree.root()).map(|t| f64::from(t.bounding_box().bottom())))
+        .unwrap_or(size * 1.2)
+}
+pub(crate) fn clusters(
     text: &str,
     size: f64,
     width: f64,

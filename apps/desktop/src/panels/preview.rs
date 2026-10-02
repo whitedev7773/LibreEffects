@@ -20,6 +20,8 @@ mod preview_render;
 mod shape_gesture;
 use preview_render::Request;
 use shape_gesture::ShapeGesture;
+#[path = "text_box.rs"]
+mod text_box;
 #[path = "text_input.rs"]
 mod text_input;
 
@@ -80,6 +82,9 @@ pub(crate) struct Preview {
     state: Entity<EditorState>,
     text_dragging: bool,
     text_was_active: bool,
+    text_box_drag: Option<text_box::TextBoxDrag>,
+    text_resizing: bool,
+    text_resize_handle: Rc<Cell<Option<Bounds<Pixels>>>>,
     bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     gesture: Option<MoveGesture>,
     drawing: Option<ShapeGesture>,
@@ -177,6 +182,9 @@ impl Preview {
             state,
             text_dragging: false,
             text_was_active: false,
+            text_box_drag: None,
+            text_resizing: false,
+            text_resize_handle: Rc::new(Cell::new(None)),
             bounds: Rc::new(Cell::new(None)),
             gesture: None,
             drawing: None,
@@ -397,6 +405,7 @@ impl Preview {
         let Some(bounds) = self.bounds.get() else {
             return;
         };
+        crate::components::TextField::commit_active(window, cx);
         window.focus(&self.focus);
         let state = self.state.read(cx);
         let comp = state.editor.project().composition();
@@ -444,6 +453,15 @@ impl Preview {
             return;
         }
         if state.text_session.is_some() {
+            if self
+                .text_resize_handle
+                .get()
+                .is_some_and(|b| b.contains(&event.position))
+            {
+                self.text_resizing = true;
+                cx.stop_propagation();
+                return;
+            }
             self.text_click(event, cx);
             self.text_dragging = true;
             cx.stop_propagation();
@@ -463,7 +481,7 @@ impl Preview {
                             .world_transform(l.id(), frame)
                             .and_then(|m| m.inverse())
                             .is_some_and(|m| {
-                                if text.is_empty() {
+                                if text.is_empty() || l.text_style().paragraph {
                                     let local = m.point(p);
                                     (0.0..=l.width()).contains(&local[0])
                                         && (0.0..=l.height()).contains(&local[1])
@@ -478,8 +496,15 @@ impl Preview {
                                 }
                             })
                 })
-                .map(|l| l.id());
+                .map(|l| l.id())
+                .filter(|_| !(state.tool == Tool::Text && event.modifiers.shift));
             if id.is_some() || state.tool == Tool::Text {
+                if id.is_none() {
+                    self.text_box_drag = Some(text_box::TextBoxDrag::new(p, origin, zoom, state));
+                    cx.stop_propagation();
+                    cx.notify();
+                    return;
+                }
                 let place_caret = state.tool == Tool::Text && id.is_some();
                 crate::components::TextField::commit_active(window, cx);
                 self.state.update(cx, |s, cx| {
@@ -714,6 +739,15 @@ impl Preview {
         cx.notify();
     }
     fn moving(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if self.text_resizing {
+            self.resize_text(event.position, cx);
+            return;
+        }
+        if let Some(drag) = &mut self.text_box_drag {
+            drag.update(event.position, event.modifiers.alt);
+            cx.notify();
+            return;
+        }
         if self.text_dragging
             && self.state.read(cx).text_session.is_some()
             && event.pressed_button == Some(MouseButton::Left)
@@ -773,6 +807,20 @@ impl Preview {
         }
     }
     fn up(&mut self, event: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.text_resizing {
+            self.resize_text(event.position, cx);
+            self.text_resizing = false;
+            return;
+        }
+        if let Some(mut drag) = self.text_box_drag.take() {
+            drag.update(event.position, event.modifiers.alt);
+            if drag.valid(self.state.read(cx)) {
+                self.state
+                    .update(cx, |s, cx| s.dispatch(&drag.action(), window, cx));
+            }
+            cx.notify();
+            return;
+        }
         if self.text_dragging {
             self.text_dragging = false;
             return;
@@ -863,6 +911,13 @@ impl Preview {
 impl Render for Preview {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self
+            .text_box_drag
+            .as_ref()
+            .is_some_and(|d| !d.valid(self.state.read(cx)))
+        {
+            self.text_box_drag = None;
+        }
+        if self
             .state
             .read(cx)
             .text_session
@@ -881,6 +936,10 @@ impl Render for Preview {
             window.focus(&self.focus);
         }
         self.text_was_active = state.text_session.is_some();
+        if !self.text_was_active {
+            self.text_resizing = false;
+        }
+        self.text_resize_handle.set(None);
         if state.welcome() {
             let create = self.state.clone();
             let import = self.state.clone();
@@ -970,7 +1029,9 @@ impl Render for Preview {
         let gesture = self.gesture.clone();
         let mut render_project = state.text_project();
         let text_session = state.text_session.clone();
+        let text_box_rect = self.text_box_drag.as_ref().map(|d| d.rect());
         let text_input = cx.entity();
+        let text_resize_handle = self.text_resize_handle.clone();
         let text_focus = self.focus.clone();
         if let Some(g) = &gesture
             && g.layer.is_some()
@@ -1101,6 +1162,7 @@ impl Render for Preview {
                     .id("composition-canvas")
                     .track_focus(&self.focus)
                     .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+                        if event.keystroke.key=="escape" && this.text_box_drag.take().is_some() {cx.stop_propagation();cx.notify();return;}
                         if this.text_key(event,window,cx) {return;}
                         if this.state.read(cx).colors.session.is_some() { return; }
                         if this.state.read(cx).tool == Tool::Pen {
@@ -1308,7 +1370,11 @@ impl Render for Preview {
                                         },
                                     );
                                     super::pen::paint(&pen_overlay, origin, zoom, window);
-                                    if let Some(session)=&text_session {text_input::paint(session,origin,zoom,bounds,&text_focus,text_input.clone(),window,cx);}
+                                    if let Some(r)=text_box_rect {
+                                        let b=Bounds::new(origin+point(px(r[0] as f32*zoom),px(r[1] as f32*zoom)),size(px(r[2] as f32*zoom),px(r[3] as f32*zoom)));
+                                        window.paint_quad(gpui::outline(b,rgb(ui::BLUE),gpui::BorderStyle::Solid));
+                                    }
+                                    if let Some(session)=&text_session {text_input::paint(session,origin,zoom,bounds,&text_focus,text_input.clone(),&text_resize_handle,window,cx);}
                                     viewer_tools::paint(&overlay_options,&guides,bounds,stage,zoom,window,cx);
                                 });
                             },

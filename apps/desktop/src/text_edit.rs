@@ -220,19 +220,87 @@ pub(crate) struct Session {
     pub world: Affine,
     pub font_size: f64,
     pub width: f64,
+    pub height: f64,
     pub style: libre_effects_core::TextStyle,
     pub preferred_x: Option<f64>,
+    pub caret_hint: Option<(usize, [f64; 2])>,
     base: Project,
     seed: Vec<Command>,
     revision: u64,
 }
 impl Session {
+    pub fn line_edge(&mut self, end: bool, document: bool, extend: bool) {
+        if document || !self.style.paragraph {
+            self.buffer.line_edge(end, document, extend);
+            self.caret_hint = None;
+            return;
+        }
+        let layout = layout::Layout::new(self);
+        let y = self.caret_position(&layout)[1];
+        let candidates = layout
+            .carets
+            .iter()
+            .filter(|(_, p)| (p[1] - y).abs() < 0.001);
+        let target = if end {
+            candidates.max_by_key(|(i, _)| *i)
+        } else {
+            candidates.min_by_key(|(i, _)| *i)
+        };
+        if let Some((at, p)) = target {
+            self.buffer.select(*at, extend);
+            self.caret_hint = Some((*at, *p));
+        }
+    }
+    pub fn caret_position(&self, layout: &layout::Layout) -> [f64; 2] {
+        let at = self.buffer.caret;
+        if let Some((index, p)) = self.caret_hint.filter(|(i, _)| *i == at) {
+            return layout
+                .carets
+                .iter()
+                .filter(|(i, _)| *i == index)
+                .min_by(|(_, a), (_, b)| {
+                    let distance =
+                        |q: &[f64; 2]| (q[0] - p[0]).abs() + (q[1] - p[1]).abs() * 10000.0;
+                    distance(a).total_cmp(&distance(b))
+                })
+                .map_or_else(|| layout.caret(at), |(_, q)| *q);
+        }
+        layout.caret(at)
+    }
     pub fn vertical(&mut self, down: bool, extend: bool) {
         let layout = layout::Layout::new(self);
-        let mut p = layout.caret(self.buffer.caret);
+        let mut p = self.caret_position(&layout);
         p[0] = *self.preferred_x.get_or_insert(p[0]);
         p[1] += self.font_size * (0.5 + self.style.leading * if down { 1.0 } else { -1.0 });
-        self.buffer.select(layout.hit(p), extend);
+        let (at, point) = layout.hit_caret(p);
+        self.buffer.select(at, extend);
+        self.caret_hint = Some((at, point));
+    }
+    pub fn new_box(
+        project: &Project,
+        revision: u64,
+        frame: Frame,
+        rect: [f64; 4],
+    ) -> Result<Self, String> {
+        if !rect[2..]
+            .iter()
+            .all(|v| v.is_finite() && (1.0..=16384.0).contains(v))
+        {
+            return Err("Paragraph box dimensions must be 1–16384 pixels".into());
+        }
+        let mut session = Self::new(project, revision, frame, None, [rect[0], rect[1]])?;
+        session.width = rect[2];
+        session.height = rect[3];
+        session.style.paragraph = true;
+        if let Some(Command::AddContent { width, height, .. }) = session.seed.first_mut() {
+            *width = rect[2];
+            *height = rect[3];
+        }
+        session.seed.push(Command::SetTextStyle {
+            id: session.id,
+            style: session.style.clone(),
+        });
+        Ok(session)
     }
     pub fn new(
         project: &Project,
@@ -303,8 +371,10 @@ impl Session {
             world,
             font_size: *font_size,
             width: layer.width(),
+            height: layer.height(),
             style: layer.text_style(),
             preferred_x: None,
+            caret_hint: None,
             base: project.clone(),
             seed,
             revision,
@@ -317,7 +387,11 @@ impl Session {
         if !self.seed.is_empty() {
             !self.buffer.text.is_empty()
         } else {
-            matches!(self.base.composition().layer(self.id).map(|l|l.content()),Some(Content::Text{text,..}) if text!=&self.buffer.text)
+            self.base.composition().layer(self.id).is_some_and(|l| {
+                matches!(l.content(),Content::Text{text,..} if text!=&self.buffer.text)
+                    || (self.style.paragraph
+                        && (l.width() != self.width || l.height() != self.height))
+            })
         }
     }
     pub fn command(&self) -> Command {
@@ -329,6 +403,13 @@ impl Session {
                 font_size: self.font_size,
             },
         });
+        if self.style.paragraph {
+            commands.push(Command::SetTextBox {
+                id: self.id,
+                width: self.width,
+                height: self.height,
+            });
+        }
         Command::Batch(commands)
     }
     pub fn project(&self) -> Result<Project, String> {
@@ -342,6 +423,63 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn paragraph_draft_resize_and_visual_line_navigation_are_one_transaction() {
+        let mut e = Editor::default();
+        let base = e.project().clone();
+        let mut s = Session::new_box(&base, 0, 0, [20.0, 30.0, 210.0, 160.0]).unwrap();
+        assert!(!s.changed());
+        s.buffer
+            .replace(None, "one two three four five six", false, None)
+            .unwrap();
+        let layout = layout::Layout::new(&s);
+        let lines = crate::text_flow::lines(&s.buffer.text, s.font_size, s.width, &s.style);
+        assert!(lines.len() > 2);
+        let start = lines[1].range.start;
+        let point = layout
+            .carets
+            .iter()
+            .find(|(i, p)| *i == start && p[1] > 0.0)
+            .unwrap()
+            .1;
+        s.buffer.select(start, false);
+        s.caret_hint = Some((start, point));
+        assert_eq!(s.caret_position(&layout), point);
+        s.line_edge(true, false, false);
+        assert_eq!(s.buffer.caret, lines[1].range.end);
+        assert_eq!(s.caret_position(&layout)[1], point[1]);
+        s.line_edge(false, false, false);
+        assert_eq!(s.buffer.caret, start);
+        s.line_edge(false, true, false);
+        assert_eq!(s.buffer.caret, 0);
+        e.execute(s.command()).unwrap();
+        let committed = e.project().clone();
+        assert_eq!(committed, s.project().unwrap());
+        e.undo();
+        assert_eq!(e.project(), &base);
+        e.redo();
+        assert_eq!(e.project(), &committed);
+        let mut edit = Session::new(e.project(), 1, 0, Some(s.id), [0.0; 2]).unwrap();
+        edit.width = 420.0;
+        edit.height = 240.0;
+        assert!(edit.changed());
+        assert!(
+            crate::text_flow::lines(&edit.buffer.text, edit.font_size, edit.width, &edit.style)
+                .len()
+                < lines.len()
+        );
+        e.execute(edit.command()).unwrap();
+        let resized = e.project().clone();
+        assert_eq!(resized.composition().layer(s.id).unwrap().width(), 420.0);
+        e.undo();
+        assert_eq!(e.project(), &committed);
+        e.redo();
+        assert_eq!(e.project(), &resized);
+        assert_eq!(
+            Project::from_json(&resized.to_json().unwrap()).unwrap(),
+            resized
+        );
+    }
     #[test]
     fn vertical_motion_remembers_the_original_column_across_short_lines() {
         let mut s = Session::new(&Project::default(), 0, 0, None, [0.0; 2]).unwrap();

@@ -1,7 +1,7 @@
 //! Grapheme hit regions in layer coordinates, shaped with the selected real face.
 use super::Session;
 #[path = "text_metrics.rs"]
-mod metrics;
+pub(crate) mod metrics;
 use std::ops::Range;
 use std::{cell::RefCell, sync::Arc};
 use unicode_segmentation::UnicodeSegmentation;
@@ -148,10 +148,13 @@ impl Layout {
             size: font_size,
             ..Default::default()
         };
-        let mut base = 0;
-        for (line_index, line) in text.split('\n').enumerate() {
+        let lines = crate::text_flow::lines(text, font_size, width, style);
+        for (line_index, flow) in lines.iter().enumerate() {
+            let base = flow.range.start;
+            let line = &text[flow.range.clone()];
+            let drawn = &text[base..flow.visible_end];
             let y = line_index as f64 * font_size * style.leading;
-            let clusters = metrics::clusters(line, font_size, width, style).unwrap_or_default();
+            let clusters = metrics::clusters(drawn, font_size, width, style).unwrap_or_default();
             let bidi = unicode_bidi::BidiInfo::new(line, Some(unicode_bidi::Level::ltr()));
             let graphemes: Vec<_> = line
                 .grapheme_indices(true)
@@ -204,7 +207,6 @@ impl Layout {
                 });
                 last = x2;
             }
-            base += line.len() + 1;
         }
         result
     }
@@ -235,10 +237,14 @@ impl Layout {
     pub fn caret(&self, at: usize) -> [f64; 2] {
         self.carets
             .iter()
+            .rev()
             .min_by_key(|(i, _)| i.abs_diff(at))
             .map_or([0.0; 2], |(_, p)| *p)
     }
     pub fn hit(&self, p: [f64; 2]) -> usize {
+        self.hit_caret(p).0
+    }
+    pub fn hit_caret(&self, p: [f64; 2]) -> (usize, [f64; 2]) {
         self.carets
             .iter()
             .min_by(|(_, a), (_, b)| {
@@ -247,6 +253,7 @@ impl Layout {
                 };
                 d(a).total_cmp(&d(b))
             })
-            .map_or(0, |(i, _)| *i)
+            .copied()
+            .unwrap_or((0, [0.0; 2]))
     }
 }

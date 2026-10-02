@@ -332,44 +332,166 @@ impl Render for Character {
         panel
     }
 }
-pub(crate) fn paragraph(state: &Entity<EditorState>, cx: &Context<super::Sidebar>) -> gpui::Div {
-    let layer = state
-        .read(cx)
-        .editor
-        .selected_layer()
-        .filter(|l| matches!(l.content(), Content::Text { .. }))
-        .cloned();
-    let mut panel = div().p_3().flex().gap_2();
-    let Some(l) = layer else {
-        return panel.child("Select a text layer.");
-    };
-    for (align, icon, label) in [
-        (TextAlign::Left, "text-align-left", "Align text left"),
-        (TextAlign::Center, "text-align-center", "Center text"),
-        (TextAlign::Right, "text-align-right", "Align text right"),
-    ] {
-        let mut style = l.text_style();
-        style.align = align;
-        let id = l.id();
-        let state = state.clone();
-        panel = panel.child(
-            ui::tool(icon, icon, label, l.text_style().align == align).when(!l.locked(), |b| {
-                b.on_click(move |_, w, cx| {
-                    state.update(cx, |s, cx| {
-                        s.dispatch(
-                            &Action::Edit(Command::SetTextStyle {
-                                id,
-                                style: style.clone(),
-                            }),
-                            w,
-                            cx,
-                        )
+pub(crate) struct Paragraph {
+    state: Entity<EditorState>,
+    fields: Vec<Entity<TextField>>,
+}
+impl Paragraph {
+    pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
+        cx.observe(&state, |_, _, cx| cx.notify()).detach();
+        let fields = (0..2)
+            .map(|index| {
+                let state = state.clone();
+                cx.new(|cx| {
+                    TextField::new(cx, move |text, w, cx| {
+                        state.update(cx, |s, cx| {
+                            let Some(layer) = s.editor.selected_layer() else {
+                                return;
+                            };
+                            let Ok(value) = text.trim().parse::<f64>() else {
+                                s.status = "Enter a box size in pixels".into();
+                                cx.notify();
+                                return;
+                            };
+                            let command = Command::SetTextBox {
+                                id: layer.id(),
+                                width: if index == 0 { value } else { layer.width() },
+                                height: if index == 1 { value } else { layer.height() },
+                            };
+                            s.dispatch(&Action::Edit(command), w, cx);
+                        })
                     })
                 })
-            }),
-        );
+            })
+            .collect();
+        Self { state, fields }
     }
-    panel
+}
+impl Render for Paragraph {
+    fn render(&mut self, w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let layer = self
+            .state
+            .read(cx)
+            .editor
+            .selected_layer()
+            .filter(|l| matches!(l.content(), Content::Text { .. }))
+            .cloned();
+        let mut panel = div().p_3().flex().flex_col().gap_2().text_size(px(11.0));
+        let Some(l) = layer else {
+            return panel.child("Select a text layer.");
+        };
+        let mut alignment = div().flex().gap_2();
+        for (align, icon, label) in [
+            (TextAlign::Left, "text-align-left", "Align text left"),
+            (TextAlign::Center, "text-align-center", "Center text"),
+            (TextAlign::Right, "text-align-right", "Align text right"),
+        ] {
+            let mut style = l.text_style();
+            style.align = align;
+            let id = l.id();
+            let state = self.state.clone();
+            alignment = alignment.child(
+                ui::tool(icon, icon, label, l.text_style().align == align).when(!l.locked(), |b| {
+                    b.on_click(move |_, w, cx| {
+                        state.update(cx, |s, cx| {
+                            s.dispatch(
+                                &Action::Edit(Command::SetTextStyle {
+                                    id,
+                                    style: style.clone(),
+                                }),
+                                w,
+                                cx,
+                            )
+                        })
+                    })
+                }),
+            );
+        }
+        panel = panel.child(alignment);
+        let mut modes = div().flex().gap_2();
+        for (paragraph, label) in [(false, "Point text"), (true, "Paragraph text")] {
+            let command = crate::text_flow::convert(&l, paragraph);
+            let state = self.state.clone();
+            modes = modes.child(
+                ui::text_button(label, label)
+                    .when(l.text_style().paragraph == paragraph, |b| {
+                        b.text_color(rgb(ui::BLUE))
+                    })
+                    .when(!l.locked(), |b| {
+                        b.on_click(move |_, w, cx| {
+                            state.update(cx, |s, cx| {
+                                s.dispatch(&Action::Edit(command.clone()), w, cx)
+                            })
+                        })
+                    }),
+            );
+        }
+        panel = panel.child(modes);
+        if l.text_style().paragraph {
+            for (i, label, value) in [
+                (0, "Box width (px)", l.width()),
+                (1, "Box height (px)", l.height()),
+            ] {
+                self.fields[i].update(cx, |f, _| {
+                    f.sync(l.id().to_string(), format!("{value:.2}"), w)
+                });
+                panel = panel.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .child(div().w(px(108.0)).child(label))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .when(l.locked(), |d| d.child(format!("{value:.1}")))
+                                .when(!l.locked(), |d| d.child(self.fields[i].clone())),
+                        ),
+                );
+            }
+            if let Content::Text { text, font_size } = l.content() {
+                let lines = crate::text_flow::lines(text, *font_size, l.width(), &l.text_style());
+                let needed = lines.iter().map(|l| l.bottom).fold(1.0, f64::max);
+                if crate::text_flow::composed_count(&lines, l.height()) < lines.len() {
+                    let state = self.state.clone();
+                    let id = l.id();
+                    let width = l.width();
+                    panel = panel
+                        .child(
+                            div()
+                                .text_color(rgb(0xffaa88))
+                                .child("Overflow: Point conversion removes hidden text"),
+                        )
+                        .when(
+                            needed.ceil() > l.height() && needed.ceil() <= 16384.0,
+                            |panel| {
+                                panel.child(
+                                    ui::text_button("fit-text-height", "Fit box height").when(
+                                        !l.locked(),
+                                        |b| {
+                                            b.on_click(move |_, w, cx| {
+                                                state.update(cx, |s, cx| {
+                                                    s.dispatch(
+                                                        &Action::Edit(Command::SetTextBox {
+                                                            id,
+                                                            width,
+                                                            height: needed.ceil(),
+                                                        }),
+                                                        w,
+                                                        cx,
+                                                    )
+                                                })
+                                            })
+                                        },
+                                    ),
+                                )
+                            },
+                        );
+                }
+            }
+        }
+        panel
+    }
 }
 
 fn font_button(

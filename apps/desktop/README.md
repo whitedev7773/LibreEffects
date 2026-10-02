@@ -88,6 +88,27 @@ Ctrl+Enter finishes and Escape restores the original text (or discards a new
 draft). Clicking another panel, changing tools, saving or closing also finishes
 the edit. Empty new drafts do not create a layer.
 
+Drag with the Text tool to create a paragraph box; Alt-drag creates it around
+the starting point. Shift-click before entering text editing creates another
+layer even over existing text. Paragraph text wraps at Unicode line-break
+opportunities; overlong words wrap at whole grapheme boundaries. Enter inserts
+a paragraph break; Shift+Enter inserts a soft line break. The original source
+is preserved during reflow and box resizing.
+
+While editing, drag the bottom-right box handle to reflow text without scaling
+the glyphs. Paragraph also has numeric width/height and Fit box height controls.
+Only composed lines that fit the box are rendered; an overflow marker and panel
+message identify hidden text. Width and height are limited to 1–16384 pixels.
+The box type and dimensions roundtrip in project version 33. Older documents
+remain point text.
+
+Point/Paragraph buttons convert the selected layer. Paragraph-to-Point fixes
+the visible line breaks in the source and removes overflow, following the
+[AE conversion rule](https://helpx.adobe.com/after-effects/desktop/add-text/create-and-edit-text-layers/creating-editing-text-layers.html).
+The whole conversion is one Undo step, including restoration of hidden source.
+Resize the box before converting if that text needs to be retained. Home/End
+move within the current visual line; Ctrl+Home/End target the entire source.
+
 Drag or Shift+arrows selects text; Home/End, Ctrl+Home/End and Ctrl+arrows move
 within lines, the document and words. Clipboard shortcuts and local Undo/Redo
 work while editing. Double-click within an active edit selects a word; triple-click
@@ -99,14 +120,17 @@ Text is limited to 16 KiB; oversized input is rejected without changing the draf
 
 The native input handler exposes UTF-16 selections and marked composition text.
 Model tests cover Korean composition updates, surrogate pairs and joined emoji;
-actual Windows IME, focus and pointer behavior still require native verification.
+Native Windows checks covered pointer entry into paragraph editing, box resizing,
+selection, Korean/English text replacement, commit, document Undo/Redo and saving.
+Real IME composition/candidate windows and the full keyboard/focus matrix still
+require native verification (injected Unicode text is not an IME composition test).
 Caret cells use the compositor's actual fallback faces and glyph positions,
 including script-sensitive tracking and the absence of trailing letter spacing.
 The most recent layout is cached for pointer movement and selection painting.
 Graphemes stay together; internal ligature caret positions are distributed evenly
 rather than reading OpenType GDEF caret tables, and bidi boundary affinity remains
-limited. Paragraph boxes, per-character styles,
-Text Animator and caret blinking are not implemented. Existing AE-style panel
+limited. Per-character styles, paragraph indentation/justification, vertical
+text, Text Animator and caret blinking are not implemented. Existing AE-style panel
 geometry is unchanged.
 
 ## Effect presets
