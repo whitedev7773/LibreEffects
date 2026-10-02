@@ -15,6 +15,25 @@ Command-line renders remain independent of the interactive editor.
 
 ![Libre Effects workspace with the Content and Motion Study sample](screenshots/workspace.png)
 
+## Pen and path masks
+
+Use **G** for the Pen tool. Click to add corners, drag to create Bezier handles,
+click the first vertex to close a path, or press Enter to finish an open shape.
+Escape cancels the draft; Backspace removes its last vertex. With a footage,
+text, solid or adjustment layer selected, the tool creates a closed mask.
+With no selection it creates a shape path; use Ctrl when starting a mask on a
+shape layer. Click an existing vertex or handle to drag it, click a curve to
+insert a vertex without changing the curve, and use Delete on a selected vertex.
+Alt-click converts a vertex to a corner; Alt-drag a handle to break its symmetry.
+Shift constrains handles to an axis. Each completed path or drag is one Undo.
+
+Properties contains shape Fill/Stroke and Closed Path controls, and ordered
+mask Add/Subtract/Intersect/None, Invert, reorder and remove controls. Paths
+are stored in layer coordinates, including parent transformations, in project
+version 29. Existing rectangular masks remain supported. Path animation,
+mask Feather/Expansion/Opacity, multi-vertex selection and shape Contents
+operators are not implemented yet.
+
 ## Workspace
 
 - Compact menu bar and toolbar; Project and Composition above the Timeline, with a

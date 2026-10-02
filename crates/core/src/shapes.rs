@@ -30,6 +30,8 @@ impl ShapeKind {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Shape {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<crate::VectorPath>,
     pub kind: ShapeKind,
     pub fill: bool,
     pub stroke_color: u32,
@@ -41,6 +43,7 @@ pub struct Shape {
 impl Default for Shape {
     fn default() -> Self {
         Self {
+            path: None,
             kind: ShapeKind::Rectangle,
             fill: true,
             stroke_color: 0xffffff,
@@ -53,7 +56,8 @@ impl Default for Shape {
 }
 impl Shape {
     pub fn valid(&self) -> bool {
-        self.stroke_color <= 0xffffff
+        self.path.as_ref().is_none_or(crate::VectorPath::valid)
+            && self.stroke_color <= 0xffffff
             && self.stroke_width.is_finite()
             && (0.0..=1024.0).contains(&self.stroke_width)
             && self.roundness.is_finite()
@@ -72,6 +76,9 @@ impl Shape {
             "fill='{fill}' stroke='#{:06x}' stroke-width='{}' stroke-linejoin='round'",
             self.stroke_color, self.stroke_width
         );
+        if let Some(path) = &self.path {
+            return format!("<path d='{}' {style}/>", path.svg_data());
+        }
         match self.kind {
             ShapeKind::Rectangle | ShapeKind::RoundedRectangle => format!(
                 "<rect width='{width}' height='{height}' rx='{}' {style}/>",

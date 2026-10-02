@@ -43,6 +43,8 @@ pub use image_sequence::MissingFramePolicy;
 mod time;
 mod time_remap;
 pub use assets::{AssetId, AssetLibrary, FolderId, MediaAsset, ProjectFolder, ProjectItem};
+mod paths;
+pub use paths::{PathMask, PathMaskMode, PathVertex, VectorPath};
 mod shapes;
 mod text_style;
 pub use shapes::{Shape, ShapeKind};
@@ -233,6 +235,8 @@ pub struct Layer {
     next_effect_id: EffectId,
     #[serde(default)]
     mask: Option<Mask>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    path_masks: Vec<PathMask>,
     id: LayerId,
     name: String,
     visible: bool,
@@ -280,6 +284,9 @@ impl Layer {
     }
     pub fn effects(&self) -> Effects {
         self.effects
+    }
+    pub fn path_masks(&self) -> &[PathMask] {
+        &self.path_masks
     }
     pub fn mask(&self) -> Option<Mask> {
         self.mask
@@ -552,7 +559,7 @@ impl Project {
     }
 
     fn validate(&self) -> Result<(), String> {
-        if !(1..=28).contains(&self.version) {
+        if !(1..=29).contains(&self.version) {
             return Err("Unsupported project version".into());
         }
         if self.version < 9
@@ -589,6 +596,18 @@ impl Project {
             return Err("Embedded image assets exceed 128 MiB".into());
         }
         for (_, comp) in self.compositions() {
+            for layer in &comp.layers {
+                let has_path = matches!(&layer.content, Content::Shape(s) if s.path.is_some());
+                if (has_path || !layer.path_masks.is_empty()) && self.version < 29 {
+                    return Err("Vector paths require project version 29".into());
+                }
+                if layer.path_masks.len() > 64 || layer.path_masks.iter().any(|m| !m.valid()) {
+                    return Err(
+                        "Invalid path mask: at most 64 closed paths with 3–1024 finite vertices"
+                            .into(),
+                    );
+                }
+            }
             matte::validate(comp, self.version)?;
             guides::validate(&comp.guides)?;
             if self.version < 27
@@ -906,6 +925,10 @@ pub enum Command {
     SetEffects {
         id: LayerId,
         effects: Effects,
+    },
+    SetPathMasks {
+        id: LayerId,
+        masks: Vec<PathMask>,
     },
     SetMask {
         id: LayerId,
@@ -1278,6 +1301,14 @@ impl Editor {
         {
             next.project.version = next.project.version.max(28);
         }
+        if next.project.compositions().into_iter().any(|(_, c)| {
+            c.layers.iter().any(|l| {
+                !l.path_masks.is_empty()
+                    || matches!(&l.content, Content::Shape(s) if s.path.is_some())
+            })
+        }) {
+            next.project.version = next.project.version.max(29);
+        }
         next.project.validate()?;
         if next != self.current {
             let previous = std::mem::replace(&mut self.current, next);
@@ -1558,6 +1589,7 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
                 effect_stack: Vec::new(),
                 next_effect_id: 1,
                 mask: None,
+                path_masks: Vec::new(),
                 id,
                 name: format!("Rectangle {id}"),
                 visible: true,

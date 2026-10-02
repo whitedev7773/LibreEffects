@@ -451,6 +451,7 @@ impl Render for Inspector {
         if matches!(layer.content(), Content::Shape(_)) {
             contents = contents.child(self.shape_controls.clone());
         }
+        contents = contents.child(super::path_masks::controls(&self.state, &layer));
         if let Content::Composition { composition, .. } = layer.content() {
             let source = *composition;
             let state = self.state.clone();

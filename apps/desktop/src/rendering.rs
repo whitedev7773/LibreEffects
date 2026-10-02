@@ -257,9 +257,11 @@ impl Renderer {
             svg.push_str(&format!("<clipPath id='mask{id}'><path clip-rule='evenodd' d='{}M{} {}h{}v{}h{}z'/></clipPath>", if m.inverted { format!("M0 0h{}v{}h{}z ",l.width(),l.height(),-l.width()) } else { String::new() },m.x,m.y,m.width,m.height,-m.width));
         }
         svg.push_str("</defs>");
+        let (path_defs, path_mask) = crate::path_mask_render::mask(l, &id);
+        svg.push_str(&path_defs);
         let a = matrix.0;
         svg.push_str(&format!(
-            "<g transform='matrix({} {} {} {} {} {})' opacity='{}'>{effect_open}<g {}><g {}>",
+            "<g transform='matrix({} {} {} {} {} {})' opacity='{}'>{effect_open}<g {}><g {}><g {path_mask}>",
             a[0],
             a[1],
             a[2],
@@ -381,7 +383,7 @@ impl Renderer {
                 }
             }
         }
-        svg.push_str(&format!("</g></g>{effect_close}</g>"));
+        svg.push_str(&format!("</g></g></g>{effect_close}</g>"));
 
         if let Some((matte, mode)) = self.matte_pixels(
             project,

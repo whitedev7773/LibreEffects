@@ -74,6 +74,41 @@ impl Render for ShapeControls {
                     })
                 }),
         );
+        if let Some(path) = &shape.path {
+            let mut changed = shape.clone();
+            changed.path.as_mut().unwrap().closed = !path.closed;
+            if path.vertices.len() >= 3 {
+                let state = self.state.clone();
+                root = root.child(
+                    ui::text_button(
+                        "path-closed",
+                        if path.closed {
+                            "☑ Closed path"
+                        } else {
+                            "☐ Closed path"
+                        },
+                    )
+                    .when(!locked, |b| {
+                        b.on_click(move |_, w, cx| {
+                            state.update(cx, |s, cx| {
+                                s.dispatch(
+                                    &Action::Edit(Command::SetContent {
+                                        id,
+                                        content: Content::Shape(changed.clone()),
+                                    }),
+                                    w,
+                                    cx,
+                                )
+                            });
+                        })
+                    }),
+                );
+            }
+            root = root.child(div().child(format!(
+                "{} vertices · Pen (G) to edit",
+                path.vertices.len()
+            )));
+        }
         let values = [
             format!("{:06X}", shape.stroke_color),
             shape.stroke_width.to_string(),
@@ -91,7 +126,8 @@ impl Render for ShapeControls {
         .into_iter()
         .enumerate()
         {
-            if index == 2 && shape.kind != ShapeKind::RoundedRectangle
+            if (shape.path.is_some() && index >= 2)
+                || index == 2 && shape.kind != ShapeKind::RoundedRectangle
                 || index == 3 && !matches!(shape.kind, ShapeKind::Polygon | ShapeKind::Star)
                 || index == 4 && shape.kind != ShapeKind::Star
             {

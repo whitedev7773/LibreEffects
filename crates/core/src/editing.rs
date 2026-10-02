@@ -303,6 +303,7 @@ pub(super) fn apply_extended(
             | Command::FreezeVideo { .. }
             | Command::SetEffects { .. }
             | Command::SetMask { .. }
+            | Command::SetPathMasks { .. }
             | Command::SetColor { .. }
             | Command::ShiftLayer { .. }
             | Command::MoveKeys { .. }
@@ -719,6 +720,7 @@ pub(super) fn apply_extended(
                 layer.footage_interpretation = Default::default();
             }
             Command::SetEffects { id, effects } => editable(state, *id)?.effects = *effects,
+            Command::SetPathMasks { id, masks } => editable(state, *id)?.path_masks = masks.clone(),
             Command::SetMask { id, mask } => editable(state, *id)?.mask = *mask,
             Command::SetColor { id, color } => editable(state, *id)?.color = *color,
             Command::ShiftLayer { id, delta } => {

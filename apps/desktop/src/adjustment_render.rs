@@ -140,7 +140,9 @@ impl Renderer {
         } else {
             String::new()
         };
-        region.push_str(&format!("<g transform='{forward}'><rect width='{}' height='{}' fill='white' opacity='{opacity}' {clip}/></g>",layer.width(),layer.height()));
+        let (path_defs, path_mask) = crate::path_mask_render::mask(layer, id);
+        region.push_str(&path_defs);
+        region.push_str(&format!("<g transform='{forward}'><rect width='{}' height='{}' fill='white' opacity='{opacity}' {clip} {path_mask}/></g>",layer.width(),layer.height()));
         let mut coverage = self.raster_canvas(&region, width, height, max_dimension)?;
         if let Some((pixels, mode)) = matte {
             crate::matte_render::apply_matte(&mut coverage, pixels, mode);
@@ -303,6 +305,49 @@ mod tests {
             })
             .unwrap();
         }
+    }
+    #[test]
+    fn path_masks_and_legacy_masks_intersect_on_adjustments_without_changing_alpha() {
+        use libre_effects_core::{Effects, PathMask, PathMaskMode, PathVertex, VectorPath};
+        let mut e = scene();
+        e.execute(Command::AddAdjustment).unwrap();
+        e.execute(Command::SetEffects {
+            id: 2,
+            effects: Effects {
+                brightness: 0.0,
+                ..Default::default()
+            },
+        })
+        .unwrap();
+        e.execute(Command::SetPathMasks {
+            id: 2,
+            masks: vec![PathMask {
+                path: VectorPath {
+                    closed: true,
+                    vertices: [[0.0, 0.0], [50.0, 0.0], [50.0, 100.0], [0.0, 100.0]]
+                        .map(PathVertex::corner)
+                        .to_vec(),
+                },
+                mode: PathMaskMode::Add,
+                inverted: false,
+            }],
+        })
+        .unwrap();
+        e.execute(Command::SetMask {
+            id: 2,
+            mask: Some(Mask {
+                x: 0.0,
+                y: 0.0,
+                width: 100.0,
+                height: 50.0,
+                inverted: false,
+            }),
+        })
+        .unwrap();
+        let pixels = Renderer::new().render_preview(e.project(), 0, 100).unwrap();
+        assert_eq!(pixels.get_pixel(30, 30).0, [0, 0, 0, 128]);
+        assert_eq!(pixels.get_pixel(70, 30).0, [255, 0, 0, 128]);
+        assert_eq!(pixels.get_pixel(30, 70).0, [255, 0, 0, 128]);
     }
     #[test]
     fn adjustment_interpolates_premultiplied_alpha_masks_and_only_lower_layers() {

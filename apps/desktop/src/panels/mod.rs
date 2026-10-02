@@ -11,6 +11,8 @@ mod inspector;
 mod markers;
 mod matte;
 mod parent_drag;
+mod path_masks;
+mod pen;
 mod preview;
 mod shape_controls;
 mod sidebar;

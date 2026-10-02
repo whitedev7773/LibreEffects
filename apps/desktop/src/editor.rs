@@ -127,6 +127,7 @@ pub(crate) enum Tool {
     Hand,
     Zoom,
     Shape(libre_effects_core::ShapeKind),
+    Pen,
     Rotate,
     Anchor,
 }

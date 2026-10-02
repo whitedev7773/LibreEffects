@@ -79,6 +79,7 @@ pub(crate) struct Preview {
     bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     gesture: Option<MoveGesture>,
     drawing: Option<ShapeGesture>,
+    pen: super::pen::Pen,
     focus: FocusHandle,
     guide_gesture: Option<GuideGesture>,
     options_open: bool,
@@ -173,6 +174,7 @@ impl Preview {
             bounds: Rc::new(Cell::new(None)),
             gesture: None,
             drawing: None,
+            pen: Default::default(),
             focus: cx.focus_handle(),
             guide_gesture: None,
             options_open: false,
@@ -349,6 +351,22 @@ impl Preview {
             });
         }
     }
+    fn pen_pointer(&self, position: Point<Pixels>, cx: &Context<Self>) -> Option<[f64; 2]> {
+        let s = self.state.read(cx);
+        let c = s.editor.project().composition();
+        let (zoom, origin) = geometry(
+            self.bounds.get()?,
+            c.width(),
+            c.height(),
+            s.preview_zoom,
+            point(px(s.preview_pan[0]), px(s.preview_pan[1])),
+            s.viewer.rulers,
+        );
+        Some([
+            f32::from(position.x - origin.x) as f64 / zoom as f64,
+            f32::from(position.y - origin.y) as f64 / zoom as f64,
+        ])
+    }
     fn down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let Some(bounds) = self.bounds.get() else {
             return;
@@ -396,6 +414,23 @@ impl Preview {
                 });
                 self.guide_update(event.position, cx);
             }
+            cx.notify();
+            return;
+        }
+        if state.tool == Tool::Pen {
+            let command = self.pen.down(
+                state,
+                p,
+                zoom as f64,
+                event.modifiers.alt,
+                event.modifiers.control,
+            );
+            self.state.update(cx, |s, cx| {
+                s.dispatch(&Action::Seek(frame), window, cx);
+                if let Some(command) = command {
+                    s.dispatch(&Action::Edit(command), window, cx);
+                }
+            });
             cx.notify();
             return;
         }
@@ -531,7 +566,7 @@ impl Preview {
             Tool::Select => {
                 handle_hit.and_then(|(_, handle)| TransformGesture::scale(comp, id, frame, handle))
             }
-            Tool::Hand | Tool::Zoom | Tool::Shape(_) => None,
+            Tool::Hand | Tool::Zoom | Tool::Shape(_) | Tool::Pen => None,
         });
         let transform = if let Some(transform) = transform {
             match transform.with_selection(
@@ -607,6 +642,15 @@ impl Preview {
         if event.pressed_button != Some(MouseButton::Left) {
             return;
         }
+        if self.state.read(cx).tool == Tool::Pen {
+            self.pen.reset_if_stale(self.state.read(cx));
+            if let Some(p) = self.pen_pointer(event.position, cx) {
+                self.pen
+                    .moving(p, event.modifiers.alt, event.modifiers.shift);
+            }
+            cx.notify();
+            return;
+        }
         if let Some(drawing) = &mut self.drawing {
             drawing.update(event.position, event.modifiers.shift, event.modifiers.alt);
             cx.notify();
@@ -643,6 +687,14 @@ impl Preview {
         }
     }
     fn up(&mut self, event: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.state.read(cx).tool == Tool::Pen {
+            if let Some(command) = self.pen.up(self.state.read(cx)) {
+                self.state
+                    .update(cx, |s, cx| s.dispatch(&Action::Edit(command), window, cx));
+            }
+            cx.notify();
+            return;
+        }
         if let Some(mut drawing) = self.drawing.take() {
             drawing.update(event.position, event.modifiers.shift, event.modifiers.alt);
             if let Some(command) = drawing.command(self.state.read(cx)) {
@@ -718,6 +770,7 @@ impl Preview {
 impl Render for Preview {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.state.read(cx);
+        self.pen.reset_if_stale(state);
         if state.welcome() {
             let create = self.state.clone();
             let import = self.state.clone();
@@ -822,6 +875,16 @@ impl Render for Preview {
                 render_project = temporary.project().clone();
             }
         }
+        if let Some(command) = self.pen.pending(state) {
+            let mut temporary = libre_effects_core::Editor::default();
+            if temporary.replace_project(render_project.clone()).is_ok()
+                && temporary.execute(command).is_ok()
+            {
+                render_project = temporary.project().clone();
+            }
+        }
+        let pen_overlay = self.pen.overlay(state);
+        let pen_active = state.tool == Tool::Pen;
         let comp = render_project.composition().clone();
         self.update_render(
             Request {
@@ -913,7 +976,7 @@ impl Render for Preview {
                     .child(format!(
                         "{}  ›  Active Camera{}",
                         comp.name(),
-                        if self.pending.is_some() {
+                        if pen_active { "  ·  Pen: click / drag · Enter finish · Esc cancel · Delete vertex" } else if self.pending.is_some() {
                             "  ·  Rendering…"
                         } else {
                             ""
@@ -924,7 +987,14 @@ impl Render for Preview {
                 div()
                     .id("composition-canvas")
                     .track_focus(&self.focus)
-                    .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
+                    .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+                        if this.state.read(cx).tool == Tool::Pen {
+                            let (handled, command) = this.pen.key(&event.keystroke.key, this.state.read(cx));
+                            if handled {
+                                if let Some(command) = command { this.state.update(cx, |s,cx| s.dispatch(&Action::Edit(command), window, cx)); }
+                                cx.stop_propagation(); cx.notify(); return;
+                            }
+                        }
                         if event.keystroke.key == "escape" && this.drawing.take().is_some() {cx.stop_propagation();cx.notify();return;}
                         if event.keystroke.key == "escape" && this.guide_gesture.take().is_some() {cx.stop_propagation();cx.notify();return;}
                         if event.keystroke.key == "escape"
@@ -1024,7 +1094,7 @@ impl Render for Preview {
                                             }
                                             for layer in
                                                 comp.layers().iter().rev().filter(|layer| {
-                                                    controls_active(
+                                                    !pen_active && controls_active(
                                                         &comp,
                                                         layer,
                                                         frame,
@@ -1120,6 +1190,7 @@ impl Render for Preview {
                                             }
                                         },
                                     );
+                                    super::pen::paint(&pen_overlay, origin, zoom, window);
                                     viewer_tools::paint(&overlay_options,&guides,bounds,stage,zoom,window,cx);
                                 });
                             },

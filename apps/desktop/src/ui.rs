@@ -45,6 +45,7 @@ impl AssetSource for Assets {
             "text-align-center",
             "text-align-right",
             "cursor",
+            "pen",
             "circle",
             "star",
             "text",

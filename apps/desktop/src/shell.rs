@@ -380,6 +380,7 @@ impl Shell {
                     };
                     Some(Action::SetTool(Tool::Shape(next)))
                 }
+                "g" => Some(Action::SetTool(Tool::Pen)),
                 "w" => Some(Action::SetTool(Tool::Rotate)),
                 "y" => Some(Action::SetTool(Tool::Anchor)),
                 "p" => Some(Action::Filter(Some(PropertyFilter::Position))),
@@ -596,6 +597,7 @@ impl Render for Shell {
                     .child(div().mx_2().w(px(1.0)).h(px(20.0)).bg(rgb(0x414141)))
                     .child(ui::action_tool("shape-tool", match tool { Tool::Shape(libre_effects_core::ShapeKind::Ellipse) => "circle", Tool::Shape(libre_effects_core::ShapeKind::Star) => "star", Tool::Shape(libre_effects_core::ShapeKind::Polygon) => "triangle-up", _ => "square" }, "Shape tool (Q cycles shapes) · Drag to draw · Shift constrains · Alt draws from center", &self.state, Action::SetTool(match tool {Tool::Shape(_) => tool, _ => Tool::Shape(libre_effects_core::ShapeKind::Rectangle)}), matches!(tool, Tool::Shape(_))))
                     .child(ui::text_button("shape-menu", "▾").on_click(cx.listener(|this, _, window, cx| {window.focus(&this.focus); this.menu = if this.menu == Some("Shape") {None} else {Some("Shape")}; cx.notify();})))
+                    .child(ui::action_tool("pen-tool", "pen", "Pen (G) · Click vertices, drag curves · Close at first point / Enter · Alt converts corners or breaks handles · Ctrl draws a mask on a shape", &self.state, Action::SetTool(Tool::Pen), tool == Tool::Pen))
                     .child(ui::action_tool("text-tool", "text", "New text layer (Ctrl+T)", &self.state, Action::AddText, false))
                     .child(div().mx_2().w(px(1.0)).h(px(20.0)).bg(rgb(0x414141)))
                     .child(ui::text_button("toolbar-snapping", if self.state.read(cx).snapping {"☑ Snapping"} else {"☐ Snapping"}).on_click(cx.listener(|this,_,window,cx| {let _ = window; this.state.update(cx, |s,cx| {s.snapping = !s.snapping; cx.notify();});})))
