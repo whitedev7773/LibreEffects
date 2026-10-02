@@ -160,6 +160,13 @@ impl Session {
             None => self.slot.clear(),
         }
     }
+    /// Final replacement snapshot: later autosave tasks must not erase it.
+    pub fn preserve_for_replacement(&mut self, project: &Project) -> Result<(), String> {
+        self.slot.write(project)?;
+        self.generation = self.generation.wrapping_add(1);
+        self.enabled = false;
+        Ok(())
+    }
     pub fn reset(&mut self, close: bool) -> Result<(), String> {
         self.generation = self.generation.wrapping_add(1);
         self.enabled = !close;
@@ -183,6 +190,20 @@ impl Candidate {
 mod tests {
     use super::*;
     use libre_effects_core::{Command, Editor};
+    #[test]
+    fn replacement_preserves_latest_edits_against_late_autosave() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut session, _, _) = Session::in_directory(root.path()).unwrap();
+        let mut editor = Editor::default();
+        editor.execute(Command::AddRectangle).unwrap();
+        session.preserve_for_replacement(editor.project()).unwrap();
+        session.checkpoint(0, None).unwrap();
+        session.checkpoint(session.generation, None).unwrap();
+        drop(session);
+        let (_, candidates, _) = Session::in_directory(root.path()).unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(&candidates[0].project, editor.project());
+    }
     #[test]
     fn live_sessions_are_isolated_and_abandoned_slots_are_claimed_once() {
         let dir = tempfile::tempdir().unwrap();

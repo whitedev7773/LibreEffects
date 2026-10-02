@@ -433,13 +433,26 @@ impl Render for EffectControls {
 pub(crate) struct EffectCatalog {
     state: Entity<EditorState>,
     search: Entity<TextField>,
+    collapsed: BTreeSet<&'static str>,
 }
 impl EffectCatalog {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
         let search = cx.new(|cx| TextField::new(cx, |_, _, _| {}));
         cx.observe(&search, |_, _, cx| cx.notify()).detach();
-        Self { state, search }
+        Self {
+            state,
+            search,
+            collapsed: [
+                "Blur & Sharpen",
+                "Color Correction",
+                "Generate",
+                "Perspective",
+                "Stylize",
+            ]
+            .into_iter()
+            .collect(),
+        }
     }
 }
 impl Render for EffectCatalog {
@@ -455,12 +468,13 @@ impl Render for EffectCatalog {
         let mut list = div()
             .id("effects-catalog")
             .p_2()
-            .max_h(px(290.0))
+            .h_full()
+            .min_h_0()
             .overflow_y_scroll()
             .flex()
             .flex_col()
             .gap_1()
-            .child(self.search.clone());
+            .child(div().flex_none().child(self.search.clone()));
         if selected.is_none() {
             list = list.child(
                 div()
@@ -469,15 +483,74 @@ impl Render for EffectCatalog {
                     .child("Select an unlocked image, text, shape or composition layer."),
             );
         }
-        for kind in EffectKind::ALL
-            .into_iter()
-            .filter(|k| k.label().to_lowercase().contains(&query))
-        {
-            let state = self.state.clone();
+        let mut count = 0;
+        for (category, kinds) in [
+            ("Blur & Sharpen", vec![EffectKind::GaussianBlur]),
+            (
+                "Color Correction",
+                vec![
+                    EffectKind::Brightness,
+                    EffectKind::Grayscale,
+                    EffectKind::Tint,
+                    EffectKind::HueSaturation,
+                    EffectKind::Levels,
+                    EffectKind::Curves,
+                ],
+            ),
+            (
+                "Generate",
+                vec![
+                    EffectKind::Fill,
+                    EffectKind::LinearGradient,
+                    EffectKind::RadialGradient,
+                ],
+            ),
+            ("Perspective", vec![EffectKind::DropShadow]),
+            ("Stylize", vec![EffectKind::Glow]),
+        ] {
+            let kinds: Vec<_> = kinds
+                .into_iter()
+                .filter(|k| {
+                    query.is_empty()
+                        || category.to_lowercase().contains(&query)
+                        || k.label().to_lowercase().contains(&query)
+                })
+                .collect();
+            if kinds.is_empty() {
+                continue;
+            }
+            count += kinds.len();
+            let expanded = !query.is_empty() || !self.collapsed.contains(category);
             list = list.child(
-                ui::text_button(SharedString::from(format!("add-{kind:?}")), kind.label())
+                ui::text_button(
+                    SharedString::from(format!("effect-group-{category}")),
+                    format!("{}  {category}", if expanded { "▾" } else { "▸" }),
+                )
+                .h(px(23.0))
+                .flex_none()
+                .justify_start()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if !this.collapsed.remove(category) {
+                        this.collapsed.insert(category);
+                    }
+                    cx.notify();
+                })),
+            );
+            if !expanded {
+                continue;
+            }
+            for kind in kinds {
+                let state = self.state.clone();
+                list = list.child(
+                    ui::text_button(
+                        SharedString::from(format!("add-{kind:?}")),
+                        format!("ƒx  {}", kind.label()),
+                    )
+                    .h(px(23.0))
+                    .flex_none()
+                    .ml_3()
                     .justify_start()
-                    .when(selected.is_none(), |s| s.opacity(0.4))
+                    .when(selected.is_none(), |s| s.opacity(0.5))
                     .on_click(move |_, window, cx| {
                         if let Some(id) = selected {
                             state.update(cx, |s, cx| {
@@ -488,10 +561,21 @@ impl Render for EffectCatalog {
                                     }),
                                     window,
                                     cx,
-                                )
+                                );
+                                s.effect_controls_open = true;
+                                cx.notify();
                             });
                         }
                     }),
+                );
+            }
+        }
+        if count == 0 {
+            list = list.child(
+                div()
+                    .p_2()
+                    .text_color(rgb(ui::MUTED))
+                    .child("No matching effects"),
             );
         }
         list

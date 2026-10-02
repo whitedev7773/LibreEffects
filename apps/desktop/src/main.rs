@@ -76,7 +76,7 @@ fn main() {
         Ok(Some(instance)) => instance,
         Ok(None) => return,
         Err(error) => {
-            eprintln!("Cannot start Libre Effects: {error}");
+            single_instance::report_start_error(&error);
             std::process::exit(1);
         }
     };
@@ -126,7 +126,7 @@ fn main() {
                     instance = next;
                     if activate
                         && window
-                            .update(cx, |_, window, _| single_instance::activate_window(window))
+                            .update(cx, |shell, window, cx| shell.replace_instance(window, cx))
                             .is_err()
                     {
                         break;

@@ -253,6 +253,47 @@ impl Render for Browser {
                 .into_any_element();
         }
         let state = self.state.read(cx);
+        if state.welcome() {
+            let create = self.state.clone();
+            return div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .bg(rgb(ui::BG))
+                .child(tabs)
+                .child(div().flex_1().min_h_0())
+                .child(
+                    div()
+                        .h(px(28.0))
+                        .flex()
+                        .items_center()
+                        .border_t_1()
+                        .border_color(rgb(ui::BORDER))
+                        .child(ui::action_tool(
+                            "empty-project-import",
+                            "folder-open",
+                            "Import footage (Ctrl+I)",
+                            &self.state,
+                            Action::ImportImage,
+                            false,
+                        ))
+                        .child(
+                            ui::tool(
+                                "empty-project-composition",
+                                "filmstrip",
+                                "New composition (Ctrl+N)",
+                                false,
+                            )
+                            .on_click(move |_, _, cx| {
+                                create.update(cx, |s, cx| {
+                                    s.new_composition_requested = true;
+                                    cx.notify();
+                                })
+                            }),
+                        ),
+                )
+                .into_any_element();
+        }
         let project = state.editor.project().clone();
         let active = project.active_composition_id();
         let frame = state.frame;

@@ -8,6 +8,7 @@ use libre_effects_core::{AlignTarget, Alignment, Command};
 
 pub(crate) struct Sidebar {
     state: Entity<EditorState>,
+    character: Entity<super::character::Character>,
     inspector: Entity<Inspector>,
     catalog: Entity<super::effects::EffectCatalog>,
 }
@@ -15,6 +16,7 @@ impl Sidebar {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
         Self {
+            character: cx.new(|cx| super::character::Character::new(state.clone(), cx)),
             inspector: cx.new(|cx| Inspector::new(state.clone(), cx)),
             catalog: cx.new(|cx| super::effects::EffectCatalog::new(state.clone(), cx)),
             state,
@@ -48,16 +50,29 @@ impl Render for Sidebar {
         let expanded = state.workspace.sidebar_expanded;
         let work = format!("Work area: {}–{}f", state.work_start, state.work_end);
         let mut panel = div()
+            .id("sidebar-scroll")
+            .overflow_y_scroll()
             .size_full()
             .flex()
             .flex_col()
             .min_h_0()
             .bg(rgb(ui::BG));
-        for (index, label) in ["Properties", "Info", "Preview", "Effects & Presets"]
-            .into_iter()
-            .enumerate()
+        for (index, label) in [
+            (0, "Properties"),
+            (1, "Info"),
+            (4, "Audio"),
+            (2, "Preview"),
+            (3, "Effects & Presets"),
+            (5, "Character"),
+            (6, "Paragraph"),
+        ]
+        .into_iter()
         {
-            let active = expanded[index];
+            let active = if index < 4 {
+                expanded[index]
+            } else {
+                state.workspace.extra_sidebar_expanded[index - 4]
+            };
             panel = panel.child(
                 ui::text_button(gpui::SharedString::from(format!("dock-{label}")), label)
                     .h(px(27.0))
@@ -67,6 +82,14 @@ impl Render for Sidebar {
                     .border_color(rgb(ui::BORDER))
                     .when(active, |s| s.text_color(rgb(ui::BLUE)))
                     .on_click(cx.listener(move |this, _, _, cx| {
+                        if index >= 4 {
+                            this.state.update(cx, |s, cx| {
+                                s.workspace.extra_sidebar_expanded[index - 4] =
+                                    !s.workspace.extra_sidebar_expanded[index - 4];
+                                cx.notify();
+                            });
+                            return;
+                        }
                         this.state.update(cx, |s, cx| {
                             s.workspace.sidebar_expanded[index] =
                                 !s.workspace.sidebar_expanded[index];
@@ -77,7 +100,10 @@ impl Render for Sidebar {
             if active {
                 panel = panel.child(match index {
                     0 => div()
-                        .flex_1()
+                        .when(state.editor.selected().is_some(), |d| d.flex_1())
+                        .when(state.editor.selected().is_none(), |d| {
+                            d.h(px(46.0)).flex_none()
+                        })
                         .min_h_0()
                         .child(self.inspector.clone())
                         .into_any_element(),
@@ -89,8 +115,18 @@ impl Render for Sidebar {
                         .text_size(px(11.0))
                         .children(info.lines().map(|line| div().child(line.to_string())))
                         .into_any_element(),
-                    3 => div()
+                    4 => div()
+                        .p_3()
+                        .child(preview_audio_controls(&self.state, cx))
+                        .into_any_element(),
+                    5 => div()
                         .flex_none()
+                        .child(self.character.clone())
+                        .into_any_element(),
+                    6 => super::character::paragraph(&self.state, cx).into_any_element(),
+                    3 => div()
+                        .flex_1()
+                        .min_h_0()
                         .child(self.catalog.clone())
                         .into_any_element(),
                     _ => div()
@@ -143,8 +179,7 @@ impl Render for Sidebar {
                                 )
                                 .child("Shortcut: Space")
                                 .child(work.clone())
-                                .child(preview_cache_controls(&self.state, cx))
-                                .child(preview_audio_controls(&self.state, cx)),
+                                .child(preview_cache_controls(&self.state, cx)),
                         )
                         .into_any_element(),
                 });

@@ -43,6 +43,10 @@ pub use image_sequence::MissingFramePolicy;
 mod time;
 mod time_remap;
 pub use assets::{AssetId, AssetLibrary, FolderId, MediaAsset, ProjectFolder, ProjectItem};
+mod shapes;
+mod text_style;
+pub use shapes::{Shape, ShapeKind};
+pub use text_style::{TextAlign, TextStyle};
 mod tracks;
 pub use editing::{Content, Effects, KeyCopy, KeyRef, Mask, VideoPlayback};
 pub use geometry::{Affine, Bezier};
@@ -200,6 +204,8 @@ impl AnimatedProperty {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Layer {
+    #[serde(default, skip_serializing_if = "TextStyle::is_default")]
+    text_style: TextStyle,
     #[serde(
         default,
         skip_serializing_if = "audio_controls::AudioControls::is_default"
@@ -253,6 +259,10 @@ pub struct Layer {
 }
 
 impl Layer {
+    pub fn text_style(&self) -> TextStyle {
+        self.text_style
+    }
+
     pub fn blend_mode(&self) -> BlendMode {
         self.blend_mode
     }
@@ -542,7 +552,7 @@ impl Project {
     }
 
     fn validate(&self) -> Result<(), String> {
-        if !(1..=26).contains(&self.version) {
+        if !(1..=28).contains(&self.version) {
             return Err("Unsupported project version".into());
         }
         if self.version < 9
@@ -581,6 +591,14 @@ impl Project {
         for (_, comp) in self.compositions() {
             matte::validate(comp, self.version)?;
             guides::validate(&comp.guides)?;
+            if self.version < 27
+                && comp
+                    .layers
+                    .iter()
+                    .any(|l| matches!(l.content(), Content::Shape(_)))
+            {
+                return Err("Shape content requires project version 27".into());
+            }
             if self.version < 20 && !comp.guides.is_empty() {
                 return Err("Composition guides require project version 20".into());
             }
@@ -647,6 +665,11 @@ impl Project {
             }
             for layer in &comp.layers {
                 time_remap::validate(layer, comp.duration, self.version)?;
+                if !layer.text_style.valid()
+                    || (!layer.text_style.is_default() && self.version < 28)
+                {
+                    return Err("Invalid or unsupported text style".into());
+                }
                 audio_controls::validate(layer, comp.duration, self.version)?;
                 layer.markers.validate(comp.duration)?;
                 effects::validate(layer, comp.duration)?;
@@ -855,6 +878,10 @@ pub enum Command {
         width: f64,
         height: f64,
         name: String,
+    },
+    SetTextStyle {
+        id: LayerId,
+        style: TextStyle,
     },
     SetContent {
         id: LayerId,
@@ -1236,6 +1263,21 @@ impl Editor {
         {
             next.project.version = 26;
         }
+        if next.project.compositions().into_iter().any(|(_, c)| {
+            c.layers
+                .iter()
+                .any(|l| matches!(l.content, Content::Shape(_)))
+        }) {
+            next.project.version = next.project.version.max(27);
+        }
+        if next
+            .project
+            .compositions()
+            .into_iter()
+            .any(|(_, c)| c.layers.iter().any(|l| !l.text_style.is_default()))
+        {
+            next.project.version = next.project.version.max(28);
+        }
         next.project.validate()?;
         if next != self.current {
             let previous = std::mem::replace(&mut self.current, next);
@@ -1505,6 +1547,7 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
             Layer {
                 footage_interpretation: Default::default(),
                 asset: None,
+                text_style: Default::default(),
                 audio_controls: Default::default(),
                 time_remap: None,
                 track_matte: None,

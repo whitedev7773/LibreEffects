@@ -41,6 +41,14 @@ impl AssetSource for Assets {
             _ => None,
         } }; }
         Ok(icons!(
+            "text-align-left",
+            "text-align-center",
+            "text-align-right",
+            "cursor",
+            "circle",
+            "star",
+            "text",
+            "triangle-up",
             "volume",
             "volume-xmark",
             "hand",

@@ -77,6 +77,7 @@ pub(crate) enum Action {
     RelinkVideo,
     RefreshFootage,
     AddText,
+    CompositionFromFootage,
     ExportFrame,
     ExportFrameBackground,
     ExportSequence,
@@ -124,6 +125,8 @@ pub(crate) enum Action {
 pub(crate) enum Tool {
     Select,
     Hand,
+    Zoom,
+    Shape(libre_effects_core::ShapeKind),
     Rotate,
     Anchor,
 }
@@ -172,6 +175,8 @@ pub(crate) struct EditorState {
     clipboard: Vec<KeyCopy>,
     layer_clipboard: Option<libre_effects_core::LayerClipboard>,
     pub path: Option<PathBuf>,
+    pub composition_started: bool,
+    pub new_composition_requested: bool,
     saved: Project,
     pub saving: bool,
     pub collecting: bool,
@@ -242,6 +247,8 @@ impl Default for EditorState {
             clipboard: Vec::new(),
             layer_clipboard: None,
             path: None,
+            composition_started: false,
+            new_composition_requested: false,
             saved: Project::default(),
             saving: false,
             collecting: false,
@@ -272,7 +279,7 @@ impl Default for EditorState {
                 ..Default::default()
             },
             audio_session: None,
-            status: "Add a rectangle to start. Projects are saved as .lfe.json.".into(),
+            status: "Create a composition or import footage to begin.".into(),
             timeline_zoom: 1.0,
             timeline_start: 0,
             preview_zoom: None,
@@ -299,6 +306,14 @@ impl Default for EditorState {
 }
 
 impl EditorState {
+    pub fn welcome(&self) -> bool {
+        !self.composition_started
+            && self.path.is_none()
+            && !self.dirty()
+            && self.editor.project().composition().layers().is_empty()
+            && self.editor.project().compositions().len() == 1
+    }
+
     pub(crate) fn transport_generation(&self) -> u64 {
         self.playback_generation
     }
@@ -887,8 +902,9 @@ impl EditorState {
                 window,
                 cx,
             ),
-            Action::ImportImage => self.import_assets(false, cx),
-            Action::ImportImageSequence => self.import_assets(true, cx),
+            Action::ImportImage => self.import_assets(false, false, cx),
+            Action::CompositionFromFootage => self.import_assets(false, true, cx),
+            Action::ImportImageSequence => self.import_assets(true, false, cx),
             Action::RelinkSequence(id) => self.relink_sequence(*id, cx),
             Action::ImportVideo => self.import_video(false, cx),
             Action::RelinkVideo => self.import_video(true, cx),
@@ -1139,6 +1155,7 @@ impl EditorState {
                 match self.editor.replace_project(Project::default()) {
                     Ok(()) => {
                         self.path = None;
+                        self.composition_started = false;
                         self.saved = Project::default();
                         self.editor.clear_history();
                         self.selected_layers.clear();

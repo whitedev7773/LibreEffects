@@ -6,6 +6,31 @@ use std::{
     path::{Path, PathBuf},
 };
 
+pub(crate) fn report_start_error(error: &str) {
+    eprintln!("Cannot start Libre Effects: {error}");
+    #[cfg(windows)]
+    {
+        use windows::{
+            Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW},
+            core::PCWSTR,
+        };
+        let message: Vec<u16> = format!("Cannot start Libre Effects.\n\n{error}")
+            .encode_utf16()
+            .chain(Some(0))
+            .collect();
+        let title: Vec<u16> = "Libre Effects".encode_utf16().chain(Some(0)).collect();
+        // Both UTF-16 buffers remain alive for the synchronous native dialog.
+        unsafe {
+            MessageBoxW(
+                None,
+                PCWSTR(message.as_ptr()),
+                PCWSTR(title.as_ptr()),
+                MB_OK | MB_ICONERROR,
+            );
+        }
+    }
+}
+
 pub(crate) struct Instance {
     _lock: File,
     activation: PathBuf,
@@ -20,14 +45,47 @@ impl Instance {
             .or_else(|| std::env::var_os("HOME").map(|p| PathBuf::from(p).join(".local/state")))
             .ok_or("Cannot locate the user data directory for the editor instance lock")?
             .join("LibreEffects");
-        Self::in_directory(&root).map_err(|error| error.to_string())
+        Self::replace_in_directory(&root, std::time::Duration::from_secs(60))
+            .map_err(|error| error.to_string())
     }
 
-    fn in_directory(root: &Path) -> io::Result<Option<Self>> {
+    fn replace_in_directory(root: &Path, timeout: std::time::Duration) -> io::Result<Option<Self>> {
         std::fs::create_dir_all(root)?;
+        // Only one replacement may wait for the owner. Rapid double-clicks
+        // must not create a succession of editors terminating one another.
+        let launch = File::options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(root.join("editor.launch.lock"))?;
+        match launch.try_lock() {
+            Ok(()) => {}
+            Err(TryLockError::WouldBlock) => return Ok(None),
+            Err(TryLockError::Error(error)) => return Err(error),
+        }
+        if let Some(owner) = Self::in_directory(root)? {
+            return Ok(Some(owner));
+        }
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            // The successor never opens its window until the old process has
+            // released its lifetime lock (including recovery and child cleanup).
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            if let Some(owner) = Self::try_owner(root)? {
+                return Ok(Some(owner));
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "The existing editor could not finish saving its recovery copy or closing a dialog. No second editor was opened.",
+                ));
+            }
+        }
+    }
+
+    fn try_owner(root: &Path) -> io::Result<Option<Self>> {
         let activation = root.join("editor.activate");
-        // Read before acquiring: a request arriving just after acquisition must
-        // still activate the window when GPUI finishes starting.
         let last_request = read_request(&activation).unwrap_or_default();
         let lock = File::options()
             .read(true)
@@ -41,24 +99,31 @@ impl Instance {
                 activation,
                 last_request,
             })),
-            Err(TryLockError::WouldBlock) => {
-                let token = format!("{}:{:?}", std::process::id(), std::time::SystemTime::now());
-                // Serialize requests on a separate short-lived lock. Concurrent
-                // atomic file replacements can fail with sharing violations on
-                // Windows; the long-lived editor lock must remain untouched.
-                let mut signal = File::options()
-                    .read(true)
-                    .write(true)
-                    .create(true)
-                    .truncate(false)
-                    .open(&activation)?;
-                signal.lock()?;
-                signal.set_len(0)?;
-                signal.write_all(token.as_bytes())?;
-                Ok(None)
-            }
+            Err(TryLockError::WouldBlock) => Ok(None),
             Err(TryLockError::Error(error)) => Err(error),
         }
+    }
+
+    fn in_directory(root: &Path) -> io::Result<Option<Self>> {
+        std::fs::create_dir_all(root)?;
+        if let Some(owner) = Self::try_owner(root)? {
+            return Ok(Some(owner));
+        }
+        let token = format!(
+            "replace:{}:{:?}",
+            std::process::id(),
+            std::time::SystemTime::now()
+        );
+        let mut signal = File::options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(root.join("editor.activate"))?;
+        signal.lock()?;
+        signal.set_len(0)?;
+        signal.write_all(token.as_bytes())?;
+        Ok(None)
     }
 
     pub fn take_activation(&mut self) -> bool {
@@ -81,48 +146,53 @@ fn read_request(path: &Path) -> io::Result<Vec<u8>> {
     Ok(value)
 }
 
-pub(crate) fn activate_window(window: &gpui::Window) {
-    #[cfg(windows)]
-    {
-        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-        use windows::Win32::{
-            Foundation::HWND,
-            UI::WindowsAndMessaging::{
-                GetLastActivePopup, IsIconic, IsWindowVisible, SW_RESTORE, SetForegroundWindow,
-                ShowWindowAsync,
-            },
-        };
-        if let Ok(handle) = HasWindowHandle::window_handle(window)
-            && let RawWindowHandle::Win32(handle) = handle.as_raw()
-        {
-            let owner = HWND(handle.hwnd.get() as *mut _);
-            // SAFETY: GPUI owns this live HWND and calls us on its UI thread.
-            // Activate its owned dialog when a file picker is open; activating
-            // the disabled owner instead can leave the picker without focus.
-            unsafe {
-                if IsIconic(owner).as_bool() {
-                    let _ = ShowWindowAsync(owner, SW_RESTORE);
-                }
-                let popup = GetLastActivePopup(owner);
-                let target = if !popup.is_invalid() && IsWindowVisible(popup).as_bool() {
-                    popup
-                } else {
-                    owner
-                };
-                let _ = SetForegroundWindow(target);
-            }
-            return;
-        }
-    }
-    window.activate_window();
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn replacement_waits_for_cleanup_and_concurrent_launches_do_not_cascade() {
+        let root = tempfile::tempdir().unwrap();
+        let mut owner = Instance::in_directory(root.path()).unwrap().unwrap();
+        std::thread::scope(|scope| {
+            let next = scope.spawn(|| {
+                Instance::replace_in_directory(root.path(), std::time::Duration::from_secs(5))
+                    .unwrap()
+                    .unwrap()
+            });
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            while !owner.take_activation() {
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            assert!(Instance::try_owner(root.path()).unwrap().is_none());
+            assert!(
+                Instance::replace_in_directory(root.path(), std::time::Duration::from_millis(50))
+                    .unwrap()
+                    .is_none()
+            );
+            drop(owner);
+            let mut successor = next.join().unwrap();
+            assert!(!successor.take_activation());
+            assert!(Instance::try_owner(root.path()).unwrap().is_none());
+        });
+        assert!(Instance::try_owner(root.path()).unwrap().is_some());
+    }
+    #[test]
+    fn unresponsive_owner_never_allows_a_second_window() {
+        let root = tempfile::tempdir().unwrap();
+        let _owner = Instance::in_directory(root.path()).unwrap().unwrap();
+        assert_eq!(
+            Instance::replace_in_directory(root.path(), std::time::Duration::ZERO)
+                .err()
+                .unwrap()
+                .kind(),
+            io::ErrorKind::TimedOut
+        );
+        assert!(Instance::try_owner(root.path()).unwrap().is_none());
+    }
 
     #[test]
-    fn duplicate_requests_activation_without_replacing_owner() {
+    fn replacement_request_does_not_release_owner_before_cleanup() {
         let root = tempfile::tempdir().unwrap();
         let mut first = Instance::in_directory(root.path()).unwrap().unwrap();
         assert!(!first.take_activation());

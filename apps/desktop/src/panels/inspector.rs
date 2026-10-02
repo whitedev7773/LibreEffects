@@ -22,6 +22,7 @@ pub(crate) struct Inspector {
     extra: Vec<Entity<TextField>>,
     playback: Vec<Entity<TextField>>,
     audio_controls: Entity<super::audio_controls::AudioControls>,
+    shape_controls: Entity<super::shape_controls::ShapeControls>,
 }
 impl Inspector {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
@@ -228,6 +229,8 @@ impl Inspector {
             .collect();
         let audio_controls =
             cx.new(|cx| super::audio_controls::AudioControls::new(state.clone(), cx));
+        let shape_controls =
+            cx.new(|cx| super::shape_controls::ShapeControls::new(state.clone(), cx));
         Self {
             blend: None,
             matte: None,
@@ -240,6 +243,7 @@ impl Inspector {
             parent_owner: None,
             playback,
             audio_controls,
+            shape_controls,
         }
     }
 }
@@ -444,6 +448,9 @@ impl Render for Inspector {
                     "Content"
                 }),
         );
+        if matches!(layer.content(), Content::Shape(_)) {
+            contents = contents.child(self.shape_controls.clone());
+        }
         if let Content::Composition { composition, .. } = layer.content() {
             let source = *composition;
             let state = self.state.clone();

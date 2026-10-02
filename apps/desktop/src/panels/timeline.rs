@@ -397,7 +397,6 @@ impl Render for Timeline {
             .retain(|(id, p), _| comp.layer(*id).is_some_and(|l| l.track(*p).is_some()));
         let graph_open = state.graph_open;
         let marker_open = state.selected_marker().is_some();
-        let snapping = state.snapping;
         let graph_property = state.graph_property;
         let frame = state.frame;
         let start = state.timeline_start;
@@ -1394,7 +1393,11 @@ impl Render for Timeline {
                     cx.stop_propagation();
                 }
             }))
-            .child(ui::panel_header(comp.name().to_string()))
+            .child(ui::panel_header(if self.state.read(cx).welcome() {
+                "Timeline".to_string()
+            } else {
+                comp.name().to_string()
+            }))
             .child(
                 div()
                     .flex()
@@ -1430,16 +1433,30 @@ impl Render for Timeline {
                             .child(ui::icon("magnifier"))
                             .child(div().flex_1().child(self.search.clone())),
                     )
-                    .child(ui::text_button("all-properties", "All").on_click({
-                        let state = self.state.clone();
-                        move |_, window, cx| {
-                            state.update(cx, |state, cx| {
-                                state.dispatch(&Action::Filter(None), window, cx)
-                            })
-                        }
-                    }))
                     .child(
-                        ui::text_button("animated-properties", "Animated").on_click({
+                        ui::tool(
+                            "all-properties",
+                            "chevron-down",
+                            "Reveal all properties",
+                            false,
+                        )
+                        .on_click({
+                            let state = self.state.clone();
+                            move |_, window, cx| {
+                                state.update(cx, |state, cx| {
+                                    state.dispatch(&Action::Filter(None), window, cx)
+                                })
+                            }
+                        }),
+                    )
+                    .child(
+                        ui::tool(
+                            "animated-properties",
+                            "stopwatch",
+                            "Reveal animated properties (U)",
+                            false,
+                        )
+                        .on_click({
                             let state = self.state.clone();
                             move |_, window, cx| {
                                 state.update(cx, |state, cx| {
@@ -1461,70 +1478,75 @@ impl Render for Timeline {
                         graph_open,
                     ))
                     .child(
-                        ui::text_button("hide-shy-layers", "Hide Shy")
-                            .when(comp.hide_shy(), |s| {
-                                s.bg(rgb(0x164a7b)).text_color(rgb(ui::BLUE))
-                            })
-                            .on_click({
-                                let state = self.state.clone();
-                                let hidden = comp.hide_shy();
-                                move |_, window, cx| {
-                                    state.update(cx, |s, cx| {
+                        ui::tool(
+                            "hide-shy-layers",
+                            "eye-slash",
+                            "Hide shy layers",
+                            comp.hide_shy(),
+                        )
+                        .when(comp.hide_shy(), |s| {
+                            s.bg(rgb(0x164a7b)).text_color(rgb(ui::BLUE))
+                        })
+                        .on_click({
+                            let state = self.state.clone();
+                            let hidden = comp.hide_shy();
+                            move |_, window, cx| {
+                                state.update(cx, |s, cx| {
+                                    s.dispatch(
+                                        &Action::Edit(Command::SetHideShy(!hidden)),
+                                        window,
+                                        cx,
+                                    )
+                                })
+                            }
+                        }),
+                    )
+                    .child(
+                        ui::tool(
+                            "add-comp-marker",
+                            "diamond",
+                            "Add composition marker",
+                            false,
+                        )
+                        .on_click({
+                            let state = self.state.clone();
+                            move |_, w, cx| {
+                                state.update(cx, |s, cx| {
+                                    s.dispatch(
+                                        &Action::AddMarker(
+                                            libre_effects_core::MarkerTarget::Composition,
+                                        ),
+                                        w,
+                                        cx,
+                                    )
+                                })
+                            }
+                        }),
+                    )
+                    .child(
+                        ui::tool(
+                            "add-layer-marker",
+                            "plus",
+                            "Add selected layer marker",
+                            false,
+                        )
+                        .when(selected.is_none(), |d| d.opacity(0.4))
+                        .on_click({
+                            let state = self.state.clone();
+                            move |_, w, cx| {
+                                state.update(cx, |s, cx| {
+                                    if let Some(id) = s.editor.selected() {
                                         s.dispatch(
-                                            &Action::Edit(Command::SetHideShy(!hidden)),
-                                            window,
+                                            &Action::AddMarker(
+                                                libre_effects_core::MarkerTarget::Layer(id),
+                                            ),
+                                            w,
                                             cx,
                                         )
-                                    })
-                                }
-                            }),
-                    )
-                    .child(ui::text_button("add-comp-marker", "Comp Marker").on_click({
-                        let state = self.state.clone();
-                        move |_, w, cx| {
-                            state.update(cx, |s, cx| {
-                                s.dispatch(
-                                    &Action::AddMarker(
-                                        libre_effects_core::MarkerTarget::Composition,
-                                    ),
-                                    w,
-                                    cx,
-                                )
-                            })
-                        }
-                    }))
-                    .child(
-                        ui::text_button("add-layer-marker", "Layer Marker")
-                            .when(selected.is_none(), |d| d.opacity(0.4))
-                            .on_click({
-                                let state = self.state.clone();
-                                move |_, w, cx| {
-                                    state.update(cx, |s, cx| {
-                                        if let Some(id) = s.editor.selected() {
-                                            s.dispatch(
-                                                &Action::AddMarker(
-                                                    libre_effects_core::MarkerTarget::Layer(id),
-                                                ),
-                                                w,
-                                                cx,
-                                            )
-                                        }
-                                    })
-                                }
-                            }),
-                    )
-                    .child(
-                        ui::text_button("timeline-snapping", "Snap")
-                            .when(snapping, |d| d.text_color(rgb(ui::BLUE)).bg(rgb(0x164a7b)))
-                            .on_click({
-                                let state = self.state.clone();
-                                move |_, _, cx| {
-                                    state.update(cx, |s, cx| {
-                                        s.snapping = !s.snapping;
-                                        cx.notify();
-                                    })
-                                }
-                            }),
+                                    }
+                                })
+                            }
+                        }),
                     )
                     .child(div().flex_1())
                     .child(ui::action_tool(

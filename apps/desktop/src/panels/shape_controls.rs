@@ -1,0 +1,120 @@
+use crate::{
+    components::TextField,
+    editor::{Action, EditorState},
+    ui,
+};
+use gpui::{Context, Entity, Window, div, prelude::*, px};
+use libre_effects_core::{Command, Content, ShapeKind};
+
+pub(crate) struct ShapeControls {
+    state: Entity<EditorState>,
+    fields: Vec<Entity<TextField>>,
+}
+impl ShapeControls {
+    pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
+        cx.observe(&state, |_, _, cx| cx.notify()).detach();
+        let fields = (0..5).map(|index| {
+            let edit = state.clone();
+            cx.new(|cx| TextField::new(cx, move |text, window, cx| {
+                edit.update(cx, |s, cx| {
+                    let Some(layer) = s.editor.selected_layer() else {return;};
+                    if layer.locked() {return;}
+                    let Content::Shape(mut shape) = layer.content().clone() else {return;};
+                    let id = layer.id();
+                    let valid = match index {
+                        0 => ui::parse_hex_color(text).map(|v| shape.stroke_color = v).is_ok(),
+                        3 => text.trim().parse::<u32>().map(|v| shape.points = v).is_ok(),
+                        _ => text.trim().parse::<f64>().map(|v| match index {
+                            1 => shape.stroke_width = v,
+                            2 => shape.roundness = v,
+                            _ => shape.inner_radius = v,
+                        }).is_ok(),
+                    };
+                    if valid && shape.valid() {
+                        s.dispatch(&Action::Edit(Command::SetContent {id, content: Content::Shape(shape)}), window, cx);
+                    } else {
+                        s.status = "Invalid shape value: stroke 0–1024, roundness 0–8192, points 3–128, inner radius 0–100%.".into();
+                        cx.notify();
+                    }
+                });
+            }))
+        }).collect();
+        Self { state, fields }
+    }
+}
+impl Render for ShapeControls {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let mut root = div().flex().flex_col().gap_1().mt_2();
+        let Some(layer) = self.state.read(cx).editor.selected_layer() else {
+            return root;
+        };
+        let Content::Shape(shape) = layer.content().clone() else {
+            return root;
+        };
+        let id = layer.id();
+        let locked = layer.locked();
+        let mut next = shape.clone();
+        next.fill = !next.fill;
+        let state = self.state.clone();
+        root = root.child(
+            ui::text_button("shape-fill", if shape.fill { "☑ Fill" } else { "☐ Fill" })
+                .justify_start()
+                .when(!locked, |b| {
+                    b.on_click(move |_, w, cx| {
+                        state.update(cx, |s, cx| {
+                            s.dispatch(
+                                &Action::Edit(Command::SetContent {
+                                    id,
+                                    content: Content::Shape(next.clone()),
+                                }),
+                                w,
+                                cx,
+                            )
+                        })
+                    })
+                }),
+        );
+        let values = [
+            format!("{:06X}", shape.stroke_color),
+            shape.stroke_width.to_string(),
+            shape.roundness.to_string(),
+            shape.points.to_string(),
+            shape.inner_radius.to_string(),
+        ];
+        for (index, label) in [
+            "Stroke color",
+            "Stroke width",
+            "Roundness",
+            "Points",
+            "Inner radius %",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if index == 2 && shape.kind != ShapeKind::RoundedRectangle
+                || index == 3 && !matches!(shape.kind, ShapeKind::Polygon | ShapeKind::Star)
+                || index == 4 && shape.kind != ShapeKind::Star
+            {
+                continue;
+            }
+            self.fields[index].update(cx, |f, _| {
+                f.sync(format!("{id}-{index}"), values[index].clone(), window)
+            });
+            root = root.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .h(px(27.0))
+                    .child(div().w(px(105.0)).child(label))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .when(!locked, |d| d.child(self.fields[index].clone()))
+                            .when(locked, |d| d.child(values[index].clone())),
+                    ),
+            );
+        }
+        root
+    }
+}

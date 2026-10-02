@@ -62,6 +62,7 @@ pub(crate) struct WorkspaceView {
     pub fractions: [f32; 4],
     pub timeline_left: f32,
     pub sidebar_expanded: [bool; 4],
+    pub extra_sidebar_expanded: [bool; 3],
     pub effect_controls_open: bool,
     pub snapping: bool,
     pub align_to_selection: bool,
@@ -72,6 +73,7 @@ impl Default for WorkspaceView {
             fractions: [0.84, 0.20, 0.615, 0.615],
             timeline_left: 560.0,
             sidebar_expanded: [true, false, false, false],
+            extra_sidebar_expanded: [false; 3],
             effect_controls_open: false,
             snapping: true,
             align_to_selection: false,
@@ -179,6 +181,7 @@ mod tests {
         );
         views.workspace.fractions = [0.8, 0.25, 0.7, 0.5];
         views.workspace.align_to_selection = true;
+        views.workspace.extra_sidebar_expanded = [true, true, false];
         let json = views.write(&p).unwrap();
         assert_eq!(Project::from_json(&json).unwrap(), p);
         assert_eq!(ProjectViews::read(&json, &p), views);

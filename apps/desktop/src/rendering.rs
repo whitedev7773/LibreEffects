@@ -15,8 +15,19 @@ pub(crate) struct Renderer {
     decoders: std::sync::Mutex<crate::video_decoder::Pool>,
     cancel: Arc<std::sync::atomic::AtomicBool>,
 }
-fn text_svg(text: &str, font_size: f64, color: &str) -> String {
-    text.lines().enumerate().map(|(line,s)| format!("<text x='0' y='{}' font-family='Wanted Sans' font-size='{font_size}' fill='{color}' xml:space='preserve'>{}</text>",font_size * (1.0 + 1.2 * line as f64),xml(s))).collect()
+fn text_svg(
+    text: &str,
+    font_size: f64,
+    color: &str,
+    width: f64,
+    style: libre_effects_core::TextStyle,
+) -> String {
+    let (x, anchor) = match style.align {
+        libre_effects_core::TextAlign::Left => (0.0, "start"),
+        libre_effects_core::TextAlign::Center => (width / 2.0, "middle"),
+        libre_effects_core::TextAlign::Right => (width, "end"),
+    };
+    text.lines().enumerate().map(|(line,s)| format!("<text x='{x}' y='{}' text-anchor='{anchor}' letter-spacing='{}' font-family='Wanted Sans' font-size='{font_size}' fill='{color}' xml:space='preserve'>{}</text>",font_size * (1.0 + style.leading * line as f64),style.tracking * font_size / 1000.0,xml(s))).collect()
 }
 /// Flatten straight RGBA over a solid RGB matte, including partially transparent edges.
 pub(crate) fn composite_background(pixels: &mut image::RgbaImage, color: u32) {
@@ -209,7 +220,7 @@ impl Renderer {
                 "<svg xmlns='http://www.w3.org/2000/svg' width='{}' height='{}'>{}</svg>",
                 l.width(),
                 l.height(),
-                text_svg(text, *font_size, "white")
+                text_svg(text, *font_size, "white", l.width(), l.text_style())
             );
             let measured =
                 resvg::usvg::Tree::from_str(&source, &self.options).map_err(|e| e.to_string())?;
@@ -278,8 +289,15 @@ impl Renderer {
                 l.width(),
                 l.height()
             )),
+            Content::Shape(shape) => svg.push_str(&shape.svg(l.width(), l.height(), l.color())),
             Content::Text { text, font_size } => {
-                svg.push_str(&text_svg(text, *font_size, &color));
+                svg.push_str(&text_svg(
+                    text,
+                    *font_size,
+                    &color,
+                    l.width(),
+                    l.text_style(),
+                ));
             }
             Content::Image { png } => {
                 let png = crate::source_render::alpha_png(png, l.footage_interpretation())?;
@@ -939,6 +957,77 @@ mod tests {
         assert_eq!(pixel[0], pixel[1]);
         assert_eq!(pixel[1], pixel[2]);
         assert!(pixel[0] > 0 && pixel[0] < 128);
+    }
+    #[test]
+    fn shape_fill_stroke_and_typography_use_the_shared_compositor() {
+        use libre_effects_core::{Shape, ShapeKind, TextAlign, TextStyle};
+        let mut e = scene();
+        e.execute(Command::AddContent {
+            content: Content::Shape(Shape {
+                kind: ShapeKind::Ellipse,
+                ..Default::default()
+            }),
+            width: 60.0,
+            height: 60.0,
+            name: "Ellipse".into(),
+        })
+        .unwrap();
+        let id = e.selected().unwrap();
+        e.execute(Command::SetColor {
+            id,
+            color: 0xff3300,
+        })
+        .unwrap();
+        let r = Renderer::new();
+        let filled = r.render(e.project(), 0, 100).unwrap();
+        assert_eq!(filled.get_pixel(50, 50).0, [255, 51, 0, 255]);
+        assert_eq!(filled.get_pixel(21, 21)[3], 0);
+        e.execute(Command::SetContent {
+            id,
+            content: Content::Shape(Shape {
+                kind: ShapeKind::Ellipse,
+                fill: false,
+                stroke_color: 0x00ff00,
+                stroke_width: 6.0,
+                ..Default::default()
+            }),
+        })
+        .unwrap();
+        let stroked = r.render(e.project(), 0, 100).unwrap();
+        assert_eq!(stroked.get_pixel(50, 50)[3], 0);
+        assert!(stroked.pixels().any(|p| p[1] > 200 && p[3] > 200));
+        e.execute(Command::SetContent {
+            id,
+            content: Content::Text {
+                text: "AA\nBB".into(),
+                font_size: 12.0,
+            },
+        })
+        .unwrap();
+        let left = r.render(e.project(), 0, 100).unwrap();
+        e.execute(Command::SetTextStyle {
+            id,
+            style: TextStyle {
+                leading: 2.0,
+                tracking: 150.0,
+                align: TextAlign::Right,
+            },
+        })
+        .unwrap();
+        let right = r.render(e.project(), 0, 100).unwrap();
+        assert_ne!(left, right);
+        let bounds = |img: &image::RgbaImage| {
+            img.enumerate_pixels()
+                .filter(|(_, _, p)| p[3] > 50)
+                .fold((u32::MAX, 0, 0), |(min, max, bottom), (x, y, _)| {
+                    (min.min(x), max.max(x), bottom.max(y))
+                })
+        };
+        assert!(bounds(&right).0 > bounds(&left).0);
+        assert!(bounds(&right).2 > bounds(&left).2);
+        let restored = Project::from_json(&e.project().to_json().unwrap()).unwrap();
+        assert_eq!(r.render(&restored, 0, 100).unwrap(), right);
+        assert_eq!(r.render_preview(&restored, 0, 100).unwrap(), right);
     }
     #[test]
     fn embedded_image_and_wanted_sans_text_render() {

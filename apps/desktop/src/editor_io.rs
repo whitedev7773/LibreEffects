@@ -3,6 +3,29 @@ use crate::rendering::Renderer;
 use std::time::Duration;
 
 impl EditorState {
+    pub fn prepare_replacement(&mut self, cx: &mut Context<Self>) {
+        self.stop();
+        self.export_cancel
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        self.collection_cancel
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        cx.notify();
+    }
+    pub fn preserve_replacement(&self) -> Result<(), String> {
+        if !self.dirty() {
+            if let Some(session) = &self.recovery_session {
+                session.lock().map_err(|e| e.to_string())?.reset(true)?;
+            }
+            return Ok(());
+        }
+        let session = self.recovery_session.as_ref().ok_or(
+            "Recovery storage is not ready; replacement canceled to preserve unsaved edits",
+        )?;
+        session
+            .lock()
+            .map_err(|e| e.to_string())?
+            .preserve_for_replacement(self.editor.project())
+    }
     pub fn dirty(&self) -> bool {
         !self.editor.project().same_document(&self.saved)
     }

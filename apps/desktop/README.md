@@ -5,8 +5,11 @@ and basic editing workflow follow After Effects conventions. It is an early 2D
 editor, not a complete After Effects replacement or an AEP-compatible application.
 
 Only one editor runs per user, including builds launched from different folders
-or executable names. Launching again requests activation of the existing window
-and exits before GPUI, media caches or recovery start. The OS releases ownership
+or executable names. Launching again requests that the previous editor stop its
+work, checkpoint unsaved edits to recovery, and close. The successor waits for
+ownership before opening its window; competing launches exit. Recovery failure
+or a dialog that cannot close prevents a second window (60-second timeout).
+The OS releases ownership
 after a crash; do not delete `LibreEffects/editor.lock` in the user data directory.
 Command-line renders remain independent of the interactive editor.
 
@@ -15,7 +18,8 @@ Command-line renders remain independent of the interactive editor.
 ## Workspace
 
 - Compact menu bar and toolbar; Project and Composition above the Timeline, with a
-  full-height right dock for Properties / Info / Preview and a separate Align panel.
+  right dock for Properties / Info / Audio / Preview / Effects & Presets /
+  Character / Paragraph and a separate Align panel.
   The default proportions follow the open After Effects 2026 workspace measured at
   1920 × 1032. The Timeline ends at the right dock; toggling the graph changes only
   its time area, preserving the layer list, composition tab and ruler.
@@ -51,6 +55,23 @@ Command-line renders remain independent of the interactive editor.
   is rejected rather than silently discarding edits.
 
 ## Editing
+
+- Start with New Composition (Ctrl+N) or New Composition From Footage. New
+  composition settings commit as one undo step; Cancel creates no composition.
+  Ctrl+Alt+N starts a new project with the existing unsaved-change prompt.
+- The toolbar contains editing tools. Q cycles Rectangle, Rounded Rectangle,
+  Ellipse, Polygon and Star; its arrow menu selects a shape directly. Drag in the
+  composition to draw, Shift constrains proportions, Alt draws from the center,
+  and Escape cancels. Each completed drag is one undo step. Properties controls
+  fill, stroke RGB/width, corner roundness, points and star inner radius.
+- Z zooms in at the viewer; Alt-click zooms out. Ctrl+T adds a Wanted Sans text
+  layer. Character edits font size, leading in pixels, tracking in thousandths
+  of an em and color. Paragraph aligns within the text layer's source width.
+  These are whole-layer settings; per-character styles and on-canvas text entry
+  are not implemented. Shape/text styling uses the same preview/export renderer.
+- Effects & Presets groups the twelve built-in effects into searchable folders.
+  Applying an effect opens its Effect Controls. User preset storage is pending.
+
 
 - Rectangle, text and embedded image layers with stable IDs, rename, duplicate,
   ordering, visibility and locking. Layer → New text uses embedded Wanted Sans.
@@ -260,7 +281,9 @@ cargo run -p libre-effects-core --example make_animation_study -- examples/curve
 
 | Shortcut | Action |
 | --- | --- |
-| Ctrl+N / Ctrl+O / Ctrl+S | New / Open / Save |
+| Ctrl+N / Ctrl+Alt+N | New composition / New project |
+| Ctrl+O / Ctrl+S | Open / Save |
+| Q / Z / Ctrl+T | Cycle shape tool / Zoom tool / New text layer |
 | Ctrl+Shift+S / Ctrl+I | Save as / Import footage into Project |
 | Ctrl+Shift+I | Import video footage |
 | Ctrl+C / Ctrl+V | Copy / Paste selected keys |

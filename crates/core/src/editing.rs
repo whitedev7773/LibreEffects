@@ -26,6 +26,7 @@ pub enum Content {
     Rectangle,
     /// An independent, fixed-size color source, unaffected by composition resizing.
     Solid,
+    Shape(Shape),
     /// Filters the composite below this layer; contributes no source pixels.
     Adjustment,
     Null,
@@ -162,6 +163,7 @@ pub(super) fn validate_content(
 ) -> Result<(), String> {
     let valid = match content {
         Content::Rectangle | Content::Solid | Content::Adjustment | Content::Null => true,
+        Content::Shape(shape) => shape.valid(),
         Content::Composition {
             composition,
             start_frame,
@@ -294,6 +296,7 @@ pub(super) fn apply_extended(
             | Command::SetAnchor { .. }
             | Command::AddContent { .. }
             | Command::SetContent { .. }
+            | Command::SetTextStyle { .. }
             | Command::SetVideoSpeed { .. }
             | Command::SetVideoSourceIn { .. }
             | Command::ReverseVideo { .. }
@@ -699,6 +702,15 @@ pub(super) fn apply_extended(
                     l.properties.get_mut(&Property::ScaleX).unwrap().value = scale;
                     l.properties.get_mut(&Property::ScaleY).unwrap().value = scale;
                 }
+            }
+            Command::SetTextStyle { id, style } => {
+                let layer = editable(state, *id)?;
+                if !matches!(layer.content, Content::Text { .. }) || !style.valid() {
+                    return Err(
+                        "Text style requires a text layer and valid leading/tracking".into(),
+                    );
+                }
+                layer.text_style = *style;
             }
             Command::SetContent { id, content } => {
                 let layer = editable(state, *id)?;

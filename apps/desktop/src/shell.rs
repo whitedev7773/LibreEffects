@@ -19,6 +19,7 @@ pub(crate) struct Shell {
     initialized: bool,
     menu: Option<&'static str>,
     settings: bool,
+    settings_new: bool,
     settings_error: String,
     fields: Vec<Entity<TextField>>,
     help: bool,
@@ -26,6 +27,7 @@ pub(crate) struct Shell {
     pending_document: Option<Action>,
     pending_save: bool,
     modal_active: bool,
+    replacing: bool,
 }
 
 impl Shell {
@@ -86,6 +88,7 @@ impl Shell {
             initialized: false,
             menu: None,
             settings: false,
+            settings_new: false,
             settings_error: String::new(),
             fields,
             help: false,
@@ -93,7 +96,15 @@ impl Shell {
             pending_document: None,
             pending_save: false,
             modal_active: false,
+            replacing: false,
         }
+    }
+    pub(crate) fn replace_instance(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        TextField::commit_active(window, cx);
+        window.focus(&self.focus);
+        self.replacing = true;
+        self.state.update(cx, |s, cx| s.prepare_replacement(cx));
+        cx.notify();
     }
     fn dispatch(&mut self, mut action: Action, window: &mut Window, cx: &mut Context<Self>) {
         if self.state.read(cx).queue_open && matches!(action, Action::Undo | Action::Redo) {
@@ -135,6 +146,7 @@ impl Shell {
         self.right.update(cx, |p, cx| p.reset(cx));
     }
     fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.settings_new = false;
         let comp = self.state.read(cx).editor.project().composition();
         let values = [
             comp.name().to_string(),
@@ -154,6 +166,19 @@ impl Shell {
         self.settings = true;
         self.menu = None;
         cx.notify();
+    }
+    fn new_composition(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_settings(window, cx);
+        self.settings_new = true;
+        let name = format!(
+            "Composition {:02}",
+            if self.state.read(cx).welcome() {
+                1
+            } else {
+                self.state.read(cx).editor.project().compositions().len() + 1
+            }
+        );
+        self.fields[0].update(cx, |f, _| f.sync("new-composition".into(), name, window));
     }
     fn apply_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let name = self.fields[0].read(cx).value().to_string();
@@ -197,23 +222,27 @@ impl Shell {
                 return;
             }
         };
-        self.dispatch(
-            Action::Edit(Command::Batch(vec![
-                Command::ConfigureCompositionRate {
-                    name,
-                    width,
-                    height,
-                    fps,
-                    duration,
-                    display_start,
-                },
-                Command::SetCompositionBackground(background),
-            ])),
-            window,
-            cx,
-        );
+        let mut commands = vec![
+            Command::ConfigureCompositionRate {
+                name,
+                width,
+                height,
+                fps,
+                duration,
+                display_start,
+            },
+            Command::SetCompositionBackground(background),
+        ];
+        if self.settings_new && !self.state.read(cx).welcome() {
+            commands.insert(0, Command::NewComposition);
+        }
+        self.dispatch(Action::Edit(Command::Batch(commands)), window, cx);
         let status = self.state.read(cx).status.clone();
         if status.starts_with("Edited") {
+            self.state.update(cx, |s, cx| {
+                s.composition_started = true;
+                cx.notify();
+            });
             self.settings = false;
             window.focus(&self.focus);
         } else {
@@ -252,7 +281,11 @@ impl Shell {
         }
         let action = if m.control {
             match key {
-                "n" => Some(Action::New),
+                "n" if m.alt => Some(Action::New),
+                "n" => {
+                    self.new_composition(window, cx);
+                    None
+                }
                 "o" => Some(Action::Open),
                 "s" => Some(if m.shift {
                     Action::SaveAs
@@ -287,6 +320,7 @@ impl Shell {
                     crate::viewer_tools::ViewOption::Rulers,
                 )),
                 "t" if m.alt => Some(Action::ToggleTimeRemap),
+                "t" => Some(Action::AddText),
                 "k" => {
                     self.open_settings(window, cx);
                     None
@@ -335,6 +369,17 @@ impl Shell {
                 "delete" | "backspace" => Some(Action::DeleteSelection),
                 "v" => Some(Action::SetTool(Tool::Select)),
                 "h" => Some(Action::SetTool(Tool::Hand)),
+                "z" => Some(Action::SetTool(Tool::Zoom)),
+                "q" => {
+                    let all = libre_effects_core::ShapeKind::ALL;
+                    let next = match self.state.read(cx).tool {
+                        Tool::Shape(kind) => {
+                            all[(all.iter().position(|k| *k == kind).unwrap() + 1) % all.len()]
+                        }
+                        _ => all[0],
+                    };
+                    Some(Action::SetTool(Tool::Shape(next)))
+                }
                 "w" => Some(Action::SetTool(Tool::Rotate)),
                 "y" => Some(Action::SetTool(Tool::Anchor)),
                 "p" => Some(Action::Filter(Some(PropertyFilter::Position))),
@@ -361,6 +406,11 @@ impl Shell {
 
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.state.read(cx).new_composition_requested {
+            self.state
+                .update(cx, |s, _| s.new_composition_requested = false);
+            self.new_composition(window, cx);
+        }
         let fractions = self.state.read(cx).workspace.fractions;
         for (index, panel) in [&self.layout, &self.upper, &self.middle, &self.right]
             .into_iter()
@@ -423,6 +473,25 @@ impl Render for Shell {
                 .unwrap_or("Untitled".into())
         );
         window.set_window_title(&title);
+        if self.replacing
+            && !state.saving
+            && !state.exporting
+            && !state.collecting
+            && !state.queue_busy
+            && !state.importing_video
+        {
+            match state.preserve_replacement() {
+                Ok(()) => window.remove_window(),
+                Err(error) => {
+                    self.replacing = false;
+                    self.state.update(cx, |s, cx| {
+                        s.status = format!("Cannot replace editor: {error}");
+                        cx.notify();
+                    });
+                }
+            }
+        }
+        let state = self.state.read(cx);
         if state.close_after_save && !state.saving && !state.dirty() && !state.exporting {
             state.clear_recovery();
             window.remove_window();
@@ -493,7 +562,7 @@ impl Render for Shell {
                     .bg(rgb(ui::PANEL))
                     .child(ui::action_tool(
                         "select",
-                        "square-dashed",
+                        "cursor",
                         "Selection tool (V)",
                         &self.state,
                         Action::SetTool(Tool::Select),
@@ -507,6 +576,7 @@ impl Render for Shell {
                         Action::SetTool(Tool::Hand),
                         tool == Tool::Hand,
                     ))
+                    .child(ui::action_tool("zoom-tool", "magnifier", "Zoom tool (Z) · Alt to zoom out", &self.state, Action::SetTool(Tool::Zoom), tool == Tool::Zoom))
                     .child(ui::action_tool(
                         "rotate",
                         "arrow-rotate-right",
@@ -524,50 +594,12 @@ impl Render for Shell {
                         tool == Tool::Anchor,
                     ))
                     .child(div().mx_2().w(px(1.0)).h(px(20.0)).bg(rgb(0x414141)))
-                    .child(ui::action_tool(
-                        "rectangle",
-                        "square",
-                        "New rectangle layer",
-                        &self.state,
-                        Action::Edit(Command::AddRectangle),
-                        false,
-                    ))
-                    .child(ui::action_tool(
-                        "undo",
-                        "arrow-rotate-left",
-                        "Undo (Ctrl+Z)",
-                        &self.state,
-                        Action::Undo,
-                        false,
-                    ))
-                    .child(ui::action_tool(
-                        "redo",
-                        "arrow-rotate-right",
-                        "Redo (Ctrl+Shift+Z)",
-                        &self.state,
-                        Action::Redo,
-                        false,
-                    ))
-                    .child(ui::action_tool(
-                        "save",
-                        "floppy-disk",
-                        "Save project (Ctrl+S)",
-                        &self.state,
-                        Action::Save,
-                        false,
-                    ))
+                    .child(ui::action_tool("shape-tool", match tool { Tool::Shape(libre_effects_core::ShapeKind::Ellipse) => "circle", Tool::Shape(libre_effects_core::ShapeKind::Star) => "star", Tool::Shape(libre_effects_core::ShapeKind::Polygon) => "triangle-up", _ => "square" }, "Shape tool (Q cycles shapes) · Drag to draw · Shift constrains · Alt draws from center", &self.state, Action::SetTool(match tool {Tool::Shape(_) => tool, _ => Tool::Shape(libre_effects_core::ShapeKind::Rectangle)}), matches!(tool, Tool::Shape(_))))
+                    .child(ui::text_button("shape-menu", "▾").on_click(cx.listener(|this, _, window, cx| {window.focus(&this.focus); this.menu = if this.menu == Some("Shape") {None} else {Some("Shape")}; cx.notify();})))
+                    .child(ui::action_tool("text-tool", "text", "New text layer (Ctrl+T)", &self.state, Action::AddText, false))
+                    .child(div().mx_2().w(px(1.0)).h(px(20.0)).bg(rgb(0x414141)))
+                    .child(ui::text_button("toolbar-snapping", if self.state.read(cx).snapping {"☑ Snapping"} else {"☐ Snapping"}).on_click(cx.listener(|this,_,window,cx| {let _ = window; this.state.update(cx, |s,cx| {s.snapping = !s.snapping; cx.notify();});})))
                     .child(div().flex_1())
-                    .child(
-                        ui::text_button("show-render-queue", "Render Queue").on_click(cx.listener(
-                            |this, _, window, cx| {
-                                this.dispatch(
-                                    Action::Queue(crate::editor::queue::QueueAction::Show(true)),
-                                    window,
-                                    cx,
-                                )
-                            },
-                        )),
-                    )
                     .child(div().text_color(rgb(ui::BLUE)).mr_4().child("Default"))
                     .child(
                         ui::text_button("reset-workspace", "Reset workspace")
@@ -670,7 +702,7 @@ impl Render for Shell {
                             crate::video_export::VideoPreset::ProResAlpha,
                         )),
                     ),
-                    ("New project", "Ctrl+N", Some(Action::New)),
+                    ("New project", "Ctrl+Alt+N", Some(Action::New)),
                     ("Open project…", "Ctrl+O", Some(Action::Open)),
                     ("Save", "Ctrl+S", Some(Action::Save)),
                     ("Save as…", "Ctrl+Shift+S", Some(Action::SaveAs)),
@@ -832,6 +864,10 @@ impl Render for Shell {
                         selected.map(|id| Action::Edit(Command::ToggleLocked(id))),
                     ),
                 ],
+                "Shape" => libre_effects_core::ShapeKind::ALL
+                    .into_iter()
+                    .map(|kind| (kind.label(), "Q", Some(Action::SetTool(Tool::Shape(kind)))))
+                    .collect(),
                 "Effect" => libre_effects_core::EffectKind::ALL
                     .into_iter()
                     .map(|kind| {
@@ -927,8 +963,9 @@ impl Render for Shell {
             let mut dropdown = div()
                 .id("main-menu")
                 .absolute()
-                .top(px(27.0))
+                .top(px(if menu == "Shape" { 63.0 } else { 27.0 }))
                 .left(px(match menu {
+                    "Shape" => 165.0,
                     "File" => 0.0,
                     "Edit" => 40.0,
                     "Composition" => 78.0,
@@ -1012,7 +1049,11 @@ impl Render for Shell {
                     dropdown = dropdown.child(ui::text_button(id, label).on_click(cx.listener(
                         move |this, _, window, cx| {
                             this.menu = None;
-                            this.dispatch(Action::Edit(command.clone()), window, cx);
+                            if matches!(command, Command::NewComposition) {
+                                this.new_composition(window, cx);
+                            } else {
+                                this.dispatch(Action::Edit(command.clone()), window, cx);
+                            }
                             cx.notify();
                         },
                     )));
@@ -1064,7 +1105,11 @@ impl Render for Shell {
                 .shadow_lg()
                 .child(div().text_size(px(15.0)).text_color(rgb(0xffffff)).child(
                     if self.settings {
-                        "Composition Settings"
+                        if self.settings_new {
+                            "New Composition"
+                        } else {
+                            "Composition Settings"
+                        }
                     } else {
                         "Keyboard shortcuts"
                     },

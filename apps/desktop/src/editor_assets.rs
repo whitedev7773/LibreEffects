@@ -53,7 +53,12 @@ impl EditorState {
         })
         .detach();
     }
-    pub(super) fn import_assets(&mut self, sequence: bool, cx: &mut Context<Self>) {
+    pub(super) fn import_assets(
+        &mut self,
+        sequence: bool,
+        from_footage: bool,
+        cx: &mut Context<Self>,
+    ) {
         if self.importing_video {
             return;
         }
@@ -75,7 +80,7 @@ impl EditorState {
         let prompt = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
-            multiple: !sequence,
+            multiple: !sequence && !from_footage,
             prompt: Some(
                 if sequence {
                     "Choose the first numbered PNG/JPEG frame"
@@ -103,15 +108,20 @@ impl EditorState {
                 .await;
             let _ = entity.update(cx, |s, cx| {
                 s.importing_video = false;
-                s.status = match result.and_then(|commands| {
+                s.status = match result.and_then(|mut commands| {
                     if revision != s.document_revision {
                         return Err("Document changed during import; import again".into());
                     }
                     s.stop();
+                    if from_footage {s.remember_view();}
+                    if from_footage {
+                        commands = with_composition(s.editor.project(), commands, s.welcome())?;
+                    }
                     s.editor.execute(Command::Batch(commands))
                 }) {
                     Ok(()) => {
-                        if sequence { "Imported sequence · Interpret footage sets FPS and missing-frame policy".into() } else { format!("Imported {count} file(s) · Add to composition · audio waveform, Preview and output ready") }
+                        if from_footage { s.composition_started = true; s.restore_composition_view(); }
+                        if from_footage {"Created composition from footage".into()} else if sequence { "Imported sequence · Interpret footage sets FPS and missing-frame policy".into() } else { format!("Imported {count} file(s) · Add to composition · audio waveform, Preview and output ready") }
                     }
                     Err(error) => format!("Import failed; no files added: {error}"),
                 };
@@ -122,6 +132,84 @@ impl EditorState {
         .detach();
     }
 }
+fn with_composition(
+    project: &Project,
+    mut commands: Vec<Command>,
+    initialize: bool,
+) -> Result<Vec<Command>, String> {
+    let before = project.asset_library().assets();
+    let mut temporary = Editor::default();
+    temporary.replace_project(project.clone())?;
+    temporary.execute(Command::Batch(commands.clone()))?;
+    let asset = temporary
+        .project()
+        .asset_library()
+        .assets()
+        .keys()
+        .find(|id| !before.contains_key(id))
+        .copied()
+        .ok_or("No new footage was imported")?;
+    if initialize {
+        if project.compositions().len() != 1 || !project.composition().layers().is_empty() {
+            return Err("Initial composition is not empty".into());
+        }
+        temporary.execute(Command::CompositionFromAsset(asset))?;
+        let comp = temporary.project().composition();
+        commands.extend([
+            Command::ConfigureCompositionRate {
+                name: comp.name().to_string(),
+                width: comp.width(),
+                height: comp.height(),
+                fps: comp.fps(),
+                duration: comp.duration(),
+                display_start: 0,
+            },
+            Command::SetCompositionBackground(comp.background_color()),
+            Command::AddAssetLayer { asset, frame: 0 },
+        ]);
+    } else {
+        commands.push(Command::CompositionFromAsset(asset));
+    }
+    Ok(commands)
+}
+
+#[cfg(test)]
+mod composition_import_tests {
+    use super::*;
+    #[test]
+    fn footage_start_uses_one_composition_and_one_undo_transaction() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("source.png");
+        image::RgbaImage::from_pixel(64, 32, image::Rgba([80, 120, 160, 255]))
+            .save(&path)
+            .unwrap();
+        for initialize in [true, false] {
+            let mut e = Editor::default();
+            let before = e.project().clone();
+            let commands = with_composition(
+                &before,
+                read_assets(&[path.clone()], None).unwrap(),
+                initialize,
+            )
+            .unwrap();
+            e.execute(Command::Batch(commands)).unwrap();
+            assert_eq!(
+                e.project().compositions().len(),
+                if initialize { 1 } else { 2 }
+            );
+            assert_eq!(e.project().composition().width(), 64);
+            assert_eq!(e.project().composition().height(), 32);
+            assert_eq!(e.project().composition().layers().len(), 1);
+            assert_eq!(e.project().asset_library().assets().len(), 1);
+            let saved = e.project().clone();
+            e.undo();
+            assert_eq!(*e.project(), before);
+            e.redo();
+            assert_eq!(*e.project(), saved);
+        }
+    }
+}
+
 pub(crate) fn read_assets(
     paths: &[PathBuf],
     folder: Option<libre_effects_core::FolderId>,

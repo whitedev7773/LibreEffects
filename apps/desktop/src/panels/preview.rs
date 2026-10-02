@@ -16,7 +16,10 @@ use libre_effects_core::{Guide, GuideAxis};
 use transform_gesture::{TransformGesture, handles};
 #[path = "preview_render.rs"]
 mod preview_render;
+#[path = "shape_gesture.rs"]
+mod shape_gesture;
 use preview_render::Request;
+use shape_gesture::ShapeGesture;
 
 #[derive(Clone)]
 struct GuideGesture {
@@ -75,6 +78,7 @@ pub(crate) struct Preview {
     state: Entity<EditorState>,
     bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     gesture: Option<MoveGesture>,
+    drawing: Option<ShapeGesture>,
     focus: FocusHandle,
     guide_gesture: Option<GuideGesture>,
     options_open: bool,
@@ -168,6 +172,7 @@ impl Preview {
             state,
             bounds: Rc::new(Cell::new(None)),
             gesture: None,
+            drawing: None,
             focus: cx.focus_handle(),
             guide_gesture: None,
             options_open: false,
@@ -394,6 +399,23 @@ impl Preview {
             cx.notify();
             return;
         }
+        if let Tool::Shape(kind) = state.tool {
+            self.drawing = Some(ShapeGesture::new(kind, p, origin, zoom, state));
+            self.state
+                .update(cx, |s, cx| s.dispatch(&Action::Seek(frame), window, cx));
+            cx.notify();
+            return;
+        }
+        if state.tool == Tool::Zoom {
+            self.state.update(cx, |s, cx| {
+                s.dispatch(
+                    &Action::ZoomPreview(if event.modifiers.alt { 0.5 } else { 2.0 }),
+                    window,
+                    cx,
+                )
+            });
+            return;
+        }
         if state.viewer.guides && !state.viewer.lock_guides && state.tool != Tool::Hand {
             if let Some((index, guide)) = comp.guides().iter().enumerate().find(|(_, g)| {
                 (g.position - p[if g.axis == GuideAxis::Vertical { 0 } else { 1 }]).abs()
@@ -509,7 +531,7 @@ impl Preview {
             Tool::Select => {
                 handle_hit.and_then(|(_, handle)| TransformGesture::scale(comp, id, frame, handle))
             }
-            Tool::Hand => None,
+            Tool::Hand | Tool::Zoom | Tool::Shape(_) => None,
         });
         let transform = if let Some(transform) = transform {
             match transform.with_selection(
@@ -585,6 +607,11 @@ impl Preview {
         if event.pressed_button != Some(MouseButton::Left) {
             return;
         }
+        if let Some(drawing) = &mut self.drawing {
+            drawing.update(event.position, event.modifiers.shift, event.modifiers.alt);
+            cx.notify();
+            return;
+        }
         if self.guide_gesture.is_some() {
             self.guide_update(event.position, cx);
             cx.notify();
@@ -616,6 +643,15 @@ impl Preview {
         }
     }
     fn up(&mut self, event: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(mut drawing) = self.drawing.take() {
+            drawing.update(event.position, event.modifiers.shift, event.modifiers.alt);
+            if let Some(command) = drawing.command(self.state.read(cx)) {
+                self.state
+                    .update(cx, |s, cx| s.dispatch(&Action::Edit(command), window, cx));
+            }
+            cx.notify();
+            return;
+        }
         if self.guide_gesture.is_some() {
             self.guide_update(event.position, cx);
             let g = self.guide_gesture.take().unwrap();
@@ -682,6 +718,56 @@ impl Preview {
 impl Render for Preview {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.state.read(cx);
+        if state.welcome() {
+            let create = self.state.clone();
+            let import = self.state.clone();
+            return div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .bg(rgb(ui::BG))
+                .child(ui::panel_header("Composition"))
+                .child(
+                    div()
+                        .flex_1()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .gap_4()
+                        .child(
+                            ui::text_button("welcome-composition", "")
+                                .w(px(210.0))
+                                .h(px(220.0))
+                                .flex_col()
+                                .gap_4()
+                                .bg(rgb(0x292929))
+                                .child(ui::icon("filmstrip").size(px(50.0)))
+                                .child("New Composition")
+                                .on_click(move |_, _, cx| {
+                                    create.update(cx, |s, cx| {
+                                        s.new_composition_requested = true;
+                                        cx.notify();
+                                    })
+                                }),
+                        )
+                        .child(
+                            ui::text_button("welcome-footage", "")
+                                .w(px(210.0))
+                                .h(px(220.0))
+                                .flex_col()
+                                .gap_4()
+                                .bg(rgb(0x292929))
+                                .child(ui::icon("folder-open").size(px(50.0)))
+                                .child("New Composition From Footage")
+                                .on_click(move |_, window, cx| {
+                                    import.update(cx, |s, cx| {
+                                        s.dispatch(&Action::CompositionFromFootage, window, cx)
+                                    })
+                                }),
+                        ),
+                )
+                .into_any_element();
+        }
         let comp = state.editor.project().composition().clone();
         let frame = state.frame;
         let selected = state.selected_layers.clone();
@@ -727,6 +813,14 @@ impl Render for Preview {
             let _ = temporary.replace_project(render_project.clone());
             let _ = temporary.execute(move_command(g));
             render_project = temporary.project().clone();
+        }
+        if let Some(command) = self.drawing.as_ref().and_then(|d| d.command(state)) {
+            let mut temporary = libre_effects_core::Editor::default();
+            if temporary.replace_project(render_project.clone()).is_ok()
+                && temporary.execute(command).is_ok()
+            {
+                render_project = temporary.project().clone();
+            }
         }
         let comp = render_project.composition().clone();
         self.update_render(
@@ -831,6 +925,7 @@ impl Render for Preview {
                     .id("composition-canvas")
                     .track_focus(&self.focus)
                     .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
+                        if event.keystroke.key == "escape" && this.drawing.take().is_some() {cx.stop_propagation();cx.notify();return;}
                         if event.keystroke.key == "escape" && this.guide_gesture.take().is_some() {cx.stop_propagation();cx.notify();return;}
                         if event.keystroke.key == "escape"
                             && let Some(gesture) = this.gesture.take()
@@ -1124,7 +1219,7 @@ impl Render for Preview {
                             .child(time),
                     )
                     .child(div().w(px(8.0))),
-            )
+            ).into_any_element()
     }
 }
 
