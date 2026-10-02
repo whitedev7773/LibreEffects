@@ -30,6 +30,9 @@ pub(crate) struct TextField {
 }
 
 impl TextField {
+    pub fn focus_input(&self, window: &mut Window) {
+        window.focus(&self.focus);
+    }
     pub fn is_composing(window: &Window, cx: &App) -> bool {
         cx.try_global::<ActiveField>()
             .and_then(|active| active.0.upgrade())

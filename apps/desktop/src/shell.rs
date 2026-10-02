@@ -10,6 +10,8 @@ use libre_effects_core::{Command, FrameRate};
 mod media;
 #[path = "shell_menu.rs"]
 mod menu;
+#[path = "shell_search.rs"]
+mod search;
 
 pub(crate) struct Shell {
     state: Entity<EditorState>,
@@ -25,6 +27,12 @@ pub(crate) struct Shell {
     menu_cursor: Option<usize>,
     menu_return_focus: Option<FocusHandle>,
     menu_scroll: gpui::ScrollHandle,
+    search_open: bool,
+    search_field: Entity<TextField>,
+    search_cursor: Option<menu::Key>,
+    search_query: String,
+    search_scroll: gpui::ScrollHandle,
+    search_return_focus: Option<FocusHandle>,
     settings: bool,
     settings_new: bool,
     settings_error: String,
@@ -88,6 +96,8 @@ impl Shell {
             })
             .detach();
         }
+        let search_field = cx.new(|cx| TextField::new(cx, |_, _, _| {}));
+        cx.observe(&search_field, |_, _, cx| cx.notify()).detach();
         cx.observe(&fields[5], |_, _, cx| cx.notify()).detach();
         Self {
             state,
@@ -103,6 +113,12 @@ impl Shell {
             menu_cursor: None,
             menu_return_focus: None,
             menu_scroll: gpui::ScrollHandle::new(),
+            search_open: false,
+            search_field,
+            search_cursor: None,
+            search_query: String::new(),
+            search_scroll: gpui::ScrollHandle::new(),
+            search_return_focus: None,
             settings: false,
             settings_new: false,
             settings_error: String::new(),
@@ -308,6 +324,7 @@ impl Shell {
             menu::Target::Settings => self.open_settings(window, cx),
             menu::Target::ResetWorkspace => self.reset_layout(cx),
             menu::Target::Help => self.help = true,
+            menu::Target::Search => self.open_search(window, cx),
         }
         cx.notify();
     }
@@ -324,6 +341,26 @@ impl Shell {
             || state.recovery.is_some()
             || state.colors.session.is_some()
         {
+            return;
+        }
+        if self.search_open {
+            self.search_key(event, window, cx);
+            return;
+        }
+        if key == "p"
+            && m.control
+            && m.shift
+            && !m.alt
+            && !m.platform
+            && !TextField::is_composing(window, cx)
+            && !state
+                .text_session
+                .as_ref()
+                .is_some_and(|s| s.buffer.marked.is_some())
+        {
+            self.open_search(window, cx);
+            cx.stop_propagation();
+            window.prevent_default();
             return;
         }
         if self.menu.is_none() {
@@ -379,6 +416,10 @@ impl Shell {
         cx.notify();
     }
     fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.search_open {
+            cx.stop_propagation();
+            return;
+        }
         let key = event.keystroke.key.as_str();
         let m = event.keystroke.modifiers;
         if self.state.read(cx).colors.session.is_some() {
@@ -903,6 +944,9 @@ impl Render for Shell {
             }
             root = root.child(gpui::deferred(dropdown).with_priority(2));
         }
+        if self.search_open {
+            root = root.child(gpui::deferred(self.render_search(window, cx)).with_priority(3));
+        }
         if (self.settings || self.help) && !self.state.read(cx).colors.picking() {
             let mut dialog = div()
                 .id("settings-help-dialog")
@@ -1112,6 +1156,7 @@ impl Render for Shell {
                     "Ctrl+Shift+C — Pre-compose selected layers",
                     "Shift+F3 — Graph Editor    F9 — Ease selected graph segment",
                     "B / N — Work area start / end    + / − — Timeline zoom",
+                    "Ctrl+Shift+P — Find command · ↑/↓ select · Enter run · Esc close",
                     "F10 — Menus · ←/→ menu · ↑/↓ item · Enter run · Esc close",
                     "Menu Home/End — First/last · Letter — Next matching item",
                     "Enter — Commit field    Escape — Cancel field",

@@ -20,6 +20,7 @@ pub enum Target {
     Settings,
     ResetWorkspace,
     Help,
+    Search,
 }
 pub struct Item {
     pub label: &'static str,
@@ -301,6 +302,27 @@ pub fn items(menu: &str, state: &EditorState) -> Vec<Item> {
             ),
             ("Clear guides", "", Some(Action::ClearGuides)),
         ],
+        "Tools" => [
+            ("Selection tool", "V", Tool::Select),
+            ("Hand tool", "H", Tool::Hand),
+            ("Zoom tool", "Z", Tool::Zoom),
+            ("Rotation tool", "W", Tool::Rotate),
+            ("Anchor Point tool", "Y", Tool::Anchor),
+            ("Pen tool", "G", Tool::Pen),
+            ("Text tool", "Ctrl+T", Tool::Text),
+        ]
+        .into_iter()
+        .map(|(label, shortcut, tool)| (label, shortcut, Some(Action::SetTool(tool))))
+        .collect(),
+        "Preview" => vec![
+            ("Play / Pause", "Space", Some(Action::Play)),
+            ("Previous frame", "Page Up", Some(Action::Step(-1))),
+            ("Next frame", "Page Down", Some(Action::Step(1))),
+            ("Set work area start", "B", Some(Action::WorkStart)),
+            ("Set work area end", "N", Some(Action::WorkEnd)),
+            ("Toggle preview audio", "", Some(Action::PreviewAudio)),
+            ("Toggle preview loop", "", Some(Action::PreviewLoop)),
+        ],
         _ => Vec::new(),
     };
 
@@ -337,7 +359,10 @@ pub fn items(menu: &str, state: &EditorState) -> Vec<Item> {
             "",
             Target::ResetWorkspace,
         )),
-        "Help" => result.push(Item::special("Keyboard shortcuts", "", Target::Help)),
+        "Help" => result.extend([
+            Item::special("Find command…", "Ctrl+Shift+P", Target::Search),
+            Item::special("Keyboard shortcuts", "", Target::Help),
+        ]),
         _ => {}
     }
     result
@@ -386,13 +411,164 @@ pub fn letter(items: &[Item], current: Option<usize>, key: &str) -> Option<usize
         .or(current)
 }
 pub fn adjacent(menu: &str, forward: bool) -> &'static str {
-    let i = MENUS.iter().position(|m| *m == menu).unwrap_or(0);
+    let Some(i) = MENUS.iter().position(|m| *m == menu) else {
+        return if forward { "File" } else { "Help" };
+    };
     MENUS[(i + if forward { 1 } else { MENUS.len() - 1 }) % MENUS.len()]
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Key {
+    pub category: &'static str,
+    pub label: &'static str,
+}
+pub struct Match {
+    pub key: Key,
+    pub item: Item,
+}
+pub fn search(query: &str, state: &EditorState) -> Vec<Match> {
+    let query = query.trim().to_lowercase();
+    let words: Vec<_> = query.split_whitespace().collect();
+    let mut matches = vec![];
+    for category in MENUS.into_iter().chain(["Tools", "Shape", "Preview"]) {
+        for item in items(category, state) {
+            if matches!(item.target, Some(Target::Search)) {
+                continue;
+            }
+            let label = item.label.to_lowercase();
+            let haystack = format!("{category} {} {}", item.label, item.shortcut).to_lowercase();
+            if words.iter().all(|word| haystack.contains(word)) {
+                let rank = if label == query {
+                    0
+                } else if label.starts_with(&query) {
+                    1
+                } else if label.contains(&query) {
+                    2
+                } else {
+                    3
+                };
+                matches.push((
+                    rank,
+                    Match {
+                        key: Key {
+                            category,
+                            label: item.label,
+                        },
+                        item,
+                    },
+                ));
+            }
+        }
+    }
+    matches.sort_by_key(|(rank, entry)| (entry.item.target.is_none(), *rank));
+    matches.into_iter().map(|(_, entry)| entry).collect()
+}
+pub fn search_step(results: &[Match], current: Option<Key>, forward: bool) -> Option<Key> {
+    let count = results.len();
+    if count == 0 {
+        return None;
+    }
+    let start = results
+        .iter()
+        .position(|r| Some(r.key) == current)
+        .unwrap_or(if forward { count - 1 } else { 0 });
+    (1..=count)
+        .map(|n| {
+            if forward {
+                (start + n) % count
+            } else {
+                (start + count - n) % count
+            }
+        })
+        .find(|i| results[*i].item.target.is_some())
+        .map(|i| results[i].key)
+}
+/// Resolve against current state, never dispatch an Action cached in a result row.
+pub fn resolve(key: Key, state: &EditorState) -> Option<Target> {
+    items(key.category, state)
+        .into_iter()
+        .find(|item| item.label == key.label)?
+        .target
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn command_search_matches_words_categories_shortcuts_and_disabled_entries() {
+        let state = EditorState::default();
+        let results = search("  PROJECT   fonts ", &state);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].key.label, "Manage project fonts…");
+        assert_eq!(
+            search("Ctrl+K", &state)[0].key.label,
+            "Composition settings…"
+        );
+        assert!(matches!(
+            search("tools pen", &state)[0].item.target,
+            Some(Target::Action(Action::SetTool(Tool::Pen)))
+        ));
+        assert!(search("no-such-command 한글", &state).is_empty());
+        let effects = search("effect blur", &state);
+        assert_eq!(effects.len(), 1);
+        assert!(effects[0].item.target.is_none());
+        assert_eq!(search_step(&effects, None, true), None);
+        let all = search("", &state);
+        assert!(
+            !all.iter()
+                .any(|r| matches!(r.item.target, Some(Target::Search)))
+        );
+        let mut keys = std::collections::BTreeSet::new();
+        for entry in &all {
+            assert!(keys.insert((entry.key.category, entry.key.label)));
+        }
+        let first = search_step(&all, None, true);
+        let last = search_step(&all, first, false);
+        assert_eq!(search_step(&all, last, true), first);
+        assert_eq!(adjacent("Shape", true), "File");
+        assert_eq!(adjacent("Shape", false), "Help");
+    }
+
+    #[test]
+    fn search_resolves_fresh_selection_and_effect_roundtrips_through_history_and_pixels() {
+        let mut state = EditorState::default();
+        state.editor.execute(Command::AddRectangle).unwrap();
+        let key = search("effect gaussian", &state)[0].key;
+        assert!(matches!(
+            resolve(key, &state),
+            Some(Target::Action(Action::Edit(Command::Effect { id: 1, .. })))
+        ));
+        state.editor.execute(Command::ToggleLocked(1)).unwrap();
+        assert!(resolve(key, &state).is_none());
+        state.editor.execute(Command::AddRectangle).unwrap();
+        assert!(matches!(
+            resolve(key, &state),
+            Some(Target::Action(Action::Edit(Command::Effect { id: 2, .. })))
+        ));
+        let before = state.editor.project().clone();
+        let renderer = crate::rendering::Renderer::new();
+        let original = renderer.render_preview(&before, 0, 480).unwrap();
+        let Some(Target::Action(Action::Edit(command))) = resolve(key, &state) else {
+            panic!("missing command");
+        };
+        state.editor.execute(command).unwrap();
+        let after = state.editor.project().clone();
+        let reopened = libre_effects_core::Project::from_json(&after.to_json().unwrap()).unwrap();
+        assert_eq!(after, reopened);
+        let preview = renderer.render_preview(&after, 0, 480).unwrap();
+        assert_ne!(preview, original);
+        assert_eq!(
+            renderer
+                .render_output(&reopened, 0, preview.width(), preview.height())
+                .unwrap(),
+            preview
+        );
+        state.editor.undo();
+        assert_eq!(state.editor.project(), &before);
+        state.editor.redo();
+        assert_eq!(state.editor.project(), &after);
+    }
 
     #[test]
     fn navigation_wraps_skips_disabled_and_cycles_matching_letters() {

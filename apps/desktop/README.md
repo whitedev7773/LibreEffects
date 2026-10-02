@@ -17,6 +17,17 @@ Command-line renders remain independent of the interactive editor.
 
 ## Keyboard menus
 
+Use **Ctrl+Shift+P** or Help → Find command to search workspace commands without
+changing the panel layout. Search words match the menu/category, command name
+and displayed shortcut, regardless of case. Results include the menus, shape
+choices, editing tools and basic preview controls. Unavailable commands remain
+visible and are skipped by keyboard selection. Up/Down selects a result,
+Ctrl+Home/End selects the first/last available result, Enter executes, and Escape
+or an outside click closes the search and restores focus. Home/End and clipboard
+shortcuts continue to edit the search field. Commands are resolved again against
+the current selection before execution. IME marked text keeps Enter/arrows until
+composition finishes; the search does not intercept it to execute a command.
+
 Press F10 to open File, Left/Right to switch menus and Up/Down to select an
 enabled item. Home/End select the first/last enabled item; a letter cycles
 through items starting with that letter. Enter or Space executes the highlighted
@@ -28,8 +39,9 @@ Mouse and keyboard execute the same commands, including Composition settings,
 workspace reset and Help. While a menu is open, document shortcuts and movement
 keys are captured by the menu. F10 does not open a menu during a marked IME
 composition or a workspace modal. Opening a menu commits a normal field/text
-draft first. Native F10 opening/highlight has been checked; full Windows
-keyboard, IME and DPI regression remains to be completed.
+draft first. Native F10 opening, menu/item navigation, Enter execution and
+Escape closing have been checked; full Windows keyboard, IME and DPI regression
+remains to be completed.
 
 ## Pen and path masks
 
