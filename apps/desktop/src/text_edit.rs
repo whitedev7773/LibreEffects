@@ -180,6 +180,25 @@ impl Buffer {
         };
         self.select(at, extend);
     }
+    pub fn select_word(&mut self, at: usize) {
+        let at = at.min(self.text.len());
+        let range = self
+            .text
+            .split_word_bound_indices()
+            .map(|(i, s)| i..i + s.len())
+            .find(|r| r.contains(&at))
+            .unwrap_or(at..at);
+        self.select(range.start, false);
+        self.select(range.end, true);
+    }
+    pub fn select_line(&mut self, at: usize) {
+        self.select(at, false);
+        self.line_edge(false, false, false);
+        self.line_edge(true, false, true);
+        if self.caret < self.text.len() {
+            self.caret += 1;
+        }
+    }
     pub fn line_edge(&mut self, end: bool, document: bool, extend: bool) {
         let at = if document {
             if end { self.text.len() } else { 0 }
@@ -202,11 +221,19 @@ pub(crate) struct Session {
     pub font_size: f64,
     pub width: f64,
     pub style: libre_effects_core::TextStyle,
+    pub preferred_x: Option<f64>,
     base: Project,
     seed: Vec<Command>,
     revision: u64,
 }
 impl Session {
+    pub fn vertical(&mut self, down: bool, extend: bool) {
+        let layout = layout::Layout::new(self);
+        let mut p = layout.caret(self.buffer.caret);
+        p[0] = *self.preferred_x.get_or_insert(p[0]);
+        p[1] += self.font_size * (0.5 + self.style.leading * if down { 1.0 } else { -1.0 });
+        self.buffer.select(layout.hit(p), extend);
+    }
     pub fn new(
         project: &Project,
         revision: u64,
@@ -277,6 +304,7 @@ impl Session {
             font_size: *font_size,
             width: layer.width(),
             style: layer.text_style(),
+            preferred_x: None,
             base: project.clone(),
             seed,
             revision,
@@ -315,6 +343,22 @@ impl Session {
 mod tests {
     use super::*;
     #[test]
+    fn vertical_motion_remembers_the_original_column_across_short_lines() {
+        let mut s = Session::new(&Project::default(), 0, 0, None, [0.0; 2]).unwrap();
+        s.buffer
+            .replace(None, "WWWWWW\nI\nWWWWWW", false, None)
+            .unwrap();
+        s.buffer.select(6, false);
+        s.vertical(true, false);
+        assert_eq!(s.buffer.caret, 8);
+        s.vertical(true, false);
+        assert_eq!(s.buffer.caret, 15);
+        s.vertical(false, false);
+        assert_eq!(s.buffer.caret, 8);
+        s.vertical(false, true);
+        assert_eq!(s.buffer.selection(), 6..8);
+    }
+    #[test]
     fn word_selection_and_grapheme_deletion_keep_unicode_intact() {
         let mut b = Buffer::new("one 한글 three".into());
         b.word(false, true);
@@ -337,6 +381,13 @@ mod tests {
         b.replace(Some(0..0), "한", true, Some(50..80)).unwrap();
         assert_eq!(b.caret, "한".len());
         assert_eq!(b.anchor, b.caret);
+        b = Buffer::new("first 한글\nsecond line".into());
+        b.select_word(7);
+        assert_eq!(&b.text[b.selection()], "한글");
+        b.select_line(7);
+        assert_eq!(&b.text[b.selection()], "first 한글\n");
+        b.select_line(b.text.len());
+        assert_eq!(&b.text[b.selection()], "second line");
     }
 
     #[test]

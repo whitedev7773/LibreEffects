@@ -28,10 +28,30 @@ impl Preview {
         self.state.update(cx, |s, cx| {
             if let Some(session) = &mut s.text_session {
                 let at = Layout::new(session).hit(p);
+                session.preferred_x = None;
                 session.buffer.select(at, extend);
                 cx.notify();
             }
         });
+    }
+    pub(super) fn text_click(&mut self, e: &MouseDownEvent, cx: &mut Context<Self>) {
+        self.text_pointer(e.position, e.modifiers.shift, cx);
+        if e.click_count >= 2 {
+            let local = self.text_point(e.position, cx);
+            self.state.update(cx, |s, cx| {
+                if let Some(session) = &mut s.text_session {
+                    let at = local.map_or(session.buffer.caret, |p| {
+                        Layout::new(session).hit_character(p)
+                    });
+                    if e.click_count == 2 {
+                        session.buffer.select_word(at);
+                    } else {
+                        session.buffer.select_line(at);
+                    }
+                    cx.notify();
+                }
+            });
+        }
     }
     pub(super) fn text_key(
         &mut self,
@@ -70,6 +90,9 @@ impl Preview {
                 return;
             };
             let mut error = None;
+            if !matches!(key, "up" | "down") {
+                session.preferred_x = None;
+            }
             if ctrl {
                 match key {
                     "a" => session.buffer.all(),
@@ -111,13 +134,7 @@ impl Preview {
                     "left" | "right" => session.buffer.step(key == "right", shift),
                     "home" | "end" => session.buffer.line_edge(key == "end", false, shift),
                     "up" | "down" => {
-                        let layout = Layout::new(session);
-                        let mut p = layout.caret(session.buffer.caret);
-                        p[1] += session.font_size
-                            * (0.5
-                                + session.style.leading * if key == "down" { 1.0 } else { -1.0 });
-                        let at = layout.hit(p);
-                        session.buffer.select(at, shift);
+                        session.vertical(key == "down", shift);
                     }
                     _ => {}
                 }
@@ -139,6 +156,7 @@ impl Preview {
     ) {
         self.state.update(cx, |s, cx| {
             if let Some(session) = &mut s.text_session {
+                session.preferred_x = None;
                 if let Err(e) = session.buffer.replace(range, text, mark, selected) {
                     s.status = e;
                 }

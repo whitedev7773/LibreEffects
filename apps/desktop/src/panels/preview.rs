@@ -444,7 +444,7 @@ impl Preview {
             return;
         }
         if state.text_session.is_some() {
-            self.text_pointer(event.position, event.modifiers.shift, cx);
+            self.text_click(event, cx);
             self.text_dragging = true;
             cx.stop_propagation();
             return;

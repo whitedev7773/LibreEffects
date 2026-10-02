@@ -2950,6 +2950,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "unicode-bidi",
+ "unicode-script",
  "unicode-segmentation",
  "windows 0.61.3",
 ]

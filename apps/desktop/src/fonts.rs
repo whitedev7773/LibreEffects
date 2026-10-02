@@ -3,6 +3,14 @@ use libre_effects_core::TextStyle;
 use resvg::usvg::fontdb::{Database, Family, Query, Stretch, Style, Weight};
 use std::sync::{Arc, OnceLock};
 
+pub(crate) fn render_options() -> resvg::usvg::Options<'static> {
+    resvg::usvg::Options {
+        fontdb: database(),
+        font_family: "Wanted Sans".into(),
+        ..Default::default()
+    }
+}
+
 struct Catalog {
     db: Arc<Database>,
     families: Vec<String>,

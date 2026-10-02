@@ -90,7 +90,9 @@ the edit. Empty new drafts do not create a layer.
 
 Drag or Shift+arrows selects text; Home/End, Ctrl+Home/End and Ctrl+arrows move
 within lines, the document and words. Clipboard shortcuts and local Undo/Redo
-work while editing. Backspace/Delete respect Unicode grapheme clusters. A
+work while editing. Double-click within an active edit selects a word; triple-click
+selects a line. Vertical arrows retain the original horizontal position across
+shorter lines. Backspace/Delete respect Unicode grapheme clusters. A
 finished edit, including creation, is one document Undo step. Live drafts enter
 recovery checkpoints; editor replacement commits them before preserving recovery.
 Text is limited to 16 KiB; oversized input is rejected without changing the draft.
@@ -98,9 +100,12 @@ Text is limited to 16 KiB; oversized input is rejected without changing the draf
 The native input handler exposes UTF-16 selections and marked composition text.
 Model tests cover Korean composition updates, surrogate pairs and joined emoji;
 actual Windows IME, focus and pointer behavior still require native verification.
-Caret shaping
-uses the selected face; fallback glyphs, complex bidirectional text and ligature
-positions can differ from rendered glyphs. Paragraph boxes, per-character styles,
+Caret cells use the compositor's actual fallback faces and glyph positions,
+including script-sensitive tracking and the absence of trailing letter spacing.
+The most recent layout is cached for pointer movement and selection painting.
+Graphemes stay together; internal ligature caret positions are distributed evenly
+rather than reading OpenType GDEF caret tables, and bidi boundary affinity remains
+limited. Paragraph boxes, per-character styles,
 Text Animator and caret blinking are not implemented. Existing AE-style panel
 geometry is unchanged.
 

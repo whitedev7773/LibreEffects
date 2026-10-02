@@ -15,7 +15,7 @@ pub(crate) struct Renderer {
     decoders: std::sync::Mutex<crate::video_decoder::Pool>,
     cancel: Arc<std::sync::atomic::AtomicBool>,
 }
-fn text_svg(
+pub(crate) fn text_svg(
     text: &str,
     font_size: f64,
     color: &str,
@@ -92,9 +92,7 @@ impl Renderer {
         Self::with_cancel(Default::default())
     }
     pub fn with_cancel(cancel: Arc<std::sync::atomic::AtomicBool>) -> Self {
-        let mut options = resvg::usvg::Options::default();
-        options.fontdb = crate::fonts::database();
-        options.font_family = "Wanted Sans".into();
+        let options = crate::fonts::render_options();
         Self {
             options,
             decoders: Default::default(),
