@@ -448,11 +448,19 @@ Click the graph icon in the timeline, use Animation → Toggle Graph Editor, or 
 Shift+F3. Click a property label or its X/Y channel in the persistent layer list. The value graph shares timeline
 zoom and pan; its vertical range fits the visible curve.
 
-- Click a key to select it; drag to change both frame and value. Release commits
-  one undo step. Escape cancels; occupied frames and invalid values are rejected.
+- Click a key to select it; Shift/Ctrl-click toggles membership. Drag empty graph
+  space to box-select keys; Shift/Ctrl adds to the selection. Ctrl+A selects all
+  keys in the displayed channel, including keys outside the visible time range.
+- Drag a selected key to translate the group in time and value without changing
+  spacing or value differences. Shift constrains the dominant axis. Boundary
+  limits apply to the entire group; selected source frames can be destinations.
+  Release commits one undo step. Escape cancels; collisions with unselected keys
+  or invalid values reject the whole edit. Document changes cancel an active drag.
 - Keyframe... opens a compact popup with Frame and Value fields for precise edits.
-  Escape or Close dismisses it. Delete removes only the selected
-  graph key. The diamond adds/removes a key at the playhead.
+  Fields edit the active key; interpolation/mode/Ease buttons act on all selected
+  keys in the displayed channel. Mixed modes have no highlighted mode button.
+  Escape or Close dismisses it. Delete removes the selected graph keys in one Undo.
+  The diamond adds/removes a key at the playhead.
 - Linear and Hold replace the selected key's outgoing segment, clearing its outgoing
   handle and the next key's incoming handle. Other segments remain unchanged.
 - Ease (F9) sets zero velocity and one-third influence on both sides of the selected
@@ -482,7 +490,7 @@ zoom and pan; its vertical range fits the visible curve.
   shape-preserving scalar policy, not a claim of numerical parity with AE's Auto.
   Linked modes require project version 36 / effect preset version 3. Old independent
   handles and legacy files retain their existing representation and samples.
-- This is still a single-channel value graph. Spatial paths, multi-key graph
+- This is still a single-channel value graph. Spatial paths, multi-channel graph
   editing, influence-handle dragging and full AE
   Easy Ease compatibility remain unfinished.
   Geometry path timing tracks do not yet support these scalar velocity handles.
@@ -495,8 +503,9 @@ Separate strokes represent each segment; Hold jumps and vertical tangents are
 gaps rather than artificial finite spikes. The zero axis remains visible.
 
 At a key, the left marker edits incoming velocity and the right marker outgoing
-velocity. Drag horizontally to retime the key and vertically to change that
-side's velocity while preserving its influence and property value. Release is
+velocity. Drag horizontally to retime selected keys and vertically to offset that
+side's velocities by the same amount, preserving each influence and property value.
+Keys without that adjacent segment are retimed but receive no velocity edit. Release is
 one Undo step; collisions/invalid velocities reject the entire edit and Escape
 cancels. Keyframe... still edits precise time/value/velocity/influence. View
 switching changes no project content; graph type is currently session-local.

@@ -1,3 +1,4 @@
+mod selection;
 mod speed;
 use crate::{
     components::TextField,
@@ -126,6 +127,15 @@ impl HandleSpace {
 }
 #[derive(Clone)]
 enum Drag {
+    Marquee {
+        id: LayerId,
+        property: PropertyPath,
+        start: Point<Pixels>,
+        end: Point<Pixels>,
+        additive: bool,
+        view: View,
+        bounds: Bounds<Pixels>,
+    },
     Key {
         id: LayerId,
         property: PropertyPath,
@@ -133,6 +143,9 @@ enum Drag {
         to: u32,
         value: f64,
         velocity: Option<(bool, libre_effects_core::TemporalHandle, f64)>,
+        keys: Vec<selection::Sample>,
+        origin: f64,
+        remove_on_click: bool,
         view: View,
         bounds: Bounds<Pixels>,
         start: Point<Pixels>,
@@ -155,12 +168,22 @@ pub(crate) struct Graph {
     easing: Rc<Cell<Option<Bounds<Pixels>>>>,
     focus: FocusHandle,
     drag: Option<Drag>,
+    drag_revision: u64,
     fields: Vec<Entity<TextField>>,
     details: bool,
     speed_mode: bool,
 }
 fn selected(state: &EditorState) -> Option<(LayerId, u32, PropertyPath)> {
-    let (id, frame) = state.graph_key?;
+    let (id, frame) = state
+        .graph_key
+        .filter(|(id, frame)| {
+            state.selected_keys.contains(&libre_effects_core::KeyRef {
+                id: *id,
+                property: state.graph_property,
+                frame: *frame,
+            })
+        })
+        .or_else(|| selection::active(state).first().map(|k| (k.id, k.frame)))?;
     (state.editor.selected() == Some(id)
         && state
             .editor
@@ -173,6 +196,9 @@ fn selected(state: &EditorState) -> Option<(LayerId, u32, PropertyPath)> {
     .then_some((id, frame, state.graph_property))
 }
 fn curve_at(state: &EditorState) -> Option<Bezier> {
+    if selection::active(state).len() > 1 {
+        return None;
+    }
     let (id, frame, property) = selected(state)?;
     let track = state
         .editor
@@ -208,15 +234,24 @@ fn dispatch_key(
     window: &mut Window,
     cx: &mut Context<EditorState>,
 ) {
+    let from = selected(state).map(|(_, frame, _)| frame);
+    let mut keys = state.selected_keys.clone();
     state.dispatch(&Action::Edit(command), window, cx);
     if state.status.starts_with("Edited") {
         state.selected_layers = [id].into();
-        state.selected_keys = [libre_effects_core::KeyRef {
+        if let Some(frame) = from {
+            keys.remove(&libre_effects_core::KeyRef {
+                id,
+                property: state.graph_property,
+                frame,
+            });
+        }
+        keys.insert(libre_effects_core::KeyRef {
             id,
             property: state.graph_property,
             frame: to,
-        }]
-        .into();
+        });
+        state.selected_keys = keys;
         state.graph_key = Some((id, to));
         state.frame = to;
         cx.notify();
@@ -227,12 +262,14 @@ impl Graph {
         cx.observe(&state, |this, _, cx| {
             if this.drag.as_ref().is_some_and(|drag| {
                 let (id, p) = match drag {
-                    Drag::Key { id, property, .. } | Drag::Handle { id, property, .. } => {
-                        (*id, *property)
-                    }
+                    Drag::Key { id, property, .. }
+                    | Drag::Handle { id, property, .. }
+                    | Drag::Marquee { id, property, .. } => (*id, *property),
                 };
                 let s = this.state.read(cx);
-                s.editor.selected() != Some(id) || s.graph_property != p
+                s.editor.selected() != Some(id)
+                    || s.graph_property != p
+                    || s.document_revision != this.drag_revision
             }) {
                 this.drag = None;
             }
@@ -359,6 +396,7 @@ impl Graph {
             easing: Rc::new(Cell::new(None)),
             focus: cx.focus_handle(),
             drag: None,
+            drag_revision: 0,
             fields,
             details: false,
             speed_mode: false,
@@ -366,69 +404,36 @@ impl Graph {
     }
     fn preset(&self, interpolation: Interpolation, window: &mut Window, cx: &mut Context<Self>) {
         self.state.update(cx, |state, cx| {
-            if let Some((id, frame, property)) = selected(state) {
-                state.dispatch(
-                    &Action::Edit(Command::EditTrack {
-                        id,
-                        property,
-                        edit: TrackEdit::Interpolate {
-                            frame,
-                            interpolation,
-                        },
-                    }),
-                    window,
-                    cx,
-                );
+            let commands = selection::active(state)
+                .into_iter()
+                .map(|k| Command::EditTrack {
+                    id: k.id,
+                    property: k.property,
+                    edit: TrackEdit::Interpolate {
+                        frame: k.frame,
+                        interpolation,
+                    },
+                })
+                .collect::<Vec<_>>();
+            if !commands.is_empty() {
+                state.dispatch(&Action::Edit(Command::Batch(commands)), window, cx);
             }
         });
     }
     fn ease(&self, incoming: bool, outgoing: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.state.update(cx, |state, cx| {
-            if let Some((id, frame, property)) = selected(state) {
-                let track = state
-                    .editor
-                    .project()
-                    .composition()
-                    .layer(id)
-                    .unwrap()
-                    .track(property)
-                    .unwrap();
-                let mut commands = [
-                    (
-                        true,
-                        incoming && track.keys().range(..frame).next_back().is_some(),
-                    ),
-                    (
-                        false,
-                        outgoing && track.keys().range(frame + 1..).next().is_some(),
-                    ),
-                ]
-                .into_iter()
-                .filter(|(_, enabled)| *enabled)
-                .map(|(incoming, _)| Command::SetTemporalHandle {
-                    id,
-                    property,
-                    frame,
-                    incoming,
-                    handle: libre_effects_core::TemporalHandle {
-                        slope: 0.0,
-                        influence: 1.0 / 3.0,
-                    },
-                })
-                .collect::<Vec<_>>();
-                if !commands.is_empty() {
-                    commands.insert(
-                        0,
-                        Command::SetTemporalMode {
-                            id,
-                            property,
-                            frame,
-                            mode: TemporalMode::Independent,
-                        },
-                    );
-                    state.dispatch(&Action::Edit(Command::Batch(commands)), window, cx);
-                }
+            let keys = selection::active(state);
+            if keys.is_empty() {
+                return;
             }
+            let track = state
+                .editor
+                .selected_layer()
+                .unwrap()
+                .track(state.graph_property)
+                .unwrap();
+            let command = selection::ease(track, &keys, incoming, outgoing);
+            state.dispatch(&Action::Edit(command), window, cx);
         });
     }
     fn down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -437,6 +442,7 @@ impl Graph {
             return;
         };
         let state = self.state.read(cx);
+        self.drag_revision = state.document_revision;
         let Some(layer) = state.editor.selected_layer() else {
             return;
         };
@@ -520,7 +526,27 @@ impl Graph {
             }
         }
         if let Some((frame, value, velocity)) = hit {
-            if !layer.locked() {
+            let key = libre_effects_core::KeyRef {
+                id,
+                property,
+                frame,
+            };
+            let existing = selection::active(state)
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>();
+            let toggle = event.modifiers.shift || event.modifiers.control;
+            let remove_on_click = !layer.locked() && toggle && existing.contains(&key);
+            let chosen = if remove_on_click {
+                existing
+            } else {
+                selection::clicked(existing, key, toggle)
+            };
+            let samples = selection::snapshot(
+                track,
+                &chosen.iter().copied().collect::<Vec<_>>(),
+                velocity.map(|(side, _, _)| side),
+            );
+            if !layer.locked() && chosen.contains(&key) {
                 self.drag = Some(Drag::Key {
                     id,
                     property,
@@ -528,6 +554,9 @@ impl Graph {
                     to: frame,
                     value,
                     velocity,
+                    keys: samples,
+                    origin: velocity.map_or(value, |(_, h, _)| h.slope),
+                    remove_on_click,
                     view,
                     bounds,
                     start: event.position,
@@ -535,21 +564,23 @@ impl Graph {
                 });
             }
             self.state.update(cx, |s, cx| {
-                s.graph_key = Some((id, frame));
-                s.selected_keys = std::iter::once(libre_effects_core::KeyRef {
-                    id,
-                    property,
-                    frame,
-                })
-                .collect();
+                s.graph_key = if chosen.contains(&key) {
+                    Some((id, frame))
+                } else {
+                    chosen.first().map(|k| (k.id, k.frame))
+                };
+                s.selected_keys = chosen;
                 s.dispatch(&Action::Seek(frame), window, cx);
             });
         } else {
-            let (frame, _) = view.value(bounds, event.position);
-            self.state.update(cx, |s, cx| {
-                s.graph_key = None;
-                s.selected_keys.clear();
-                s.dispatch(&Action::Seek(frame.max(0.0).round() as u32), window, cx);
+            self.drag = Some(Drag::Marquee {
+                id,
+                property,
+                start: event.position,
+                end: event.position,
+                additive: event.modifiers.shift || event.modifiers.control,
+                view,
+                bounds,
             });
         }
         cx.notify();
@@ -557,6 +588,7 @@ impl Graph {
     fn handle_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus);
         let state = self.state.read(cx);
+        self.drag_revision = state.document_revision;
         let Some((id, frame, property)) = selected(state) else {
             return;
         };
@@ -605,47 +637,52 @@ impl Graph {
             return;
         }
         match &mut self.drag {
+            Some(Drag::Marquee { end, .. }) => {
+                *end = event.position;
+            }
             Some(Drag::Key {
                 from,
                 to,
                 value,
                 velocity,
+                keys,
+                origin,
                 view,
                 bounds,
                 start,
                 moved,
                 ..
             }) => {
-                if !*moved
-                    && f32::from(event.position.x - start.x).abs()
-                        + f32::from(event.position.y - start.y).abs()
-                        < 3.0
-                {
+                let mut dx = f32::from(event.position.x - start.x);
+                let mut dy = f32::from(event.position.y - start.y);
+                if !*moved && dx.abs() + dy.abs() < 3.0 {
                     return;
                 }
                 *moved = true;
-                let (mut f, v) = view.value(*bounds, event.position);
-                if velocity.is_some() {
-                    f = *from as f64
-                        + f32::from(event.position.x - start.x) as f64
-                            / f32::from(bounds.size.width).max(1.0) as f64
-                            * view.span;
+                if event.modifiers.shift {
+                    if dx.abs() > dy.abs() {
+                        dy = 0.0;
+                    } else {
+                        dx = 0.0;
+                    }
                 }
-                *to = f.round().clamp(
-                    0.0,
-                    (self
-                        .state
-                        .read(cx)
-                        .editor
-                        .project()
-                        .composition()
-                        .duration()
-                        - 1) as f64,
-                ) as u32;
+                let delta = (dx as f64 / f32::from(bounds.size.width).max(1.0) as f64 * view.span)
+                    .round() as i64;
+                let duration = self
+                    .state
+                    .read(cx)
+                    .editor
+                    .project()
+                    .composition()
+                    .duration();
+                let delta = selection::clamp_delta(keys, delta, duration);
+                *to = (*from as i64 + delta) as u32;
+                let amount = -(dy as f64) / f32::from(bounds.size.height).max(1.0) as f64
+                    * (view.high - view.low);
                 if let Some((_, handle, fps)) = velocity {
-                    handle.slope = v / *fps;
+                    handle.slope = *origin + amount / *fps;
                 } else {
-                    *value = v;
+                    *value = *origin + amount;
                 }
             }
             Some(Drag::Handle {
@@ -682,6 +719,25 @@ impl Graph {
     }
     fn up(&mut self, _: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(drag) = self.drag.take() {
+            if let Drag::Key {
+                id,
+                property,
+                from,
+                moved: false,
+                remove_on_click: true,
+                ..
+            } = &drag
+            {
+                self.state.update(cx, |s, cx| {
+                    s.selected_keys.remove(&libre_effects_core::KeyRef {
+                        id: *id,
+                        property: *property,
+                        frame: *from,
+                    });
+                    s.graph_key = selection::active(s).first().map(|k| (k.id, k.frame));
+                    cx.notify();
+                });
+            }
             if matches!(
                 &drag,
                 Drag::Key { moved: false, .. } | Drag::Handle { moved: false, .. }
@@ -690,22 +746,105 @@ impl Graph {
                 return;
             }
             self.state.update(cx, |state, cx| match drag {
-                Drag::Key {
+                Drag::Marquee {
                     id,
                     property,
+                    start,
+                    end,
+                    additive,
+                    view,
+                    bounds,
+                } => {
+                    let track = state
+                        .editor
+                        .project()
+                        .composition()
+                        .layer(id)
+                        .and_then(|l| l.track(property));
+                    let moved =
+                        f32::from(end.x - start.x).abs() + f32::from(end.y - start.y).abs() >= 3.0;
+                    let mut keys = if additive {
+                        selection::active(state)
+                            .into_iter()
+                            .collect::<std::collections::BTreeSet<_>>()
+                    } else {
+                        Default::default()
+                    };
+                    if moved && let Some(track) = track {
+                        let fps = state.editor.project().composition().fps().as_f64();
+                        for (&frame, k) in track.keys() {
+                            let points = if self.speed_mode {
+                                speed::ends(track, frame, fps)
+                                    .into_iter()
+                                    .map(|(side, v)| {
+                                        let mut p = view.point(bounds, frame as f64, v);
+                                        p.x += px(if side { -5.0 } else { 5.0 });
+                                        p
+                                    })
+                                    .collect::<Vec<_>>()
+                            } else {
+                                vec![view.point(bounds, frame as f64, k.value)]
+                            };
+                            if points
+                                .into_iter()
+                                .any(|p| bounds.contains(&p) && selection::inside(start, end, p))
+                            {
+                                keys.insert(libre_effects_core::KeyRef {
+                                    id,
+                                    property,
+                                    frame,
+                                });
+                            }
+                        }
+                    }
+                    state.graph_key = keys.first().map(|k| (k.id, k.frame));
+                    state.selected_keys = keys;
+                    if !moved && !additive {
+                        let (frame, _) = view.value(bounds, end);
+                        state.dispatch(&Action::Seek(frame.max(0.0).round() as u32), window, cx);
+                    }
+                    cx.notify();
+                }
+                Drag::Key {
+                    id,
                     from,
                     to,
                     value,
                     velocity,
+                    keys,
+                    origin,
                     ..
-                } => dispatch_key(
-                    state,
-                    key_drag_command(id, property, from, to, value, velocity),
-                    id,
-                    to,
-                    window,
-                    cx,
-                ),
+                } => {
+                    let delta = to as i64 - from as i64;
+                    let amount = velocity.map_or(value - origin, |(_, h, _)| h.slope - origin);
+                    match selection::translate(
+                        &keys,
+                        delta,
+                        amount,
+                        velocity.map(|(side, _, _)| side),
+                    ) {
+                        Ok(command) => {
+                            state.dispatch(&Action::Edit(command), window, cx);
+                            if state.status.starts_with("Edited") {
+                                state.selected_keys = keys
+                                    .into_iter()
+                                    .map(|s| {
+                                        let mut k = s.key;
+                                        k.frame = (k.frame as i64 + delta) as u32;
+                                        k
+                                    })
+                                    .collect();
+                                state.graph_key = Some((id, to));
+                                state.frame = to;
+                                cx.notify();
+                            }
+                        }
+                        Err(error) => {
+                            state.status = error;
+                            cx.notify();
+                        }
+                    }
+                }
                 Drag::Handle {
                     id,
                     property,
@@ -727,34 +866,6 @@ impl Graph {
             });
         }
         cx.notify();
-    }
-}
-fn key_drag_command(
-    id: LayerId,
-    property: PropertyPath,
-    from: u32,
-    to: u32,
-    value: f64,
-    velocity: Option<(bool, libre_effects_core::TemporalHandle, f64)>,
-) -> Command {
-    let edit = Command::EditTrack {
-        id,
-        property,
-        edit: TrackEdit::Keyframe { from, to, value },
-    };
-    if let Some((incoming, handle, _)) = velocity {
-        Command::Batch(vec![
-            edit,
-            Command::SetTemporalHandle {
-                id,
-                property,
-                frame: to,
-                incoming,
-                handle,
-            },
-        ])
-    } else {
-        edit
     }
 }
 fn stroke(
@@ -795,6 +906,11 @@ impl Render for Graph {
         let current = state.frame;
         let fps = state.editor.project().composition().fps().as_f64();
         let selection = selected(state);
+        let selected_frames = selection::active(state)
+            .into_iter()
+            .map(|k| k.frame)
+            .collect::<std::collections::BTreeSet<_>>();
+        let selected_count = selected_frames.len();
         let curve = curve_at(state);
         let locked = layer.as_ref().is_none_or(|l| l.locked());
         let root = div()
@@ -821,18 +937,33 @@ impl Render for Graph {
                     this.ease(true, true, window, cx);
                     cx.stop_propagation();
                 }
+                if key == "a" && event.keystroke.modifiers.control && this.focus.is_focused(window)
+                {
+                    this.drag = None;
+                    this.state.update(cx, |s, cx| {
+                        if let Some(layer) = s.editor.selected_layer()
+                            && let Some(track) = layer.track(s.graph_property)
+                        {
+                            s.selected_keys = track
+                                .keys()
+                                .keys()
+                                .map(|&frame| libre_effects_core::KeyRef {
+                                    id: layer.id(),
+                                    property: s.graph_property,
+                                    frame,
+                                })
+                                .collect();
+                            s.graph_key = s.selected_keys.first().map(|k| (k.id, k.frame));
+                        }
+                        cx.notify();
+                    });
+                    cx.stop_propagation();
+                }
                 if matches!(key, "delete" | "backspace") {
                     this.state.update(cx, |state, cx| {
-                        if let Some((id, frame, property)) = selected(state) {
-                            state.dispatch(
-                                &Action::Edit(Command::EditTrack {
-                                    id,
-                                    property,
-                                    edit: TrackEdit::ToggleKey { frame },
-                                }),
-                                window,
-                                cx,
-                            );
+                        let keys = selection::active(state);
+                        if !keys.is_empty() {
+                            state.dispatch(&Action::Edit(Command::DeleteKeys(keys)), window, cx);
                         }
                     });
                     cx.stop_propagation();
@@ -920,7 +1051,7 @@ impl Render for Graph {
         };
         let speed_mode = self.speed_mode;
         let mut graph_view = view(&track, start, span, speed_mode, fps);
-        if let Some(Drag::Key { view, .. }) = &self.drag {
+        if let Some(Drag::Key { view, .. } | Drag::Marquee { view, .. }) = &self.drag {
             graph_view = *view;
         }
         if let Some(Drag::Handle { space, .. }) = &self.drag
@@ -931,6 +1062,18 @@ impl Render for Graph {
         let measured = self.plot.clone();
         let drag = self.drag.clone();
         let plot_track = track.clone();
+        let selection_mode = [
+            TemporalMode::Independent,
+            TemporalMode::Continuous,
+            TemporalMode::Auto,
+        ]
+        .into_iter()
+        .find(|mode| {
+            selected_count > 0
+                && selected_frames
+                    .iter()
+                    .all(|f| track.keys()[f].temporal.mode == *mode)
+        });
         let speed_curves = if speed_mode {
             speed::curves(&track, start, span, fps)
         } else {
@@ -1051,8 +1194,7 @@ impl Render for Graph {
                                             dot(
                                                 window,
                                                 p,
-                                                if selection.is_some_and(|(_, frame, _)| frame == f)
-                                                {
+                                                if selected_frames.contains(&f) {
                                                     ui::BLUE
                                                 } else {
                                                     0xffc66d
@@ -1064,7 +1206,7 @@ impl Render for Graph {
                                     dot(
                                         window,
                                         graph_view.point(bounds, f as f64, k.value),
-                                        if selection.is_some_and(|(_, frame, _)| frame == f) {
+                                        if selected_frames.contains(&f) {
                                             ui::BLUE
                                         } else {
                                             0xffc66d
@@ -1072,20 +1214,54 @@ impl Render for Graph {
                                     );
                                 }
                                 if let Some(Drag::Key {
+                                    from,
                                     to,
                                     value,
                                     velocity,
+                                    keys,
+                                    origin,
                                     ..
                                 }) = &drag
                                 {
-                                    dot(
+                                    let delta = *to as i64 - *from as i64;
+                                    let amount = velocity
+                                        .map_or(*value - *origin, |(_, h, _)| h.slope - *origin);
+                                    for sample in keys {
+                                        let val = if let Some((_, _, fps)) = velocity {
+                                            sample.handle.map(|h| (h.slope + amount) * fps)
+                                        } else {
+                                            Some(sample.value + amount)
+                                        };
+                                        if let Some(val) = val {
+                                            dot(
+                                                window,
+                                                graph_view.point(
+                                                    bounds,
+                                                    (sample.key.frame as i64 + delta) as f64,
+                                                    val,
+                                                ),
+                                                0xffffff,
+                                            );
+                                        }
+                                    }
+                                }
+                                if let Some(Drag::Marquee { start, end, .. }) = &drag {
+                                    let area = Bounds::from_corners(
+                                        point(start.x.min(end.x), start.y.min(end.y)),
+                                        point(start.x.max(end.x), start.y.max(end.y)),
+                                    );
+                                    window.paint_quad(fill(area, gpui::rgba(0x4ba6ff22)));
+                                    stroke(
                                         window,
-                                        graph_view.point(
-                                            bounds,
-                                            *to as f64,
-                                            velocity.map_or(*value, |(_, h, fps)| h.slope * fps),
-                                        ),
-                                        0xffffff,
+                                        [
+                                            area.origin,
+                                            point(area.right(), area.top()),
+                                            point(area.right(), area.bottom()),
+                                            point(area.left(), area.bottom()),
+                                            area.origin,
+                                        ],
+                                        ui::BLUE,
+                                        1.0,
                                     );
                                 }
                                 let x = graph_view.point(bounds, current as f64, 0.0).x;
@@ -1115,7 +1291,7 @@ impl Render for Graph {
         let mut easing = div()
             .id("easing-controls")
             .w(px(280.0))
-            .h(px(420.0))
+            .h(px(if selected_count > 1 { 450.0 } else { 420.0 }))
             .bg(rgb(ui::PANEL))
             .border_1()
             .border_color(rgb(0x555555))
@@ -1124,7 +1300,17 @@ impl Render for Graph {
             .border_l_1()
             .border_color(rgb(ui::BORDER))
             .px_2()
-            .child(div().h(px(20.0)).child("Keyframe timing and velocity"));
+            .child(div().h(px(20.0)).child("Keyframe timing and velocity"))
+            .when(selected_count > 1, |s| {
+                s.child(
+                    div()
+                        .text_size(px(10.0))
+                        .text_color(rgb(ui::MUTED))
+                        .child(format!(
+                            "{selected_count} keys selected · fields edit the active key"
+                        )),
+                )
+            });
         if let Some((id, frame, _)) = selection {
             let key = &track.keys()[&frame];
             for (index, (label, value)) in [
@@ -1173,18 +1359,22 @@ impl Render for Graph {
                         )
                         .text_size(px(10.0))
                         .px_1()
-                        .when(key.temporal.mode == mode, |s| s.bg(rgb(0x34495c)))
+                        .when(selection_mode == Some(mode), |s| s.bg(rgb(0x34495c)))
                         .when(locked, |s| s.opacity(0.4))
                         .on_click(move |_, window, cx| {
                             state.update(cx, |state, cx| {
-                                if let Some((id, frame, property)) = selected(state) {
+                                let commands = selection::active(state)
+                                    .into_iter()
+                                    .map(|k| Command::SetTemporalMode {
+                                        id: k.id,
+                                        property: k.property,
+                                        frame: k.frame,
+                                        mode,
+                                    })
+                                    .collect::<Vec<_>>();
+                                if !commands.is_empty() {
                                     state.dispatch(
-                                        &Action::Edit(Command::SetTemporalMode {
-                                            id,
-                                            property,
-                                            frame,
-                                            mode,
-                                        }),
+                                        &Action::Edit(Command::Batch(commands)),
                                         window,
                                         cx,
                                     );
@@ -1385,8 +1575,15 @@ impl Render for Graph {
                 .flex_none()
                 .px_2()
                 .text_color(rgb(ui::MUTED))
-                .child(format!("{}{}", layer.track_label(property).unwrap_or_default(),
-                    if speed_mode { " · signed units/s · left/right handles: incoming/outgoing · gaps: discontinuity" } else { "" })),
+                .child(format!(
+                    "{} · {selected_count} selected{}",
+                    layer.track_label(property).unwrap_or_default(),
+                    if speed_mode {
+                        " · signed units/s · left/right: incoming/outgoing · Shift-drag: constrain"
+                    } else {
+                        " · Shift/Ctrl-click or box select · Shift-drag: constrain"
+                    }
+                )),
         )
         .child(chart)
         .child(toolbar)
@@ -1402,122 +1599,31 @@ impl Render for Graph {
 mod tests {
     use super::*;
     #[test]
-    fn speed_drag_converts_auto_to_continuous_and_undo_restores_auto() {
-        use libre_effects_core::{Editor, Property, TemporalHandle};
-        let mut e = Editor::default();
-        e.execute(Command::AddRectangle).unwrap();
-        for frame in [0, 30, 60] {
-            e.execute(Command::ToggleKeyframe {
+    fn key_details_require_a_current_selection_after_undo_or_deselect() {
+        use libre_effects_core::{KeyRef, Property};
+        let mut state = EditorState::default();
+        state.editor.execute(Command::AddRectangle).unwrap();
+        state
+            .editor
+            .execute(Command::ToggleKeyframe {
                 id: 1,
                 property: Property::PositionX,
-                frame,
+                frame: 0,
             })
             .unwrap();
-        }
-        e.execute(Command::SetTemporalMode {
+        state.graph_property = Property::PositionX.into();
+        state.graph_key = Some((1, 0));
+        assert!(selected(&state).is_none());
+        state.selected_keys.insert(KeyRef {
             id: 1,
-            property: Property::PositionX.into(),
-            frame: 30,
-            mode: TemporalMode::Auto,
-        })
-        .unwrap();
-        let before = e.project().clone();
-        let value = e
-            .selected_layer()
-            .unwrap()
-            .property(Property::PositionX)
-            .keys()[&30]
-            .value;
-        e.execute(key_drag_command(
-            1,
-            Property::PositionX.into(),
-            30,
-            35,
-            value,
-            Some((
-                false,
-                TemporalHandle {
-                    slope: 4.0,
-                    influence: 1.0 / 3.0,
-                },
-                30.0,
-            )),
-        ))
-        .unwrap();
-        let key = &e
-            .selected_layer()
-            .unwrap()
-            .property(Property::PositionX)
-            .keys()[&35];
-        assert_eq!(key.temporal.mode, TemporalMode::Continuous);
-        assert_eq!(key.temporal.incoming.unwrap().slope, 4.0);
-        assert_eq!(key.temporal.outgoing.unwrap().slope, 4.0);
-        e.undo();
-        assert_eq!(e.project(), &before);
-    }
-    #[test]
-    fn speed_drag_changes_time_and_velocity_without_changing_value_and_is_one_undo() {
-        use libre_effects_core::{Editor, Property, TemporalHandle};
-        let mut e = Editor::default();
-        e.execute(Command::AddRectangle).unwrap();
-        for frame in [0, 30, 60] {
-            e.execute(Command::ToggleKeyframe {
-                id: 1,
-                property: Property::PositionX,
-                frame,
-            })
-            .unwrap();
-        }
-        let before = e.project().clone();
-        let value = e
-            .selected_layer()
-            .unwrap()
-            .property(Property::PositionX)
-            .keys()[&30]
-            .value;
-        e.execute(key_drag_command(
-            1,
-            Property::PositionX.into(),
-            30,
-            35,
-            value,
-            Some((
-                true,
-                TemporalHandle {
-                    slope: -4.0,
-                    influence: 0.6,
-                },
-                30.0,
-            )),
-        ))
-        .unwrap();
-        let t = e.selected_layer().unwrap().property(Property::PositionX);
-        assert!(!t.keys().contains_key(&30));
-        assert_eq!(t.keys()[&35].value, value);
-        assert_eq!(t.keys()[&35].temporal.incoming.unwrap().slope, -4.0);
-        e.undo();
-        assert_eq!(e.project(), &before);
-        e.redo();
-        let after = e.project().clone();
-        assert!(
-            e.execute(key_drag_command(
-                1,
-                Property::PositionX.into(),
-                35,
-                60,
-                value,
-                Some((
-                    true,
-                    TemporalHandle {
-                        slope: 1.0,
-                        influence: 0.3
-                    },
-                    30.0
-                ))
-            ))
-            .is_err()
-        );
-        assert_eq!(e.project(), &after);
+            property: state.graph_property,
+            frame: 0,
+        });
+        assert_eq!(selected(&state), Some((1, 0, state.graph_property)));
+        state.graph_key = None;
+        assert_eq!(selected(&state), Some((1, 0, state.graph_property)));
+        state.selected_keys.clear();
+        assert!(selected(&state).is_none());
     }
     #[test]
     fn inline_handle_coordinates_support_descending_segments() {
