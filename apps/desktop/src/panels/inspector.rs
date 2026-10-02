@@ -712,6 +712,15 @@ impl Render for Inspector {
                     .h(px(29.0))
                     .items_center()
                     .child(div().w(px(105.0)).child(label))
+                    .when(index == 2, |d| {
+                        d.child(super::color_picker::swatch(
+                            "layer-fill-color",
+                            layer.color(),
+                            crate::color_edit::Target::Fill(id),
+                            locked,
+                            &self.state,
+                        ))
+                    })
                     .child(
                         div()
                             .flex_1()

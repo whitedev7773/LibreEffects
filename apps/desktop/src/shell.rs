@@ -11,6 +11,7 @@ mod media;
 
 pub(crate) struct Shell {
     state: Entity<EditorState>,
+    color_picker: Entity<crate::panels::color_picker::ColorPicker>,
     layout: Entity<ResizablePanelGroup>,
     middle: Entity<ResizablePanelGroup>,
     upper: Entity<ResizablePanelGroup>,
@@ -34,6 +35,8 @@ impl Shell {
     pub(crate) fn new(cx: &mut Context<Self>) -> Self {
         let state = cx.new(|_| EditorState::default());
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
+        let color_picker =
+            cx.new(|cx| crate::panels::color_picker::ColorPicker::new(state.clone(), cx));
         let browser = cx.new(|cx| Browser::new(state.clone(), cx));
         let preview = cx.new(|cx| Preview::new(state.clone(), cx));
         let sidebar = cx.new(|cx| Sidebar::new(state.clone(), cx));
@@ -80,6 +83,7 @@ impl Shell {
         cx.observe(&fields[5], |_, _, cx| cx.notify()).detach();
         Self {
             state,
+            color_picker,
             layout,
             middle,
             upper,
@@ -107,6 +111,9 @@ impl Shell {
         cx.notify();
     }
     fn dispatch(&mut self, mut action: Action, window: &mut Window, cx: &mut Context<Self>) {
+        if self.state.read(cx).colors.session.is_some() {
+            return;
+        }
         if self.state.read(cx).queue_open && matches!(action, Action::Undo | Action::Redo) {
             action = Action::Queue(if matches!(action, Action::Redo) {
                 crate::editor::queue::QueueAction::Redo
@@ -146,6 +153,9 @@ impl Shell {
         self.right.update(cx, |p, cx| p.reset(cx));
     }
     fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.state.read(cx).colors.session.is_some() {
+            return;
+        }
         self.settings_new = false;
         let comp = self.state.read(cx).editor.project().composition();
         let values = [
@@ -168,6 +178,9 @@ impl Shell {
         cx.notify();
     }
     fn new_composition(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.state.read(cx).colors.session.is_some() {
+            return;
+        }
         self.open_settings(window, cx);
         self.settings_new = true;
         let name = format!(
@@ -253,6 +266,15 @@ impl Shell {
     fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let key = event.keystroke.key.as_str();
         let m = event.keystroke.modifiers;
+        if self.state.read(cx).colors.session.is_some() {
+            if key == "escape" {
+                self.state
+                    .update(cx, |s, cx| s.dispatch(&Action::CancelColor, window, cx));
+                window.focus(&self.focus);
+            }
+            cx.stop_propagation();
+            return;
+        }
         if key == "escape" {
             cx.stop_active_drag(window);
             self.closing = false;
@@ -407,6 +429,19 @@ impl Shell {
 
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if let Some(color) = self
+            .state
+            .update(cx, |s, _| s.colors.background_result.take())
+        {
+            self.fields[5].update(cx, |f, _| {
+                f.sync(
+                    "composition-settings".into(),
+                    format!("#{color:06X}"),
+                    window,
+                )
+            });
+        }
+
         if self.state.read(cx).new_composition_requested {
             self.state
                 .update(cx, |s, _| s.new_composition_requested = false);
@@ -1091,7 +1126,7 @@ impl Render for Shell {
             }
             root = root.child(gpui::deferred(dropdown).with_priority(2));
         }
-        if self.settings || self.help {
+        if (self.settings || self.help) && !self.state.read(cx).colors.picking() {
             let mut dialog = div()
                 .id("settings-help-dialog")
                 .max_h(px(640.0))
@@ -1198,6 +1233,28 @@ impl Render for Shell {
                         .border_color(rgb(ui::MUTED))
                         .bg(rgb(color.unwrap_or(0)))
                         .child(if color.is_some() { "" } else { "?" }),
+                );
+                palette = palette.child(
+                    ui::text_button("choose-background-color", "Choose…").on_click(cx.listener(
+                        |this, _, w, cx| {
+                            TextField::commit_active(w, cx);
+                            if let Ok(color) = ui::parse_hex_color(this.fields[5].read(cx).value())
+                            {
+                                this.state.update(cx, |s, cx| {
+                                    s.dispatch(
+                                        &Action::OpenColor(
+                                            crate::color_edit::Target::BackgroundDraft(color),
+                                        ),
+                                        w,
+                                        cx,
+                                    )
+                                });
+                            } else {
+                                this.settings_error = "Enter a valid background color first".into();
+                                cx.notify();
+                            }
+                        },
+                    )),
                 );
                 for (label, color) in [
                     ("Black", 0x000000),
@@ -1425,6 +1482,22 @@ impl Render for Shell {
                         .child(dialog),
                 )
                 .with_priority(5),
+            );
+        }
+        if self.state.read(cx).colors.session.is_some() && !self.state.read(cx).colors.picking() {
+            root = root.child(
+                gpui::deferred(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(gpui::rgba(0x00000090))
+                        .occlude()
+                        .child(self.color_picker.clone()),
+                )
+                .with_priority(4),
             );
         }
         root

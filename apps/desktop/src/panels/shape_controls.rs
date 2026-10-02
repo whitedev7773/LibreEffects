@@ -154,6 +154,15 @@ impl Render for ShapeControls {
                     .items_center()
                     .h(px(27.0))
                     .child(div().w(px(105.0)).child(label))
+                    .when(index == 0, |d| {
+                        d.child(super::color_picker::swatch(
+                            "shape-stroke-color",
+                            shape.stroke_color,
+                            crate::color_edit::Target::Stroke(id),
+                            locked,
+                            &self.state,
+                        ))
+                    })
                     .child(
                         div()
                             .flex_1()

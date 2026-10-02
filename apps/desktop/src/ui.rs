@@ -105,7 +105,7 @@ pub fn icon(name: &'static str) -> gpui::Svg {
         .text_color(rgb(TEXT))
 }
 
-struct Tip(SharedString);
+pub(crate) struct Tip(pub(crate) SharedString);
 impl Render for Tip {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()

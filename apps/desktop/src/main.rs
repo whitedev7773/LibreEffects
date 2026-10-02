@@ -14,6 +14,7 @@ mod audio_mix;
 mod audio_playback;
 mod blend_render;
 mod cli;
+mod color_edit;
 mod components;
 mod editor;
 mod effect_render;

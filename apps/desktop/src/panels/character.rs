@@ -106,6 +106,15 @@ impl Render for Character {
                     .flex()
                     .items_center()
                     .child(div().w(px(108.0)).child(label))
+                    .when(i == 3, |d| {
+                        d.child(super::color_picker::swatch(
+                            "text-fill-color",
+                            l.color(),
+                            crate::color_edit::Target::Fill(l.id()),
+                            l.locked(),
+                            &self.state,
+                        ))
+                    })
                     .child(
                         div()
                             .flex_1()

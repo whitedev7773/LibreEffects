@@ -30,9 +30,33 @@ Shift constrains handles to an axis. Each completed path or drag is one Undo.
 Properties contains shape Fill/Stroke and Closed Path controls, and ordered
 mask Add/Subtract/Intersect/None, Invert, reorder and remove controls. Paths
 are stored in layer coordinates, including parent transformations, in project
-version 29. Existing rectangular masks remain supported. Path animation,
-mask Feather/Expansion/Opacity, multi-vertex selection and shape Contents
-operators are not implemented yet.
+version 29. Existing rectangular masks remain supported. Mask Opacity,
+Feather and Expansion animate in v30; shape/mask vertices and handles animate
+in v31. Enable the Path stopwatch and edit with the Pen at another frame.
+Animated paths require matching topology. Multi-vertex selection, topology
+changes across keys, variable feather and shape Contents operators remain open.
+
+## Color selection
+
+Click the color swatch next to Fill in Properties or Character, Stroke in shape
+Properties, or **Choose…** in Composition Settings. The shared dialog provides a
+saturation/brightness area, hue strip, RGB and HEX fields, original/new swatches,
+and twelve recent colors saved in the local user profile. Arrow keys adjust
+saturation/brightness; Page Up/Down adjusts hue; Shift increases the step.
+
+Layer color accepts RRGGBB or RRGGBBAA. Its **Opacity %** edits the entire layer's
+opacity at the current frame, preserving animation and other keys. Stroke and
+composition background edit RGB only. The background remains opaque for MP4
+and background-inclusive stills; alpha exports retain transparency.
+
+Changes are drafts until OK. Accepting a layer color/opacity is one Undo;
+Cancel leaves the document untouched. Background selection stays in Composition
+Settings until that dialog is accepted. **Pick from Composition** temporarily
+hides the dialog: click a rendered pixel, or press Escape to return. Sampling
+uses the current preview's raw 8-bit straight RGBA before background, checker,
+channel display and overlays. It uses the current preview resolution; it is not
+an OS screen eyedropper or a color-managed HDR sampler. At partial alpha,
+premultiplication roundtrips can differ from source RGB by one byte.
 
 ## Workspace
 

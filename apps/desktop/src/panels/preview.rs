@@ -368,6 +368,26 @@ impl Preview {
         ])
     }
     fn down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.state.read(cx).colors.picking() {
+            self.sample_pointer(event.position, cx);
+            self.state.update(cx, |s, cx| {
+                if let Some((revision, composition, pixel)) = &s.pixel_info
+                    && *revision == s.document_revision
+                    && *composition == s.editor.project().active_composition_id()
+                    && pixel.frame == s.frame
+                {
+                    let rgba = pixel.rgba;
+                    s.dispatch(&Action::SampleColor(rgba), window, cx);
+                } else {
+                    s.status =
+                        "Wait for the current frame, then click inside the Composition.".into();
+                    cx.notify();
+                }
+            });
+            cx.stop_propagation();
+            return;
+        }
+
         let Some(bounds) = self.bounds.get() else {
             return;
         };
@@ -639,6 +659,9 @@ impl Preview {
     }
     fn moving(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
         self.sample_pointer(event.position, cx);
+        if self.state.read(cx).colors.session.is_some() {
+            return;
+        }
         if event.pressed_button != Some(MouseButton::Left) {
             return;
         }
@@ -687,6 +710,9 @@ impl Preview {
         }
     }
     fn up(&mut self, event: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.state.read(cx).colors.session.is_some() {
+            return;
+        }
         if self.state.read(cx).tool == Tool::Pen {
             if let Some(command) = self.pen.up(self.state.read(cx)) {
                 self.state
@@ -976,7 +1002,7 @@ impl Render for Preview {
                     .child(format!(
                         "{}  ›  Active Camera{}",
                         comp.name(),
-                        if pen_active { "  ·  Pen: click / drag · Enter finish · Esc cancel · Delete vertex" } else if self.pending.is_some() {
+                        if self.state.read(cx).colors.picking() { "  ·  Pick composition color · click to sample · Esc to return" } else if pen_active { "  ·  Pen: click / drag · Enter finish · Esc cancel · Delete vertex" } else if self.pending.is_some() {
                             "  ·  Rendering…"
                         } else {
                             ""
@@ -988,6 +1014,7 @@ impl Render for Preview {
                     .id("composition-canvas")
                     .track_focus(&self.focus)
                     .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+                        if this.state.read(cx).colors.session.is_some() { return; }
                         if this.state.read(cx).tool == Tool::Pen {
                             let (handled, command) = this.pen.key(&event.keystroke.key, this.state.read(cx));
                             if handled {

@@ -29,3 +29,5 @@ pub(crate) use timeline::Timeline;
 pub(crate) mod render_queue;
 
 mod path_controls;
+
+pub(crate) mod color_picker;

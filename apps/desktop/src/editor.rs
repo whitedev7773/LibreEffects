@@ -37,6 +37,11 @@ pub(crate) struct VideoJob {
 
 #[derive(Clone)]
 pub(crate) enum Action {
+    OpenColor(crate::color_edit::Target),
+    ApplyColor,
+    CancelColor,
+    PickColor,
+    SampleColor([u8; 4]),
     Queue(queue::QueueAction),
     AddMarker(libre_effects_core::MarkerTarget),
     ShowMarker(
@@ -155,6 +160,7 @@ impl PropertyFilter {
 }
 
 pub(crate) struct EditorState {
+    pub colors: crate::color_edit::Workflow,
     pub queue: Option<std::sync::Arc<std::sync::Mutex<crate::render_queue::Queue>>>,
     pub queue_open: bool,
     pub queue_busy: bool,
@@ -231,7 +237,12 @@ pub(crate) struct EditorState {
 
 impl Default for EditorState {
     fn default() -> Self {
+        let mut colors = crate::color_edit::Workflow::default();
+        if let Some(path) = crate::color_edit::Workflow::path() {
+            colors.load(&path);
+        }
         Self {
+            colors,
             queue: None,
             queue_open: false,
             queue_busy: false,
@@ -453,6 +464,18 @@ impl EditorState {
     }
 
     pub fn dispatch(&mut self, action: &Action, window: &mut Window, cx: &mut Context<Self>) {
+        if self.colors.session.is_some()
+            && !matches!(
+                action,
+                Action::ApplyColor
+                    | Action::CancelColor
+                    | Action::PickColor
+                    | Action::SampleColor(_)
+            )
+        {
+            return;
+        }
+
         if !matches!(
             action,
             Action::Select(_)
@@ -492,6 +515,98 @@ impl EditorState {
             window.blur();
         }
         match action {
+            Action::OpenColor(target) => {
+                self.stop();
+                match crate::color_edit::Session::new(
+                    *target,
+                    self.editor.project(),
+                    self.document_revision,
+                    self.frame,
+                ) {
+                    Ok(session) => {
+                        self.colors.session = Some(session);
+                        self.colors.serial = self.colors.serial.wrapping_add(1);
+                    }
+                    Err(error) => self.status = error,
+                }
+            }
+            Action::CancelColor => {
+                if self.colors.picking() {
+                    self.colors.session.as_mut().unwrap().picking = false;
+                    self.status = "Color sample canceled".into();
+                } else {
+                    self.colors.session = None;
+                    self.status = "Color edit canceled".into();
+                }
+            }
+            Action::PickColor => {
+                if let Some(session) = &mut self.colors.session {
+                    session.picking = true;
+                    session.error.clear();
+                }
+                self.status = "Click inside the Composition to sample its RGBA pixels. Esc returns to the color dialog.".into();
+            }
+            Action::SampleColor(rgba) => {
+                if let Some(session) = &mut self.colors.session {
+                    match session.validate(
+                        self.editor.project(),
+                        self.document_revision,
+                        self.frame,
+                    ) {
+                        Ok(()) => {
+                            self.status = format!(
+                                "Sampled RGBA {}, {}, {}, {}",
+                                rgba[0], rgba[1], rgba[2], rgba[3]
+                            );
+                            session.set_color(crate::color_edit::Color::rgba(*rgba));
+                            session.picking = false;
+                        }
+                        Err(error) => {
+                            session.error = error;
+                            session.picking = false;
+                        }
+                    }
+                }
+            }
+            Action::ApplyColor => {
+                if let Some(mut session) = self.colors.session.take() {
+                    let result = if !session.error.is_empty() {
+                        Err(session.error.clone())
+                    } else {
+                        session.validate(self.editor.project(), self.document_revision, self.frame)
+                    };
+                    if let Err(error) = result {
+                        session.error = error;
+                        self.colors.session = Some(session);
+                    } else {
+                        let color = session.color;
+                        if let Some(command) = session.command() {
+                            self.dispatch(&Action::Edit(command), window, cx);
+                        } else {
+                            self.status = "Color accepted".into();
+                        }
+                        if self.status == "Edited" || self.status == "Color accepted" {
+                            if matches!(
+                                session.target,
+                                crate::color_edit::Target::BackgroundDraft(_)
+                            ) {
+                                self.colors.background_result = Some(color.rgb);
+                            }
+                            self.colors.remember(color);
+                            if let Some(path) = crate::color_edit::Workflow::path()
+                                && let Err(error) = self.colors.save(&path)
+                            {
+                                self.status = format!(
+                                    "Color applied; recent colors could not be saved: {error}"
+                                );
+                            }
+                        } else {
+                            session.error = self.status.clone();
+                            self.colors.session = Some(session);
+                        }
+                    }
+                }
+            }
             Action::Queue(action) => self.queue_action(action, window, cx),
             Action::AddMarker(target) => {
                 let existing = self
