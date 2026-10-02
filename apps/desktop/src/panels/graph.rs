@@ -1,3 +1,4 @@
+mod speed;
 use crate::{
     components::TextField,
     editor::{Action, EditorState},
@@ -41,7 +42,21 @@ impl View {
         )
     }
 }
-fn view(track: &AnimatedProperty, start: u32, span: u32) -> View {
+fn view(track: &AnimatedProperty, start: u32, span: u32, speed_mode: bool, fps: f64) -> View {
+    if speed_mode {
+        let (mut low, mut high) = (0.0_f64, 0.0_f64);
+        for (_, v) in speed::curves(track, start, span, fps).into_iter().flatten() {
+            low = low.min(v);
+            high = high.max(v);
+        }
+        let padding = ((high - low) * 0.18).max(1.0);
+        return View {
+            start: start as f64,
+            span: span.max(1) as f64,
+            low: low - padding,
+            high: high + padding,
+        };
+    }
     let mut low = f64::INFINITY;
     let mut high = f64::NEG_INFINITY;
     for i in 0..=512 {
@@ -116,6 +131,7 @@ enum Drag {
         from: u32,
         to: u32,
         value: f64,
+        velocity: Option<(bool, libre_effects_core::TemporalHandle, f64)>,
         view: View,
         bounds: Bounds<Pixels>,
         start: Point<Pixels>,
@@ -140,6 +156,7 @@ pub(crate) struct Graph {
     drag: Option<Drag>,
     fields: Vec<Entity<TextField>>,
     details: bool,
+    speed_mode: bool,
 }
 fn selected(state: &EditorState) -> Option<(LayerId, u32, PropertyPath)> {
     let (id, frame) = state.graph_key?;
@@ -339,6 +356,7 @@ impl Graph {
             drag: None,
             fields,
             details: false,
+            speed_mode: false,
         }
     }
     fn preset(&self, interpolation: Interpolation, window: &mut Window, cx: &mut Context<Self>) {
@@ -413,20 +431,52 @@ impl Graph {
         let Some(track) = layer.track(property) else {
             return;
         };
-        let view = view(track, state.timeline_start, state.visible_frames());
+        let fps = state.editor.project().composition().fps().as_f64();
+        let view = view(
+            track,
+            state.timeline_start,
+            state.visible_frames(),
+            self.speed_mode,
+            fps,
+        );
         let hit = track
             .keys()
             .iter()
             .filter(|(f, _)| {
                 **f >= state.timeline_start && **f <= state.timeline_start + state.visible_frames()
             })
-            .find(|(f, k)| {
-                let p = view.point(bounds, **f as f64, k.value);
-                f32::from(p.x - event.position.x).abs() < 9.0
-                    && f32::from(p.y - event.position.y).abs() < 9.0
-            })
-            .map(|(f, k)| (*f, k.value));
-        if hit.is_none() && !layer.locked() {
+            .find_map(|(&f, k)| {
+                let near = |v: f64, offset: f32| {
+                    let p = view.point(bounds, f as f64, v);
+                    f32::from(p.x - event.position.x).abs() < 9.0 + offset.abs()
+                        && (f32::from(p.x - event.position.x) + offset).abs() < 7.0
+                        && f32::from(p.y - event.position.y).abs() < 9.0
+                };
+                if self.speed_mode {
+                    speed::ends(track, f, fps)
+                        .into_iter()
+                        .find(|(incoming, v)| near(*v, if *incoming { -5.0 } else { 5.0 }))
+                        .map(|(incoming, _)| {
+                            (
+                                f,
+                                k.value,
+                                Some((
+                                    incoming,
+                                    track.temporal_handle(f, incoming).unwrap_or(
+                                        libre_effects_core::TemporalHandle {
+                                            slope: 0.0,
+                                            influence: 1.0 / 3.0,
+                                        },
+                                    ),
+                                    fps,
+                                )),
+                            )
+                        })
+                } else {
+                    near(k.value, 0.0).then_some((f, k.value, None))
+                }
+            });
+        if hit.is_none() && !layer.locked() && !self.speed_mode {
             if let Some((_, frame, _)) = selected(state)
                 && let Some(curve) = curve_at(state)
                 && let Some(space) = HandleSpace::segment(view, bounds, track, frame)
@@ -455,7 +505,7 @@ impl Graph {
                 }
             }
         }
-        if let Some((frame, value)) = hit {
+        if let Some((frame, value, velocity)) = hit {
             if !layer.locked() {
                 self.drag = Some(Drag::Key {
                     id,
@@ -463,6 +513,7 @@ impl Graph {
                     from: frame,
                     to: frame,
                     value,
+                    velocity,
                     view,
                     bounds,
                     start: event.position,
@@ -541,8 +592,10 @@ impl Graph {
         }
         match &mut self.drag {
             Some(Drag::Key {
+                from,
                 to,
                 value,
+                velocity,
                 view,
                 bounds,
                 start,
@@ -557,7 +610,13 @@ impl Graph {
                     return;
                 }
                 *moved = true;
-                let (f, v) = view.value(*bounds, event.position);
+                let (mut f, v) = view.value(*bounds, event.position);
+                if velocity.is_some() {
+                    f = *from as f64
+                        + f32::from(event.position.x - start.x) as f64
+                            / f32::from(bounds.size.width).max(1.0) as f64
+                            * view.span;
+                }
                 *to = f.round().clamp(
                     0.0,
                     (self
@@ -569,7 +628,11 @@ impl Graph {
                         .duration()
                         - 1) as f64,
                 ) as u32;
-                *value = v;
+                if let Some((_, handle, fps)) = velocity {
+                    handle.slope = v / *fps;
+                } else {
+                    *value = v;
+                }
             }
             Some(Drag::Handle {
                 index,
@@ -619,14 +682,11 @@ impl Graph {
                     from,
                     to,
                     value,
+                    velocity,
                     ..
                 } => dispatch_key(
                     state,
-                    Command::EditTrack {
-                        id,
-                        property,
-                        edit: TrackEdit::Keyframe { from, to, value },
-                    },
+                    key_drag_command(id, property, from, to, value, velocity),
                     id,
                     to,
                     window,
@@ -653,6 +713,34 @@ impl Graph {
             });
         }
         cx.notify();
+    }
+}
+fn key_drag_command(
+    id: LayerId,
+    property: PropertyPath,
+    from: u32,
+    to: u32,
+    value: f64,
+    velocity: Option<(bool, libre_effects_core::TemporalHandle, f64)>,
+) -> Command {
+    let edit = Command::EditTrack {
+        id,
+        property,
+        edit: TrackEdit::Keyframe { from, to, value },
+    };
+    if let Some((incoming, handle, _)) = velocity {
+        Command::Batch(vec![
+            edit,
+            Command::SetTemporalHandle {
+                id,
+                property,
+                frame: to,
+                incoming,
+                handle,
+            },
+        ])
+    } else {
+        edit
     }
 }
 fn stroke(
@@ -743,6 +831,20 @@ impl Render for Graph {
             .items_center()
             .gap_1()
             .px_2();
+        for (label, speed_mode) in [("Value Graph", false), ("Speed Graph", true)] {
+            toolbar = toolbar.child(
+                ui::text_button(
+                    SharedString::from(format!("graph-type-{speed_mode}")),
+                    label,
+                )
+                .when(self.speed_mode == speed_mode, |s| s.bg(rgb(0x34495c)))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.speed_mode = speed_mode;
+                    this.drag = None;
+                    cx.notify();
+                })),
+            );
+        }
         if let Some(layer) = &layer {
             toolbar = toolbar.child(ui::action_tool(
                 "graph-add-key",
@@ -802,7 +904,8 @@ impl Render for Graph {
         let Some(track) = layer.track(property).cloned() else {
             return root.child(div().p_4().child("Select a property in the timeline."));
         };
-        let mut graph_view = view(&track, start, span);
+        let speed_mode = self.speed_mode;
+        let mut graph_view = view(&track, start, span, speed_mode, fps);
         if let Some(Drag::Key { view, .. }) = &self.drag {
             graph_view = *view;
         }
@@ -814,6 +917,11 @@ impl Render for Graph {
         let measured = self.plot.clone();
         let drag = self.drag.clone();
         let plot_track = track.clone();
+        let speed_curves = if speed_mode {
+            speed::curves(&track, start, span, fps)
+        } else {
+            vec![]
+        };
         let chart = div().flex_1().min_h_0().min_w_0().flex().flex_col().child(
             div()
                 .id("value-graph-canvas")
@@ -875,17 +983,30 @@ impl Render for Graph {
                                     }
                                     plot_track.sample(frame)
                                 };
-                                stroke(
-                                    window,
-                                    (0..=600).map(|i| {
-                                        let f =
-                                            graph_view.start + graph_view.span * i as f64 / 600.0;
-                                        graph_view.point(bounds, f, evaluate(f))
-                                    }),
-                                    0xffc66d,
-                                    1.5,
-                                );
-                                if let Some((_, frame, _)) = selection
+                                if speed_mode {
+                                    for line in &speed_curves {
+                                        stroke(
+                                            window,
+                                            line.iter()
+                                                .map(|(f, v)| graph_view.point(bounds, *f, *v)),
+                                            0xffc66d,
+                                            1.5,
+                                        );
+                                    }
+                                } else {
+                                    stroke(
+                                        window,
+                                        (0..=600).map(|i| {
+                                            let f = graph_view.start
+                                                + graph_view.span * i as f64 / 600.0;
+                                            graph_view.point(bounds, f, evaluate(f))
+                                        }),
+                                        0xffc66d,
+                                        1.5,
+                                    );
+                                }
+                                if !speed_mode
+                                    && let Some((_, frame, _)) = selection
                                     && let Some(mut curve) = curve
                                     && let Some(space) =
                                         HandleSpace::segment(graph_view, bounds, &plot_track, frame)
@@ -909,6 +1030,23 @@ impl Render for Graph {
                                     dot(window, space.point(curve.x2, curve.y2), ui::BLUE);
                                 }
                                 for (&f, k) in plot_track.keys() {
+                                    if speed_mode {
+                                        for (incoming, v) in speed::ends(&plot_track, f, fps) {
+                                            let mut p = graph_view.point(bounds, f as f64, v);
+                                            p.x += px(if incoming { -5.0 } else { 5.0 });
+                                            dot(
+                                                window,
+                                                p,
+                                                if selection.is_some_and(|(_, frame, _)| frame == f)
+                                                {
+                                                    ui::BLUE
+                                                } else {
+                                                    0xffc66d
+                                                },
+                                            );
+                                        }
+                                        continue;
+                                    }
                                     dot(
                                         window,
                                         graph_view.point(bounds, f as f64, k.value),
@@ -919,10 +1057,20 @@ impl Render for Graph {
                                         },
                                     );
                                 }
-                                if let Some(Drag::Key { to, value, .. }) = &drag {
+                                if let Some(Drag::Key {
+                                    to,
+                                    value,
+                                    velocity,
+                                    ..
+                                }) = &drag
+                                {
                                     dot(
                                         window,
-                                        graph_view.point(bounds, *to as f64, *value),
+                                        graph_view.point(
+                                            bounds,
+                                            *to as f64,
+                                            velocity.map_or(*value, |(_, h, fps)| h.slope * fps),
+                                        ),
                                         0xffffff,
                                     );
                                 }
@@ -1174,7 +1322,8 @@ impl Render for Graph {
                 .flex_none()
                 .px_2()
                 .text_color(rgb(ui::MUTED))
-                .child(layer.track_label(property).unwrap_or_default()),
+                .child(format!("{}{}", layer.track_label(property).unwrap_or_default(),
+                    if speed_mode { " · signed units/s · left/right handles: incoming/outgoing · gaps: discontinuity" } else { "" })),
         )
         .child(chart)
         .child(toolbar)
@@ -1189,6 +1338,70 @@ impl Render for Graph {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn speed_drag_changes_time_and_velocity_without_changing_value_and_is_one_undo() {
+        use libre_effects_core::{Editor, Property, TemporalHandle};
+        let mut e = Editor::default();
+        e.execute(Command::AddRectangle).unwrap();
+        for frame in [0, 30, 60] {
+            e.execute(Command::ToggleKeyframe {
+                id: 1,
+                property: Property::PositionX,
+                frame,
+            })
+            .unwrap();
+        }
+        let before = e.project().clone();
+        let value = e
+            .selected_layer()
+            .unwrap()
+            .property(Property::PositionX)
+            .keys()[&30]
+            .value;
+        e.execute(key_drag_command(
+            1,
+            Property::PositionX.into(),
+            30,
+            35,
+            value,
+            Some((
+                true,
+                TemporalHandle {
+                    slope: -4.0,
+                    influence: 0.6,
+                },
+                30.0,
+            )),
+        ))
+        .unwrap();
+        let t = e.selected_layer().unwrap().property(Property::PositionX);
+        assert!(!t.keys().contains_key(&30));
+        assert_eq!(t.keys()[&35].value, value);
+        assert_eq!(t.keys()[&35].temporal.incoming.unwrap().slope, -4.0);
+        e.undo();
+        assert_eq!(e.project(), &before);
+        e.redo();
+        let after = e.project().clone();
+        assert!(
+            e.execute(key_drag_command(
+                1,
+                Property::PositionX.into(),
+                35,
+                60,
+                value,
+                Some((
+                    true,
+                    TemporalHandle {
+                        slope: 1.0,
+                        influence: 0.3
+                    },
+                    30.0
+                ))
+            ))
+            .is_err()
+        );
+        assert_eq!(e.project(), &after);
+    }
     #[test]
     fn inline_handle_coordinates_support_descending_segments() {
         let bounds = Bounds::new(point(px(400.0), px(100.0)), size(px(600.0), px(200.0)));

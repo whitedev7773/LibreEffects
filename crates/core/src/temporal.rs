@@ -86,6 +86,96 @@ pub(super) fn sample(a: &Keyframe, b: &Keyframe, span: f64, time: f64) -> f64 {
     cubic(a.value, y1, y2, b.value, (lo + hi) * 0.5)
 }
 impl AnimatedProperty {
+    /// Signed, unclamped scalar velocity in property units per frame. At an exact
+    /// key, `incoming` selects the left-hand limit; otherwise the right-hand limit.
+    /// None denotes a Hold jump or a vertical tangent, never an arbitrary finite spike.
+    pub fn velocity(&self, frame: f64, incoming: bool) -> Option<f64> {
+        if !frame.is_finite() {
+            return None;
+        }
+        if frame < 0.0 {
+            return Some(0.0);
+        }
+        let exact = frame.fract() == 0.0;
+        let f = frame.floor().min(u32::MAX as f64) as Frame;
+        let left = if exact && incoming {
+            self.keys.range(..f).next_back()
+        } else {
+            self.keys.range(..=f).next_back()
+        };
+        let Some((&start, a)) = left else {
+            return Some(0.0);
+        };
+        let Some((&end, b)) = self
+            .keys
+            .range((std::ops::Bound::Excluded(start), std::ops::Bound::Unbounded))
+            .next()
+        else {
+            return Some(0.0);
+        };
+        if frame > end as f64 {
+            return Some(0.0);
+        }
+        let span = (end - start) as f64;
+        let time = ((frame - start as f64) / span).clamp(0.0, 1.0);
+        if a.interpolation == Interpolation::Hold {
+            return if time == 1.0 && a.value != b.value {
+                None
+            } else {
+                Some(0.0)
+            };
+        }
+        if a.temporal.outgoing.is_none() && b.temporal.incoming.is_none() {
+            match a.interpolation {
+                Interpolation::Linear => return Some((b.value - a.value) / span),
+                Interpolation::Smooth => {
+                    return Some((b.value - a.value) / span * 6.0 * time * (1.0 - time));
+                }
+                _ => {}
+            }
+        }
+        let (x1, y1, x2, y2) = controls(a, b, span);
+        let cubic_x = |t: f64| {
+            let u = 1.0 - t;
+            3.0 * u * u * t * x1 + 3.0 * u * t * t * x2 + t * t * t
+        };
+        let t = if time == 0.5 && x1 == 1.0 && x2 == 0.0 {
+            0.5
+        } else if time == 0.0 || time == 1.0 {
+            time
+        } else {
+            let (mut lo, mut hi) = (0.0, 1.0);
+            for _ in 0..48 {
+                let t = (lo + hi) * 0.5;
+                if cubic_x(t) < time {
+                    lo = t;
+                } else {
+                    hi = t;
+                }
+            }
+            (lo + hi) * 0.5
+        };
+        let derivatives = |a: f64, b: f64, c: f64, d: f64| {
+            let u = 1.0 - t;
+            [
+                3.0 * (u * u * (b - a) + 2.0 * u * t * (c - b) + t * t * (d - c)),
+                6.0 * (u * (c - 2.0 * b + a) + t * (d - 2.0 * c + b)),
+                6.0 * (d - 3.0 * c + 3.0 * b - a),
+            ]
+        };
+        let dx = derivatives(0.0, x1, x2, 1.0);
+        let dy = derivatives(a.value, y1, y2, b.value);
+        for (x, y) in dx.into_iter().zip(dy) {
+            if x.abs() > 1e-12 {
+                let v = y / x / span;
+                return v.is_finite().then_some(v);
+            }
+            if y.abs() > 1e-10 {
+                return None;
+            }
+        }
+        Some(0.0)
+    }
     /// Existing finite tangent, or a derived legacy tangent. Vertical legacy handles return None.
     pub fn temporal_handle(&self, frame: Frame, incoming: bool) -> Option<TemporalHandle> {
         let key = self.keys.get(&frame)?;
@@ -196,6 +286,136 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn velocity_matches_fractional_samples_and_integrates_to_value_change() {
+        let p = Property::PositionX.into();
+        let mut e = scene(p);
+        for mode in [
+            Interpolation::Linear,
+            Interpolation::Smooth,
+            Interpolation::Bezier(Bezier {
+                x1: 0.15,
+                y1: -0.3,
+                x2: 0.8,
+                y2: 1.4,
+            }),
+        ] {
+            e.execute(Command::SetInterpolation {
+                id: 1,
+                property: Property::PositionX,
+                frame: 0,
+                interpolation: mode,
+            })
+            .unwrap();
+            let t = track(&e, p);
+            for f in [0.1, 2.0, 8.5, 15.0, 24.0, 29.9] {
+                let finite = (t.sample(f + 1e-4) - t.sample(f - 1e-4)) / 2e-4;
+                assert!(
+                    (t.velocity(f, false).unwrap() - finite).abs() < 1e-5,
+                    "{mode:?} at {f}"
+                );
+            }
+            let area = (0..10000)
+                .map(|i| {
+                    t.velocity((i as f64 + 0.5) * 30.0 / 10000.0, false)
+                        .unwrap()
+                })
+                .sum::<f64>()
+                * 30.0
+                / 10000.0;
+            assert!((area - 30.0).abs() < 1e-4);
+        }
+        set(&mut e, p, 0, false, 4.0, 0.5).unwrap();
+        set(&mut e, p, 30, true, -2.0, 0.3).unwrap();
+        assert!((track(&e, p).velocity(0.0, false).unwrap() - 4.0).abs() < 1e-12);
+        assert!((track(&e, p).velocity(30.0, true).unwrap() + 2.0).abs() < 1e-12);
+        assert_eq!(track(&e, p).velocity(30.0, false), Some(-1.0));
+        let t = track(&e, p);
+        let finite = (t.sample(12.5001) - t.sample(12.4999)) / 0.0002;
+        assert!((t.velocity(12.5, false).unwrap() - finite).abs() < 1e-5);
+    }
+    #[test]
+    fn velocity_limits_distinguish_jumps_vertical_handles_and_removable_singularities() {
+        let p = Property::PositionX.into();
+        let mut e = scene(p);
+        e.execute(Command::SetInterpolation {
+            id: 1,
+            property: Property::PositionX,
+            frame: 0,
+            interpolation: Interpolation::Hold,
+        })
+        .unwrap();
+        assert_eq!(track(&e, p).velocity(29.9, false), Some(0.0));
+        assert_eq!(track(&e, p).velocity(30.0, true), None);
+        assert_eq!(track(&e, p).velocity(30.0, false), Some(-1.0));
+        assert_eq!(track(&e, p).velocity(100.0, false), Some(0.0));
+        assert_eq!(track(&e, p).velocity(f64::NAN, false), None);
+        for (curve, frame, want) in [
+            (
+                Bezier {
+                    x1: 0.0,
+                    y1: 0.5,
+                    x2: 0.8,
+                    y2: 0.7,
+                },
+                0.0,
+                None,
+            ),
+            (
+                Bezier {
+                    x1: 0.0,
+                    y1: 0.0,
+                    x2: 1.0,
+                    y2: 1.0,
+                },
+                0.0,
+                Some(1.0),
+            ),
+            (
+                Bezier {
+                    x1: 0.0,
+                    y1: 0.0,
+                    x2: 1.0,
+                    y2: 1.0,
+                },
+                30.0,
+                Some(1.0),
+            ),
+            (
+                Bezier {
+                    x1: 1.0,
+                    y1: 0.0,
+                    x2: 0.0,
+                    y2: 1.0,
+                },
+                15.0,
+                None,
+            ),
+            (
+                Bezier {
+                    x1: 1.0,
+                    y1: 1.0,
+                    x2: 0.0,
+                    y2: 0.0,
+                },
+                15.0,
+                Some(1.0),
+            ),
+        ] {
+            e.execute(Command::SetInterpolation {
+                id: 1,
+                property: Property::PositionX,
+                frame: 0,
+                interpolation: Interpolation::Bezier(curve),
+            })
+            .unwrap();
+            assert_eq!(
+                track(&e, p).velocity(frame, frame == 30.0),
+                want,
+                "{curve:?}"
+            );
+        }
+    }
     fn scene(path: PropertyPath) -> Editor {
         let mut e = Editor::default();
         e.execute(Command::AddRectangle).unwrap();

@@ -471,9 +471,29 @@ zoom and pan; its vertical range fits the visible curve.
   Layer clipboard and effect preset FPS conversion preserves velocity per second.
   These handles require project version 35 (effect preset version 2 when present).
 - This is still a single-channel value graph. Auto/Continuous Bezier linking,
-  speed graphs, spatial paths, multi-key graph editing, pointer dragging of the
-  independent tangents and full AE Easy Ease compatibility remain unfinished.
+  spatial paths, multi-key graph editing, influence-handle dragging and full AE
+  Easy Ease compatibility remain unfinished.
   Geometry path timing tracks do not yet support these scalar velocity handles.
+
+Use **Value Graph / Speed Graph** in the graph toolbar to switch views. Speed
+Graph shows the signed derivative of the selected scalar channel in property
+units per second (a decreasing value has negative velocity). It uses the same
+Linear/Smooth/Bezier/independent tangent curve as playback, with FPS conversion.
+Separate strokes represent each segment; Hold jumps and vertical tangents are
+gaps rather than artificial finite spikes. The zero axis remains visible.
+
+At a key, the left marker edits incoming velocity and the right marker outgoing
+velocity. Drag horizontally to retime the key and vertically to change that
+side's velocity while preserving its influence and property value. Release is
+one Undo step; collisions/invalid velocities reject the entire edit and Escape
+cancels. Keyframe... still edits precise time/value/velocity/influence. View
+switching changes no project content; graph type is currently session-local.
+
+This is a scalar channel graph (including separate Position X/Y), not the
+magnitude of a combined spatial path or the derivative of final composited
+pixels. Property/effect output clamping can therefore differ from raw track
+velocity. Multi-channel selection, vector speed, automatic graph type selection,
+linked tangent modes and persisted graph preferences remain open work.
 
 Open `examples/curve-parent-study.lfe.json` for an overshooting Bezier animation
 with a child layer. The source generator is
