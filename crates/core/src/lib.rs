@@ -18,8 +18,10 @@ mod compositions;
 mod document;
 mod editing;
 mod key_scale;
+mod key_velocity_scale;
 pub mod project_file;
 pub use key_scale::KeyScale;
+pub use key_velocity_scale::KeyVelocityScale;
 mod effects;
 pub use effects::{
     EffectColorSpace, EffectEdit, EffectId, EffectInstance, EffectKind, EffectParam, EffectPreset,
@@ -1103,6 +1105,11 @@ pub enum Command {
         keys: Vec<KeyRef>,
         scale: KeyScale,
     },
+    /// Scale signed scalar endpoint velocities without moving keys or values.
+    ScaleKeyVelocities {
+        keys: Vec<KeyRef>,
+        scale: KeyVelocityScale,
+    },
     DeleteKeys(Vec<KeyRef>),
     PasteKeys {
         keys: Vec<KeyCopy>,
@@ -1323,12 +1330,14 @@ impl Editor {
         let mut next = self.current.clone();
         let reorder_only = command.reorders_only();
         let text_values_only = text_animation::value_edits_only(&command);
+        let velocity_scales_only = key_velocity_scale::edits_only(&command);
         apply(&mut next, command)?;
         if text_values_only && next == self.current {
             return Ok(());
         }
-        if reorder_only {
-            // Reindexing needs no schema/asset migration, even for imported projects.
+        if reorder_only || velocity_scales_only {
+            // Reindexing and velocity scaling need no unrelated schema/asset migration.
+            // Velocity scaling applies only its existing temporal schema minimums.
             return self.accept_candidate(next);
         }
         // Older applications must reject projects they cannot render faithfully.

@@ -3,7 +3,7 @@
 use super::*;
 use libre_effects_core::{FrameRate, Project, Property, TemporalHandle};
 
-fn scene(frames: &[u32]) -> (EditorState, View, Bounds<Pixels>) {
+pub(super) fn scene(frames: &[u32]) -> (EditorState, View, Bounds<Pixels>) {
     let mut state = EditorState::default();
     state
         .editor
@@ -42,7 +42,7 @@ fn scene(frames: &[u32]) -> (EditorState, View, Bounds<Pixels>) {
         Bounds::new(point(px(100.0), px(100.0)), size(px(1000.0), px(400.0))),
     )
 }
-fn edit(state: &mut EditorState, edit: TrackEdit) {
+pub(super) fn edit(state: &mut EditorState, edit: TrackEdit) {
     state
         .editor
         .execute(Command::EditTrack {
@@ -52,7 +52,7 @@ fn edit(state: &mut EditorState, edit: TrackEdit) {
         })
         .unwrap();
 }
-fn track(state: &EditorState) -> &AnimatedProperty {
+pub(super) fn track(state: &EditorState) -> &AnimatedProperty {
     state
         .editor
         .selected_layer()
@@ -60,7 +60,7 @@ fn track(state: &EditorState) -> &AnimatedProperty {
         .track(state.graph_property)
         .unwrap()
 }
-fn area(state: &EditorState) -> SelectionBox {
+pub(super) fn area(state: &EditorState) -> SelectionBox {
     SelectionBox::new(
         track(state),
         &selection::active(state).iter().map(|k| k.frame).collect(),
@@ -78,7 +78,7 @@ fn grab(state: &EditorState, view: View, bounds: Bounds<Pixels>, side: i8) -> Tr
         .1;
     Transform::new(state, view, bounds, p + point(px(2.0), px(-1.0))).unwrap()
 }
-fn manual(state: &mut EditorState) {
+pub(super) fn manual(state: &mut EditorState) {
     let frames: Vec<_> = track(state).keys().keys().copied().collect();
     for (i, &frame) in frames.iter().enumerate() {
         for incoming in [true, false] {
@@ -161,25 +161,21 @@ fn speed_box_uses_signed_finite_endpoints_in_rational_fps_units() {
 }
 
 #[test]
-fn speed_box_has_only_horizontal_hit_targets_and_clips_pointer_hits() {
+fn speed_box_has_axis_only_hit_targets_and_clips_pointer_hits() {
     let (mut state, view, bounds) = scene(&[30, 50, 60]);
     manual(&mut state);
     let b = area(&state);
     let handles = b.handles(view, bounds);
     assert_eq!(
         handles.iter().map(|(h, _)| *h).collect::<Vec<_>>(),
-        vec![Handle(-1, 0), Handle(1, 0)]
+        vec![Handle(-1, 0), Handle(1, 0), Handle(0, -1), Handle(0, 1)]
     );
     for &(handle, at) in &handles {
         assert_eq!(b.hit(view, bounds, at), Some(handle));
     }
     let box_bounds = b.area(view, bounds);
     for y in [box_bounds.top(), box_bounds.bottom()] {
-        for x in [
-            box_bounds.left(),
-            box_bounds.left() + box_bounds.size.width / 2.0,
-            box_bounds.right(),
-        ] {
+        for x in [box_bounds.left(), box_bounds.right()] {
             assert_eq!(b.hit(view, bounds, point(x, y)), None);
         }
     }
@@ -464,7 +460,11 @@ fn speed_box_offscreen_selected_keys_keep_full_selection_and_true_pivot() {
     };
     let b = area(&state);
     assert_eq!((b.first, b.last), (30.0, 60.0));
-    let handles = b.handles(view, bounds);
+    let handles: Vec<_> = b
+        .handles(view, bounds)
+        .into_iter()
+        .filter(|(handle, _)| handle.1 == 0)
+        .collect();
     assert_eq!(handles.len(), 1);
     assert_eq!(handles[0].0, Handle(1, 0));
     assert!(bounds.contains(&handles[0].1));

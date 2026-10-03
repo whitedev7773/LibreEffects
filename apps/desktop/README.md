@@ -786,7 +786,7 @@ timeline still limits time zoom to 1–64× and integer viewport start frames.
   matches. Unmoved axes do not snap, and occupied or rounded-together key times
   are skipped. Custom anchor points and skew remain pending. This overlay does not
   alter the panel layout or saved document format.
-- In **Speed Graph**, the same Transform box toggle exposes only **left/right time
+- In **Speed Graph**, the same Transform box toggle exposes **left/right time
   handles** for two or more selected scalar keys. The opposite time edge is the
   pivot; Alt uses the selection midpoint. Vertical pointer motion is ignored,
   including mouse-up. Ordinary key dragging still translates selected key times.
@@ -804,8 +804,33 @@ timeline still limits time zoom to 1–64× and integer viewport start frames.
   Invalid factors, time collisions, duration or slope limits reject atomically.
   A frozen source/view/selection protects each draft; tool, channel, layer,
   document, Value/Speed changes, Escape or focus loss cancel it. Identity and
-  return-to-start drags add no history. Vertical Speed scaling, corner transforms,
-  simultaneous multi-channel graphs and AE equivalence remain separate work.
+  return-to-start drags add no history.
+- Speed Graph **top/bottom handles** edit selected endpoint velocities without
+  moving key times or changing base/key values. The opposite velocity boundary
+  stays fixed; Alt uses the initial velocity midpoint. Horizontal pointer motion
+  is ignored. Dragging through the pivot reflects signed velocities; reaching it
+  collapses them to that velocity. This edits endpoint tangents, **not a uniform
+  scaling of every point on the derivative curve**: fixed key values and times
+  constrain the intervening motion.
+  Both actual incoming/outgoing sides of selected keys participate. Influences
+  and interpolation tags stay unchanged. Independent tangents remain independent;
+  Continuous tangents stay linked. An effective Auto edit freezes its original
+  resolved slope/influences to Continuous, matching manual temporal editing.
+  Unchanged Auto keys remain Auto. Missing endpoint segments are skipped.
+  Hold, undefined/singular or unrepresentable sides disable the whole vertical
+  operation with a reason, leaving horizontal time handles available. Flat
+  endpoint ranges have no top/bottom handles. Tiny plots may omit handles rather
+  than cover key glyphs; enlarge or fit the graph when needed. Corners remain absent.
+  Snapping uses unselected endpoint velocities in the displayed channel, with
+  units/second converted consistently at the composition's rational FPS. Ctrl
+  inverts Snap; Alt changes the pivot, and an unmoved vertical axis does not snap.
+  Invalid snap candidates are skipped rather than invalidating a valid raw drag.
+  The preview freezes source, selection, composition/FPS and view. Context or
+  transport changes, focus loss and Escape cancel it; release recomputes the final
+  pointer/modifiers and commits one Undo. Exact identity, affine fixed points and
+  return-to-start preserve handles, legacy schema/assets and Undo/Redo. A real
+  edit uses existing temporal schema 35/36 where needed; LEP remains v1.
+  Multi-channel graphs, Speed corner transforms and AE equivalence remain separate.
 - Graph numeric fields return keyboard focus to the graph after Enter/Escape.
   Enter commits, Escape cancels the field draft, and Escape from the graph closes
   Keyframe...; Undo, selection and fitting shortcuts work without another click.

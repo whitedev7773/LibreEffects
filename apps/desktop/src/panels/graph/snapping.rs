@@ -96,6 +96,51 @@ impl Targets {
         }
         (scale, guides)
     }
+    /// Endpoint-velocity targets and pivots are units/frame; only the viewport
+    /// and guide are units/second. This path deliberately does not reuse value
+    /// scaling, which compares ordinary property values without FPS conversion.
+    pub fn velocity_scale(
+        &self,
+        mut scale: libre_effects_core::KeyVelocityScale,
+        edge: f64,
+        view: View,
+        bounds: Bounds<Pixels>,
+        mut valid: impl FnMut(libre_effects_core::KeyVelocityScale) -> bool,
+    ) -> (libre_effects_core::KeyVelocityScale, Guides) {
+        let mut guides = Guides::default();
+        let span = edge - scale.origin;
+        if !scale.origin.is_finite() || !scale.factor.is_finite() || span.abs() < 1e-12 {
+            return (scale, guides);
+        }
+        let wanted = scale.origin + span * scale.factor;
+        let tolerance =
+            8.0 * (view.high - view.low) / f32::from(bounds.size.height).max(1.0) as f64 / self.fps;
+        let first = self
+            .values
+            .partition_point(|value| *value < wanted - tolerance);
+        let target = self.values[first..]
+            .iter()
+            .take_while(|value| **value <= wanted + tolerance)
+            .copied()
+            .filter(|value| {
+                let candidate = libre_effects_core::KeyVelocityScale {
+                    origin: scale.origin,
+                    factor: (value - scale.origin) / span,
+                };
+                candidate.factor.is_finite() && valid(candidate)
+            })
+            .min_by(|a, b| {
+                (a - wanted)
+                    .abs()
+                    .total_cmp(&(b - wanted).abs())
+                    .then_with(|| a.total_cmp(b))
+            });
+        if let Some(target) = target {
+            scale.factor = (target - scale.origin) / span;
+            guides.value = Some(target * self.fps);
+        }
+        (scale, guides)
+    }
     /// Capture before clicking a key seeks the playhead to that key.
     pub fn new(
         state: &EditorState,
@@ -575,5 +620,108 @@ mod tests {
                 .value,
             600.0
         );
+    }
+}
+
+#[cfg(test)]
+mod velocity_scale_tests {
+    use super::*;
+    use libre_effects_core::{FrameRate, KeyRef, KeyVelocityScale, Property, TemporalHandle};
+
+    #[test]
+    fn endpoint_snap_skips_invalid_reflection_candidate_and_preserves_valid_raw_edit() {
+        let mut state = EditorState::default();
+        state
+            .editor
+            .execute(Command::ConfigureCompositionRate {
+                name: "Rational endpoint snapping".into(),
+                width: 1280,
+                height: 720,
+                fps: FrameRate::new(30_000, 1001).unwrap(),
+                duration: 150,
+                display_start: 0,
+            })
+            .unwrap();
+        state.editor.execute(Command::AddRectangle).unwrap();
+        state.graph_property = Property::PositionX.into();
+        for (frame, value) in [(10, 100.0), (30, 200.0), (60, 300.0)] {
+            for edit in [
+                TrackEdit::ToggleKey { frame },
+                TrackEdit::Value { frame, value },
+            ] {
+                state
+                    .editor
+                    .execute(Command::EditTrack {
+                        id: 1,
+                        property: state.graph_property,
+                        edit,
+                    })
+                    .unwrap();
+            }
+        }
+        for (frame, incoming, slope) in [(10, false, 0.0), (30, true, 0.0), (30, false, 1e9)] {
+            state
+                .editor
+                .execute(Command::SetTemporalHandle {
+                    id: 1,
+                    property: state.graph_property,
+                    frame,
+                    incoming,
+                    handle: TemporalHandle {
+                        slope,
+                        influence: 0.3,
+                    },
+                })
+                .unwrap();
+        }
+        let keys = [10, 30].map(|frame| KeyRef {
+            id: 1,
+            property: state.graph_property,
+            frame,
+        });
+        let track = state
+            .editor
+            .selected_layer()
+            .unwrap()
+            .track(state.graph_property)
+            .unwrap();
+        let mut targets = Targets::new(
+            &state,
+            track,
+            &selection::snapshot(track, &keys, None),
+            Some(false),
+        );
+        targets.values = vec![-1.0, 3.0];
+        let raw = KeyVelocityScale {
+            origin: 5e8,
+            factor: -0.999999998,
+        };
+        let fps = state.editor.project().composition().fps().as_f64();
+        let view = View {
+            start: 0.0,
+            span: 150.0,
+            low: -1000.0 * fps,
+            high: 1000.0 * fps,
+        };
+        let bounds = Bounds::new(point(px(0.0), px(0.0)), size(px(1000.0), px(400.0)));
+        let valid = |scale| track.preview_key_velocity_scale(&[10, 30], scale).is_ok();
+        assert!(valid(raw));
+        assert!(!valid(KeyVelocityScale {
+            factor: (-1.0 - 5e8) / 5e8,
+            ..raw
+        }));
+        let (snapped, guides) = targets.velocity_scale(raw, 1e9, view, bounds, valid);
+        assert!(valid(snapped));
+        assert_eq!(
+            guides,
+            Guides {
+                frame: None,
+                value: Some(3.0 * fps)
+            }
+        );
+        targets.values = vec![-1.0];
+        let (still, guides) = targets.velocity_scale(raw, 1e9, view, bounds, valid);
+        assert_eq!(still, raw);
+        assert_eq!(guides, Guides::default());
     }
 }

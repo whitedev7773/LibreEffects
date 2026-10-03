@@ -320,6 +320,7 @@ pub(super) fn apply_extended(
             | Command::ShiftLayer { .. }
             | Command::MoveKeys { .. }
             | Command::ScaleKeys { .. }
+            | Command::ScaleKeyVelocities { .. }
             | Command::DeleteKeys(_)
             | Command::PasteKeys { .. }
     ) {
@@ -799,6 +800,9 @@ pub(super) fn apply_extended(
                 }
             }
             Command::ScaleKeys { keys, scale } => key_scale::apply(state, keys, *scale)?,
+            Command::ScaleKeyVelocities { keys, scale } => {
+                key_velocity_scale::apply(state, keys, *scale)?
+            }
             Command::DeleteKeys(keys) => {
                 for key in keys.iter().copied().collect::<BTreeSet<_>>() {
                     let track = editable(state, key.id)?.track_mut(key.property)?;

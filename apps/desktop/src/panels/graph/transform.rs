@@ -1,13 +1,13 @@
-//! Scalar graph selection scaling. Speed mode exposes time-only handles.
+//! Scalar graph selection scaling and endpoint-velocity editing.
 //! Pointer deltas, source keys and snapping use a frozen mouse-down snapshot.
 use super::*;
-use libre_effects_core::{KeyRef, KeyScale};
+use libre_effects_core::{KeyRef, KeyScale, KeyVelocityScale};
 use std::collections::BTreeSet;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Handle(pub i8, pub i8);
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) struct SelectionBox {
     first: f64,
     last: f64,
@@ -15,6 +15,10 @@ pub(super) struct SelectionBox {
     high: f64,
     speed: bool,
     speed_ends: [[Option<f64>; 2]; 2],
+    speed_points: Vec<(u32, bool, f64)>,
+    velocity_disabled: Option<String>,
+    velocity_range: Option<(f64, f64)>,
+    fps: f64,
 }
 
 #[cfg(test)]
@@ -306,12 +310,59 @@ impl SelectionBox {
                 values.iter().copied().fold(f64::NEG_INFINITY, f64::max),
             )
         };
+        // The edit pivots come from the core's exact representable endpoint
+        // handles. Keep the pre-existing display bounds for horizontal scaling.
+        let velocities: Result<Vec<f64>, String> = if speed {
+            frames.iter().try_fold(Vec::new(), |mut values, &frame| {
+                values.extend(
+                    track
+                        .key_velocity_handles(frame)?
+                        .into_iter()
+                        .flatten()
+                        .map(|handle| handle.slope),
+                );
+                Ok(values)
+            })
+        } else {
+            Ok(vec![])
+        };
+        let velocity_range = velocities.as_ref().ok().and_then(|values| {
+            let low = values.iter().copied().reduce(f64::min)?;
+            let high = values.iter().copied().reduce(f64::max)?;
+            ((high - low) * fps >= 1e-9).then_some((low, high))
+        });
+        let velocity_disabled = if speed {
+            velocities.err().or_else(|| {
+                velocity_range
+                    .is_none()
+                    .then(|| "Selected endpoint velocities have no range".into())
+            })
+        } else {
+            None
+        };
         Some(Self {
             first: *frames.first()? as f64,
             last: *frames.last()? as f64,
             low,
             high,
             speed,
+            velocity_disabled,
+            velocity_range,
+            fps,
+            speed_points: if speed {
+                track
+                    .keys()
+                    .keys()
+                    .flat_map(|&frame| {
+                        speed::ends(track, frame, fps)
+                            .into_iter()
+                            .filter(|(_, value)| value.is_finite())
+                            .map(move |(incoming, value)| (frame, incoming, value))
+                    })
+                    .collect()
+            } else {
+                vec![]
+            },
             speed_ends: [*frames.first()?, *frames.last()?].map(|frame| {
                 let ends = if speed {
                     speed::ends(track, frame, fps)
@@ -326,14 +377,14 @@ impl SelectionBox {
             }),
         })
     }
-    fn area(self, view: View, bounds: Bounds<Pixels>) -> Bounds<Pixels> {
+    fn area(&self, view: View, bounds: Bounds<Pixels>) -> Bounds<Pixels> {
         // Inset keys remain individually selectable inside the transform handles.
         Bounds::from_corners(
             view.point(bounds, self.first, self.high) - point(px(10.0), px(10.0)),
             view.point(bounds, self.last, self.low) + point(px(10.0), px(10.0)),
         )
     }
-    fn handles(self, view: View, bounds: Bounds<Pixels>) -> Vec<(Handle, Point<Pixels>)> {
+    fn handles(&self, view: View, bounds: Bounds<Pixels>) -> Vec<(Handle, Point<Pixels>)> {
         let area = self.area(view, bounds);
         if self.speed {
             // The decorative 10px inset must not hide visible time edges, nor
@@ -343,7 +394,7 @@ impl SelectionBox {
             let inset_y = px(4.0).min(bounds.size.height / 2.0);
             let middle = (area.top() + area.size.height / 2.0)
                 .clamp(bounds.top() + inset_y, bounds.bottom() - inset_y);
-            return [(self.first, area.left(), -1), (self.last, area.right(), 1)]
+            let mut handles: Vec<_> = [(self.first, area.left(), -1), (self.last, area.right(), 1)]
                 .into_iter()
                 .enumerate()
                 .filter_map(|(index, (frame, decorated, side))| {
@@ -378,6 +429,8 @@ impl SelectionBox {
                     Some((Handle(side, 0), point(x, y)))
                 })
                 .collect();
+            self.add_velocity_handles(view, bounds, &mut handles);
+            return handles;
         }
         let mut handles = Vec::new();
         for y in [-1, 0, 1] {
@@ -396,7 +449,62 @@ impl SelectionBox {
         }
         handles
     }
-    pub fn hit(self, view: View, bounds: Bounds<Pixels>, p: Point<Pixels>) -> Option<Handle> {
+    pub fn velocity_disabled_reason(&self) -> Option<&str> {
+        self.velocity_disabled.as_deref()
+    }
+    /// A vertical edge must be genuinely visible. Decoration may be clamped, but
+    /// may never impersonate an offscreen velocity boundary or cover a key glyph.
+    fn add_velocity_handles(
+        &self,
+        view: View,
+        bounds: Bounds<Pixels>,
+        handles: &mut Vec<(Handle, Point<Pixels>)>,
+    ) {
+        if self.velocity_disabled.is_some()
+            || bounds.size.width < px(16.0)
+            || bounds.size.height < px(16.0)
+        {
+            return;
+        }
+        let first_x = view.point(bounds, self.first, 0.0).x;
+        let last_x = view.point(bounds, self.last, 0.0).x;
+        if first_x > bounds.right() || last_x < bounds.left() {
+            return;
+        }
+        let left = first_x.max(bounds.left() + px(4.0));
+        let right = last_x.min(bounds.right() - px(4.0));
+        if left > right {
+            return;
+        }
+        let middle = ((first_x + last_x) / 2.0).clamp(left, right);
+        let Some((low, high)) = self.velocity_range else {
+            return;
+        };
+        for (value, side) in [(low * self.fps, -1), (high * self.fps, 1)] {
+            let decorated = view.point(bounds, self.first, value).y - px(side as f32 * 10.0);
+            let true_y = view.point(bounds, self.first, value).y;
+            if true_y < bounds.top() || true_y > bounds.bottom() {
+                continue;
+            }
+            let y = decorated.clamp(bounds.top() + px(4.0), bounds.bottom() - px(4.0));
+            let x = [0.0, -14.0, 14.0, -28.0, 28.0, -42.0, 42.0, -56.0, 56.0]
+                .into_iter()
+                .map(|offset| (middle + px(offset)).clamp(left, right))
+                .find(|x| {
+                    self.speed_points.iter().all(|&(frame, incoming, value)| {
+                        let key = view.point(bounds, frame as f64, value)
+                            + point(px(if incoming { -5.0 } else { 5.0 }), px(0.0));
+                        f32::from(*x - key.x).abs() > 10.0 || f32::from(y - key.y).abs() > 10.0
+                    }) && handles.iter().all(|(_, at)| {
+                        f32::from(*x - at.x).abs() > 12.0 || f32::from(y - at.y).abs() > 12.0
+                    })
+                });
+            if let Some(x) = x {
+                handles.push((Handle(0, side), point(x, y)));
+            }
+        }
+    }
+    pub fn hit(&self, view: View, bounds: Bounds<Pixels>, p: Point<Pixels>) -> Option<Handle> {
         if !bounds.contains(&p) {
             return None;
         }
@@ -407,7 +515,7 @@ impl SelectionBox {
                 .then_some(h)
         })
     }
-    pub fn paint(self, view: View, bounds: Bounds<Pixels>, window: &mut Window, invalid: bool) {
+    pub fn paint(&self, view: View, bounds: Bounds<Pixels>, window: &mut Window, invalid: bool) {
         let area = self.area(view, bounds);
         let color = if invalid { 0xff6b6b } else { ui::BLUE };
         stroke(
@@ -442,9 +550,15 @@ pub(super) struct Transform {
     pub active: usize,
     revision: u64,
     tool: Tool,
+    transport_generation: u64,
+    graph_open: bool,
     snap: bool,
     original: AnimatedProperty,
+    source: Option<std::sync::Arc<libre_effects_core::Project>>,
     duration: u32,
+    fps: f64,
+    viewport: (u32, f32, Option<[f64; 2]>),
+    velocity_scale: Option<KeyVelocityScale>,
     targets: snapping::Targets,
     pub guides: snapping::Guides,
     pub preview: Result<(KeyScale, AnimatedProperty), String>,
@@ -469,8 +583,16 @@ impl Transform {
             state.editor.project().composition().fps().as_f64(),
         )?;
         let handle = area.hit(view, bounds, start)?;
-        let targets =
-            snapping::Targets::new(state, track, &selection::snapshot(track, &keys, None), None);
+        let velocity = area.speed && handle.1 != 0;
+        if velocity && !Self::velocity_context_available(state) {
+            return None;
+        }
+        let targets = snapping::Targets::new(
+            state,
+            track,
+            &selection::snapshot(track, &keys, None),
+            velocity.then_some(false),
+        );
         let identity = KeyScale {
             time_origin: 0.0,
             time_scale: 1.0,
@@ -489,24 +611,70 @@ impl Transform {
             keys,
             revision: state.document_revision,
             tool: state.tool,
+            transport_generation: state.transport_generation(),
+            graph_open: state.graph_open,
             snap: state.snapping,
             original: track.clone(),
+            source: velocity.then(|| std::sync::Arc::new(state.editor.project().clone())),
             duration: state.editor.project().composition().duration(),
+            fps: state.editor.project().composition().fps().as_f64(),
+            viewport: (
+                state.timeline_start,
+                state.timeline_zoom,
+                state.graph_view.height,
+            ),
+            velocity_scale: velocity.then_some(KeyVelocityScale {
+                origin: 0.0,
+                factor: 1.0,
+            }),
             targets,
             guides: Default::default(),
             preview: Ok((identity, track.clone())),
             moved: false,
         })
     }
+    fn velocity_context_available(state: &EditorState) -> bool {
+        !state.playing
+            && !state.fonts_open
+            && !state.media_open
+            && !state.queue_open
+            && state.colors.session.is_none()
+            && state.gradient_editor.is_none()
+            && state.vertex_editor.is_none()
+            && state.text_session.is_none()
+            && !state.new_composition_requested
+    }
     /// Reject stale previews even if an observer has not run before mouse-up.
     pub fn is_current(&self, state: &EditorState) -> bool {
         state.document_revision == self.revision
             && state.tool == self.tool
             && state.graph_view.speed == self.area.speed
+            && state.editor.project().composition().fps().as_f64() == self.fps
+            && self
+                .source
+                .as_ref()
+                .is_none_or(|source| source.as_ref() == state.editor.project())
+            && self.keys.first().is_some_and(|key| {
+                state.editor.selected() == Some(key.id) && state.graph_property == key.property
+            })
+            && (self.velocity_scale.is_none()
+                || (Self::velocity_context_available(state)
+                    && self.transport_generation == state.transport_generation()
+                    && self.graph_open == state.graph_open))
+            && (self.velocity_scale.is_none()
+                || self.viewport
+                    == (
+                        state.timeline_start,
+                        state.timeline_zoom,
+                        state.graph_view.height,
+                    ))
             && selection::active(state) == self.keys
             && state.editor.selected_layer().is_some_and(|layer| {
                 !layer.locked() && layer.track(state.graph_property) == Some(&self.original)
             })
+    }
+    pub fn geometry_current(&self, bounds: Option<Bounds<Pixels>>) -> bool {
+        self.velocity_scale.is_none() || bounds == Some(self.bounds)
     }
     pub fn has_changes(&self) -> bool {
         self.preview
@@ -527,7 +695,7 @@ impl Transform {
             -(f32::from(delta.y) as f64) / f32::from(self.bounds.size.height).max(1.0) as f64
                 * (self.view.high - self.view.low)
         };
-        let a = self.area;
+        let a = &self.area;
         let time_origin = if center {
             (a.first + a.last) / 2.0
         } else if self.handle.0 < 0 {
@@ -563,16 +731,21 @@ impl Transform {
     }
     pub fn moving(&mut self, end: Point<Pixels>, center: bool, snap: bool) {
         let delta = end - self.start;
-        let distance = f32::from(delta.x).abs()
-            + if self.area.speed {
-                0.0
-            } else {
-                f32::from(delta.y).abs()
-            };
+        let distance = if self.velocity_scale.is_some() {
+            f32::from(delta.y).abs()
+        } else if self.area.speed {
+            f32::from(delta.x).abs()
+        } else {
+            f32::from(delta.x).abs() + f32::from(delta.y).abs()
+        };
         if !self.moved && distance < 3.0 {
             return;
         }
         self.moved = true;
+        if self.velocity_scale.is_some() {
+            self.moving_velocity(delta, center, snap);
+            return;
+        }
         let mut scale = self.scale(end, center);
         self.guides = Default::default();
         if snap {
@@ -610,6 +783,59 @@ impl Transform {
             self.guides = Default::default();
         }
     }
+    fn moving_velocity(&mut self, delta: Point<Pixels>, center: bool, snap: bool) {
+        let (low, high) = self.area.velocity_range.expect("eligible vertical handle");
+        let origin = if center {
+            (low + high) / 2.0
+        } else if self.handle.1 < 0 {
+            high
+        } else {
+            low
+        };
+        let edge = if self.handle.1 < 0 { low } else { high };
+        let amount = -(f32::from(delta.y) as f64)
+            / f32::from(self.bounds.size.height).max(1.0) as f64
+            * (self.view.high - self.view.low)
+            / self.fps;
+        let mut scale = KeyVelocityScale {
+            origin,
+            factor: 1.0 + amount / (edge - origin),
+        };
+        self.guides = Default::default();
+        if snap && delta.y != px(0.0) {
+            (scale, self.guides) =
+                self.targets
+                    .velocity_scale(scale, edge, self.view, self.bounds, |candidate| {
+                        self.original
+                            .preview_key_velocity_scale(
+                                &self.keys.iter().map(|key| key.frame).collect::<Vec<_>>(),
+                                candidate,
+                            )
+                            .is_ok()
+                    });
+        }
+        self.velocity_scale = Some(scale);
+        self.preview = self
+            .original
+            .preview_key_velocity_scale(
+                &self.keys.iter().map(|key| key.frame).collect::<Vec<_>>(),
+                scale,
+            )
+            .map(|track| {
+                (
+                    KeyScale {
+                        time_origin: 0.0,
+                        time_scale: 1.0,
+                        value_origin: 0.0,
+                        value_scale: 1.0,
+                    },
+                    track,
+                )
+            });
+        if self.preview.is_err() {
+            self.guides = Default::default();
+        }
+    }
     pub fn frames(&self) -> BTreeSet<u32> {
         self.keys
             .iter()
@@ -624,6 +850,15 @@ impl Transform {
     }
     pub fn command(&self) -> Result<(Command, Vec<KeyRef>), String> {
         let (scale, _) = self.preview.as_ref().map_err(Clone::clone)?;
+        if let Some(scale) = self.velocity_scale {
+            return Ok((
+                Command::ScaleKeyVelocities {
+                    keys: self.keys.clone(),
+                    scale,
+                },
+                self.keys.clone(),
+            ));
+        }
         let moved = self
             .keys
             .iter()
@@ -647,3 +882,7 @@ impl Transform {
 #[cfg(test)]
 #[path = "transform_speed_tests.rs"]
 mod speed_tests;
+
+#[cfg(test)]
+#[path = "transform_velocity_tests.rs"]
+mod velocity_tests;

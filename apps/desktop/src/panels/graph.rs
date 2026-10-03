@@ -941,7 +941,9 @@ impl Graph {
         }
         match &mut self.drag {
             Some(Drag::Transform { transform, .. }) => {
-                if !transform.is_current(self.state.read(cx)) {
+                if !transform.is_current(self.state.read(cx))
+                    || !transform.geometry_current(self.plot.get())
+                {
                     self.drag = None;
                     cx.notify();
                     return;
@@ -1118,11 +1120,12 @@ impl Graph {
             }
             self.state.update(cx, |state, cx| match drag {
                 Drag::Transform { mut transform, .. } => {
-                    if !transform.is_current(state) {
+                    if !transform.is_current(state) || !transform.geometry_current(self.plot.get())
+                    {
                         return;
                     }
-                    // Include the release position outside the canvas. Speed mode
-                    // discards vertical motion, including this final pointer event.
+                    // Recompute the final position and modifiers even outside the canvas.
+                    // Each Speed Graph handle changes only its own axis.
                     transform.update_pointer(
                         event.position,
                         event.modifiers.alt,
@@ -1570,7 +1573,7 @@ impl Render for Graph {
                     "graph-transform-box",
                     "square",
                     if state.graph_view.speed {
-                        "Scale selected key times · Alt: center · Ctrl: toggle snapping"
+                        "Scale key times or endpoint velocities · Alt: center · Ctrl: toggle snapping"
                     } else {
                         "Transform selected Value Graph keys · Alt: center · Ctrl: toggle snapping"
                     },
@@ -1690,6 +1693,13 @@ impl Render for Graph {
         let transform_box = (self.transform_box && !locked)
             .then(|| transform::SelectionBox::new(&plot_track, &paint_frames, speed_mode, fps))
             .flatten();
+        let speed_box_hint = transform_box.as_ref().and_then(|area| area.velocity_disabled_reason())
+            .map(|reason| format!(" · time handles · velocity unavailable: {reason}"))
+            .unwrap_or_else(|| if selected_count < 2 {
+                " · select two or more keys for transform handles".into()
+            } else {
+                " · sides: time · top/bottom: endpoint velocity · Alt: center · Ctrl: snap · Esc: cancel".into()
+            });
         let tangents = if transform_box.is_some() {
             vec![]
         } else {
@@ -1894,7 +1904,7 @@ impl Render for Graph {
                                         }
                                     }
                                 }
-                                if let Some(transform_box) = transform_box {
+                                if let Some(transform_box) = &transform_box {
                                     let invalid = matches!(&drag, Some(Drag::Transform { transform, .. }) if transform.preview.is_err());
                                     transform_box.paint(graph_view,bounds,window,invalid);
                                 }
@@ -2292,7 +2302,7 @@ impl Render for Graph {
                         format!(" · {}", graph_units(property, speed_mode))
                     },
                     if speed_mode && self.transform_box {
-                        " · side handles: time scale only · Alt: center · Ctrl: snap · Esc: cancel"
+                        &speed_box_hint
                     } else if speed_mode {
                         " · diamonds: velocity/influence · Alt: split · Shift: keep velocity"
                     } else if self.transform_box {

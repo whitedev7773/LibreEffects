@@ -12,7 +12,7 @@
 
 ### 현재 단계와 다음 개발
 
-**2026-10-03 사용자 우선순위:** 고유 `.lep` (Libre Effects Project) 파일 형식을 먼저 구현·실행 검증하고, 그 뒤 보류한 편집 기능과 나머지 백로그를 재개한다. `.lep`의 서명/컨테이너 버전/체크섬/제한된 청크와 Save/Open/CLI/복구/수집 연결을 구현했고 코어·데스크톱 기본 626개와 FFmpeg 30개, 릴리스 빌드가 통과했다. 기존 `.lfe.json`은 호환 입력으로 유지하며 Save는 `.lep` 사본을 만든다. 네이티브 복구·이동 수집까지 아래 범위의 end-to-end 검증을 마쳤다. 고유 형식의 기본 단계와 이어 재개한 같은 경로 박스 선택/Ctrl+A의 검증을 마쳤다. E04 Contents의 형제 항목 다중 선택·같은 부모 안의 묶음 순서 편집과 저장 포커스 회귀까지 검증을 마쳤다. 이어서 F03/D01의 레이어 전체 Text Fill/Stroke RGB와 Stroke Width 7개 스칼라 애니메이션을 연결하고 최종 네이티브 검증을 마쳤다. 문자별 스타일/타이포그래피 애니메이션은 별도 범위다. E02 단일 정점 숫자 모달과 F02 실제 fallback face/미해결 glyph 진단도 구현·자동/네이티브 검증을 마쳤다. 다음 P1 단계는 D03 단일 채널 Speed Graph에서 key time/value를 고정한 endpoint velocity 세로 변형이다. Hold/정의되지 않은 side는 거부하고 기존 가로 시간 변형은 유지하며 전체 derivative curve의 균일 배율이나 AE 동등성을 뜻하지 않는다.
+**2026-10-03 사용자 우선순위:** 고유 `.lep` (Libre Effects Project) 파일 형식을 먼저 구현·실행 검증하고, 그 뒤 보류한 편집 기능과 나머지 백로그를 재개한다. `.lep`의 서명/컨테이너 버전/체크섬/제한된 청크와 Save/Open/CLI/복구/수집 연결을 구현했고 코어·데스크톱 기본 626개와 FFmpeg 30개, 릴리스 빌드가 통과했다. 기존 `.lfe.json`은 호환 입력으로 유지하며 Save는 `.lep` 사본을 만든다. 네이티브 복구·이동 수집까지 아래 범위의 end-to-end 검증을 마쳤다. 고유 형식의 기본 단계와 이어 재개한 같은 경로 박스 선택/Ctrl+A의 검증을 마쳤다. E04 Contents의 형제 항목 다중 선택·같은 부모 안의 묶음 순서 편집과 저장 포커스 회귀까지 검증을 마쳤다. 이어서 F03/D01의 레이어 전체 Text Fill/Stroke RGB와 Stroke Width 7개 스칼라 애니메이션을 연결하고 최종 네이티브 검증을 마쳤다. 문자별 스타일/타이포그래피 애니메이션은 별도 범위다. E02 단일 정점 숫자 모달과 F02 실제 fallback face/미해결 glyph 진단도 구현·자동/네이티브 검증을 마쳤다. D03 단일 채널 endpoint velocity 세로 변형도 검증했다. 다음 P1 단계는 pinned channel·단위별 lane·공통 시간축·교차 lane 선택과 원자적 retiming 및 lane-local 값/속도 편집을 연결하는 다중 channel Graph다. 핀/범위의 Save/reopen과 명시적 VIEW metadata migration까지 같은 milestone에서 검증하며 현재 구현 완료 기능으로 표시하지 않는다.
 
 현재는 **2D 모션 편집·합성 기반을 구현한 단계**다. AE 동등 수준이나 전체 백로그 완료 상태는 아니다. 기능군마다 규모가 달라 단순 항목 수를 완성률로 표시하지 않는다.
 
@@ -21,6 +21,16 @@
 - **정교한 편집에 남은 기능:** D02/D03 다중 채널·공간 보간·Speed Graph 선택 변형, E02/E03 경로 토폴로지·marquee/교차 경로 선택, E04 트리 편집·복합 Colors 애니메이션, G01 가변 Feather·로토베지어, F01–F03 실제 IME 검증·문자별 스타일·텍스트 속성 애니메이션, B01/B05/B07 배치 회귀·단축키/접근성. 스칼라 양방향 시간 보간·Speed Graph, Contents·도형 속성 애니메이션, 직접 텍스트 편집과 B06 공통 색 선택기는 아래 이력의 범위로 이미 구현됐다.
 - **후속 고급 기능:** 패널 도킹·소스 뷰어·최근 프로젝트, 타임라인 고급 시간 편집/검색/가상화, 공간 경로·프리셋·표현식, Shape 연산/SVG·Text Animator, 추가 효과·모션 블러, 고정밀 색/HDR·Proxy/GPU, 템플릿, 설치/업데이트·한글화와 UI 회귀 자동화.
 - **별도 대형 단계:** 3D/카메라/라이트·모델, 추적·로토/Puppet, 플러그인/교환 포맷 연구, 웹/API 제품 범위. AEP/MOGRT 호환은 구현되지 않았다.
+
+### D03 Speed Graph endpoint velocity 세로 변형 — 2026-10-03
+
+- 단일 scalar channel의 선택 key 둘 이상에서 Transform box 위/아래 handle을 추가했다. key time/base/value는 고정하고 실제 incoming/outgoing endpoint slope만 `pivot + factor × (slope − pivot)`로 변형한다. 반대쪽 velocity 경계가 기본 pivot이며 Alt는 시작 midpoint다. 음수 factor는 signed velocity 반사, 0은 pivot에 모으기다. 고정된 시간/값이 중간 curve를 제약하므로 전체 derivative curve를 같은 배율로 변형하는 기능으로 설명하지 않는다. 기존 가로 time handle 경로는 유지하며 corner는 추가하지 않았다.
+- Core의 별도 KeyVelocityScale/ScaleKeyVelocities와 공통 key_velocity_handles로 실제 인접 side·Hold·표현 가능성을 검사한다. Independent는 해당 side만 바꾸고 Continuous는 linked slope를 함께 유지한다. 실제 바뀐 Auto는 원래 slope/influence를 고정하여 Continuous로 전환하며 변하지 않은 Auto는 유지한다. interpolation tag와 influence, 다른 key/track은 보존한다. Hold/정의되지 않은·singular·범위 밖 side가 있으면 전체 세로 작업을 거부하고, 이웃 없는 endpoint side는 없다. 평평한 endpoint range는 세로 handle을 만들지 않는다.
+- 같은 원본 track에서 모든 side를 계산해 순차 setter의 coupling/Hold 변경을 피한다. identity/affine fixed point/no-net-change는 handle·legacy schema/assets·Redo/Undo를 보존한다. Linear/diagonal Bezier의 absolute control 반올림에서 생긴 가짜 미세 편집은 새 연산 내부의 normalized slope 계산으로 수정했다. 실제 편집은 기존 temporal schema 35/36 최소치만 적용하고 더 높은 버전을 보존한다. 새로운 project 또는 LEP 버전은 없다. wholly empty Batch의 기존 migration 정책은 유지한다.
+- 세로 gesture는 source Project·composition/FPS·선택·도구/모드·view/bounds·transport generation을 고정한다. 최종 release의 좌표/modifier로 다시 계산하며 stale/focus/modal/context/transport 변경은 취소한다. Snap은 현재 채널의 unselected endpoint 속도만 쓰고 frame/second 변환을 분리한다. Ctrl은 Snap을 반전하고 Alt는 pivot만 바꾼다. 움직이지 않은 축은 snap하지 않으며 core-invalid snap 후보는 건너뛴다. 작은 plot에서는 key glyph를 가리는 handle을 억지로 배치하지 않는다.
+- 최종 자동 검증은 Core 267 + Desktop 554(기본 821), 명시적 FFmpeg 30, fmt/direct locked Cargo check/release가 통과했다. 신규 29개(Core 16, vertical UI/transaction 12, invalid-snap 1)는 이 집계에 포함한다. 독립 core math/transaction과 UI lifecycle/snapping 리뷰에 차단 문제가 없다. 최종 pin 네이티브 top-handle snap은 30000/1001 FPS에서 예상 factor 11/8·pivot −2·slope −2/4.875/9와 고정 time/value/interpolation/influence, Auto→Continuous를 확인했다. bottom reflection은 pivot 6·factor −3/8·slope 9/7.125/6이며 pivot 위의 Auto key는 원래대로다. Ctrl snap 반전, click-only/가로-only/return-to-start 뒤 한 Undo와 Redo, native reopen/resave PROJ·VIEW 정확 일치가 통과했다. Hold/flat/singular는 세로 거부와 source 불변을 확인했고 main/Hold/flat 가로 time 변형·Undo는 그대로다.
+- 새 curve는 keyframe 4개 픽셀 불변 및 독립 cubic/static reference 9개 frame, 총 4,160,000 RGBA 픽셀이 정확히 일치한다. 기존 text 회귀 32 frame의 28,440,800 픽셀도 최종 pin에서 그대로다. 실제 CUA 화면 24개를 보존했으며 통합 사후 assertion 107개와 native 파일 24개의 공식 codec 왕복이 모두 통과했다. Alt는 Linux window manager가 가로채어 창을 옮겼고 source는 그대로였으므로 midpoint의 네이티브 통과로 표시하지 않는다. exact zero collapse·held-pointer Escape/playback start-stop·실제 IME·Windows/DPI는 네이티브 미검증이다.
+- 다중 channel/축·Speed corner·공간 속도/roving 및 AE 수치 동등성은 별도 범위다.
 
 ### F02 실제 glyph·fallback face 진단 — 2026-10-03
 
