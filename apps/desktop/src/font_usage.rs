@@ -1,14 +1,22 @@
 //! Project-wide font inventory and transactional replacement planning.
-use libre_effects_core::{Command, Content, Project, TextFont};
-use std::collections::BTreeMap;
+use libre_effects_core::{Command, CompositionId, Content, Layer, LayerId, Project, TextFont};
+use std::{
+    collections::BTreeMap,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Usage {
+    pub composition_id: CompositionId,
+    pub layer_id: LayerId,
     pub composition: String,
     pub layer: String,
     pub locked: bool,
 }
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Group {
     pub font: TextFont,
     pub actual: TextFont,
@@ -22,13 +30,15 @@ impl Group {
 }
 pub(crate) fn inventory(project: &Project) -> Vec<Group> {
     let mut groups = BTreeMap::<TextFont, Vec<Usage>>::new();
-    for (_, comp) in project.compositions() {
+    for (composition_id, comp) in project.compositions() {
         for layer in comp.layers() {
             if matches!(layer.content(), Content::Text { .. }) {
                 groups
                     .entry(TextFont::of(&layer.text_style()))
                     .or_default()
                     .push(Usage {
+                        composition_id,
+                        layer_id: layer.id(),
                         composition: comp.name().into(),
                         layer: layer.name().into(),
                         locked: layer.locked(),
@@ -56,6 +66,235 @@ pub(crate) fn missing_count(project: &Project) -> usize {
         .map(|g| g.usages.len())
         .sum()
 }
+// Deliberately independent of the cheap inventory and export missing_count.
+// A check freezes only selected text layers, once, after an explicit UI action.
+pub(crate) const MAX_CHECK_LAYERS: usize = 256;
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct FrozenLayer {
+    pub usage: Usage,
+    pub layer: Layer,
+}
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CoverageSnapshot {
+    revision: u64,
+    font: TextFont,
+    pub layers: Vec<FrozenLayer>,
+}
+impl CoverageSnapshot {
+    fn capture(project: &Project, revision: u64, font: &TextFont) -> Self {
+        let mut layers = Vec::new();
+        for (composition_id, comp) in project.compositions() {
+            for layer in comp.layers() {
+                if matches!(layer.content(), Content::Text { .. })
+                    && TextFont::of(&layer.text_style()) == *font
+                {
+                    layers.push(FrozenLayer {
+                        usage: Usage {
+                            composition_id,
+                            layer_id: layer.id(),
+                            composition: comp.name().into(),
+                            layer: layer.name().into(),
+                            locked: layer.locked(),
+                        },
+                        layer: layer.clone(),
+                    });
+                }
+            }
+        }
+        Self {
+            revision,
+            font: font.clone(),
+            layers,
+        }
+    }
+    pub fn target(&self) -> usize {
+        self.layers.len().min(MAX_CHECK_LAYERS)
+    }
+    fn matches(&self, project: &Project, revision: u64, selected: Option<&TextFont>) -> bool {
+        if self.revision != revision || selected != Some(&self.font) {
+            return false;
+        }
+        // Count membership too: an added matching layer must invalidate a report.
+        let mut index = 0;
+        for (composition_id, comp) in project.compositions() {
+            for layer in comp.layers() {
+                if matches!(layer.content(), Content::Text { .. })
+                    && TextFont::of(&layer.text_style()) == self.font
+                {
+                    let Some(frozen) = self.layers.get(index) else {
+                        return false;
+                    };
+                    if frozen.usage.composition_id != composition_id
+                        || frozen.usage.layer_id != layer.id()
+                        || frozen.usage.composition != comp.name()
+                        || &frozen.layer != layer
+                    {
+                        return false;
+                    }
+                    index += 1;
+                }
+            }
+        }
+        index == self.layers.len()
+    }
+}
+#[derive(Clone)]
+pub(crate) struct CoverageJob {
+    pub serial: u64,
+    pub snapshot: Arc<CoverageSnapshot>,
+    pub cancel: Arc<AtomicBool>,
+}
+impl CoverageJob {
+    pub fn cancelled(&self) -> bool {
+        self.cancel.load(Ordering::Acquire)
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum CheckPhase {
+    Checking,
+    Finished,
+    Cancelled,
+    Failed(String),
+}
+pub(crate) struct CoverageCheck {
+    serial: u64,
+    pub snapshot: Arc<CoverageSnapshot>,
+    pub reports: Vec<crate::font_coverage::Report>,
+    pub phase: CheckPhase,
+}
+/// Pure lifecycle state, shared by the dialog and deterministic async-race tests.
+/// Cancelling never frees the worker slot until that worker has actually settled.
+#[derive(Default)]
+pub(crate) struct CoverageSession {
+    serial: u64,
+    worker: Option<u64>,
+    cancel: Option<Arc<AtomicBool>>,
+    pub check: Option<CoverageCheck>,
+}
+impl CoverageSession {
+    pub fn busy(&self) -> bool {
+        self.worker.is_some()
+    }
+    pub fn invalidate(&mut self) {
+        if let Some(cancel) = &self.cancel {
+            cancel.store(true, Ordering::Release);
+        }
+        self.serial = self.serial.wrapping_add(1);
+        self.check = None;
+    }
+    pub fn validate(
+        &mut self,
+        project: &Project,
+        revision: u64,
+        selected: Option<&TextFont>,
+        open: bool,
+    ) {
+        if self
+            .check
+            .as_ref()
+            .is_some_and(|check| !open || !check.snapshot.matches(project, revision, selected))
+        {
+            self.invalidate();
+        }
+    }
+    pub fn start(
+        &mut self,
+        project: &Project,
+        revision: u64,
+        font: &TextFont,
+    ) -> Result<CoverageJob, String> {
+        if self.busy() {
+            return Err("The previous glyph check is still stopping.".into());
+        }
+        let snapshot = Arc::new(CoverageSnapshot::capture(project, revision, font));
+        if snapshot.layers.is_empty() {
+            return Err("This font is no longer used.".into());
+        }
+        self.serial = self.serial.wrapping_add(1);
+        let cancel = Arc::new(AtomicBool::new(false));
+        let job = CoverageJob {
+            serial: self.serial,
+            snapshot: snapshot.clone(),
+            cancel: cancel.clone(),
+        };
+        self.worker = Some(job.serial);
+        self.cancel = Some(cancel);
+        self.check = Some(CoverageCheck {
+            serial: job.serial,
+            snapshot,
+            reports: Vec::new(),
+            phase: CheckPhase::Checking,
+        });
+        Ok(job)
+    }
+    pub fn cancel(&mut self) {
+        if let Some(cancel) = &self.cancel {
+            cancel.store(true, Ordering::Release);
+        }
+        if let Some(check) = &mut self.check {
+            if check.phase == CheckPhase::Checking {
+                check.phase = CheckPhase::Cancelled;
+            }
+        }
+    }
+    // The caller validates the live source immediately before accepting each result.
+    pub fn accept(
+        &mut self,
+        serial: u64,
+        index: usize,
+        result: Result<crate::font_coverage::Report, String>,
+    ) -> bool {
+        let Some(check) = &mut self.check else {
+            return false;
+        };
+        if check.serial != serial
+            || check.phase != CheckPhase::Checking
+            || index != check.reports.len()
+            || index >= check.snapshot.target()
+        {
+            return false;
+        }
+        match result {
+            Ok(report) => {
+                check.reports.push(report);
+                true
+            }
+            Err(error) => {
+                check.phase = CheckPhase::Failed(error);
+                if let Some(cancel) = &self.cancel {
+                    cancel.store(true, Ordering::Release);
+                }
+                false
+            }
+        }
+    }
+    pub fn finish(&mut self, serial: u64) {
+        if self.worker != Some(serial) {
+            return;
+        }
+        self.worker = None;
+        self.cancel = None;
+        if let Some(check) = &mut self.check {
+            if check.serial == serial && check.phase == CheckPhase::Checking {
+                check.phase = if check.reports.len() == check.snapshot.target() {
+                    CheckPhase::Finished
+                } else {
+                    CheckPhase::Failed(
+                        "The worker stopped before all scheduled layers were examined.".into(),
+                    )
+                };
+            }
+        }
+    }
+}
+impl Drop for CoverageSession {
+    fn drop(&mut self) {
+        if let Some(cancel) = &self.cancel {
+            cancel.store(true, Ordering::Release);
+        }
+    }
+}
+
 pub(crate) struct Replacement {
     origin: Project,
     revision: u64,
@@ -223,5 +462,388 @@ mod tests {
         assert_eq!(missing_count(e.project()), 2);
         assert_eq!(groups.iter().filter(|g| g.warning.is_none()).count(), 1);
         assert!(groups.iter().all(|g| g.actual.family == "Wanted Sans"));
+    }
+}
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+    use crate::font_coverage::{Report, Status};
+    use libre_effects_core::{Editor, TextStyle};
+
+    fn add_text(editor: &mut Editor, text: &str) {
+        editor
+            .execute(Command::AddContent {
+                content: Content::Text {
+                    text: text.into(),
+                    font_size: 32.0,
+                },
+                width: 250.0,
+                height: 100.0,
+                name: "Same layer".into(),
+            })
+            .unwrap();
+    }
+    fn scene() -> (Editor, TextFont) {
+        let mut editor = Editor::default();
+        add_text(&mut editor, "First");
+        add_text(&mut editor, "Second");
+        let font = TextFont::of(&TextStyle::default());
+        (editor, font)
+    }
+    fn report(glyphs: usize) -> Report {
+        Report {
+            primary: None,
+            faces: vec![],
+            unresolved_glyphs: 0,
+            samples: vec![],
+            glyphs,
+            composed_lines: 1,
+            overflow_lines: 0,
+            status: Status::Complete,
+            truncated: false,
+        }
+    }
+    fn assert_invalidated(mut editor: Editor, font: &TextFont, edit: Command) {
+        let mut session = CoverageSession::default();
+        let job = session.start(editor.project(), 7, font).unwrap();
+        editor.execute(edit).unwrap();
+        session.validate(editor.project(), 7, Some(font), true);
+        assert!(session.check.is_none());
+        assert!(job.cancelled());
+        assert!(!session.accept(job.serial, 0, Ok(report(1))));
+        session.finish(job.serial);
+        assert!(!session.busy());
+    }
+
+    #[test]
+    fn glyph_check_uses_ids_when_composition_and_layer_names_are_identical() {
+        let (mut editor, font) = scene();
+        editor.execute(Command::DuplicateComposition).unwrap();
+        editor
+            .execute(Command::ConfigureComposition {
+                name: "Composition 01".into(),
+                width: 1920,
+                height: 1080,
+                fps: 30,
+                duration: 300,
+            })
+            .unwrap();
+        let mut session = CoverageSession::default();
+        let job = session.start(editor.project(), 7, &font).unwrap();
+        assert_eq!(job.snapshot.layers.len(), 4);
+        let ids: std::collections::BTreeSet<_> = job
+            .snapshot
+            .layers
+            .iter()
+            .map(|f| (f.usage.composition_id, f.usage.layer_id))
+            .collect();
+        assert_eq!(ids.len(), 4);
+        assert!(
+            job.snapshot
+                .layers
+                .iter()
+                .all(|f| f.usage.layer == "Same layer")
+        );
+        assert!(
+            job.snapshot
+                .layers
+                .iter()
+                .all(|f| f.usage.composition == "Composition 01")
+        );
+        for index in 0..4 {
+            assert!(session.accept(job.serial, index, Ok(report(index + 1))));
+        }
+        session.finish(job.serial);
+        let check = session.check.as_ref().unwrap();
+        assert_eq!(check.phase, CheckPhase::Finished);
+        for (i, actual) in check.reports.iter().enumerate() {
+            assert_eq!(actual.glyphs, i + 1);
+            assert_eq!(
+                check.snapshot.layers[i].usage.layer_id,
+                job.snapshot.layers[i].layer.id()
+            );
+        }
+        let group = inventory(editor.project()).remove(0);
+        assert_eq!(
+            group
+                .usages
+                .iter()
+                .map(|u| (u.composition_id, u.layer_id))
+                .collect::<std::collections::BTreeSet<_>>(),
+            ids
+        );
+    }
+
+    #[test]
+    fn glyph_check_source_edits_invalidate_without_a_revision_change() {
+        let (editor, font) = scene();
+        assert_invalidated(
+            editor,
+            &font,
+            Command::SetContent {
+                id: 1,
+                content: Content::Text {
+                    text: "Changed".into(),
+                    font_size: 32.0,
+                },
+            },
+        );
+    }
+    #[test]
+    fn glyph_check_font_size_edits_invalidate_without_a_revision_change() {
+        let (editor, font) = scene();
+        assert_invalidated(
+            editor,
+            &font,
+            Command::SetContent {
+                id: 1,
+                content: Content::Text {
+                    text: "First".into(),
+                    font_size: 48.0,
+                },
+            },
+        );
+    }
+    #[test]
+    fn glyph_check_style_edits_invalidate_without_a_revision_change() {
+        let (editor, font) = scene();
+        assert_invalidated(
+            editor,
+            &font,
+            Command::SetTextStyle {
+                id: 1,
+                style: TextStyle {
+                    tracking: 100.0,
+                    ..Default::default()
+                },
+            },
+        );
+    }
+    #[test]
+    fn glyph_check_paragraph_boxes_invalidate_without_a_revision_change() {
+        let (mut editor, font) = scene();
+        editor
+            .execute(Command::SetTextStyle {
+                id: 1,
+                style: TextStyle {
+                    paragraph: true,
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        assert_invalidated(
+            editor,
+            &font,
+            Command::SetTextBox {
+                id: 1,
+                width: 80.0,
+                height: 40.0,
+            },
+        );
+    }
+    #[test]
+    fn glyph_check_new_matching_layer_invalidates_even_when_prior_layers_match() {
+        let (mut editor, font) = scene();
+        let mut session = CoverageSession::default();
+        let job = session.start(editor.project(), 7, &font).unwrap();
+        add_text(&mut editor, "Third");
+        session.validate(editor.project(), 7, Some(&font), true);
+        assert!(session.check.is_none());
+        assert!(job.cancelled());
+    }
+    #[test]
+    fn glyph_check_document_replacement_invalidates_identical_content() {
+        let (editor, font) = scene();
+        let mut session = CoverageSession::default();
+        let job = session.start(editor.project(), 7, &font).unwrap();
+        session.validate(editor.project(), 8, Some(&font), true);
+        assert!(session.check.is_none());
+        assert!(job.cancelled());
+    }
+    #[test]
+    fn glyph_check_selection_change_discards_and_cancels_the_job() {
+        let (editor, font) = scene();
+        let mut session = CoverageSession::default();
+        let job = session.start(editor.project(), 7, &font).unwrap();
+        let other = TextFont {
+            weight: 700,
+            ..font.clone()
+        };
+        session.validate(editor.project(), 7, Some(&other), true);
+        assert!(session.check.is_none());
+        assert!(job.cancelled());
+        session.validate(editor.project(), 7, Some(&font), true);
+        assert!(!session.accept(job.serial, 0, Ok(report(1))));
+    }
+    #[test]
+    fn glyph_check_close_reopen_rejects_late_results_and_preserves_one_worker() {
+        let (editor, font) = scene();
+        let mut session = CoverageSession::default();
+        let old = session.start(editor.project(), 7, &font).unwrap();
+        session.validate(editor.project(), 7, Some(&font), false);
+        session.validate(editor.project(), 7, Some(&font), true);
+        assert!(session.start(editor.project(), 7, &font).is_err());
+        assert!(!session.accept(old.serial, 0, Ok(report(1))));
+        session.finish(old.serial);
+        assert!(session.check.is_none());
+        let new = session.start(editor.project(), 7, &font).unwrap();
+        assert_ne!(old.serial, new.serial);
+        assert!(!session.accept(old.serial, 0, Ok(report(100))));
+        session.finish(old.serial);
+        assert!(session.busy());
+        assert!(session.accept(new.serial, 0, Ok(report(2))));
+        assert_eq!(session.check.as_ref().unwrap().reports[0].glyphs, 2);
+    }
+    #[test]
+    fn glyph_check_cancel_keeps_only_finished_layer_reports() {
+        let (editor, font) = scene();
+        let mut session = CoverageSession::default();
+        let job = session.start(editor.project(), 7, &font).unwrap();
+        assert!(session.accept(job.serial, 0, Ok(report(1))));
+        session.cancel();
+        assert!(job.cancelled());
+        assert!(!session.accept(job.serial, 1, Ok(report(2))));
+        assert!(session.start(editor.project(), 7, &font).is_err());
+        session.finish(job.serial);
+        let check = session.check.as_ref().unwrap();
+        assert_eq!(check.phase, CheckPhase::Cancelled);
+        assert_eq!(check.reports.len(), 1);
+        assert_eq!(check.snapshot.layers.len(), 2);
+        assert!(!session.busy());
+    }
+    #[test]
+    fn glyph_check_duplicate_out_of_order_and_failed_results_are_not_success() {
+        let (editor, font) = scene();
+        let mut session = CoverageSession::default();
+        let job = session.start(editor.project(), 7, &font).unwrap();
+        assert!(!session.accept(job.serial, 1, Ok(report(2))));
+        assert!(session.accept(job.serial, 0, Ok(report(1))));
+        assert!(!session.accept(job.serial, 0, Ok(report(3))));
+        assert!(!session.accept(job.serial, 1, Err("Worker failure".into())));
+        session.finish(job.serial);
+        assert_eq!(
+            session.check.as_ref().unwrap().phase,
+            CheckPhase::Failed("Worker failure".into())
+        );
+        assert_eq!(session.check.as_ref().unwrap().reports.len(), 1);
+    }
+    #[test]
+    fn glyph_check_dropped_worker_and_empty_reports_do_not_become_success() {
+        let (editor, font) = scene();
+        let mut session = CoverageSession::default();
+        let job = session.start(editor.project(), 7, &font).unwrap();
+        session.finish(job.serial);
+        assert!(matches!(
+            session.check.as_ref().unwrap().phase,
+            CheckPhase::Failed(_)
+        ));
+        let job = session.start(editor.project(), 7, &font).unwrap();
+        let mut empty = report(0);
+        empty.status = Status::Empty;
+        assert!(session.accept(job.serial, 0, Ok(empty)));
+        session.cancel();
+        session.finish(job.serial);
+        assert_eq!(
+            session.check.as_ref().unwrap().reports[0].status,
+            Status::Empty
+        );
+    }
+    #[test]
+    fn glyph_check_does_not_touch_source_selection_undo_or_redo() {
+        let (mut editor, font) = scene();
+        let expected_redo = editor.project().clone();
+        editor.undo();
+        let source = editor.project().clone();
+        let selected = editor.selected();
+        let history = (editor.can_undo(), editor.can_redo());
+        let missing = missing_count(&source);
+        let mut session = CoverageSession::default();
+        let job = session.start(editor.project(), 7, &font).unwrap();
+        assert!(session.accept(
+            job.serial,
+            0,
+            Ok(crate::font_coverage::analyze(&job.snapshot.layers[0].layer))
+        ));
+        session.finish(job.serial);
+        session.cancel();
+        session.invalidate();
+        assert_eq!(editor.project(), &source);
+        assert_eq!(editor.selected(), selected);
+        assert_eq!((editor.can_undo(), editor.can_redo()), history);
+        assert_eq!(missing_count(editor.project()), missing);
+        editor.redo();
+        assert_eq!(editor.project(), &expected_redo);
+    }
+    #[test]
+    fn glyph_check_replacement_and_undo_cannot_restore_an_old_report() {
+        let (mut editor, _) = scene();
+        let style = TextStyle {
+            font_family: "Missing glyph-check test".into(),
+            ..Default::default()
+        };
+        let font = TextFont::of(&style);
+        for id in [1, 2] {
+            editor
+                .execute(Command::SetTextStyle {
+                    id,
+                    style: style.clone(),
+                })
+                .unwrap();
+        }
+        editor.execute(Command::ToggleLocked(2)).unwrap();
+        let original = editor.project().clone();
+        let mut session = CoverageSession::default();
+        let old = session.start(editor.project(), 7, &font).unwrap();
+        assert_eq!(old.snapshot.layers.len(), 2);
+        assert!(
+            old.snapshot
+                .layers
+                .iter()
+                .find(|f| f.usage.layer_id == 2)
+                .unwrap()
+                .usage
+                .locked
+        );
+        let replacement = TextFont::of(&crate::fonts::resolved(&style));
+        let plan =
+            Replacement::new(editor.project(), 7, font.clone(), replacement.clone()).unwrap();
+        assert_eq!((plan.count, plan.locked), (1, 1));
+        editor
+            .execute(plan.command(editor.project(), 7).unwrap())
+            .unwrap();
+        let changed = editor.project().clone();
+        session.validate(editor.project(), 7, Some(&font), true);
+        assert!(old.cancelled());
+        assert!(session.check.is_none());
+        session.finish(old.serial);
+        let current = session.start(editor.project(), 7, &replacement).unwrap();
+        editor.undo();
+        assert_eq!(editor.project(), &original);
+        session.validate(editor.project(), 7, Some(&replacement), true);
+        assert!(current.cancelled());
+        assert!(!session.accept(old.serial, 0, Ok(report(1))));
+        assert!(!session.accept(current.serial, 0, Ok(report(1))));
+        editor.redo();
+        assert_eq!(editor.project(), &changed);
+        assert!(session.check.is_none());
+    }
+    #[test]
+    fn glyph_check_bounded_job_retains_explicit_unexamined_layer_count() {
+        let (editor, font) = scene();
+        let mut snapshot = CoverageSnapshot::capture(editor.project(), 7, &font);
+        snapshot
+            .layers
+            .resize(MAX_CHECK_LAYERS + 1, snapshot.layers[0].clone());
+        assert_eq!(snapshot.target(), MAX_CHECK_LAYERS);
+        assert_eq!(snapshot.layers.len() - snapshot.target(), 1);
+    }
+    #[test]
+    fn glyph_check_drop_signals_cancellation() {
+        let (editor, font) = scene();
+        let mut session = CoverageSession::default();
+        let job = session.start(editor.project(), 7, &font).unwrap();
+        drop(session);
+        assert!(job.cancelled());
     }
 }

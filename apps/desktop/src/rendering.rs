@@ -65,7 +65,7 @@ fn layer_text_svg(
 }
 // Keep paint out of shaping and caret metrics. Separate whole-layer passes also
 // preserve the chosen ordering when characters or lines overlap.
-fn text_geometry_svg(
+pub(crate) fn text_geometry_svg(
     text: &str,
     size: f64,
     color: &str,

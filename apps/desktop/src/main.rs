@@ -21,6 +21,7 @@ mod contents_render_tests;
 mod editor;
 mod effect_presets;
 mod effect_render;
+mod font_coverage;
 mod font_usage;
 mod fonts;
 mod footage;

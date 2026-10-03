@@ -12,7 +12,7 @@
 
 ### 현재 단계와 다음 개발
 
-**2026-10-03 사용자 우선순위:** 고유 `.lep` (Libre Effects Project) 파일 형식을 먼저 구현·실행 검증하고, 그 뒤 보류한 편집 기능과 나머지 백로그를 재개한다. `.lep`의 서명/컨테이너 버전/체크섬/제한된 청크와 Save/Open/CLI/복구/수집 연결을 구현했고 코어·데스크톱 기본 626개와 FFmpeg 30개, 릴리스 빌드가 통과했다. 기존 `.lfe.json`은 호환 입력으로 유지하며 Save는 `.lep` 사본을 만든다. 네이티브 복구·이동 수집까지 아래 범위의 end-to-end 검증을 마쳤다. 고유 형식의 기본 단계와 이어 재개한 같은 경로 박스 선택/Ctrl+A의 검증을 마쳤다. E04 Contents의 형제 항목 다중 선택·같은 부모 안의 묶음 순서 편집과 저장 포커스 회귀까지 검증을 마쳤다. 이어서 F03/D01의 레이어 전체 Text Fill/Stroke RGB와 Stroke Width 7개 스칼라 애니메이션을 연결하고 최종 네이티브 검증을 마쳤다. 문자별 스타일/타이포그래피 애니메이션은 별도 범위다. E02 단일 정점 숫자 모달도 구현·자동/네이티브 검증을 마쳤으며, 다음 P1 단계는 기존 글꼴 관리의 실제 fallback face/미해결 glyph 진단이다.
+**2026-10-03 사용자 우선순위:** 고유 `.lep` (Libre Effects Project) 파일 형식을 먼저 구현·실행 검증하고, 그 뒤 보류한 편집 기능과 나머지 백로그를 재개한다. `.lep`의 서명/컨테이너 버전/체크섬/제한된 청크와 Save/Open/CLI/복구/수집 연결을 구현했고 코어·데스크톱 기본 626개와 FFmpeg 30개, 릴리스 빌드가 통과했다. 기존 `.lfe.json`은 호환 입력으로 유지하며 Save는 `.lep` 사본을 만든다. 네이티브 복구·이동 수집까지 아래 범위의 end-to-end 검증을 마쳤다. 고유 형식의 기본 단계와 이어 재개한 같은 경로 박스 선택/Ctrl+A의 검증을 마쳤다. E04 Contents의 형제 항목 다중 선택·같은 부모 안의 묶음 순서 편집과 저장 포커스 회귀까지 검증을 마쳤다. 이어서 F03/D01의 레이어 전체 Text Fill/Stroke RGB와 Stroke Width 7개 스칼라 애니메이션을 연결하고 최종 네이티브 검증을 마쳤다. 문자별 스타일/타이포그래피 애니메이션은 별도 범위다. E02 단일 정점 숫자 모달과 F02 실제 fallback face/미해결 glyph 진단도 구현·자동/네이티브 검증을 마쳤다. 다음 P1 단계는 D03 단일 채널 Speed Graph에서 key time/value를 고정한 endpoint velocity 세로 변형이다. Hold/정의되지 않은 side는 거부하고 기존 가로 시간 변형은 유지하며 전체 derivative curve의 균일 배율이나 AE 동등성을 뜻하지 않는다.
 
 현재는 **2D 모션 편집·합성 기반을 구현한 단계**다. AE 동등 수준이나 전체 백로그 완료 상태는 아니다. 기능군마다 규모가 달라 단순 항목 수를 완성률로 표시하지 않는다.
 
@@ -21,6 +21,17 @@
 - **정교한 편집에 남은 기능:** D02/D03 다중 채널·공간 보간·Speed Graph 선택 변형, E02/E03 경로 토폴로지·marquee/교차 경로 선택, E04 트리 편집·복합 Colors 애니메이션, G01 가변 Feather·로토베지어, F01–F03 실제 IME 검증·문자별 스타일·텍스트 속성 애니메이션, B01/B05/B07 배치 회귀·단축키/접근성. 스칼라 양방향 시간 보간·Speed Graph, Contents·도형 속성 애니메이션, 직접 텍스트 편집과 B06 공통 색 선택기는 아래 이력의 범위로 이미 구현됐다.
 - **후속 고급 기능:** 패널 도킹·소스 뷰어·최근 프로젝트, 타임라인 고급 시간 편집/검색/가상화, 공간 경로·프리셋·표현식, Shape 연산/SVG·Text Animator, 추가 효과·모션 블러, 고정밀 색/HDR·Proxy/GPU, 템플릿, 설치/업데이트·한글화와 UI 회귀 자동화.
 - **별도 대형 단계:** 3D/카메라/라이트·모델, 추적·로토/Puppet, 플러그인/교환 포맷 연구, 웹/API 제품 범위. AEP/MOGRT 호환은 구현되지 않았다.
+
+### F02 실제 glyph·fallback face 진단 — 2026-10-03
+
+- Manage project fonts의 선택한 source group에서 Check glyphs를 명시적으로 시작한다. 모든 컴포지션의 stable ID와 원래 Layer snapshot을 고정하고 레이어별 background 작업으로 검사한다. 열기/매 redraw는 전체 text shaping을 실행하지 않는다. 창 닫기·그룹/문서/원본 변경은 결과를 무효화하며 serial과 단일 worker slot으로 늦은 응답과 겹친 검사를 막는다. Cancel은 현재 레이어 사이에서 협력적으로 멈추며 기존 Undo/Redo나 .lep 내용은 바꾸지 않는다.
+- renderer의 실제 composed text geometry를 단일 opaque paint로 검사한다. 요청한 family/face, primary matched face와 최종 positioned glyph ID가 참조하는 tree-local fontdb face를 구분한다. cmap 지원 여부를 실제 fallback으로 추정하지 않으며 supported prefix까지 whole-run fallback이 될 수 있다. glyph ID 0은 미해결로 집계하고 bounded cluster text/code point를 표시한다. 동일 표시 이름의 서로 다른 font ID도 primary/fallback 판정에서 합치지 않는다.
+- hidden/locked/paint-disabled layer도 검사하며 paragraph overflow는 별도 표시한다. empty, parser에서 사라진 node, 누락된 metadata, 처리 한도는 incomplete 등으로 명시한다. glyph 0이 없다는 것만으로 미완료 문서의 전체 문자 지원을 선언하지 않는다. grapheme/caret 범위, semantic emoji·color/bitmap glyph painting, 실제 다른 PC 출력 동등성은 이 진단의 보증 범위가 아니다.
+- 검사당 256 layer, 레이어당 4096 source bytes·128 source/composed lines·8192 glyphs·16 faces·8 sample(각 24문자) 한도를 사용한다. 보고하지 않은 layer와 truncation은 UI에 남긴다. 선택 그룹 전체의 source snapshot은 stale 검증을 위해 유지하므로 전체 프로세스/메모리 상한으로 표현하지 않는다.
+- 기존 Replace는 명시적 family 선택 때만 Project origin을 고정하고 style 선택 동안 유지한다. glyph 진행 갱신은 replacement 선택을 지우지 않으며 Apply의 원본/revision guard, locked skip, 한 Undo 명령을 유지한다. fonts resolver/layout/paint, core schema·LEP v1, strict export의 missing family/substituted primary 정책은 변경하지 않았다.
+- 최종 자동 검증은 Core 251 + Desktop 541(기본 792), 명시적 FFmpeg 30, fmt/direct pinned Cargo check/release가 통과했다. 신규 25개는 backend 9와 lifecycle 16이며 전체 집계에 포함한다. deterministic ASCII test font는 bundled Wanted Sans를 OFL 조건에 따라 renamed subset한 것으로 runtime catalog에 넣지 않는다. fixture 재생성은 byte-identical이며 독립 glyph truthfulness/fixture 및 lifecycle/replacement 리뷰에 차단 문제가 없다. 기존 text 27 frame와 수동 static 기준 5 frame의 28,440,800 RGBA 픽셀도 최종 pin에서 정확히 일치한다.
+- 최종 pin 네이티브에서 DejaVu Sans A가의 실제 whole-run Noto Sans CJK JP fallback, U+0378 glyph 0 sample, empty/4097-byte incomplete/paragraph overflow를 확인했다. Check/Close/Save의 원본 PROJ 불변, missing family의 unlocked 두 reference만 교체하고 locked/source/paint/track 보존, 이후 재검사 뒤 한 Undo 원본 복원, Redo 및 실제 reopen의 replacement PROJ 일치가 통과했다. 258-layer 검사에서 Cancel 후 71개 report/187개 unexamined 경고를 확인했고 재시작 직후 group switch는 stale report를 지웠으며 새 group의 1개 결과만 남았다. 실제 CUA 화면 31개와 최종 pin/hash를 보존하며 22개 사후 assertion, 8개 CRC 검증 native 파일의 공식 codec 왕복이 모두 통과했다. reopened PROJ와 VIEW도 정확히 일치한다. Windows/DPI·실제 IME·모든 async 순서 조합은 네이티브 미검증이다.
+- F02 전체는 variable axes, 실행 중 catalog refresh, cross-machine qualification 등 잔여 범위를 유지한다.
 
 ### E02 단일 정점 숫자 편집 트랜잭션 — 2026-10-03
 

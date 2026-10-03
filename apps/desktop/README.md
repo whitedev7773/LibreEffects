@@ -279,8 +279,8 @@ The catalog discovers system fonts once per application run; restart after
 installing fonts. Missing fonts/styles keep their saved identity and show a
 Character warning. Missing families render with Wanted Sans; missing styles use
 the closest available face. External fonts are not embedded or collected. Use
-the same installed font versions for portable output. Variable font axes, glyph
-coverage diagnostics and per-character styling remain future work.
+the same installed font versions for portable output. Variable font axes,
+per-character styling and cross-machine portability qualification remain future work.
 
 File → Manage project fonts lists every saved family/face/weight/slant reference
 across all compositions, its text-layer usages, availability and primary resolved
@@ -291,8 +291,37 @@ Locked layers retain their original reference. One Undo restores the whole
 replacement, including changes in other compositions. Text, spacing, paint,
 paragraph boxes and animation properties are preserved; a different font can
 still change glyph widths and paragraph wrapping. The list refreshes after edits
-and document changes. Fonts are not embedded, and the primary face report is not
-a glyph-by-glyph fallback or missing-character diagnostic.
+and document changes. Fonts are not embedded.
+
+Choose a source group and press **Check glyphs** to inspect its current text across
+all compositions. This is an explicit, read-only background check; opening the
+manager does not shape every text layer. Requested identity, primary matched face
+and the actual faces used by final positioned glyphs are shown separately. A
+fallback may replace a whole run, including characters the primary font supports.
+Glyph ID 0 is reported as unresolved, with bounded available cluster text/code
+points; a shaping cluster is not a character-level caret range.
+
+Checks include hidden, locked and paint-disabled layers and use the renderer's
+composed text geometry with a single opaque paint pass. Paragraph overflow is
+reported separately. Empty, dropped, unsupported or partially inspected text is
+explicitly marked; zero recorded unresolved glyphs does not establish complete
+coverage for those layers. Final shaping metadata does not prove semantic emoji,
+color/bitmap-font painting or cross-machine output equivalence.
+
+One check reports at most 256 layers. Per-layer limits are 4096 source bytes,
+128 source/composed lines, 8192 glyphs, 16 faces and 8 unresolved samples of up to
+24 characters. Unexamined layers and truncation stay visible. These are analysis
+limits, not a total process-memory guarantee: the chosen group's source snapshot
+is retained for stale-result validation. **Cancel check** stops between layers;
+the current layer must settle before another check starts. Closing, switching
+groups, changing the checked source or replacing the document invalidates the old
+result. Checking,
+cancelling and reading results do not create an Undo entry or modify `.lep`
+data. Font replacement remains the separate one-Undo action described above.
+
+This diagnostic does not change rendering, layout, stored project/container
+versions or export policy. Strict export still rejects missing families or
+substituted primary faces; it is not a glyph-coverage enforcement mode.
 
 ## Editing text in the Composition
 
