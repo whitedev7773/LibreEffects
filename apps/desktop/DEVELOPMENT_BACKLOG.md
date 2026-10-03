@@ -37,7 +37,8 @@
 - Gradient Fill/Stroke의 `Edit Gradient…`에서 색/불투명도 stop 추가·삭제·위치·midpoint·HEX/RGB·opacity를 임시 문서에서 편집한다. Composition 초안은 갱신하되 원본·자동 저장·출력·히스토리는 OK 전까지 유지한다. 여러 변경을 한 Undo로 적용하며 Cancel은 원본을 유지한다. 잘못된 입력은 승인을 막고, 필드의 Escape는 그 필드만 되돌린다. 변경 후 원래 값으로 복귀하거나 stop을 추가 후 제거하면 키/Undo를 만들지 않는다.
 - Pen은 한 경로에서 Shift-click 다중 정점 선택과 공통 로컬 이동을 지원한다. Shape·Mask·중첩 Contents의 변환, 탄젠트 오프셋과 선택하지 않은 점을 보존한다. 정적 다중 Delete는 열린 경로 2점/닫힌 경로 3점 하한을 지키며 애니메이션 토폴로지 변경은 원자적으로 거부한다. 삽입 중 Delete/연속 pointer-down, 놓는 위치와 Alt/Shift, Settings 뒤 캔버스 키 처리 문제를 리뷰에서 발견해 회귀 검사와 함께 수정했다.
 - 자동 검증: 코어 197개 + 데스크톱 319개(총 516개), 명시적 FFmpeg 30개, check/fmt/diff/릴리스 빌드 통과. 모달 16개·Pen 27개(기존 4개 + 신규 23개)·Shell focus 3개는 데스크톱 집계에 포함된다. 두 독립 리뷰의 필수 수정도 반영됐다.
-- 초기 debug 앱의 실제 화면에서 색/불투명도 stop 추가·stop/midpoint 이동·RGB/opacity scrub 후 Cancel로 원본 복원을 확인했다. 저장 문서는 view metadata 외 원본과 일치했다. 나머지 필드 Escape·잘못된 입력·OK/한 Undo·저장 재열기와 최종 release의 Pen/overlay QA는 진행 중이며 완료로 계산하지 않는다.
+- 초기 debug 앱에서 색/불투명도 stop 추가·stop/midpoint 이동·RGB/opacity scrub 후 Cancel, HEX 입력/오류 차단·필드 Escape, 여러 변경 OK와 정확한 한 Undo/Redo, 변경 후 원복의 no-op 히스토리를 실제 조작했다. 최종 release에서 저장본 재열기를 확인했고 CLI 출력의 2,244개 내부 픽셀이 독립 색/불투명도 midpoint 수식과 RGB 최대 1.47/255 이내였다.
+- 최종 release의 실제 Pen 조작에서 Shape·회전/Skew 중첩 Contents·Mask의 두 점 이동을 확인했다. 저장 JSON은 공통 로컬 이동량과 나머지 점/모든 탄젠트 보존을 입증했다. 선택만 한 no-op, 정적 6→4점 삭제, 닫힌 경로 4→2점 거부, 애니메이션 토폴로지 거부와 기존 두 키 보존, 한 Undo/Redo·정적 저장 재열기가 통과했다. Ctrl+K/Ctrl+N 뒤 Delete는 캔버스를 변경하지 않았고 Settings 필드 입력/두 단계 Escape도 통과했다. Save 등 파일 동작은 기존 포커스 정책으로 임시 Pen 선택을 지운다. 원자적 입력 도구의 한계상 마우스를 누른 중간 프레임은 미검증이며 실제 AE 비교는 수행하지 않았다.
 - 남음: 복합 Colors/토폴로지 애니메이션, 모달 내부 HSV/eyedropper·drag-away 삭제, Contents 트리 drag/다중 선택·선택 그룹 Pen 생성, marquee/교차 경로 선택·숫자 정점 편집·경로 방향/첫 정점, 가변 Feather/RotoBezier. 기존 파일 모델을 사용하며 실제 AE UI/픽셀 동등성을 주장하지 않는다. 원격 push/PR 없이 `codex/ae-workspace`의 로컬 커밋으로만 보존한다.
 
 ### I01 공통 출력 사전 점검 — 2026-10-03

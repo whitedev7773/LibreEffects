@@ -70,6 +70,8 @@ changes without falling through to layer deletion. The same selection workflow
 works on legacy shapes, vector masks and nested Contents paths. Escape, focus,
 time, tool, target or document changes cancel a pending gesture. Opening Settings,
 Help or other shell overlays removes canvas focus before editing shortcuts run.
+File actions such as Save also blur the canvas and clear transient vertex selection;
+reselect vertices before the next multi-vertex gesture.
 
 Properties contains shape Fill/Stroke and Closed Path controls, and ordered
 mask Add/Subtract/Intersect/None, Invert, reorder and remove controls. Paths
