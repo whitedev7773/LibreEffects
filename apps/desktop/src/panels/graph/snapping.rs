@@ -17,6 +17,85 @@ pub(super) struct Targets {
     fps: f64,
 }
 impl Targets {
+    /// Snap a moving selection-box edge while retaining its fixed scaling origin.
+    /// Time candidates must leave every selected destination distinct and vacant.
+    pub fn scale(
+        &self,
+        mut scale: libre_effects_core::KeyScale,
+        time_edge: Option<f64>,
+        value_edge: Option<f64>,
+        frames: &[u32],
+        view: View,
+        bounds: Bounds<Pixels>,
+        duration: u32,
+    ) -> (libre_effects_core::KeyScale, Guides) {
+        let mut guides = Guides::default();
+        if !scale.time_scale.is_finite()
+            || scale.time_scale <= 0.0
+            || !scale.value_scale.is_finite()
+        {
+            return (scale, guides);
+        }
+        if let Some(edge) = time_edge.filter(|edge| (*edge - scale.time_origin).abs() > 1e-9) {
+            let wanted = scale.time_origin + (edge - scale.time_origin) * scale.time_scale;
+            let tolerance = 8.0 * view.span / f32::from(bounds.size.width).max(1.0) as f64;
+            let first = self
+                .times
+                .partition_point(|t| (*t as f64) < wanted - tolerance);
+            let mut best: Option<(f64, i64, f64)> = None;
+            for &target in self.times[first..]
+                .iter()
+                .take_while(|t| (**t as f64) <= wanted + tolerance)
+            {
+                let factor = (target as f64 - scale.time_origin) / (edge - scale.time_origin);
+                let candidate = libre_effects_core::KeyScale {
+                    time_scale: factor,
+                    ..scale
+                };
+                let mut destinations = BTreeSet::new();
+                if frames.iter().any(|&f| {
+                    candidate.frame(f, duration).map_or(true, |to| {
+                        self.occupied.contains(&to) || !destinations.insert(to)
+                    })
+                }) {
+                    continue;
+                }
+                let distance = (target as f64 - wanted).abs();
+                if best.is_none_or(|b| (distance, target) < (b.0, b.1)) {
+                    best = Some((distance, target, factor));
+                }
+            }
+            if let Some((_, target, factor)) = best {
+                scale.time_scale = factor;
+                guides.frame = u32::try_from(target).ok();
+            }
+        }
+        if let Some(edge) = value_edge.filter(|edge| (*edge - scale.value_origin).abs() > 1e-9) {
+            let wanted = scale.value_origin + (edge - scale.value_origin) * scale.value_scale;
+            let tolerance =
+                8.0 * (view.high - view.low) / f32::from(bounds.size.height).max(1.0) as f64;
+            let first = self.values.partition_point(|v| *v < wanted - tolerance);
+            let mut best: Option<(f64, f64, f64)> = None;
+            for &target in self.values[first..]
+                .iter()
+                .take_while(|v| **v <= wanted + tolerance)
+            {
+                let factor = (target - scale.value_origin) / (edge - scale.value_origin);
+                if !factor.is_finite() {
+                    continue;
+                }
+                let distance = (target - wanted).abs();
+                if best.is_none_or(|b| (distance, target) < (b.0, b.1)) {
+                    best = Some((distance, target, factor));
+                }
+            }
+            if let Some((_, target, factor)) = best {
+                scale.value_scale = factor;
+                guides.value = Some(target);
+            }
+        }
+        (scale, guides)
+    }
     /// Capture before clicking a key seeks the playhead to that key.
     pub fn new(
         state: &EditorState,
@@ -157,6 +236,130 @@ pub(super) fn enabled(switch: bool, control: bool, alt: bool) -> bool {
 mod tests {
     use super::*;
     use libre_effects_core::{Editor, KeyRef, Project, Property};
+    #[test]
+    fn transform_snap_keeps_pivots_and_only_changes_moving_axes() {
+        let (s, k) = scene();
+        let snap = targets(&s, &k, None);
+        let (v, b) = geometry();
+        let raw = libre_effects_core::KeyScale {
+            time_origin: 10.0,
+            time_scale: 1.975,
+            value_origin: 600.0,
+            value_scale: 0.385,
+        };
+        let (scale, guides) = snap.scale(raw, Some(30.0), Some(900.0), &[10, 30], v, b, 150);
+        assert_eq!((scale.time_origin, scale.value_origin), (10.0, 600.0));
+        assert_eq!((scale.time_scale, scale.value_scale), (2.0, 0.4));
+        assert_eq!(
+            guides,
+            Guides {
+                frame: Some(50),
+                value: Some(720.0)
+            }
+        );
+        let (still, g) = snap.scale(raw, None, None, &[10, 30], v, b, 150);
+        assert_eq!(
+            (still.time_scale, still.value_scale),
+            (raw.time_scale, raw.value_scale)
+        );
+        assert_eq!(g, Guides::default());
+        // A tighter viewport uses the same eight screen pixels, not eight frames.
+        let (_, g) = snap.scale(
+            raw,
+            Some(30.0),
+            Some(900.0),
+            &[10, 30],
+            View {
+                span: 10.0,
+                low: 650.0,
+                high: 750.0,
+                ..v
+            },
+            b,
+            150,
+        );
+        assert_eq!(g, Guides::default());
+    }
+    #[test]
+    fn transform_candidates_skip_collisions_rounding_and_composition_edges() {
+        let (s, k) = scene();
+        let mut snap = targets(&s, &k, None);
+        let (v, b) = geometry();
+        snap.times = vec![39, 40];
+        snap.occupied = [40].into();
+        let raw = libre_effects_core::KeyScale {
+            time_origin: 25.0,
+            time_scale: 2.96,
+            value_origin: 0.0,
+            value_scale: 1.0,
+        };
+        let (scale, g) = snap.scale(raw, Some(30.0), None, &[20, 30], v, b, 150);
+        assert_eq!(g.frame, Some(39));
+        assert_eq!(scale.frame(20, 150).unwrap(), 11);
+        assert_eq!(scale.frame(30, 150).unwrap(), 39);
+        snap.times = vec![23, 24];
+        snap.occupied.clear();
+        let (_, g) = snap.scale(
+            libre_effects_core::KeyScale {
+                time_origin: 20.0,
+                time_scale: 0.37,
+                ..raw
+            },
+            Some(30.0),
+            None,
+            &[20, 21, 30],
+            v,
+            b,
+            150,
+        );
+        assert_eq!(g.frame, None);
+        snap.times = vec![149, 150];
+        let (scale, g) = snap.scale(
+            libre_effects_core::KeyScale {
+                time_origin: 20.0,
+                time_scale: 12.96,
+                ..raw
+            },
+            Some(30.0),
+            None,
+            &[20, 30],
+            v,
+            b,
+            150,
+        );
+        assert_eq!(g.frame, Some(149));
+        assert_eq!(scale.frame(30, 150).unwrap(), 149);
+        let (_, g) = snap.scale(
+            libre_effects_core::KeyScale {
+                time_scale: -1.0,
+                ..raw
+            },
+            Some(30.0),
+            None,
+            &[20, 30],
+            v,
+            b,
+            150,
+        );
+        assert_eq!(g, Guides::default());
+    }
+    #[test]
+    fn transform_value_reflection_snaps_signed_values_and_ignores_fixed_edges() {
+        let (s, k) = scene();
+        let mut snap = targets(&s, &k, None);
+        let (v, b) = geometry();
+        snap.values = vec![-20.0];
+        let raw = libre_effects_core::KeyScale {
+            time_origin: 20.0,
+            time_scale: 1.0,
+            value_origin: 0.0,
+            value_scale: -1.99,
+        };
+        let (scale, g) = snap.scale(raw, None, Some(10.0), &[20, 30], v, b, 150);
+        assert_eq!((scale.value_scale, g.value), (-2.0, Some(-20.0)));
+        let (_, g) = snap.scale(raw, Some(20.0), Some(0.0), &[20, 30], v, b, 150);
+        assert_eq!(g, Guides::default());
+    }
     fn scene() -> (EditorState, Vec<selection::Sample>) {
         let mut s = EditorState::default();
         s.editor.execute(Command::AddRectangle).unwrap();

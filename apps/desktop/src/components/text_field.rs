@@ -15,6 +15,7 @@ impl gpui::Global for ActiveField {}
 /// Escape restores the original value without an editing command.
 pub(crate) struct TextField {
     focus: FocusHandle,
+    return_focus: Option<FocusHandle>,
     content: String,
     original: String,
     binding: String,
@@ -53,6 +54,7 @@ impl TextField {
     ) -> Self {
         Self {
             focus: cx.focus_handle(),
+            return_focus: None,
             content: String::new(),
             original: String::new(),
             binding: String::new(),
@@ -70,6 +72,18 @@ impl TextField {
     pub fn numeric(mut self) -> Self {
         self.numeric = true;
         self
+    }
+    /// Keep keyboard editing in the owning panel after Enter or Escape.
+    pub fn return_focus(mut self, focus: FocusHandle) -> Self {
+        self.return_focus = Some(focus);
+        self
+    }
+    fn finish_input(&self, window: &mut Window) {
+        if let Some(focus) = &self.return_focus {
+            window.focus(focus);
+        } else {
+            window.blur();
+        }
     }
     pub fn set_numeric(&mut self) {
         self.numeric = true;
@@ -178,13 +192,13 @@ impl TextField {
         match key {
             "enter" => {
                 self.submit(window, cx);
-                window.blur();
+                self.finish_input(window);
             }
             "escape" => {
                 self.content = self.original.clone();
                 self.selection = 0..0;
                 self.marked = None;
-                window.blur();
+                self.finish_input(window);
             }
             "backspace" => {
                 if self.selection.is_empty() {

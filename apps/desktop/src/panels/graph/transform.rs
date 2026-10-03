@@ -83,16 +83,16 @@ mod tests {
             let mut t = grab(&s, view, bounds, h);
             for centered in [false, true] {
                 let end = t.start + point(px(h.0 as f32 * 100.0), px(h.1 as f32 * -60.0));
-                t.moving(end, centered);
+                t.moving(end, centered, false);
                 let (scale, track) = t.preview.as_ref().unwrap();
                 let factor = if centered { 2.0 } else { 1.5 };
                 assert!((scale.time_scale - if h.0 == 0 { 1.0 } else { factor }).abs() < 1e-9);
                 assert!((scale.value_scale - if h.1 == 0 { 1.0 } else { factor }).abs() < 1e-9);
                 let once = track.clone();
-                t.moving(end, centered);
+                t.moving(end, centered, false);
                 assert_eq!(&t.preview.as_ref().unwrap().1, &once);
             }
-            t.moving(t.start, false);
+            t.moving(t.start, false, false);
             assert_eq!(
                 &t.preview.as_ref().unwrap().1,
                 s.editor
@@ -108,7 +108,7 @@ mod tests {
         let (mut s, view, bounds) = scene();
         let before = s.editor.project().clone();
         let mut t = grab(&s, view, bounds, Handle(1, 1));
-        t.moving(t.start + point(px(100.0), px(-120.0)), false);
+        t.moving(t.start + point(px(100.0), px(-120.0)), false, false);
         let preview = t.preview.as_ref().unwrap().1.clone();
         let (command, keys) = t.command().unwrap();
         assert_eq!(
@@ -151,12 +151,12 @@ mod tests {
         let before = s.editor.project().clone();
         let mut t = grab(&s, view, bounds, Handle(1, 0));
         for dx in [66.66667, -200.0, 1000.0] {
-            t.moving(t.start + point(px(dx), px(0.0)), false);
+            t.moving(t.start + point(px(dx), px(0.0)), false, false);
             assert!(t.preview.is_err());
             assert!(t.command().is_err());
             assert_eq!(s.editor.project(), &before);
         }
-        t.moving(t.start + point(px(33.33333), px(0.0)), false);
+        t.moving(t.start + point(px(33.33333), px(0.0)), false, false);
         assert_eq!(t.frames(), [30, 55].into());
         assert!(t.command().is_ok());
         drop(t); // Cancel: preview never touches the document or its Undo history.
@@ -194,7 +194,7 @@ mod tests {
         );
         assert!(SelectionBox::new(track, &[30].into()).is_none());
         let mut t = grab(&s, view, bounds, Handle(0, 1));
-        t.moving(t.start + point(px(0.0), px(240.0)), false);
+        t.moving(t.start + point(px(0.0), px(240.0)), false, false);
         let (scale, preview) = t.preview.unwrap();
         assert_eq!(scale.value_scale, -1.0);
         assert_eq!(preview.keys()[&50].value, 420.0);
@@ -202,6 +202,70 @@ mod tests {
             preview.keys().keys().copied().collect::<Vec<_>>(),
             vec![30, 50, 60]
         );
+    }
+    #[test]
+    fn snapped_corner_preview_commit_undo_and_saved_output_agree() {
+        let (mut s, view, bounds) = scene();
+        for edit in [
+            TrackEdit::ToggleKey { frame: 90 },
+            TrackEdit::Value {
+                frame: 90,
+                value: 1320.0,
+            },
+        ] {
+            s.editor
+                .execute(Command::EditTrack {
+                    id: 1,
+                    property: s.graph_property,
+                    edit,
+                })
+                .unwrap();
+        }
+        s.frame = 75;
+        let before = s.editor.project().clone();
+        let mut t = grab(&s, view, bounds, Handle(1, 1));
+        // Raw edge: 75.75 frames and 1310 units, both within eight pixels.
+        let end = t.start + point(px(105.0), px(-116.0));
+        t.moving(end, false, true);
+        assert_eq!(
+            t.guides,
+            snapping::Guides {
+                frame: Some(75),
+                value: Some(1320.0)
+            }
+        );
+        let expected = t.preview.as_ref().unwrap().1.clone();
+        t.moving(end, false, false);
+        assert_eq!(t.guides, snapping::Guides::default());
+        assert!((t.preview.as_ref().unwrap().1.keys()[&61].value - 1310.0).abs() < 1e-8);
+        t.moving(end, false, true);
+        let (command, moved) = t.command().unwrap();
+        assert_eq!(
+            moved.iter().map(|k| k.frame).collect::<Vec<_>>(),
+            vec![30, 60, 75]
+        );
+        s.editor.execute(command).unwrap();
+        assert_eq!(
+            s.editor
+                .selected_layer()
+                .unwrap()
+                .track(s.graph_property)
+                .unwrap(),
+            &expected
+        );
+        assert_eq!(expected.keys()[&90].value, 1320.0);
+        let saved = Project::from_json(&s.editor.project().to_json().unwrap()).unwrap();
+        s.editor.undo();
+        assert_eq!(s.editor.project(), &before);
+        s.editor.redo();
+        assert_eq!(s.editor.project(), &saved);
+        let r = crate::rendering::Renderer::new();
+        for f in [30, 45, 60, 67, 75, 90] {
+            assert_eq!(
+                r.render(&saved, f, 384).unwrap(),
+                r.render_output(&saved, f, 384, 216).unwrap()
+            );
+        }
     }
 }
 impl SelectionBox {
@@ -288,6 +352,8 @@ pub(super) struct Transform {
     pub keys: Vec<KeyRef>,
     original: AnimatedProperty,
     duration: u32,
+    targets: snapping::Targets,
+    pub guides: snapping::Guides,
     pub preview: Result<(KeyScale, AnimatedProperty), String>,
     pub moved: bool,
 }
@@ -305,6 +371,8 @@ impl Transform {
         let keys = selection::active(state);
         let area = SelectionBox::new(track, &keys.iter().map(|k| k.frame).collect())?;
         let handle = area.hit(view, bounds, start)?;
+        let targets =
+            snapping::Targets::new(state, track, &selection::snapshot(track, &keys, None), None);
         let identity = KeyScale {
             time_origin: 0.0,
             time_scale: 1.0,
@@ -320,6 +388,8 @@ impl Transform {
             keys,
             original: track.clone(),
             duration: state.editor.project().composition().duration(),
+            targets,
+            guides: Default::default(),
             preview: Ok((identity, track.clone())),
             moved: false,
         })
@@ -362,13 +432,37 @@ impl Transform {
             },
         }
     }
-    pub fn moving(&mut self, end: Point<Pixels>, center: bool) {
+    pub fn moving(&mut self, end: Point<Pixels>, center: bool, snap: bool) {
         let delta = end - self.start;
         if !self.moved && f32::from(delta.x).abs() + f32::from(delta.y).abs() < 3.0 {
             return;
         }
         self.moved = true;
-        let scale = self.scale(end, center);
+        let mut scale = self.scale(end, center);
+        self.guides = Default::default();
+        if snap {
+            let time_edge =
+                (self.handle.0 != 0 && delta.x != px(0.0)).then_some(if self.handle.0 < 0 {
+                    self.area.first
+                } else {
+                    self.area.last
+                });
+            let value_edge =
+                (self.handle.1 != 0 && delta.y != px(0.0)).then_some(if self.handle.1 < 0 {
+                    self.area.low
+                } else {
+                    self.area.high
+                });
+            (scale, self.guides) = self.targets.scale(
+                scale,
+                time_edge,
+                value_edge,
+                &self.keys.iter().map(|k| k.frame).collect::<Vec<_>>(),
+                self.view,
+                self.bounds,
+                self.duration,
+            );
+        }
         self.preview = self
             .original
             .preview_key_scale(
@@ -377,6 +471,9 @@ impl Transform {
                 self.duration,
             )
             .map(|track| (scale, track));
+        if self.preview.is_err() {
+            self.guides = Default::default();
+        }
     }
     pub fn frames(&self) -> BTreeSet<u32> {
         self.keys

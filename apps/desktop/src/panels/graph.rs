@@ -318,9 +318,11 @@ impl Graph {
             cx.notify();
         })
         .detach();
+        let focus = cx.focus_handle();
         let fields = (0..12)
             .map(|index| {
                 let edit = state.clone();
+                let return_focus = focus.clone();
                 cx.new(|cx| {
                     TextField::new(cx, move |text, window, cx| {
                         edit.update(cx, |state, cx| {
@@ -448,6 +450,7 @@ impl Graph {
                             }
                         });
                     })
+                    .return_focus(return_focus)
                 })
             })
             .collect();
@@ -455,7 +458,7 @@ impl Graph {
             state,
             plot: Rc::new(Cell::new(None)),
             easing: Rc::new(Cell::new(None)),
-            focus: cx.focus_handle(),
+            focus,
             drag: None,
             drag_revision: 0,
             fields,
@@ -857,7 +860,11 @@ impl Graph {
         }
         match &mut self.drag {
             Some(Drag::Transform { transform, .. }) => {
-                transform.moving(event.position, event.modifiers.alt);
+                transform.moving(
+                    event.position,
+                    event.modifiers.alt,
+                    self.state.read(cx).snapping ^ event.modifiers.control,
+                );
                 cx.stop_propagation();
             }
             Some(Drag::Zoom { zoom, end, .. }) => {
@@ -1026,7 +1033,11 @@ impl Graph {
             self.state.update(cx, |state, cx| match drag {
                 Drag::Transform { mut transform, .. } => {
                     // Include the release position when it is outside the canvas.
-                    transform.moving(event.position, event.modifiers.alt);
+                    transform.moving(
+                        event.position,
+                        event.modifiers.alt,
+                        state.snapping ^ event.modifiers.control,
+                    );
                     if transform.moved {
                         match transform.command() {
                             Ok((command, moved)) => {
@@ -1447,7 +1458,7 @@ impl Render for Graph {
                 .tooltip(|_, cx| {
                     cx.new(|_| {
                         ui::Tip(
-                            "Snap keys in time and value · Ctrl-drag toggles · Alt-drag bypasses"
+                            "Snap time/value · Ctrl toggles · Alt: bypass key moves, center box scaling"
                                 .into(),
                         )
                     })
@@ -1466,7 +1477,7 @@ impl Render for Graph {
                 ui::tool(
                     "graph-transform-box",
                     "square",
-                    "Transform selected Value Graph keys · Alt: scale about center",
+                    "Transform selected Value Graph keys · Alt: center · Ctrl: toggle snapping",
                     self.transform_box,
                 )
                 .when(
@@ -1824,7 +1835,12 @@ impl Render for Graph {
                                     ui::BLUE,
                                     1.0,
                                 );
-                                if let Some(Drag::Key { guides, .. }) = &drag {
+                                let guides = match &drag {
+                                    Some(Drag::Key { guides, .. }) => Some(guides),
+                                    Some(Drag::Transform { transform, .. }) => Some(&transform.guides),
+                                    _ => None,
+                                };
+                                if let Some(guides) = guides {
                                     if let Some(frame) = guides.frame {
                                         let x = graph_view.point(bounds, frame as f64, 0.0).x;
                                         stroke(

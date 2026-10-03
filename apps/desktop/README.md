@@ -525,9 +525,17 @@ timeline still limits time zoom to 1–64× and integer viewport start frames.
   loss of focus, document/channel changes cancel without changing the document.
   Time reversal, rounding collisions and out-of-composition times are rejected;
   invalid time previews show a red box. Property bounds are validated on commit.
-  Value reflection is supported. Speed Graph transformation, transform snapping,
-  custom anchor points and skew remain pending. This overlay does not alter the
+  Value reflection is supported. With Snap enabled, moving box edges snap within
+  eight logical pixels to the captured playhead, timeline boundaries/markers/key
+  times and unselected values in this channel. The opposite edge or Alt-centered
+  pivot stays fixed. Ctrl inverts Snap for the drag; Alt continues to center
+  scaling (it bypasses snapping only for ordinary key moves). Orange guides show
+  matches. Unmoved axes do not snap, and occupied or rounded-together key times
+  are skipped. Speed Graph transformation, custom anchor points and skew remain pending. This overlay does not alter the
   panel layout or saved document format.
+- Graph numeric fields return keyboard focus to the graph after Enter/Escape.
+  Enter commits, Escape cancels the field draft, and Escape from the graph closes
+  Keyframe...; Undo, selection and fitting shortcuts work without another click.
 - Linear and Hold replace the selected key's outgoing segment, clearing its outgoing
   handle and the next key's incoming handle. Other segments remain unchanged.
 - Ease (F9) sets zero velocity and one-third influence on both sides of the selected
