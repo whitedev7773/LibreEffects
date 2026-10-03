@@ -1,4 +1,5 @@
-//! Scalar Value Graph selection scaling. Pointer deltas use a frozen viewport.
+//! Scalar graph selection scaling. Speed mode exposes time-only handles.
+//! Pointer deltas, source keys and snapping use a frozen mouse-down snapshot.
 use super::*;
 use libre_effects_core::{KeyRef, KeyScale};
 use std::collections::BTreeSet;
@@ -12,6 +13,8 @@ pub(super) struct SelectionBox {
     last: f64,
     low: f64,
     high: f64,
+    speed: bool,
+    speed_ends: [[Option<f64>; 2]; 2],
 }
 
 #[cfg(test)]
@@ -61,8 +64,13 @@ mod tests {
             .unwrap()
             .track(s.graph_property)
             .unwrap();
-        let area =
-            SelectionBox::new(t, &selection::active(s).iter().map(|k| k.frame).collect()).unwrap();
+        let area = SelectionBox::new(
+            t,
+            &selection::active(s).iter().map(|k| k.frame).collect(),
+            s.graph_view.speed,
+            s.editor.project().composition().fps().as_f64(),
+        )
+        .unwrap();
         let (_, p) = area
             .handles(view, bounds)
             .into_iter()
@@ -168,12 +176,10 @@ mod tests {
             .unwrap()
             .track(s.graph_property)
             .unwrap();
-        let area = SelectionBox::new(t, &[30, 50].into()).unwrap();
+        let area = SelectionBox::new(t, &[30, 50].into(), false, 30.0).unwrap();
         let p = area.handles(view, bounds)[0].1;
         assert!(Transform::new(&s, view, bounds, p).is_none());
         s.editor.undo();
-        s.graph_view.speed = true;
-        assert!(Transform::new(&s, view, bounds, p).is_none());
     }
     #[test]
     fn flat_selection_only_has_time_handles_and_value_reflection_is_supported() {
@@ -184,7 +190,7 @@ mod tests {
             .unwrap()
             .track(s.graph_property)
             .unwrap();
-        let flat = SelectionBox::new(track, &[30, 60].into()).unwrap();
+        let flat = SelectionBox::new(track, &[30, 60].into(), false, 30.0).unwrap();
         assert_eq!(
             flat.handles(view, bounds)
                 .iter()
@@ -192,7 +198,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![Handle(-1, 0), Handle(1, 0)]
         );
-        assert!(SelectionBox::new(track, &[30].into()).is_none());
+        assert!(SelectionBox::new(track, &[30].into(), false, 30.0).is_none());
         let mut t = grab(&s, view, bounds, Handle(0, 1));
         t.moving(t.start + point(px(0.0), px(240.0)), false, false);
         let (scale, preview) = t.preview.unwrap();
@@ -269,19 +275,55 @@ mod tests {
     }
 }
 impl SelectionBox {
-    pub fn new(track: &AnimatedProperty, frames: &BTreeSet<u32>) -> Option<Self> {
-        if frames.len() < 2 {
+    pub fn new(
+        track: &AnimatedProperty,
+        frames: &BTreeSet<u32>,
+        speed: bool,
+        fps: f64,
+    ) -> Option<Self> {
+        if frames.len() < 2 || frames.iter().any(|f| !track.keys().contains_key(f)) {
             return None;
         }
-        let values = frames
-            .iter()
-            .map(|f| track.keys().get(f).map(|k| k.value))
-            .collect::<Option<Vec<_>>>()?;
+        // Include the entire active selection, even outside the viewport. Missing,
+        // Hold-jump and singular endpoint sides are gaps, never invented velocities.
+        let values: Vec<_> = if speed {
+            frames
+                .iter()
+                .flat_map(|&f| speed::ends(track, f, fps))
+                .map(|(_, v)| v)
+                .filter(|v| v.is_finite())
+                .collect()
+        } else {
+            frames.iter().map(|f| track.keys()[f].value).collect()
+        };
+        let (low, high) = if values.is_empty() {
+            // No finite endpoint is still a valid time selection. Show its handles
+            // on the zero line rather than mixing property values into speed units.
+            (0.0, 0.0)
+        } else {
+            (
+                values.iter().copied().fold(f64::INFINITY, f64::min),
+                values.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+            )
+        };
         Some(Self {
             first: *frames.first()? as f64,
             last: *frames.last()? as f64,
-            low: values.iter().copied().fold(f64::INFINITY, f64::min),
-            high: values.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+            low,
+            high,
+            speed,
+            speed_ends: [*frames.first()?, *frames.last()?].map(|frame| {
+                let ends = if speed {
+                    speed::ends(track, frame, fps)
+                } else {
+                    vec![]
+                };
+                [false, true].map(|side| {
+                    ends.iter().find_map(|&(incoming, value)| {
+                        (incoming == side && value.is_finite()).then_some(value)
+                    })
+                })
+            }),
         })
     }
     fn area(self, view: View, bounds: Bounds<Pixels>) -> Bounds<Pixels> {
@@ -293,6 +335,50 @@ impl SelectionBox {
     }
     fn handles(self, view: View, bounds: Bounds<Pixels>) -> Vec<(Handle, Point<Pixels>)> {
         let area = self.area(view, bounds);
+        if self.speed {
+            // The decorative 10px inset must not hide visible time edges, nor
+            // expose a handle for a genuinely offscreen boundary. The stored
+            // frame pivot and pointer delta are independent of this decoration.
+            let inset_x = px(4.0).min(bounds.size.width / 2.0);
+            let inset_y = px(4.0).min(bounds.size.height / 2.0);
+            let middle = (area.top() + area.size.height / 2.0)
+                .clamp(bounds.top() + inset_y, bounds.bottom() - inset_y);
+            return [(self.first, area.left(), -1), (self.last, area.right(), 1)]
+                .into_iter()
+                .enumerate()
+                .filter_map(|(index, (frame, decorated, side))| {
+                    let true_x = view.point(bounds, frame, 0.0).x;
+                    if true_x < bounds.left() || true_x > bounds.right() {
+                        return None;
+                    }
+                    let x = decorated.clamp(bounds.left() + inset_x, bounds.right() - inset_x);
+                    // Keep ordinary speed-key glyphs clickable, including flat
+                    // selections at frame zero/final edge. Choose the closest
+                    // free point along the side, then remain inside the plot.
+                    let y = [0.0, -14.0, 14.0, -28.0, 28.0, -42.0, 42.0]
+                        .into_iter()
+                        .map(|offset| {
+                            (middle + px(offset))
+                                .clamp(bounds.top() + inset_y, bounds.bottom() - inset_y)
+                        })
+                        .find(|y| {
+                            self.speed_ends[index]
+                                .iter()
+                                .enumerate()
+                                .all(|(incoming, value)| {
+                                    value.is_none_or(|value| {
+                                        let key_x =
+                                            true_x + px(if incoming == 1 { -5.0 } else { 5.0 });
+                                        let key_y = view.point(bounds, frame, value).y;
+                                        f32::from(x - key_x).abs() > 10.0
+                                            || f32::from(*y - key_y).abs() > 10.0
+                                    })
+                                })
+                        })?;
+                    Some((Handle(side, 0), point(x, y)))
+                })
+                .collect();
+        }
         let mut handles = Vec::new();
         for y in [-1, 0, 1] {
             for x in [-1, 0, 1] {
@@ -311,6 +397,9 @@ impl SelectionBox {
         handles
     }
     pub fn hit(self, view: View, bounds: Bounds<Pixels>, p: Point<Pixels>) -> Option<Handle> {
+        if !bounds.contains(&p) {
+            return None;
+        }
         self.handles(view, bounds).into_iter().find_map(|(h, at)| {
             (bounds.contains(&at)
                 && (f32::from(p.x - at.x)).abs() <= 6.0
@@ -350,6 +439,10 @@ pub(super) struct Transform {
     area: SelectionBox,
     handle: Handle,
     pub keys: Vec<KeyRef>,
+    pub active: usize,
+    revision: u64,
+    tool: Tool,
+    snap: bool,
     original: AnimatedProperty,
     duration: u32,
     targets: snapping::Targets,
@@ -364,12 +457,17 @@ impl Transform {
         bounds: Bounds<Pixels>,
         start: Point<Pixels>,
     ) -> Option<Self> {
-        if state.graph_view.speed || state.editor.selected_layer()?.locked() {
+        if state.editor.selected_layer()?.locked() {
             return None;
         }
         let track = state.editor.selected_layer()?.track(state.graph_property)?;
         let keys = selection::active(state);
-        let area = SelectionBox::new(track, &keys.iter().map(|k| k.frame).collect())?;
+        let area = SelectionBox::new(
+            track,
+            &keys.iter().map(|k| k.frame).collect(),
+            state.graph_view.speed,
+            state.editor.project().composition().fps().as_f64(),
+        )?;
         let handle = area.hit(view, bounds, start)?;
         let targets =
             snapping::Targets::new(state, track, &selection::snapshot(track, &keys, None), None);
@@ -385,7 +483,13 @@ impl Transform {
             start,
             area,
             handle,
+            active: selected(state)
+                .and_then(|(id, frame, _)| keys.iter().position(|k| k.id == id && k.frame == frame))
+                .unwrap_or(0),
             keys,
+            revision: state.document_revision,
+            tool: state.tool,
+            snap: state.snapping,
             original: track.clone(),
             duration: state.editor.project().composition().duration(),
             targets,
@@ -394,12 +498,35 @@ impl Transform {
             moved: false,
         })
     }
+    /// Reject stale previews even if an observer has not run before mouse-up.
+    pub fn is_current(&self, state: &EditorState) -> bool {
+        state.document_revision == self.revision
+            && state.tool == self.tool
+            && state.graph_view.speed == self.area.speed
+            && selection::active(state) == self.keys
+            && state.editor.selected_layer().is_some_and(|layer| {
+                !layer.locked() && layer.track(state.graph_property) == Some(&self.original)
+            })
+    }
+    pub fn has_changes(&self) -> bool {
+        self.preview
+            .as_ref()
+            .is_ok_and(|(_, track)| track != &self.original)
+    }
+    /// Ctrl inverts the mouse-down snap switch; Alt changes the pivot only.
+    pub fn update_pointer(&mut self, end: Point<Pixels>, center: bool, control: bool) {
+        self.moving(end, center, self.snap ^ control);
+    }
     fn scale(&self, end: Point<Pixels>, center: bool) -> KeyScale {
         let delta = end - self.start;
         let dt = f32::from(delta.x) as f64 / f32::from(self.bounds.size.width).max(1.0) as f64
             * self.view.span;
-        let dv = -(f32::from(delta.y) as f64) / f32::from(self.bounds.size.height).max(1.0) as f64
-            * (self.view.high - self.view.low);
+        let dv = if self.area.speed {
+            0.0
+        } else {
+            -(f32::from(delta.y) as f64) / f32::from(self.bounds.size.height).max(1.0) as f64
+                * (self.view.high - self.view.low)
+        };
         let a = self.area;
         let time_origin = if center {
             (a.first + a.last) / 2.0
@@ -408,7 +535,9 @@ impl Transform {
         } else {
             a.first
         };
-        let value_origin = if center {
+        let value_origin = if self.area.speed {
+            0.0
+        } else if center {
             (a.low + a.high) / 2.0
         } else if self.handle.1 < 0 {
             a.high
@@ -434,7 +563,13 @@ impl Transform {
     }
     pub fn moving(&mut self, end: Point<Pixels>, center: bool, snap: bool) {
         let delta = end - self.start;
-        if !self.moved && f32::from(delta.x).abs() + f32::from(delta.y).abs() < 3.0 {
+        let distance = f32::from(delta.x).abs()
+            + if self.area.speed {
+                0.0
+            } else {
+                f32::from(delta.y).abs()
+            };
+        if !self.moved && distance < 3.0 {
             return;
         }
         self.moved = true;
@@ -508,3 +643,7 @@ impl Transform {
         ))
     }
 }
+
+#[cfg(test)]
+#[path = "transform_speed_tests.rs"]
+mod speed_tests;

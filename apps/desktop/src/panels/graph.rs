@@ -28,6 +28,10 @@ struct View {
     high: f64,
 }
 impl View {
+    fn speed_curves(self, track: &AnimatedProperty, fps: f64) -> Vec<Vec<(f64, f64)>> {
+        // Sampling and painting must share the selected (possibly frozen) view.
+        speed::curves(track, self.start as u32, self.span.ceil() as u32, fps)
+    }
     fn point(self, bounds: Bounds<Pixels>, frame: f64, value: f64) -> Point<Pixels> {
         point(
             bounds.left() + bounds.size.width * ((frame - self.start) / self.span) as f32,
@@ -314,6 +318,7 @@ impl Graph {
                 s.editor.selected() != Some(id)
                     || s.graph_property != p
                     || s.document_revision != this.drag_revision
+                    || matches!(drag, Drag::Transform { transform, .. } if !transform.is_current(s))
             }) {
                 this.drag = None;
                 this.hand.cancel();
@@ -632,7 +637,7 @@ impl Graph {
             cx.notify();
             return;
         }
-        let tangents = if self.transform_box && !speed_mode && selection::active(state).len() > 1 {
+        let tangents = if self.transform_box && selection::active(state).len() > 1 {
             vec![]
         } else {
             tangent::for_selection(
@@ -863,10 +868,15 @@ impl Graph {
         }
         match &mut self.drag {
             Some(Drag::Transform { transform, .. }) => {
-                transform.moving(
+                if !transform.is_current(self.state.read(cx)) {
+                    self.drag = None;
+                    cx.notify();
+                    return;
+                }
+                transform.update_pointer(
                     event.position,
                     event.modifiers.alt,
-                    self.state.read(cx).snapping ^ event.modifiers.control,
+                    event.modifiers.control,
                 );
                 cx.stop_propagation();
             }
@@ -1035,23 +1045,20 @@ impl Graph {
             }
             self.state.update(cx, |state, cx| match drag {
                 Drag::Transform { mut transform, .. } => {
-                    // Include the release position when it is outside the canvas.
-                    transform.moving(
+                    if !transform.is_current(state) {
+                        return;
+                    }
+                    // Include the release position outside the canvas. Speed mode
+                    // discards vertical motion, including this final pointer event.
+                    transform.update_pointer(
                         event.position,
                         event.modifiers.alt,
-                        state.snapping ^ event.modifiers.control,
+                        event.modifiers.control,
                     );
-                    if transform.moved {
+                    if transform.moved && (transform.has_changes() || transform.preview.is_err()) {
                         match transform.command() {
                             Ok((command, moved)) => {
-                                let active = selected(state)
-                                    .and_then(|(id, frame, _)| {
-                                        transform
-                                            .keys
-                                            .iter()
-                                            .position(|k| k.id == id && k.frame == frame)
-                                    })
-                                    .unwrap_or(0);
+                                let active = transform.active;
                                 state.dispatch(&Action::Edit(command), window, cx);
                                 if state.status.starts_with("Edited") {
                                     state.graph_key = Some((moved[active].id, moved[active].frame));
@@ -1257,8 +1264,6 @@ impl Render for Graph {
                 .child(ui::action_tool("path-return-timeline", "pen", "Return to path timeline", &self.state, Action::GraphProperty(state.editor.selected().unwrap_or(0),property), false));
         }
         let layer = state.editor.selected_layer().cloned();
-        let start = state.timeline_start;
-        let span = state.visible_frames();
         let current = state.frame;
         let fps = state.editor.project().composition().fps().as_f64();
         let selection = selected(state);
@@ -1485,13 +1490,14 @@ impl Render for Graph {
                 ui::tool(
                     "graph-transform-box",
                     "square",
-                    "Transform selected Value Graph keys · Alt: center · Ctrl: toggle snapping",
+                    if state.graph_view.speed {
+                        "Scale selected key times · Alt: center · Ctrl: toggle snapping"
+                    } else {
+                        "Transform selected Value Graph keys · Alt: center · Ctrl: toggle snapping"
+                    },
                     self.transform_box,
                 )
-                .when(
-                    state.graph_view.speed || selected_count < 2 || locked,
-                    |s| s.opacity(0.4),
-                )
+                .when(selected_count < 2 || locked, |s| s.opacity(0.4))
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.drag = None;
                     this.transform_box = !this.transform_box;
@@ -1600,8 +1606,8 @@ impl Render for Graph {
         } else {
             selected_frames.clone()
         };
-        let transform_box = (self.transform_box && !speed_mode && !locked)
-            .then(|| transform::SelectionBox::new(&plot_track, &paint_frames))
+        let transform_box = (self.transform_box && !locked)
+            .then(|| transform::SelectionBox::new(&plot_track, &paint_frames, speed_mode, fps))
             .flatten();
         let tangents = if transform_box.is_some() {
             vec![]
@@ -1621,7 +1627,7 @@ impl Render for Graph {
                     .all(|f| track.keys()[f].temporal.mode == *mode)
         });
         let speed_curves = if speed_mode {
-            speed::curves(&plot_track, start, span, fps)
+            graph_view.speed_curves(&plot_track, fps)
         } else {
             vec![]
         };
@@ -2201,7 +2207,9 @@ impl Render for Graph {
                 .child(format!(
                     "{} · {selected_count} selected{}",
                     layer.track_label(property).unwrap_or_default(),
-                    if speed_mode {
+                    if speed_mode && self.transform_box {
+                        " · units/s · side handles: time scale only · Alt: center · Ctrl: snap · Esc: cancel"
+                    } else if speed_mode {
                         " · units/s · diamonds: velocity/influence · Alt: split · Shift: keep velocity"
                     } else if self.transform_box {
                         " · transform handles: time/value scale · Alt: center · Esc: cancel"
