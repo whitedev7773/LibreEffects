@@ -72,8 +72,16 @@ an even cycle; empty or all-zero lists render solid. Round caps with a zero dash
 length create dots. Use Up/Down and Enter in the cap/join menus; Escape closes
 without applying. Scroll Properties to reveal further rows. Each edit is one
 Undo and uses the same preview/output renderer. Nondefault styles use project
-version 37; older shapes retain their Butt/Round/solid appearance. These stroke
-settings are currently static; their animation and grouped Contents remain open.
+version 37; older shapes retain their Butt/Round/solid appearance.
+
+Properties stopwatches animate Stroke Width, Roundness, Inner Radius %, Miter
+Limit and Dash Offset. Enable a stopwatch, move the playhead, then edit the value.
+The created track appears under **Contents · Shape** in Timeline and supports
+the existing keyframe/graph controls, copy, retiming and Undo/Redo. Disabling the
+stopwatch keeps the evaluated value at the current frame. Edited scalar tracks
+use project version 38 and leave older static values intact when no track exists.
+Cap/join, individual dash/gap lengths, points, colors and grouped Contents are
+not animated by these controls yet.
 
 ## Color selection
 

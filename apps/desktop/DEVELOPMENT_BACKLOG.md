@@ -18,6 +18,15 @@
 - **후속 고급 기능:** 패널 도킹·소스 뷰어·최근 프로젝트, 타임라인 고급 시간 편집/검색/가상화, 공간 경로·프리셋·표현식, Shape 연산/SVG·Text Animator, 추가 효과·모션 블러, 고정밀 색/HDR·Proxy/GPU, 템플릿, 설치/업데이트·한글화와 UI 회귀 자동화.
 - **별도 대형 단계:** 3D/카메라/라이트·모델, 추적·로토/Puppet, 플러그인/교환 포맷 연구, 웹/API 제품 범위. AEP/MOGRT 호환은 구현되지 않았다.
 
+### 도형 스칼라 속성 애니메이션 — 2026-10-03
+
+- E03/D02: Stroke Width, Roundness, Inner Radius %, Miter Limit, Dash Offset에 Properties 스톱워치를 연결했다. 켠 뒤 재생 헤드를 이동해 값을 바꾸면 해당 프레임에 키를 만든다. 처음 편집한 속성은 Timeline → Contents · Shape에 나타나며 공통 키 복사/붙여넣기·이동·삭제·시간/값 배율·보간·Graph에 연결된다. 스톱워치를 끄면 현재 프레임의 평가 값을 유지한다. 렌더 시 범위를 벗어나는 보간 오버슈트는 속성 한계로 제한한다.
+- 선택적 `Shape.parameters`는 사용한 속성만 저장하고 기존 정적 값은 해당 트랙이 없는 경우의 기본값으로 유지한다. 프로젝트 v38을 사용하며 v37 이하의 기존 도형 모습은 그대로다. 레이어 이동/복사 등 공통 시간 작업에도 도형 트랙을 포함했다. 스타일의 Cap/Join 변경은 애니메이션 트랙을 보존한다.
+- 검증: 코어 163개 + 데스크톱 226개(총 389개) 통과, 외부 미디어/장치 30개 제외. 다섯 속성의 보간·Undo/Redo·JSON 왕복·이전 버전 거부, 정적 경로/변형 보존, Hold·키 복사/시간 이동/배율/삭제·애니메이션 해제 값 유지·잠금/잘못된 값의 원자적 거부를 검사했다. 5프레임의 선 두께/점선 Offset 픽셀을 독립 계산하고 Preview/출력 일치를 검사했다. Cargo check/fmt/test/release build 및 git diff --check 통과(Moon/proto 미설치), 기존 릴리스 경고 17개.
+- 실제 Windows에서 v37 QA 사본을 열어 Offset 스톱워치 활성화, Timeline의 Contents · Shape/키 생성, 60프레임 이동과 값 180 입력까지 확인했다. 입력 확정 확인 시 컴퓨터 제어 도구의 `failed to activate captured window` 오류가 복구 시도에서도 반복됐다. 따라서 **이번 애니메이션의 실제 UI 입력 확정·Undo/Redo·저장/재열기·Graph 조작은 미완 검증**이다. 자동 테스트와 구분하며 이후 같은 QA 사본에서 이어서 확인한다. 이번 턴에 실제 AE 초기 패널 배치를 다시 읽어 대조했고 문서를 수정하지 않았다.
+- 별도 생성한 모델 QA 파일의 0/15/30/45/60프레임 릴리스 CLI PNG에서 Width 16→64, Offset 20→180의 17,472개 내부/외부/점선 픽셀이 독립 계산과 일치했다(`target/qa/verify_shape_animation_model.py`). 이 파일은 UI 저장 결과가 아니다. 기존 실제 v37 QA의 264개 샘플도 새 릴리스에서 통과했다. 실제 편집기 1개와 사용자 보존 원본 SHA256 불변을 확인했다.
+- 남음: 개별 Dash/Gap 길이·색상·Points 애니메이션, 다중 Fill/Stroke·Contents 그룹과 연산자. 전체 E03 완료로 표시하지 않는다.
+
 ### 도형 선 끝·모서리·점선 — 2026-10-03
 
 - E03: 기존 Properties의 Stroke 아래에 Butt/Round/Projecting 끝 모양, Miter/Round/Bevel 모서리, Miter Limit, Dash Offset, Dash/Gap 길이와 추가/제거 버튼을 연결했다. 기본 도형과 Pen 경로에 공통 적용하며 패널 배치는 유지한다. 조작 항목은 [Adobe Shape 속성 설명](https://helpx.adobe.com/in/after-effects/desktop/drawing-painting-and-paths/shapes-and-shape-attributes/shape-attributes-paint-operations-path.html)을 참고했다. 홀수 길이 목록 반복과 전부 0인 목록의 실선 처리는 [SVG 페인팅 규칙](https://www.w3.org/TR/SVG2/painting.html)을 따른다.

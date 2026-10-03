@@ -3,6 +3,7 @@ use super::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PropertyPath {
+    Shape(ShapeParam),
     Path(PathTarget),
     Mask {
         mask: u64,
@@ -46,6 +47,7 @@ pub enum TrackEdit {
 impl Layer {
     pub fn track_label(&self, path: PropertyPath) -> Option<String> {
         Some(match path {
+            PropertyPath::Shape(p) => p.label().into(),
             PropertyPath::Path(target) => match target {
                 PathTarget::Shape => "Shape Path".into(),
                 PathTarget::Mask(id) => format!(
@@ -74,6 +76,10 @@ impl Layer {
     }
     pub fn track(&self, path: PropertyPath) -> Option<&AnimatedProperty> {
         match path {
+            PropertyPath::Shape(p) => match &self.content {
+                Content::Shape(s) => s.parameters.get(&p),
+                _ => None,
+            },
             PropertyPath::Path(target) => self.path_animation(target).map(|(_, a)| &a.timing),
             PropertyPath::Mask { mask, parameter } => self
                 .path_masks
@@ -95,6 +101,10 @@ impl Layer {
     }
     pub fn track_value(&self, path: PropertyPath, frame: Frame) -> Option<f64> {
         Some(match path {
+            PropertyPath::Shape(p) => match &self.content {
+                Content::Shape(s) => s.value_at(p, frame),
+                _ => return None,
+            },
             PropertyPath::Path(_) => return None,
             PropertyPath::Mask { mask, parameter } => self
                 .path_masks
@@ -118,6 +128,16 @@ impl Layer {
         Property::ALL
             .into_iter()
             .map(PropertyPath::from)
+            .chain(
+                match &self.content {
+                    Content::Shape(s) => {
+                        Some(s.parameters.keys().copied().map(PropertyPath::Shape))
+                    }
+                    _ => None,
+                }
+                .into_iter()
+                .flatten(),
+            )
             .chain(self.time_remap.as_ref().map(|_| PropertyPath::TimeRemap))
             .chain(
                 AudioParam::ALL
@@ -156,7 +176,8 @@ impl Layer {
     pub fn copy_key(&self, property: PropertyPath, frame: Frame) -> Option<KeyCopy> {
         let data = self.track(property)?.keys().get(&frame)?.clone();
         let effect_kind = match property {
-            PropertyPath::Path(_)
+            PropertyPath::Shape(_)
+            | PropertyPath::Path(_)
             | PropertyPath::Mask { .. }
             | PropertyPath::Audio(_)
             | PropertyPath::Transform(_)
@@ -185,6 +206,10 @@ impl Layer {
         path: PropertyPath,
     ) -> Result<&mut AnimatedProperty, String> {
         match path {
+            PropertyPath::Shape(p) => match &mut self.content {
+                Content::Shape(s) => Some(s.shape_track_mut(p)),
+                _ => None,
+            },
             PropertyPath::Path(target) => {
                 self.path_animation_mut(target).map(|(_, a)| &mut a.timing)
             }
@@ -464,6 +489,11 @@ mod tests {
 
 pub(super) fn command(id: LayerId, property: PropertyPath, edit: TrackEdit) -> Command {
     match property {
+        PropertyPath::Shape(parameter) => Command::EditShape {
+            id,
+            parameter,
+            edit,
+        },
         PropertyPath::Path(target) => Command::AnimatePath { id, target, edit },
         PropertyPath::Mask { mask, parameter } => Command::EditMask {
             id,

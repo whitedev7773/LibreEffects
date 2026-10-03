@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-const PROJECT_VERSION: u32 = 37;
+const PROJECT_VERSION: u32 = 38;
 pub type Frame = u32;
 pub type LayerId = u64;
 pub type CompositionId = u64;
@@ -53,7 +53,9 @@ mod mask_animation;
 pub use mask_animation::MaskParam;
 mod paths;
 pub use paths::{PathMask, PathMaskMode, PathVertex, VectorPath};
+mod shape_animation;
 mod shape_stroke;
+pub use shape_animation::ShapeParam;
 mod shapes;
 pub use shape_stroke::{ShapeStroke, StrokeCap, StrokeJoin};
 mod text_style;
@@ -746,6 +748,7 @@ impl Project {
                     return Err("Invalid or unsupported text style".into());
                 }
                 mask_animation::validate(layer, comp.duration, self.version)?;
+                shape_animation::validate(layer, comp.duration, self.version)?;
                 path_animation::validate(layer, comp.duration, self.version)?;
                 audio_controls::validate(layer, comp.duration, self.version)?;
                 layer.markers.validate(comp.duration)?;
@@ -1005,6 +1008,11 @@ pub enum Command {
     SetEffects {
         id: LayerId,
         effects: Effects,
+    },
+    EditShape {
+        id: LayerId,
+        parameter: ShapeParam,
+        edit: TrackEdit,
     },
     EditMask {
         id: LayerId,
@@ -1477,6 +1485,13 @@ impl Editor {
         }) {
             next.project.version = next.project.version.max(37);
         }
+        if next.project.compositions().into_iter().any(|(_, c)| {
+            c.layers
+                .iter()
+                .any(|l| matches!(&l.content, Content::Shape(s) if !s.parameters.is_empty()))
+        }) {
+            next.project.version = next.project.version.max(38);
+        }
         next.project.validate()?;
         if next != self.current {
             let previous = std::mem::replace(&mut self.current, next);
@@ -1487,6 +1502,9 @@ impl Editor {
 }
 
 fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
+    if let Some(result) = shape_animation::apply(state, &command) {
+        return result;
+    }
     if let Some(result) = temporal::apply(state, &command) {
         return result;
     }

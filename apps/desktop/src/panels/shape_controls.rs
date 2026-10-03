@@ -4,7 +4,16 @@ use crate::{
     ui,
 };
 use gpui::{Context, Entity, Window, div, prelude::*, px};
-use libre_effects_core::{Command, Content, ShapeKind};
+use libre_effects_core::{Command, Content, PropertyPath, ShapeKind, ShapeParam, TrackEdit};
+
+fn parameter(index: usize) -> Option<ShapeParam> {
+    match index {
+        1 => Some(ShapeParam::StrokeWidth),
+        2 => Some(ShapeParam::Roundness),
+        4 => Some(ShapeParam::InnerRadius),
+        _ => None,
+    }
+}
 
 pub(crate) struct ShapeControls {
     stroke: Entity<super::shape_stroke::StrokeControls>,
@@ -22,6 +31,15 @@ impl ShapeControls {
                     if layer.locked() {return;}
                     let Content::Shape(mut shape) = layer.content().clone() else {return;};
                     let id = layer.id();
+                    if let Some(parameter) = parameter(index) {
+                        match text.trim().parse::<f64>() {
+                            Ok(value) => s.dispatch(&Action::Edit(Command::EditTrack {
+                                id, property: PropertyPath::Shape(parameter), edit: TrackEdit::Value { frame: s.frame, value },
+                            }), window, cx),
+                            Err(_) => { s.status = "Enter a finite shape value".into(); cx.notify(); }
+                        }
+                        return;
+                    }
                     let valid = match index {
                         0 => ui::parse_hex_color(text).map(|v| shape.stroke_color = v).is_ok(),
                         3 => text.trim().parse::<u32>().map(|v| shape.points = v).is_ok(),
@@ -128,10 +146,10 @@ impl Render for ShapeControls {
         }
         let values = [
             format!("{:06X}", shape.stroke_color),
-            shape.stroke_width.to_string(),
-            shape.roundness.to_string(),
+            shape.value_at(ShapeParam::StrokeWidth, frame).to_string(),
+            shape.value_at(ShapeParam::Roundness, frame).to_string(),
             shape.points.to_string(),
-            shape.inner_radius.to_string(),
+            shape.value_at(ShapeParam::InnerRadius, frame).to_string(),
         ];
         for (index, label) in [
             "Stroke color",
@@ -151,14 +169,33 @@ impl Render for ShapeControls {
                 continue;
             }
             self.fields[index].update(cx, |f, _| {
-                f.sync(format!("{id}-{index}"), values[index].clone(), window)
+                f.sync(
+                    format!("{id}-{index}-{frame}"),
+                    values[index].clone(),
+                    window,
+                )
             });
             root = root.child(
                 div()
                     .flex()
                     .items_center()
                     .h(px(27.0))
-                    .child(div().w(px(105.0)).child(label))
+                    .child(
+                        div()
+                            .w(px(105.0))
+                            .flex()
+                            .items_center()
+                            .when_some(parameter(index), |d, p| {
+                                d.child(super::shape_values::watch(
+                                    &self.state,
+                                    &shape,
+                                    id,
+                                    p,
+                                    frame,
+                                ))
+                            })
+                            .child(div().min_w_0().text_size(px(11.0)).child(label)),
+                    )
                     .when(index == 0, |d| {
                         d.child(super::color_picker::swatch(
                             "shape-stroke-color",

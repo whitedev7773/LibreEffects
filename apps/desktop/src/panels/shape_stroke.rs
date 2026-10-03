@@ -7,7 +7,10 @@ use gpui::{
     Bounds, Context, Entity, FocusHandle, Pixels, Window, anchored, canvas, deferred, div, point,
     prelude::*, px, rgb,
 };
-use libre_effects_core::{Command, Content, LayerId, Project, ShapeStroke, StrokeCap, StrokeJoin};
+use libre_effects_core::{
+    Command, Content, Frame, LayerId, Project, PropertyPath, ShapeParam, ShapeStroke, StrokeCap,
+    StrokeJoin, TrackEdit,
+};
 use std::{cell::Cell, rc::Rc};
 
 #[derive(Clone, Copy)]
@@ -18,7 +21,7 @@ enum Edit {
     Add,
     Remove,
 }
-fn command(project: &Project, id: LayerId, edit: Edit) -> Result<Command, String> {
+fn command_at(project: &Project, id: LayerId, edit: Edit, frame: Frame) -> Result<Command, String> {
     let l = project
         .composition()
         .layer(id)
@@ -29,6 +32,21 @@ fn command(project: &Project, id: LayerId, edit: Edit) -> Result<Command, String
     let Content::Shape(mut shape) = l.content().clone() else {
         return Err("Select a shape layer".into());
     };
+    if let Edit::Number(index @ 0..=1, value) = edit {
+        let parameter = if index == 0 {
+            ShapeParam::MiterLimit
+        } else {
+            ShapeParam::DashOffset
+        };
+        if !value.is_finite() || !(parameter.bounds().0..=parameter.bounds().1).contains(&value) {
+            return Err("Miter: 1–1024; offset: ±32768 px.".into());
+        }
+        return Ok(Command::EditTrack {
+            id,
+            property: PropertyPath::Shape(parameter),
+            edit: TrackEdit::Value { frame, value },
+        });
+    }
     let style = &mut shape.stroke_style;
     match edit {
         Edit::Cap(v) => style.cap = v,
@@ -62,7 +80,7 @@ fn apply(
     w: &mut Window,
     cx: &mut Context<EditorState>,
 ) {
-    match command(s.editor.project(), id, edit) {
+    match command_at(s.editor.project(), id, edit, s.frame) {
         Ok(c) => s.dispatch(&Action::Edit(c), w, cx),
         Err(e) => {
             s.status = e;
@@ -176,6 +194,8 @@ impl Render for StrokeControls {
         };
         let id = l.id();
         let locked = l.locked();
+        let frame = s.frame;
+        let shape = shape.clone();
         let style = shape.stroke_style.clone();
         for cap in [true, false] {
             let at = usize::from(!cap);
@@ -288,8 +308,14 @@ impl Render for StrokeControls {
                 continue;
             }
             let (label, value) = match index {
-                0 => ("Miter Limit".to_owned(), style.miter_limit),
-                1 => ("Dash Offset".to_owned(), style.dash_offset),
+                0 => (
+                    "Miter Limit".to_owned(),
+                    shape.value_at(ShapeParam::MiterLimit, frame),
+                ),
+                1 => (
+                    "Dash Offset".to_owned(),
+                    shape.value_at(ShapeParam::DashOffset, frame),
+                ),
                 _ => (
                     format!(
                         "{} {}",
@@ -300,14 +326,33 @@ impl Render for StrokeControls {
                 ),
             };
             self.fields[index].update(cx, |f, _| {
-                f.sync(format!("{id}-{index}"), value.to_string(), w)
+                f.sync(format!("{id}-{index}-{frame}"), value.to_string(), w)
             });
             root = root.child(
                 div()
                     .flex()
                     .items_center()
                     .h(px(27.0))
-                    .child(div().w(px(105.0)).child(label))
+                    .child(
+                        div()
+                            .w(px(105.0))
+                            .flex()
+                            .items_center()
+                            .when(index < 2, |d| {
+                                d.child(super::shape_values::watch(
+                                    &self.state,
+                                    &shape,
+                                    id,
+                                    if index == 0 {
+                                        ShapeParam::MiterLimit
+                                    } else {
+                                        ShapeParam::DashOffset
+                                    },
+                                    frame,
+                                ))
+                            })
+                            .child(div().min_w_0().text_size(px(11.0)).child(label)),
+                    )
                     .child(
                         div()
                             .flex_1()
@@ -419,6 +464,9 @@ impl Render for StrokeControls {
 mod tests {
     use super::*;
     use libre_effects_core::{Editor, PathVertex, Property, Shape, VectorPath};
+    fn command(project: &Project, id: LayerId, edit: Edit) -> Result<Command, String> {
+        command_at(project, id, edit, 0)
+    }
     fn scene(points: &[[f64; 2]], closed: bool) -> Editor {
         let mut e = Editor::default();
         e.execute(Command::ConfigureComposition {
@@ -598,5 +646,55 @@ mod tests {
         e.execute(Command::AddRectangle).unwrap();
         assert!(command(e.project(), 2, Edit::Add).is_err());
         assert!(command(e.project(), 999, Edit::Add).is_err());
+    }
+
+    #[test]
+    fn animated_stroke_width_and_offset_render_exact_interior_pixels() {
+        let mut e = line();
+        change(&mut e, Edit::Add);
+        change(&mut e, Edit::Number(2, 20.));
+        for (parameter, value) in [
+            (ShapeParam::StrokeWidth, 40.),
+            (ShapeParam::DashOffset, 20.),
+        ] {
+            e.execute(Command::EditShape {
+                id: 1,
+                parameter,
+                edit: TrackEdit::ToggleAnimation { frame: 0 },
+            })
+            .unwrap();
+            e.execute(Command::EditShape {
+                id: 1,
+                parameter,
+                edit: TrackEdit::Value { frame: 40, value },
+            })
+            .unwrap();
+        }
+        let saved = Project::from_json(&e.project().to_json().unwrap()).unwrap();
+        let r = crate::rendering::Renderer::new();
+        for frame in [0, 10, 20, 30, 40] {
+            let im = r.render(&saved, frame, 200).unwrap();
+            assert_eq!(im, r.render_output(&saved, frame, 200, 200).unwrap());
+            let width = 20. + frame as f64 / 2.;
+            let offset = frame as f64 / 2.;
+            for x in 42..158 {
+                let phase = (x as f64 + 0.5 - 40. + offset) % 40.;
+                if (phase - 20.).abs() < 2. || phase < 2. || phase > 38. {
+                    continue;
+                }
+                for y in 75..125 {
+                    let distance = (y as f64 + 0.5 - 100.).abs();
+                    if (distance - width / 2.).abs() < 2. {
+                        continue;
+                    }
+                    let expected = if phase < 20. && distance < width / 2. {
+                        255
+                    } else {
+                        0
+                    };
+                    assert_eq!(im.get_pixel(x, y)[3], expected, "frame {frame}, ({x},{y})");
+                }
+            }
+        }
     }
 }

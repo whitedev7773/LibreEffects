@@ -975,6 +975,13 @@ impl Render for Timeline {
                     groups.push(("Time Remap".into(), vec![PropertyPath::TimeRemap]));
                 }
                 let shape_path = PropertyPath::Path(libre_effects_core::PathTarget::Shape);
+                for path in layer
+                    .track_paths()
+                    .into_iter()
+                    .filter(|p| matches!(p, PropertyPath::Shape(_)))
+                {
+                    groups.push((layer.track_label(path).unwrap(), vec![path]));
+                }
                 if layer.track(shape_path).is_some() {
                     groups.push(("Shape Path".into(), vec![shape_path]));
                 }
@@ -1006,7 +1013,8 @@ impl Render for Timeline {
                         !properties.iter().any(|p| {
                             (match p {
                                 PropertyPath::Transform(p) => f.includes(*p),
-                                PropertyPath::Path(_)
+                                PropertyPath::Shape(_)
+                                | PropertyPath::Path(_)
                                 | PropertyPath::Mask { .. }
                                 | PropertyPath::Audio(_)
                                 | PropertyPath::Effect { .. }
@@ -1018,6 +1026,7 @@ impl Render for Timeline {
                         continue;
                     }
                     let section = match properties[0] {
+                        PropertyPath::Shape(_) => Some(((0, 1), "Contents · Shape".to_string())),
                         PropertyPath::Path(libre_effects_core::PathTarget::Shape) => {
                             Some(((0, 0), "Contents · Path".to_string()))
                         }

@@ -19,6 +19,7 @@ mod pen;
 mod preview;
 mod shape_controls;
 mod shape_stroke;
+mod shape_values;
 mod sidebar;
 mod timeline;
 mod timeline_snap;

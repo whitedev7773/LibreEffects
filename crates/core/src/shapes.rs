@@ -30,6 +30,8 @@ impl ShapeKind {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Shape {
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub parameters: std::collections::BTreeMap<crate::ShapeParam, crate::AnimatedProperty>,
     #[serde(default, skip_serializing_if = "crate::ShapeStroke::is_default")]
     pub stroke_style: crate::ShapeStroke,
     #[serde(default, skip_serializing_if = "crate::PathAnimation::is_default")]
@@ -47,6 +49,7 @@ pub struct Shape {
 impl Default for Shape {
     fn default() -> Self {
         Self {
+            parameters: Default::default(),
             stroke_style: Default::default(),
             path: None,
             path_animation: Default::default(),
@@ -74,7 +77,7 @@ impl Shape {
             && (0.0..=100.0).contains(&self.inner_radius)
     }
     pub fn svg(&self, width: f64, height: f64, color: u32) -> String {
-        self.svg_with_path(width, height, color, self.path.as_ref())
+        self.svg_at(width, height, color, 0)
     }
     pub(super) fn svg_with_path(
         &self,
