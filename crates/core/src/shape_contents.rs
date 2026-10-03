@@ -140,7 +140,7 @@ impl ContentsKind {
             _ => None,
         }
     }
-    fn is_paint(&self) -> bool {
+    pub fn is_paint(&self) -> bool {
         matches!(
             self,
             Self::Fill { .. }
@@ -237,12 +237,26 @@ impl ContentsKind {
             .collect()
     }
 }
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PaintComposite {
+    #[default]
+    BelowPrevious,
+    AbovePrevious,
+}
+impl PaintComposite {
+    fn is_default(&self) -> bool {
+        *self == Self::BelowPrevious
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ContentsNode {
     pub id: u64,
     pub name: String,
     pub enabled: bool,
     pub kind: ContentsKind,
+    #[serde(default, skip_serializing_if = "PaintComposite::is_default")]
+    pub composite: PaintComposite,
     pub parameters: BTreeMap<ContentsParam, AnimatedProperty>,
 }
 impl ContentsNode {
@@ -287,6 +301,7 @@ impl ContentsNode {
             id,
             name: format!("{} {id}", kind.label()),
             enabled: true,
+            composite: PaintComposite::default(),
             parameters: kind.defaults(),
             kind,
         }
@@ -426,7 +441,7 @@ impl ShapeContents {
         Ok(id)
     }
     pub fn validate(&self, duration: Frame) -> Result<(), String> {
-        self.validate_version(duration, 45)
+        self.validate_version(duration, 46)
     }
     pub(super) fn validate_version(&self, duration: Frame, version: u32) -> Result<(), String> {
         fn walk(
@@ -440,6 +455,11 @@ impl ShapeContents {
                 return Err("Contents nesting exceeds 8 groups".into());
             }
             for n in nodes {
+                if n.composite != PaintComposite::BelowPrevious
+                    && (version < 46 || !n.kind.is_paint())
+                {
+                    return Err("Composite requires a paint item and project v46".into());
+                }
                 if let Some(g) = n.kind.gradient() {
                     if version < 45 || !g.valid() {
                         return Err("Invalid gradient or project version (requires v45)".into());
@@ -596,7 +616,9 @@ fn transformed(mut path: VectorPath, t: Affine) -> VectorPath {
 }
 fn render(nodes: &[ContentsNode], f: Frame, scope: &str) -> (String, Vec<VectorPath>) {
     let mut paths = Vec::<VectorPath>::new();
-    let mut paints = vec![];
+    // Back-to-front SVG order. Each new paint goes behind the previous result
+    // by default; Above Previous overlays that accumulated result in this group.
+    let mut paints = std::collections::VecDeque::new();
     for n in nodes.iter().filter(|n| n.enabled) {
         if let Some(p) = n.path_at(f) {
             paths.push(p);
@@ -624,14 +646,14 @@ fn render(nodes: &[ContentsNode], f: Frame, scope: &str) -> (String, Vec<VectorP
                 let (svg, child_paths) = render(children, f, scope);
                 let t = n.transform(f);
                 let [a, b, c, d, x, y] = t.0;
-                paints.push(format!(
+                paints.push_front(format!(
                     "<g transform='matrix({a} {b} {c} {d} {x} {y})' opacity='{}'>{svg}</g>",
                     n.value_at(ContentsParam::Transform(Property::Opacity), f) / 100.
                 ));
                 paths.extend(child_paths.into_iter().map(|p| transformed(p, t)));
             }
-            ContentsKind::Fill { even_odd } | ContentsKind::GradientFill { even_odd, .. } => paints
-                .push(format!(
+            ContentsKind::Fill { even_odd } | ContentsKind::GradientFill { even_odd, .. } => {
+                let paint = format!(
                     "{}<path d='{}' fill='{}' fill-opacity='{}' fill-rule='{}'/>",
                     gradient.as_ref().map_or("", |g| g.0.as_str()),
                     paths
@@ -644,7 +666,13 @@ fn render(nodes: &[ContentsNode], f: Frame, scope: &str) -> (String, Vec<VectorP
                         .map_or_else(|| color(FillRed, FillGreen, FillBlue), |g| g.1.clone()),
                     v(FillOpacity) / 100.,
                     if *even_odd { "evenodd" } else { "nonzero" }
-                )),
+                );
+                if n.composite == PaintComposite::AbovePrevious {
+                    paints.push_back(paint);
+                } else {
+                    paints.push_front(paint);
+                }
+            }
             ContentsKind::Stroke(style) | ContentsKind::GradientStroke { style, .. } => {
                 let mut style = style.clone();
                 style.miter_limit = v(MiterLimit);
@@ -652,16 +680,40 @@ fn render(nodes: &[ContentsNode], f: Frame, scope: &str) -> (String, Vec<VectorP
                 for (i, x) in style.dashes.iter_mut().enumerate() {
                     *x = v(DashLength(i as u8));
                 }
-                paints.push(format!("{}<path d='{}' fill='none' stroke='{}' stroke-opacity='{}' stroke-width='{}' {}/>",gradient.as_ref().map_or("",|g|g.0.as_str()),paths.iter().map(VectorPath::svg_data).collect::<Vec<_>>().join(" "),gradient.as_ref().map_or_else(||color(StrokeRed,StrokeGreen,StrokeBlue),|g|g.1.clone()),v(StrokeOpacity)/100.,v(StrokeWidth),style.svg()));
+                let paint = format!(
+                    "{}<path d='{}' fill='none' stroke='{}' stroke-opacity='{}' stroke-width='{}' {}/>",
+                    gradient.as_ref().map_or("", |g| g.0.as_str()),
+                    paths
+                        .iter()
+                        .map(VectorPath::svg_data)
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                    gradient.as_ref().map_or_else(
+                        || color(StrokeRed, StrokeGreen, StrokeBlue),
+                        |g| g.1.clone()
+                    ),
+                    v(StrokeOpacity) / 100.,
+                    v(StrokeWidth),
+                    style.svg()
+                );
+                if n.composite == PaintComposite::AbovePrevious {
+                    paints.push_back(paint);
+                } else {
+                    paints.push_front(paint);
+                }
             }
             _ => {}
         }
     }
-    (paints.into_iter().rev().collect(), paths)
+    (paints.into_iter().collect(), paths)
 }
 
 #[derive(Clone, Debug)]
 pub enum ContentsEdit {
+    Composite {
+        item: u64,
+        mode: PaintComposite,
+    },
     GradientType {
         item: u64,
         radial: bool,
@@ -922,6 +974,15 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                     } => *value = *even_odd,
                     _ => return Err("Select a Fill".into()),
                 }
+            }
+            ContentsEdit::Composite { item, mode } => {
+                let n = contents
+                    .node_mut(*item)
+                    .ok_or("Contents paint no longer exists")?;
+                if !n.kind.is_paint() {
+                    return Err("Select a Fill or Stroke".into());
+                }
+                n.composite = *mode;
             }
             ContentsEdit::GradientType { item, radial } => {
                 let n = contents

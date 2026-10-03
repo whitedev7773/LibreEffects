@@ -1817,8 +1817,14 @@ Paints consume paths above them in the same group, including transformed paths
 from child groups. Earlier paints/groups composite in front of later ones.
 A Fill treats its paths as one compound shape, with Non-Zero or Even-Odd fill
 rules; overlapping paths do not multiply a single paint's opacity. Group opacity
-is applied to its combined paints. Paint blend/composite options,
-path operators and dragging Contents rows remain future work.
+is applied to its combined paints. Each solid or gradient Fill/Stroke has a
+**Composite** choice: Below Previous places it behind earlier items in the same
+group (the default); Above Previous places it in front of them. The choice changes
+paint compositing, preserving the tree order and which paths a paint consumes.
+Nested groups keep their own compositing scope. This static choice supports
+Undo/Redo and duplication; using Above Previous requires project version 46.
+Old files default to Below Previous. Paint blending modes, path operators and
+dragging Contents rows remain future work.
 Fill and Stroke have a common color picker with HEX/RGB/HSV, opacity, recent
 colors and viewer sampling. Cancel leaves the document unchanged; accepting a
 draft updates only changed channels at the current frame as one Undo step.
@@ -1834,7 +1840,8 @@ The + button inserts a stop at 50%, sampled from the current frame; removing it
 and Undo restores its animation. Start/End coordinates, radial Highlight Length
 and Angle, stop locations, RGB, opacity and midpoints have individual watches
 and Timeline/Graph tracks. Gradient Stroke retains cap, join and dash controls.
-Gradient projects use version 45; other Contents projects remain version 44.
+Gradient projects require version 45; ordinary Contents requires version 44.
+Using Above Previous Composite raises either model to version 46.
 
 Midpoints control interpolation toward the next stop in spatial order, using a
 power curve in sRGB. Radial highlights are limited to ±99.9% of the radius.

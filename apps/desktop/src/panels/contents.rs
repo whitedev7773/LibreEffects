@@ -5,8 +5,9 @@ use crate::{
 };
 use gpui::{Context, Entity, Window, div, prelude::*, px, rgb};
 use libre_effects_core::{
-    Command, Content, ContentsEdit, ContentsKind, ContentsParam, GradientParam, PathTarget,
-    PropertyPath, ShapeGradient, ShapeKind, ShapeStroke, StrokeCap, StrokeJoin, TrackEdit,
+    Command, Content, ContentsEdit, ContentsKind, ContentsParam, GradientParam, PaintComposite,
+    PathTarget, PropertyPath, ShapeGradient, ShapeKind, ShapeStroke, StrokeCap, StrokeJoin,
+    TrackEdit,
 };
 
 pub(crate) struct ContentsControls {
@@ -453,6 +454,31 @@ impl Render for ContentsControls {
             );
         }
         root = root.child(parenting);
+        if node.kind.is_paint() {
+            let mut options = div().flex().flex_wrap().gap_1();
+            for (index, mode, label) in [
+                (0usize, PaintComposite::BelowPrevious, "Below Previous"),
+                (1usize, PaintComposite::AbovePrevious, "Above Previous"),
+            ] {
+                let state = self.state.clone();
+                options = options.child(ui::text_button(("contents-composite", index), label)
+                    .when(node.composite == mode, |b| b.bg(rgb(0x164a7b)))
+                    .when(locked, |b| b.opacity(0.4))
+                    .tooltip(|_,cx| cx.new(|_|ui::Tip("Composite this paint below or above earlier items in the same group. Path order is unchanged.".into())).into())
+                    .when(!locked, |b| b.on_click(move |_,w,cx| {
+                        TextField::commit_active(w,cx);
+                        state.update(cx,|s,cx|s.dispatch(&Action::Edit(Command::Contents {id,edit:ContentsEdit::Composite {item,mode}}),w,cx));
+                    })));
+            }
+            root = root.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child("Composite")
+                    .child(options),
+            );
+        }
         if matches!(node.kind, ContentsKind::Parametric(_)) {
             let state = self.state.clone();
             root = root.child(

@@ -40,6 +40,145 @@ fn scene(kind: ShapeKind) -> Editor {
     .unwrap();
     e
 }
+
+#[test]
+fn paint_composite_changes_overlap_without_changing_path_order_or_group_scope() {
+    let renderer = crate::rendering::Renderer::new();
+    // Exercise all four paint kinds against an earlier opaque blue fill.
+    for kind in [
+        ContentsKind::Fill { even_odd: false },
+        ContentsKind::Stroke(ShapeStroke::default()),
+        ContentsKind::GradientFill {
+            even_odd: false,
+            gradient: ShapeGradient::default(),
+        },
+        ContentsKind::GradientStroke {
+            style: ShapeStroke::default(),
+            gradient: ShapeGradient::default(),
+        },
+    ] {
+        let gradient = kind.gradient().is_some();
+        let stroke = kind.stroke().is_some();
+        let mut e = scene(ShapeKind::Rectangle);
+        edit(&mut e, ContentsEdit::Promote);
+        edit(&mut e, ContentsEdit::Remove(3));
+        edit(&mut e, ContentsEdit::Add { parent: 1, kind }); // id 5, initially before Fill 4
+        edit(
+            &mut e,
+            ContentsEdit::Move {
+                item: 5,
+                parent: 1,
+                index: 2,
+            },
+        );
+        use ContentsParam::Shape as S;
+        if stroke {
+            value(&mut e, 5, S(ShapeParam::StrokeWidth), 20.);
+        }
+        if gradient {
+            for stop in [1, 2] {
+                for (p, v) in [
+                    (GradientParam::Red(stop), 255.),
+                    (GradientParam::Green(stop), 0.),
+                    (GradientParam::Blue(stop), 0.),
+                ] {
+                    value(&mut e, 5, ContentsParam::Gradient(p), v);
+                }
+            }
+        } else {
+            for (p, v) in if stroke {
+                [
+                    (ShapeParam::StrokeRed, 255.),
+                    (ShapeParam::StrokeGreen, 0.),
+                    (ShapeParam::StrokeBlue, 0.),
+                ]
+            } else {
+                [
+                    (ShapeParam::FillRed, 255.),
+                    (ShapeParam::FillGreen, 0.),
+                    (ShapeParam::FillBlue, 0.),
+                ]
+            } {
+                value(&mut e, 5, S(p), v);
+            }
+        }
+        let opacity = S(if stroke {
+            ShapeParam::StrokeOpacity
+        } else {
+            ShapeParam::FillOpacity
+        });
+        edit(
+            &mut e,
+            ContentsEdit::Track {
+                item: 5,
+                parameter: opacity,
+                edit: TrackEdit::ToggleAnimation { frame: 0 },
+            },
+        );
+        edit(
+            &mut e,
+            ContentsEdit::Track {
+                item: 5,
+                parameter: opacity,
+                edit: TrackEdit::Value {
+                    frame: 60,
+                    value: 0.,
+                },
+            },
+        );
+        let original = e.project().clone();
+        for mode in [PaintComposite::BelowPrevious, PaintComposite::AbovePrevious] {
+            edit(&mut e, ContentsEdit::Composite { item: 5, mode });
+            let saved = Project::from_json(&e.project().to_json().unwrap()).unwrap();
+            for frame in [0, 30, 60] {
+                let image = renderer.render(&saved, frame, 400).unwrap();
+                assert_eq!(
+                    image,
+                    renderer.render_output(&saved, frame, 400, 240).unwrap()
+                );
+                let alpha = if mode == PaintComposite::AbovePrevious {
+                    1. - frame as f64 / 60.
+                } else {
+                    0.
+                };
+                // Left edge interior is covered by both stroke/fill and the earlier fill.
+                let actual = image.get_pixel(124, 120).0;
+                for (i, bg) in [32., 64., 128.].into_iter().enumerate() {
+                    let expected = bg * (1. - alpha) + if i == 0 { 255. * alpha } else { 0. };
+                    assert!(
+                        (actual[i] as f64 - expected).abs() <= 1.,
+                        "{gradient} {stroke} {mode:?} frame {frame}: {actual:?}"
+                    );
+                }
+                assert_eq!(actual[3], 255);
+                assert_eq!(image.get_pixel(100, 120).0, [0, 0, 0, 0]);
+            }
+        }
+        e.undo();
+        assert_eq!(e.project(), &original);
+        e.redo();
+        // The nested group's local Above choice must not jump in front of an
+        // earlier sibling group. Duplicate group 1 first, then hide its red paint.
+        edit(&mut e, ContentsEdit::Duplicate(1));
+        edit(
+            &mut e,
+            ContentsEdit::Move {
+                item: 6,
+                parent: 0,
+                index: 0,
+            },
+        );
+        edit(
+            &mut e,
+            ContentsEdit::Enabled {
+                item: 9,
+                enabled: false,
+            },
+        );
+        let image = renderer.render(e.project(), 0, 400).unwrap();
+        assert_eq!(image.get_pixel(124, 120).0, [32, 64, 128, 255]);
+    }
+}
 fn gradient_scene(stroke: bool) -> Editor {
     let mut e = scene(ShapeKind::Rectangle);
     edit(&mut e, ContentsEdit::Promote);

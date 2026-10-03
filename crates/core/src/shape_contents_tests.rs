@@ -36,6 +36,107 @@ fn contents_value(e: &mut Editor, item: u64, parameter: ContentsParam, value: f6
 }
 
 #[test]
+fn paint_composite_preserves_order_tracks_history_and_old_documents() {
+    let mut e = scene();
+    edit(&mut e, ContentsEdit::Promote);
+    edit(
+        &mut e,
+        ContentsEdit::Track {
+            item: 4,
+            parameter: ContentsParam::Shape(ShapeParam::FillOpacity),
+            edit: TrackEdit::ToggleAnimation { frame: 0 },
+        },
+    );
+    let old = e.project().clone();
+    let json = old.to_json().unwrap();
+    assert!(!json.contains("\"composite\""));
+    assert_eq!(Project::from_json(&json).unwrap(), old);
+    edit(
+        &mut e,
+        ContentsEdit::Composite {
+            item: 4,
+            mode: PaintComposite::AbovePrevious,
+        },
+    );
+    let saved = e.project().clone();
+    assert_eq!(saved.version, 46);
+    let Content::ShapeContents(before) = &old.composition.layers[0].content else {
+        panic!()
+    };
+    assert_eq!(
+        contents(&e)
+            .rows()
+            .iter()
+            .map(|(_, _, n)| n.id)
+            .collect::<Vec<_>>(),
+        vec![1, 2, 3, 4]
+    );
+    for (_, _, node) in before.rows() {
+        assert_eq!(
+            node.parameters,
+            contents(&e).node(node.id).unwrap().parameters
+        );
+    }
+    assert_eq!(
+        Project::from_json(&saved.to_json().unwrap()).unwrap(),
+        saved
+    );
+    e.undo();
+    assert_eq!(e.project(), &old);
+    e.redo();
+    assert_eq!(e.project(), &saved);
+    edit(&mut e, ContentsEdit::Duplicate(4));
+    assert_eq!(
+        contents(&e).node(5).unwrap().composite,
+        PaintComposite::AbovePrevious
+    );
+    e.undo();
+    for item in [1, 2, 999] {
+        assert!(
+            e.execute(Command::Contents {
+                id: 1,
+                edit: ContentsEdit::Composite {
+                    item,
+                    mode: PaintComposite::AbovePrevious
+                }
+            })
+            .is_err()
+        );
+        assert_eq!(e.project(), &saved);
+    }
+    let mut invalid = saved.clone();
+    invalid.version = 45;
+    assert!(Project::from_json(&serde_json::to_string(&invalid).unwrap()).is_err());
+    invalid = saved.clone();
+    let Content::ShapeContents(c) = &mut invalid.composition.layers[0].content else {
+        panic!()
+    };
+    c.node_mut(1).unwrap().composite = PaintComposite::AbovePrevious;
+    assert!(invalid.validate().is_err());
+    edit(
+        &mut e,
+        ContentsEdit::Composite {
+            item: 4,
+            mode: PaintComposite::BelowPrevious,
+        },
+    );
+    assert!(!e.project().to_json().unwrap().contains("\"composite\""));
+    e.current.project.composition.layers[0].locked = true;
+    let locked = e.project().clone();
+    assert!(
+        e.execute(Command::Contents {
+            id: 1,
+            edit: ContentsEdit::Composite {
+                item: 4,
+                mode: PaintComposite::AbovePrevious
+            }
+        })
+        .is_err()
+    );
+    assert_eq!(e.project(), &locked);
+}
+
+#[test]
 fn contents_skew_applies_after_scale_before_rotation_and_preserves_edit_coordinates() {
     use ContentsParam::{Skew, SkewAxis, Transform as T};
     let mut e = scene();
