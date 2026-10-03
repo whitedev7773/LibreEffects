@@ -44,6 +44,7 @@ impl Context {
     fn valid(&self, s: &EditorState) -> bool {
         s.tool == Tool::Pen
             && s.gradient_editor.is_none()
+            && s.vertex_editor.is_none()
             && s.document_revision == self.revision
             && s.frame == self.frame
             && s.editor.selected() == self.selection
@@ -304,7 +305,127 @@ fn paths(s: &EditorState) -> Vec<(Target, VectorPath, Affine)> {
     );
     paths
 }
+impl Target {
+    /// Mask indices are local Pen hit-test details. Persist only their stable ID
+    /// across the modal focus change, and never infer a path from a layer row.
+    fn stable(self, s: &EditorState) -> Option<(LayerId, PathTarget)> {
+        match self {
+            Self::Shape(layer) => Some((layer, PathTarget::Shape)),
+            Self::Contents(layer, item) => Some((layer, PathTarget::Contents(item))),
+            Self::Mask(layer, index) => Some((
+                layer,
+                PathTarget::Mask(
+                    s.editor
+                        .project()
+                        .composition()
+                        .layer(layer)?
+                        .path_masks()
+                        .get(index)?
+                        .id,
+                ),
+            )),
+            Self::NewShape | Self::NewContents(..) => None,
+        }
+    }
+}
 impl Pen {
+    /// Capture only a committed, single selected vertex on its exact evaluated
+    /// path. Call at pointer-down/key-down, before opening the modal blurs canvas.
+    pub fn single_vertex_request(&self, s: &EditorState) -> Option<super::vertex_editor::Request> {
+        let (layer, target, index, path, world) = self.single_vertex_candidate(s)?;
+        super::vertex_editor::Request::new(s, layer, target, index, path, world).ok()
+    }
+    pub fn numeric_vertex_available(&self, s: &EditorState) -> bool {
+        self.single_vertex_candidate(s)
+            .is_some_and(|(layer, target, index, path, world)| {
+                super::vertex_editor::Request::available(s, layer, target, index, &path, world)
+            })
+    }
+    fn single_vertex_candidate(
+        &self,
+        s: &EditorState,
+    ) -> Option<(LayerId, PathTarget, usize, VectorPath, Affine)> {
+        if self.held
+            || self.pointer_view.is_some()
+            || self.drag.is_some()
+            || self.draft.is_some()
+            || self.marquee.is_some()
+            || s.vertex_editor.is_some()
+            || s.playing
+        {
+            return None;
+        }
+        self.selected_context.as_ref().filter(|c| c.valid(s))?;
+        let selection = self
+            .selected
+            .as_ref()
+            .filter(|selection| selection.vertices.len() == 1)?;
+        let index = *selection.vertices.first()?;
+        let (_, path, world) = paths(s)
+            .into_iter()
+            .find(|(target, _, _)| *target == selection.target)?;
+        let (layer, target) = selection.target.stable(s)?;
+        Some((layer, target, index, path, world))
+    }
+    /// Only the one-shot token supplied by ordinary modal OK/Cancel may recreate
+    /// selection. Both the frozen context and re-evaluated target must still match.
+    pub fn restore_vertex(
+        &mut self,
+        request: &super::vertex_editor::Request,
+        s: &EditorState,
+    ) -> bool {
+        if s.vertex_editor.is_some() || !request.current(s) {
+            return false;
+        }
+        let Some((target, _, _)) = paths(s).into_iter().find(|(target, path, world)| {
+            target.stable(s) == Some((request.layer, request.target))
+                && path == &request.path
+                && world == &request.world
+                && request.index < path.vertices.len()
+        }) else {
+            return false;
+        };
+        self.cancel();
+        self.selected = Some(Selection {
+            target,
+            vertices: [request.index].into(),
+        });
+        self.selected_context = Some(Context::capture(s));
+        true
+    }
+    /// An exact canvas Shift+V belongs to Pen even when no vertex can be edited.
+    /// Consume repeats/unavailable targets so V cannot leak into the Select tool.
+    pub fn numeric_vertex_key(
+        &self,
+        event: &KeyDownEvent,
+        focused: bool,
+        composing: bool,
+        s: &EditorState,
+    ) -> (bool, Option<super::vertex_editor::Request>) {
+        let m = event.keystroke.modifiers;
+        if !focused
+            || composing
+            || s.tool != Tool::Pen
+            || s.text_session.is_some()
+            || s.colors.session.is_some()
+            || s.gradient_editor.is_some()
+            || s.vertex_editor.is_some()
+            || !m.shift
+            || m.control
+            || m.alt
+            || m.platform
+            || m.function
+            || !matches!(event.keystroke.key.as_str(), "v" | "V")
+        {
+            return (false, None);
+        }
+        (
+            true,
+            (!event.is_held)
+                .then(|| self.single_vertex_request(s))
+                .flatten(),
+        )
+    }
     pub fn cancel(&mut self) {
         *self = Self::default();
     }
@@ -412,6 +533,7 @@ impl Pen {
             || self.marquee.as_ref().is_some_and(|d| !d.session.valid(s))
             || s.tool != Tool::Pen
             || s.gradient_editor.is_some()
+            || s.vertex_editor.is_some()
         {
             self.cancel();
         }
@@ -488,7 +610,7 @@ impl Pen {
         exact_shift: bool,
     ) -> Option<Command> {
         self.reset_if_stale(s);
-        if s.tool != Tool::Pen || s.gradient_editor.is_some() {
+        if s.tool != Tool::Pen || s.gradient_editor.is_some() || s.vertex_editor.is_some() {
             return None;
         }
         // A second pointer-down supersedes any gesture whose release was lost.
@@ -795,6 +917,7 @@ impl Pen {
             || s.text_session.is_some()
             || s.colors.session.is_some()
             || s.gradient_editor.is_some()
+            || s.vertex_editor.is_some()
             || !m.control
             || m.shift
             || m.alt
@@ -834,6 +957,7 @@ impl Pen {
             || s.text_session.is_some()
             || s.colors.session.is_some()
             || s.gradient_editor.is_some()
+            || s.vertex_editor.is_some()
             || !m.shift
             || m.control
             || m.alt
@@ -1003,7 +1127,7 @@ impl Pen {
         }
     }
     pub fn overlay(&self, s: &EditorState) -> Vec<(VectorPath, Affine, bool, BTreeSet<usize>)> {
-        if s.tool != Tool::Pen || s.gradient_editor.is_some() {
+        if s.tool != Tool::Pen || s.gradient_editor.is_some() || s.vertex_editor.is_some() {
             return Vec::new();
         }
         let mut all = paths(s);
@@ -1378,3 +1502,7 @@ mod marquee_tests;
 #[cfg(test)]
 #[path = "pen_view_tests.rs"]
 mod view_tests;
+
+#[cfg(test)]
+#[path = "pen_vertex_tests.rs"]
+mod numeric_vertex_tests;

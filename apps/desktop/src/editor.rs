@@ -47,6 +47,9 @@ pub(crate) enum Action {
     OpenGradient(u64),
     ApplyGradient,
     CancelGradient,
+    OpenVertex(crate::panels::vertex_editor::Request),
+    ApplyVertex,
+    CancelVertex,
     OpenColor(crate::color_edit::Target),
     ApplyColor,
     CancelColor,
@@ -135,6 +138,14 @@ pub(crate) enum Action {
     ToggleTimeRemap,
     FreezeTimeRemap,
     GraphProperty(LayerId, PropertyPath),
+}
+
+impl Action {
+    /// A vertex draft owns every editor command until it is accepted or canceled.
+    /// In particular, Undo/Redo must never reach the source behind the modal.
+    fn allowed_in_vertex_editor(&self) -> bool {
+        matches!(self, Self::ApplyVertex | Self::CancelVertex)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -253,6 +264,8 @@ pub(crate) struct EditorState {
     pub contents_selection: Option<(CompositionId, LayerId, u64)>,
     pub gradient_preview: Option<crate::color_edit::GradientDraft>,
     pub gradient_editor: Option<crate::panels::gradient_editor::Session>,
+    pub vertex_editor: Option<crate::panels::vertex_editor::Session>,
+    pub vertex_return: Option<crate::panels::vertex_editor::Request>,
     pub graph_property: PropertyPath,
     pub graph_key: Option<(LayerId, Frame)>,
     playback_origin: Option<(Instant, Frame)>,
@@ -344,6 +357,8 @@ impl Default for EditorState {
             contents_selection: None,
             gradient_preview: None,
             gradient_editor: None,
+            vertex_editor: None,
+            vertex_return: None,
             graph_property: Property::PositionX.into(),
             graph_key: None,
             playback_origin: None,
@@ -521,7 +536,15 @@ impl EditorState {
         self.status = "History updated".into();
     }
 
+    /// Interruptions must discard the draft before any field blur can submit.
+    /// Only ordinary Apply/Cancel may issue a validated one-shot Pen return.
+    pub(crate) fn discard_vertex_editor(&mut self) {
+        self.vertex_editor = None;
+        self.vertex_return = None;
+    }
+
     fn composition_changed(&mut self) {
+        self.discard_vertex_editor();
         self.gradient_controls = None;
         self.contents_selection = None;
         self.gradient_preview = None;
@@ -536,6 +559,20 @@ impl EditorState {
     }
 
     pub fn dispatch(&mut self, action: &Action, window: &mut Window, cx: &mut Context<Self>) {
+        let vertex_was_open = self.vertex_editor.is_some();
+        let vertex_invalidated = self.invalidate_vertex_editor();
+        if vertex_was_open && !action.allowed_in_vertex_editor() {
+            // A stale draft is discarded, but the event aimed at that modal
+            // must not suddenly become a source Undo/file/edit command.
+            if vertex_invalidated {
+                cx.notify();
+            }
+            return;
+        }
+        if !action.allowed_in_vertex_editor() {
+            // A new editor action supersedes a still-unconsumed modal return.
+            self.vertex_return = None;
+        }
         self.invalidate_gradient_editor();
         if self.gradient_editor.is_some()
             && !matches!(action, Action::ApplyGradient | Action::CancelGradient)
@@ -622,6 +659,19 @@ impl EditorState {
                 self.stop();
                 self.fonts_open = true;
             }
+            Action::OpenVertex(request) => {
+                // The idle Pen captured this context before focus left the canvas.
+                // Do not call stop(): that would invalidate its transport generation.
+                match crate::panels::vertex_editor::Session::new(self, request.clone()) {
+                    Ok(session) => {
+                        self.vertex_editor = Some(session);
+                        self.status = "Vertex draft · OK applies one edit · Cancel discards".into();
+                    }
+                    Err(error) => self.status = error,
+                }
+            }
+            Action::ApplyVertex => self.accept_vertex_editor(),
+            Action::CancelVertex => self.cancel_vertex_editor(),
             Action::OpenGradient(item) => {
                 self.stop();
                 self.gradient_preview = None;
@@ -1402,7 +1452,15 @@ impl EditorState {
                 .collection_cancel
                 .store(true, std::sync::atomic::Ordering::Relaxed),
         }
-        self.normalize();
+        // These actions preserve selection, time and topology. Normalizing an
+        // empty auxiliary layer set here would invalidate the explicit Pen
+        // context just captured for opening or the one-shot return on closing.
+        if !matches!(
+            action,
+            Action::OpenVertex(_) | Action::ApplyVertex | Action::CancelVertex
+        ) {
+            self.normalize();
+        }
         cx.notify();
     }
 
@@ -1457,6 +1515,47 @@ pub(crate) fn action_button(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn vertex_modal_only_routes_its_own_accept_and_cancel() {
+        assert!(Action::ApplyVertex.allowed_in_vertex_editor());
+        assert!(Action::CancelVertex.allowed_in_vertex_editor());
+        for action in [
+            Action::Undo,
+            Action::Redo,
+            Action::Edit(Command::AddRectangle),
+            Action::New,
+            Action::Open,
+            Action::Save,
+            Action::SaveAs,
+            Action::CollectFiles,
+            Action::ImportImage,
+            Action::ExportFrame,
+            Action::ManageFonts,
+            Action::ManageMedia,
+            Action::ActivateComposition(2),
+            Action::Select(2),
+            Action::SelectMany(2, true, false),
+            Action::Seek(12),
+            Action::Step(1),
+            Action::Play,
+            Action::SetTool(Tool::Select),
+            Action::OpenGradient(2),
+            Action::ApplyGradient,
+            Action::CancelGradient,
+            Action::ApplyColor,
+            Action::CancelColor,
+            Action::DeleteSelection,
+            Action::CopySelection,
+            Action::CutSelection,
+            Action::PasteSelection,
+            Action::ZoomPreview(2.),
+            Action::ZoomTimeline(2.),
+            Action::Queue(queue::QueueAction::Undo),
+        ] {
+            assert!(!action.allowed_in_vertex_editor());
+        }
+    }
+
     #[test]
     fn removed_effect_keys_do_not_leave_stale_graph_or_selection_addresses() {
         use libre_effects_core::{EffectEdit, EffectKind, EffectParam, TrackEdit};

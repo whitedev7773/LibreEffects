@@ -39,3 +39,5 @@ pub(crate) mod color_picker;
 pub(crate) mod font_manager;
 
 pub(crate) mod gradient_editor;
+
+pub(crate) mod vertex_editor;

@@ -2,7 +2,7 @@
 
 Updated 2026-10-03 for the resumed-work, I01 output-preflight and
 E04/E02 editing, D03 time-box, animated path-order, native LEP, Pen marquee and
-Contents sibling-tree and layer-wide text-paint checkpoints.
+Contents sibling-tree, layer-wide text-paint and numeric-vertex checkpoints.
 This is the current checkpoint inventory;
 [DEVELOPMENT_BACKLOG.md](DEVELOPMENT_BACKLOG.md) retains the original audit and
 its dated implementation/test history. Older “remaining” lists and test counts
@@ -49,14 +49,26 @@ does not establish a complete native editing workflow.
   usable, but no path is guessed from a layer or Group selection. Held view/layout
   changes cancel unpublished geometry/box edits before converting coordinates;
   idle zoom between creation points remains supported. Cross-path selection,
-  numeric vertex editing and topology-changing animation remain open.
+  bulk numeric transforms and topology-changing animation remain open.
 - **Whole-track path order:** Reverse Direction and closed-path Set First Vertex
   reorder base geometry and every stored pose together without changing timing,
   pose references, transforms or paint settings. Canvas shortcuts remap the same
   selected geometric points; a separate outline marks the first point. Pure
   nonempty reorder batches preserve legacy version/assets and exact no-op history.
   Cubic geometry is preserved, but winding/Non-Zero holes and dash placement can
-  intentionally change. Cross-path and numeric vertex editing remain open.
+  intentionally change. Cross-path and bulk numeric vertex editing remain open.
+- **Numeric vertex transaction:** an explicit idle single Pen vertex opens six
+  full-precision local-coordinate fields through Edit Vertex or canvas Shift+V.
+  Anchor coordinates and independent tangent offsets work on Shape, enabled
+  Contents paths and vector Masks, including evaluated animation. Draft geometry
+  and transformed overlays remain isolated from source/history/normal Save;
+  acceptance executes one EditPath. Exact no-op/Cancel preserves keys and Redo.
+  Existing-key interpolation survives; new keys use Linear. Frozen contexts,
+  serial callbacks, per-field errors, replacement/late-I/O guards and validated
+  one-shot selection return bound the modal. Mouse-release interception found in
+  native v1 was fixed in Preview; the corrected-release mouse checks passed.
+  No schema/container change or core command was needed. Multi-vertex numeric
+  transforms, linked tangents and topology changes remain outside this slice.
 - **Selected-group Pen creation:** new open/closed paths can be drawn directly
   into the explicitly selected Contents Group, including empty/nested transformed
   groups. Existing applicable paints are inherited without paint additions; the
@@ -137,8 +149,8 @@ does not establish a complete native editing workflow.
 The combined checkpoint includes all prior restoration/I01/Gradient/Pen fixes,
 selected-group creation, Speed Graph time scaling, whole-track path ordering and
 native `.lep` storage integration, same-path marquee/Ctrl+A, the sibling tree
-and seven-channel text paint.
-Formatting, type checking, all 726 default
+seven-channel text paint and the numeric vertex transaction.
+Formatting, type checking, all 767 default
 tests, the explicit 30-test media suite
 and the optimized release build passed. Native checks are listed separately with
 their tested build and coverage; automated tests do not imply native acceptance.
@@ -146,7 +158,7 @@ their tested build and coverage; automated tests do not imply native acceptance.
 | Check | Result and boundary |
 | --- | --- |
 | Core tests | 251 passed, including 13 text-paint track/lifecycle/legacy/no-op/budget regressions, 11 Contents permutation/preservation regressions, 16 codec and one native-budget regression plus prior save-budget, group-space and path-order tests. |
-| Desktop default tests on Linux | 475 passed, including 14 text controls/bindings, 6 animated text render and 3 text-session preservation regressions, plus prior tree/native-file/marquee/editing/focus/I01 tests; 30 FFmpeg tests ignored by default. |
+| Desktop default tests on Linux | 516 passed. The numeric milestone adds 41: 14 session, 14 Pen/Preview including the two pointer-release regressions, 4 UI/routing, 4 file-I/O, 1 tree-modal and 4 independent render tests. Earlier text/tree/native-file/marquee/editing/focus/I01 tests remain included; 30 FFmpeg tests are ignored by default. |
 | Explicit FFmpeg integration suite | All 30 ignored media tests were explicitly run and passed. They are not included in the default pass count. |
 | Focused editing regressions | 16 modal-transaction tests, 89 Pen tests (including 26 marquee, 8 frozen-view, 14 group-creation and 14 path-order tests), 3 Preview tests (one new view snapshot), 17 Speed-box tests, 5 path-order rendering tests, 3 shell-focus tests and the prior 20 gradient-draft/endpoint tests passed within the desktop suite; do not add these counts a second time. |
 | Release build | `cargo build -p libre-effects-desktop --release --locked` succeeded after the final review fixes. The earlier interrupted-build blocker is closed. |
@@ -166,6 +178,8 @@ their tested build and coverage; automated tests do not imply native acceptance.
 | Native Pen marquee/Ctrl+A | Separately pinned release passed static additive box selection, Ctrl+A whole-path movement, nested rotated/skewed Contents and mask targeting, including box selection from an empty retained mask target. Only intended anchor positions changed by equal local deltas; other vertices, tangents and metadata stayed exact. One-step Undo/Redo matched baseline/results. No-target and selection-only gestures changed no source; animated box/Ctrl+A at frame 30 preserved every pose and timing key without adding keys. Static .lep geometry was saved and actually reopened. A first tightly batched selection/save/drag attempt moved one point; it was undone and the separately observed gesture passed. No general Save-focus guarantee is inferred from that input-timing observation. Held-drag observation/interruption, broader focus/IME, Windows and DPI combinations remain unverified natively. |
 | Native Contents sibling tree | Candidate v2 passed root/nested block moves, nonnumeric visual order, expanded/collapsed subtree targets, rejected/no-op drops, one Undo/Redo, singleton/multi controls, clipboard/trim routing, text-field input, Pen targeting and native save/reopen. 17 recorded cases (including the discovered focus issue) and 26 file assertions preserve build attribution. QA found direct Ctrl+S could blur an apparently active tree before a subsequent Delete; the final tested v3 corrects direct-save focus and distinguishes inactive selection. Final v3 passed the exact row→duplicate→direct Save→Undo→Delete regression with one layer retained, blue active focus through direct Save, gray inactive focus after Save As and explicit refocus. During actual five-minute-fixture playback, owned Delete/arrows/Ctrl+D stayed consumed while frames advanced; stopped/save/reopen PROJ and saved frame 2466 remained exact. V2 functional cases and v3 focus/playback checks retain their separate build attribution. Held-drag intermediate observation, real IME, Windows/DPI and the wider interruption/gradient-control matrix remain unverified natively. |
 | Native text-paint editing | Final pinned release passed all 10 bounded cases: exact 0/30/60 Character samples; current-frame Character/Inspector RGB and Stroke picker edits; unchanged OK/changed Cancel followed by one Undo; grouped Fill animation off retaining its frame-30 sample and one Undo; seven Timeline channels; RGB/width Value and Speed units and representative endpoint drags; source editing at frame 30 preserving all paint tracks; native Save/reopen with exact PROJ and VIEW. All 25 post-hoc assertions passed, 13 native files passed CRC and official codec roundtrips, and 24 settled CUA screenshots were archived. Original fixture and pinned binary hashes stayed exact. Hidden stale-draft retargeting, real IME, every temporal/lock/modal combination, held-drag intermediate states, Windows and DPI remain unverified natively; model guards and exact release pixels are separate evidence. |
+| Numeric vertex render/legacy checks | Independent expected geometry matches isolated draft, committed preview/output and native roundtrip for parented/reflected Shape, rotated/skewed/reflected Contents and Add/Subtract masks, static/between-key/existing-eased-key cases. Exact return-to-opening creates no middle key. The final v2 release also retains the 32 legacy/text CLI frame cases and all 28,440,800 RGBA pixels from the earlier baseline. |
+| Native numeric vertex, preliminary v1 | Keyboard acceptance passed six independent fields/live preview, unchanged and away-back transactions, Cancel/invalid-field Escape and one Undo/Redo, transformed local coordinates, mask tangent editing, between-key insertion and existing eased-key replacement, and exact native save/reopen. 29 assertions, 22 native files and 37 CUA screenshots retain v1 attribution. Actual mouse OK/Cancel only focused buttons: Preview's occluded outside mouse-up capture handler intercepted the release. V2 removes that interception while safely abandoning canvas gestures; 50 focused vertex and 28 Preview tests pass. Final native v2 passed standalone mouse Cancel/OK, drag-out cancellation, invalid OK/field Escape, exact Undo/Redo and reopen, deactivation preserving Redo, and shared Gradient Add/Cancel/OK with one Undo. V2 has 17 exact assertions, 12 codec-validated native files and 20 CUA screenshots. Its narrower correction gate stays separate from the broader v1 target/animation cases. Real IME, direct digit text entry, held intermediate states, Windows/DPI and exhaustive stale/locked/modal permutations remain unverified natively. |
 | Windows CI and device behavior | Fresh remote CI has not run: the requested checkpoint is local commits only, with no push or PR. Historical Windows native/device results remain in the backlog; the Windows-only audio-device test was not run on Linux. |
 
 Linux native startup needs a working Vulkan driver, and Open/Save needs a running
@@ -246,7 +260,7 @@ Every original A01–L05 ID appears once below. The labels are deliberately boun
 | ID | Status | Current scope and remaining boundary |
 | --- | --- | --- |
 | E01 | Partial | Drag-created rectangle, rounded rectangle, ellipse, polygon and star; open lines can be drawn with Pen. Dedicated parametric line/tool-default controls and wider native regression remain. |
-| E02 | Partial | Open/closed Bezier Pen, insert/delete/convert points, handles, parametric conversion, same-path additive marquee/Ctrl+A, multi-vertex moves/static deletion through transforms, animated-safe Reverse/Set First and first-point marker. Cross-path selection, numeric vertex editing and topology-changing animation remain. |
+| E02 | Partial | Open/closed Bezier Pen, insert/delete/convert points, handles, parametric conversion, same-path marquee/Ctrl+A, multi-vertex moves/static deletion, animated-safe Reverse/Set First and single-vertex numeric transactions. Cross-path selection, bulk numeric transforms and topology-changing animation remain; corrected native mouse acceptance is recorded separately. |
 | E03 | Partial | Animated scalar/RGB/opacity paint, cap/join/miter/dash controls, fractional Points and Contents linear/radial Gradient Fill/Stroke. Remaining parametric details, topology editing and complete native coverage are not done. |
 | E04 | Partial | Nested Contents tree, paths/paints, animated group transforms/Skew, Composite ordering, 16 paint blend modes, gradient drafts/endpoints/modal editor, selected-group Pen and same-parent sibling multi-selection/block ordering. Compound Colors animation, cross-parent block dragging and bulk field editing remain; bounded native acceptance is recorded above. |
 | E05 | Partial | Fixed-topology shape/mask path animation exists. Trim Paths, Repeater, Merge/Offset Paths and topology-changing interpolation are not implemented. |
@@ -336,10 +350,11 @@ focused/aggregate/media/release checks and the bounded native acceptance above.
 The E04 Contents sibling tree also passes aggregate/model/render checks, its
 bounded native workflows and the corrected direct-save focus/playback gate.
 The bounded F03/D01 text-paint slice passes aggregate/model/render checks and
-the final native acceptance above. Next E02 slice: an explicit
-single-selected-vertex numeric modal, with local anchor coordinates and tangent
-offsets, static and current-frame animated geometry, transactional preview,
-Cancel/one-Undo and no topology change.
+the final native acceptance above. The E02 single-vertex numeric transaction
+passes the aggregate/render gates and the corrected native mouse-button gate.
+The next P1 slice is F02 actual fallback-face/unresolved-glyph
+diagnostics in Manage project fonts, using final renderer glyphs while retaining
+current layout, project format and export policy.
 Cross-parent tree moves need their own coordinate/paint-scope design.
 This does not close the broader A04 backup-management or other backlog extensions.
 

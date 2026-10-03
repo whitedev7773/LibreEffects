@@ -36,6 +36,7 @@ pub(crate) struct Shell {
     state: Entity<EditorState>,
     color_picker: Entity<crate::panels::color_picker::ColorPicker>,
     gradient_editor: Entity<crate::panels::gradient_editor::GradientEditor>,
+    vertex_editor: Entity<crate::panels::vertex_editor::VertexEditor>,
     font_manager: Entity<crate::panels::font_manager::FontManager>,
     layout: Entity<ResizablePanelGroup>,
     middle: Entity<ResizablePanelGroup>,
@@ -73,6 +74,8 @@ impl Shell {
             cx.new(|cx| crate::panels::color_picker::ColorPicker::new(state.clone(), cx));
         let gradient_editor =
             cx.new(|cx| crate::panels::gradient_editor::GradientEditor::new(state.clone(), cx));
+        let vertex_editor =
+            cx.new(|cx| crate::panels::vertex_editor::VertexEditor::new(state.clone(), cx));
         let browser = cx.new(|cx| Browser::new(state.clone(), cx));
         let font_manager =
             cx.new(|cx| crate::panels::font_manager::FontManager::new(state.clone(), cx));
@@ -125,6 +128,7 @@ impl Shell {
             state,
             color_picker,
             gradient_editor,
+            vertex_editor,
             font_manager,
             layout,
             middle,
@@ -155,6 +159,7 @@ impl Shell {
         }
     }
     pub(crate) fn replace_instance(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.state.update(cx, |s, _| s.discard_vertex_editor());
         TextField::commit_active(window, cx);
         window.focus(&self.focus);
         self.replacing = true;
@@ -164,6 +169,7 @@ impl Shell {
     fn dispatch(&mut self, mut action: Action, window: &mut Window, cx: &mut Context<Self>) {
         if self.state.read(cx).colors.session.is_some()
             || self.state.read(cx).gradient_editor.is_some()
+            || self.state.read(cx).vertex_editor.is_some()
         {
             return;
         }
@@ -194,6 +200,9 @@ impl Shell {
             .update(cx, |state, cx| state.dispatch(&action, window, cx));
     }
     fn reset_layout(&mut self, cx: &mut Context<Self>) {
+        if self.state.read(cx).vertex_editor.is_some() {
+            return;
+        }
         self.state.update(cx, |s, cx| {
             s.workspace = Default::default();
             s.effect_controls_open = false;
@@ -208,6 +217,7 @@ impl Shell {
     fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.state.read(cx).colors.session.is_some()
             || self.state.read(cx).gradient_editor.is_some()
+            || self.state.read(cx).vertex_editor.is_some()
         {
             return;
         }
@@ -239,6 +249,7 @@ impl Shell {
     fn new_composition(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.state.read(cx).colors.session.is_some()
             || self.state.read(cx).gradient_editor.is_some()
+            || self.state.read(cx).vertex_editor.is_some()
         {
             return;
         }
@@ -255,6 +266,9 @@ impl Shell {
         self.fields[0].update(cx, |f, _| f.sync("new-composition".into(), name, window));
     }
     fn apply_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.state.read(cx).vertex_editor.is_some() {
+            return;
+        }
         let name = self.fields[0].read(cx).value().to_string();
         let parsed = (|| -> Result<_, String> {
             let width = self.fields[1]
@@ -325,6 +339,9 @@ impl Shell {
         cx.notify();
     }
     fn open_menu(&mut self, name: &'static str, window: &mut Window, cx: &mut Context<Self>) {
+        if self.state.read(cx).vertex_editor.is_some() {
+            return;
+        }
         if self.menu.is_none() {
             self.menu_return_focus = window.focused(cx);
         }
@@ -347,6 +364,9 @@ impl Shell {
         cx.notify();
     }
     fn run_menu(&mut self, target: menu::Target, window: &mut Window, cx: &mut Context<Self>) {
+        if self.state.read(cx).vertex_editor.is_some() {
+            return;
+        }
         self.menu = None;
         self.menu_cursor = None;
         self.menu_return_focus = None;
@@ -374,6 +394,7 @@ impl Shell {
             || state.recovery.is_some()
             || state.colors.session.is_some()
             || state.gradient_editor.is_some()
+            || state.vertex_editor.is_some()
         {
             return;
         }
@@ -458,10 +479,13 @@ impl Shell {
         let m = event.keystroke.modifiers;
         if self.state.read(cx).colors.session.is_some()
             || self.state.read(cx).gradient_editor.is_some()
+            || self.state.read(cx).vertex_editor.is_some()
         {
             if key == "escape" {
                 self.state.update(cx, |s, cx| {
-                    let action = if s.gradient_editor.is_some() {
+                    let action = if s.vertex_editor.is_some() {
+                        Action::CancelVertex
+                    } else if s.gradient_editor.is_some() {
                         Action::CancelGradient
                     } else {
                         Action::CancelColor
@@ -665,6 +689,7 @@ impl Render for Shell {
                 let _ = weak.update(cx, |s, cx| {
                     s.state.update(cx, |state, cx| {
                         state.gradient_editor = None;
+                        state.discard_vertex_editor();
                         cx.notify();
                     });
                 });
@@ -694,6 +719,15 @@ impl Render for Shell {
             window.focus(&self.focus);
             cx.on_focus_lost(window, |this, window, _| window.focus(&this.focus))
                 .detach();
+            cx.observe_window_activation(window, |this, window, cx| {
+                if !window.is_window_active() {
+                    this.state.update(cx, |state, cx| {
+                        state.discard_vertex_editor();
+                        cx.notify();
+                    });
+                }
+            })
+            .detach();
             self.initialized = true;
         }
         if self.pending_save && !self.state.read(cx).saving {
@@ -1282,7 +1316,7 @@ impl Render for Shell {
             window.focus(&self.focus);
         }
         // Do not refocus on later renders: Settings/Media text fields own their
-        // active editing focus. Color, Gradient, Fonts and Search own their focus.
+        // active editing focus. Color, Gradient, Vertex, Fonts and Search own their focus.
         self.modal_active = focus_modals;
         if confirmation {
             let mut dialog = div()
@@ -1395,6 +1429,22 @@ impl Render for Shell {
                         .bg(gpui::rgba(0x00000070))
                         .occlude()
                         .child(self.gradient_editor.clone()),
+                )
+                .with_priority(4),
+            );
+        }
+        if self.state.read(cx).vertex_editor.is_some() {
+            root = root.child(
+                gpui::deferred(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(gpui::rgba(0x00000070))
+                        .occlude()
+                        .child(self.vertex_editor.clone()),
                 )
                 .with_priority(4),
             );

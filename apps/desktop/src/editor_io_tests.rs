@@ -782,3 +782,176 @@ fn recovery_cleanup_warning_still_installs_the_durable_restored_project() {
         .unwrap();
     assert_eq!(crate::project_io::read_project(&owned).unwrap(), recovered);
 }
+
+fn numeric_vertex_io_state() -> EditorState {
+    use crate::panels::vertex_editor::{Request, Session as VertexSession};
+    use libre_effects_core::{PathTarget, PathVertex, Shape, VectorPath};
+    let path = VectorPath {
+        closed: true,
+        vertices: [[20., 20.], [160., 20.], [160., 140.], [20., 140.]]
+            .map(PathVertex::corner)
+            .to_vec(),
+    };
+    let mut state = EditorState::default();
+    state
+        .editor
+        .execute(Command::AddContent {
+            content: Content::Shape(Shape {
+                path: Some(path.clone()),
+                ..Default::default()
+            }),
+            width: 200.,
+            height: 160.,
+            name: "Numeric vertex I/O".into(),
+        })
+        .unwrap();
+    state.editor.clear_history();
+    state.saved = state.editor.project().clone();
+    state.tool = crate::editor::Tool::Pen;
+    let world = state
+        .editor
+        .project()
+        .composition()
+        .world_transform(1, 0)
+        .unwrap();
+    let request = Request::new(&state, 1, PathTarget::Shape, 0, path, world).unwrap();
+    let mut session = VertexSession::new(&state, request).unwrap();
+    session.input(0, "45.125").unwrap();
+    state.vertex_editor = Some(session);
+    state
+}
+
+#[test]
+fn numeric_vertex_late_open_and_invalid_replacement_preserve_isolated_draft() {
+    let mut state = numeric_vertex_io_state();
+    let source = state.editor.project().clone();
+    let draft = state.vertex_editor.as_ref().unwrap().project().clone();
+    let serial = state.vertex_editor.as_ref().unwrap().id;
+    let operation = state.begin_file_operation();
+    let root = tempfile::tempdir().unwrap();
+    let error = state
+        .finish_open(
+            operation,
+            state.document_revision,
+            &source,
+            Ok(OpenedProject {
+                project: Project::default(),
+                views: Default::default(),
+                format: ProjectFormat::Lep,
+            }),
+            root.path().join("late.lep"),
+        )
+        .unwrap_err();
+    assert!(error.contains("changed while opening"));
+    assert_eq!(state.editor.project(), &source);
+    assert_eq!(state.vertex_editor.as_ref().unwrap().id, serial);
+    assert_eq!(state.vertex_editor.as_ref().unwrap().project(), &draft);
+    assert!(!state.editor.can_undo());
+    let mut invalid = serde_json::to_value(Project::default()).unwrap();
+    invalid["version"] = u32::MAX.into();
+    let error = state
+        .install_opened_project(
+            OpenedProject {
+                project: serde_json::from_value(invalid).unwrap(),
+                views: Default::default(),
+                format: ProjectFormat::Lep,
+            },
+            root.path().join("invalid.lep"),
+        )
+        .unwrap_err();
+    assert!(error.contains("Unsupported project version"));
+    assert_eq!(state.editor.project(), &source);
+    assert_eq!(state.vertex_editor.as_ref().unwrap().id, serial);
+    assert_eq!(state.vertex_editor.as_ref().unwrap().project(), &draft);
+}
+
+#[test]
+fn numeric_vertex_valid_replacements_drop_sessions_return_tokens_and_late_callbacks() {
+    let root = tempfile::tempdir().unwrap();
+    for new_document in [false, true] {
+        for return_only in [false, true] {
+            let mut state = numeric_vertex_io_state();
+            let serial = state.vertex_editor.as_ref().unwrap().id;
+            if return_only {
+                state.cancel_vertex_editor();
+                assert!(state.vertex_editor.is_none());
+                assert!(state.vertex_return.is_some());
+            }
+            if new_document {
+                state.install_new_project().unwrap();
+            } else {
+                state
+                    .install_opened_project(
+                        OpenedProject {
+                            project: Project::default(),
+                            views: Default::default(),
+                            format: ProjectFormat::Lep,
+                        },
+                        root.path().join("opened.lep"),
+                    )
+                    .unwrap();
+            }
+            assert!(state.vertex_editor.is_none());
+            assert!(state.vertex_return.is_none());
+            let fresh = state.editor.project().clone();
+            state.vertex_input(serial, 0, "777");
+            assert_eq!(state.editor.project(), &fresh);
+            assert!(!state.editor.can_undo());
+        }
+    }
+}
+
+#[test]
+fn numeric_vertex_direct_save_serializes_source_and_never_modal_geometry() {
+    let root = tempfile::tempdir().unwrap();
+    let mut state = numeric_vertex_io_state();
+    let source = state.editor.project().clone();
+    let draft = state.vertex_editor.as_ref().unwrap().project().clone();
+    assert_ne!(source, draft);
+    let path = root.path().join("source-only.lep");
+    save_test_project(&mut state, &path).unwrap();
+    let saved = crate::project_io::read_editor_project(&path).unwrap();
+    assert_eq!(saved.project, source);
+    assert_ne!(saved.project, draft);
+    assert_eq!(state.editor.project(), &source);
+    assert_eq!(state.vertex_editor.as_ref().unwrap().project(), &draft);
+    assert!(!state.editor.can_undo());
+}
+
+#[test]
+fn numeric_vertex_accepted_edit_stays_dirty_after_an_older_save_completes() {
+    use crate::panels::vertex_editor::Session as VertexSession;
+    let root = tempfile::tempdir().unwrap();
+    let mut state = numeric_vertex_io_state();
+    state.cancel_vertex_editor();
+    let request = state.vertex_return.take().unwrap();
+    let snapshot = state.editor.project().clone();
+    let operation = state.begin_file_operation();
+    state.saving = true;
+    // A normal save is in flight before the modal opens. Its old snapshot must
+    // become the saved baseline, never replace a later accepted geometry edit.
+    let mut session = VertexSession::new(&state, request).unwrap();
+    session.input(0, "75.123456789").unwrap();
+    state.vertex_editor = Some(session);
+    state.accept_vertex_editor();
+    let edited = state.editor.project().clone();
+    assert_ne!(edited, snapshot);
+    assert!(state.dirty());
+    state.finish_save(
+        operation,
+        snapshot.clone(),
+        root.path().join("earlier.lep"),
+        Ok(()),
+    );
+    assert!(!state.saving);
+    assert_eq!(state.saved, snapshot);
+    assert_eq!(state.editor.project(), &edited);
+    assert!(state.dirty());
+    state.editor.undo();
+    assert_eq!(state.editor.project(), &snapshot);
+    assert!(!state.dirty());
+    assert!(!state.editor.can_undo());
+    state.editor.redo();
+    assert_eq!(state.editor.project(), &edited);
+    assert!(state.dirty());
+}

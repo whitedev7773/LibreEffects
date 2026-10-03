@@ -27,6 +27,8 @@ mod footage;
 mod image_sequence;
 mod matte_render;
 mod media_io;
+#[cfg(test)]
+mod numeric_vertex_render_tests;
 mod output_preflight;
 mod output_settings;
 mod panels;

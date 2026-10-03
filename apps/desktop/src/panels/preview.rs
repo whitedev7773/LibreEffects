@@ -120,6 +120,53 @@ pub(crate) struct Preview {
         std::sync::Arc<gpui::RenderImage>,
     )>,
 }
+/// No canvas, ruler, text, guide, or toolbar-menu gesture may run behind either
+/// isolated geometry/paint modal, including a late release from an earlier drag.
+fn preview_modal_active(state: &EditorState) -> bool {
+    state.gradient_editor.is_some() || state.vertex_editor.is_some()
+}
+/// Outside mouse-up runs during GPUI capture, including when a modal occludes
+/// the canvas. A blocked release must remain untouched so the modal receives its
+/// own button click. Only invoke the canvas handler when no modal owns input.
+fn route_preview_release(modal_active: bool, release: impl FnOnce()) {
+    if !modal_active {
+        release();
+    }
+}
+fn restore_vertex_return(pen: &mut super::pen::Pen, state: &mut EditorState, active: bool) -> bool {
+    // Taking first makes inactive/stale returns terminal, even if a future render
+    // restores the same project or the window becomes active again.
+    state
+        .vertex_return
+        .take()
+        .is_some_and(|request| active && pen.restore_vertex(&request, state))
+}
+fn vertex_session(state: &EditorState) -> Option<&super::vertex_editor::Session> {
+    state
+        .vertex_editor
+        .as_ref()
+        .filter(|session| session.current(state))
+}
+fn vertex_overlay(
+    state: &EditorState,
+) -> Vec<(
+    libre_effects_core::VectorPath,
+    Affine,
+    bool,
+    std::collections::BTreeSet<usize>,
+)> {
+    vertex_session(state)
+        .map(|session| {
+            let request = session.request();
+            vec![(
+                session.path().clone(),
+                request.world,
+                matches!(request.target, libre_effects_core::PathTarget::Mask(_)),
+                [request.index].into(),
+            )]
+        })
+        .unwrap_or_default()
+}
 fn point_in_quad(p: [f64; 2], corners: [[f64; 2]; 4]) -> bool {
     let mut positive = false;
     let mut negative = false;
@@ -235,6 +282,10 @@ impl Preview {
         }
     }
     fn menu_key(&mut self, event: &gpui::KeyUpEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if preview_modal_active(self.state.read(cx)) {
+            cx.stop_propagation();
+            return;
+        }
         let count = if self.channels_open {
             Channel::ALL.len()
         } else {
@@ -410,6 +461,10 @@ impl Preview {
         ])
     }
     fn down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if preview_modal_active(self.state.read(cx)) {
+            cx.stop_propagation();
+            return;
+        }
         // Even a second down routed to rulers or another canvas editor must
         // discard the old Pen pointer without publishing provisional selection.
         let state = self.state.read(cx);
@@ -784,6 +839,10 @@ impl Preview {
         cx.notify();
     }
     fn moving(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if preview_modal_active(self.state.read(cx)) {
+            cx.stop_propagation();
+            return;
+        }
         if self.gradient_drag.is_some() {
             self.update_gradient(
                 event.position,
@@ -864,7 +923,34 @@ impl Preview {
             cx.notify();
         }
     }
+    fn cancel_canvas_gestures(&mut self) {
+        self.pen.cancel();
+        self.gesture = None;
+        self.drawing = None;
+        self.guide_gesture = None;
+        self.gradient_drag = None;
+        self.text_box_drag = None;
+        self.text_dragging = false;
+        self.text_resizing = false;
+        self.options_open = false;
+        self.channels_open = false;
+    }
     fn up(&mut self, event: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let modal_active = preview_modal_active(self.state.read(cx));
+        if modal_active {
+            // Even a release before the next render abandons earlier held work,
+            // without publishing it or consuming the modal's release event.
+            self.cancel_canvas_gestures();
+            cx.notify();
+        }
+        route_preview_release(modal_active, || self.finish_pointer_up(event, window, cx));
+    }
+    fn finish_pointer_up(
+        &mut self,
+        event: &MouseUpEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.gradient_drag.is_some() {
             self.update_gradient(
                 event.position,
@@ -1004,6 +1090,9 @@ impl Render for Preview {
                     if !window.is_window_active() {
                         this.gradient_drag = None;
                         this.pen.cancel();
+                        this.state.update(cx, |s, _| {
+                            s.vertex_return = None;
+                        });
                         cx.notify();
                     }
                 }),
@@ -1049,6 +1138,18 @@ impl Render for Preview {
         {
             self.state.update(cx, |s, cx| s.finish_text(false, cx));
             self.text_dragging = false;
+        }
+        // Ordinary OK/Cancel is the only selection-restoring route. Consume the
+        // token even if inactive/stale, so later activation cannot revive it.
+        if self.state.read(cx).vertex_return.is_some() {
+            if self.state.update(cx, |s, _| {
+                restore_vertex_return(&mut self.pen, s, window.is_window_active())
+            }) {
+                window.focus(&self.focus);
+            }
+        }
+        if preview_modal_active(self.state.read(cx)) {
+            self.cancel_canvas_gestures();
         }
         let state = self.state.read(cx);
         self.pen.reset_if_stale(state);
@@ -1148,10 +1249,14 @@ impl Render for Preview {
         let time = comp.timecode(frame);
         let pan = point(px(state.preview_pan[0]), px(state.preview_pan[1]));
         let gesture = self.gesture.clone();
-        let mut render_project = state
-            .gradient_editor
-            .as_ref()
-            .and_then(|draft| draft.preview(state))
+        let mut render_project = vertex_session(state)
+            .map(|session| session.project().clone())
+            .or_else(|| {
+                state
+                    .gradient_editor
+                    .as_ref()
+                    .and_then(|draft| draft.preview(state))
+            })
             .or_else(|| {
                 state
                     .gradient_preview
@@ -1190,7 +1295,11 @@ impl Render for Preview {
                 render_project = temporary.project().clone();
             }
         }
-        let pen_overlay = self.pen.overlay(state);
+        let pen_overlay = if state.vertex_editor.is_some() {
+            vertex_overlay(state)
+        } else {
+            self.pen.overlay(state)
+        };
         let pen_marquee = self.pen.marquee_overlay(state);
         if let Some(command) = self.gradient_drag.as_ref().and_then(|g| g.command(state)) {
             let mut temporary = libre_effects_core::Editor::default();
@@ -1204,12 +1313,19 @@ impl Render for Preview {
         let gradient_point = self.gradient_point;
         let pen_active = state.tool == Tool::Pen;
         let pen_order_help = self.pen.order_help(state);
+        let vertex_available = self.pen.numeric_vertex_available(state);
         let comp = render_project.composition().clone();
-        let gradient_gesture = state
-            .gradient_editor
-            .as_ref()
-            .filter(|draft| draft.current(state))
-            .map(|draft| draft.id)
+        // Numeric and gradient drafts share the globally unique transient-render
+        // generation. Cancel/OK clears the displayed draft before source renders.
+        let gradient_gesture = vertex_session(state)
+            .map(|session| session.id)
+            .or_else(|| {
+                state
+                    .gradient_editor
+                    .as_ref()
+                    .filter(|draft| draft.current(state))
+                    .map(|draft| draft.id)
+            })
             .or_else(|| {
                 self.gradient_drag
                     .as_ref()
@@ -1330,10 +1446,28 @@ impl Render for Preview {
                         .flex_none()
                         .px_3()
                         .overflow_hidden()
+                        .flex()
+                        .items_center()
+                        .gap_3()
                         .text_size(px(11.0))
                         .text_color(rgb(ui::MUTED))
                         .tooltip(|_, cx| cx.new(|_| ui::Tip("Reorders the base and all animation poses. Curve geometry and key timing stay unchanged. Reverse may change Non-Zero compound fill holes; either action may change stroke dash placement.".into())).into())
-                        .child(pen_order_help),
+                        .child(div().flex_1().min_w_0().overflow_hidden().child(pen_order_help))
+                        .child(ui::text_button("pen-edit-vertex", "Edit Vertex…  Shift+V")
+                            .h(px(20.0))
+                            .flex_none()
+                            .when(!vertex_available, |button| button.opacity(0.35))
+                            .tooltip(|_, cx| cx.new(|_| ui::Tip("Select exactly one existing Pen vertex. Edit its local anchor and relative tangents; one Undo step on OK.".into())).into())
+                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
+                                // Prevent the button's default focus before capturing
+                                // the live Pen selection; canvas blur still cancels it.
+                                window.prevent_default();
+                                let request = this.pen.single_vertex_request(this.state.read(cx));
+                                if let Some(request) = request {
+                                    this.state.update(cx, |s, cx| s.dispatch(&Action::OpenVertex(request), window, cx));
+                                }
+                                cx.stop_propagation();
+                            }))),
                 )
             })
             .child(
@@ -1341,11 +1475,22 @@ impl Render for Preview {
                     .id("composition-canvas")
                     .track_focus(&self.focus)
                     .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+                        if preview_modal_active(this.state.read(cx)) { cx.stop_propagation(); return; }
                         if this.gradient_key(event, window, cx) { cx.stop_propagation(); return; }
                         if event.keystroke.key=="escape" && this.text_box_drag.take().is_some() {cx.stop_propagation();cx.notify();return;}
                         if this.text_key(event,window,cx) {return;}
                         if this.state.read(cx).colors.session.is_some() || this.state.read(cx).gradient_editor.is_some() { return; }
                         if this.state.read(cx).tool == Tool::Pen {
+                            let (handled, request) = this.pen.numeric_vertex_key(
+                                event,
+                                this.focus.is_focused(window),
+                                TextField::is_composing(window, cx),
+                                this.state.read(cx),
+                            );
+                            if handled {
+                                if let Some(request) = request { this.state.update(cx, |s, cx| s.dispatch(&Action::OpenVertex(request), window, cx)); }
+                                cx.stop_propagation(); cx.notify(); return;
+                            }
                             if this.pen.select_all_key(
                                 event,
                                 this.focus.is_focused(window),
@@ -1393,7 +1538,7 @@ impl Render for Preview {
                     .when(!hand && text_session.is_none(), |s| s.cursor_crosshair())
                     .when(text_session.is_some(), |s| s.cursor_text())
                     .on_mouse_down(MouseButton::Left, cx.listener(Self::down))
-                    .on_mouse_down_out(cx.listener(|this, _: &MouseDownEvent, _, cx| {this.state.update(cx,|s,cx|s.finish_text(true,cx));}))
+                    .on_mouse_down_out(cx.listener(|this, _: &MouseDownEvent, _, cx| {if !preview_modal_active(this.state.read(cx)) { this.state.update(cx,|s,cx|s.finish_text(true,cx)); }}))
                     .on_mouse_move(cx.listener(Self::moving))
                     .on_mouse_up(MouseButton::Left, cx.listener(Self::up))
                     .on_mouse_up_out(MouseButton::Left, cx.listener(Self::up))
@@ -1653,9 +1798,9 @@ impl Render for Preview {
                         checker,
                     ))
                     .child(ui::text_button("viewer-layout-options", "Guides ▾")
-                        .on_click(cx.listener(|this,_,w,cx| {this.options_open=!this.options_open;this.channels_open=false;this.menu_index=0;w.focus(&this.menu_focus);cx.notify();})))
+                        .on_click(cx.listener(|this,_,w,cx| {if preview_modal_active(this.state.read(cx)) { return; } this.options_open=!this.options_open;this.channels_open=false;this.menu_index=0;w.focus(&this.menu_focus);cx.notify();})))
                     .child(ui::text_button("viewer-channel-options",format!("{} ▾",channel.label()))
-                        .on_click(cx.listener(|this,_,w,cx| {this.channels_open=!this.channels_open;this.options_open=false;this.menu_index=0;w.focus(&this.menu_focus);cx.notify();})))
+                        .on_click(cx.listener(|this,_,w,cx| {if preview_modal_active(this.state.read(cx)) { return; } this.channels_open=!this.channels_open;this.options_open=false;this.menu_index=0;w.focus(&this.menu_focus);cx.notify();})))
                     .when(self.options_open, |toolbar| {
                         let mut menu=div().id("viewer-layout-menu").track_focus(&self.menu_focus).on_key_down(|_,_,cx|cx.stop_propagation()).on_key_up(cx.listener(Self::menu_key)).absolute().bottom(px(32.0)).left(px(164.0)).w(px(250.0)).p_1().bg(rgb(0x2b2b2b)).border_1().border_color(rgb(0x4a4a4a)).shadow_lg().occlude()
                             .on_mouse_down_out(cx.listener(|this,_,_,cx|{this.options_open=false;cx.notify();}));
@@ -1761,3 +1906,7 @@ mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+#[path = "preview_vertex_tests.rs"]
+mod numeric_vertex_tests;

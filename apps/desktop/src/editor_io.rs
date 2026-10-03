@@ -18,6 +18,10 @@ fn selected_native_destination(selected: &Path) -> Result<PathBuf, String> {
 
 impl EditorState {
     pub fn prepare_replacement(&mut self, cx: &mut Context<Self>) {
+        // Numeric geometry drafts never enter replacement/recovery source or a
+        // late field callback. Replacement is not an ordinary modal Cancel.
+        self.vertex_editor = None;
+        self.vertex_return = None;
         self.finish_text(true, cx);
         self.stop();
         self.export_cancel
@@ -76,6 +80,8 @@ impl EditorState {
         };
         self.recovery.take();
         if let Some(editor) = replacement {
+            self.vertex_editor = None;
+            self.vertex_return = None;
             self.stop();
             self.document_revision = self.document_revision.wrapping_add(1);
             self.editor = editor;
@@ -249,6 +255,7 @@ impl EditorState {
                 .text_session
                 .as_ref()
                 .is_some_and(|session| session.changed())
+            || self.vertex_editor.is_some()
         {
             return Err("Document changed while opening; open the project again".into());
         }
@@ -263,6 +270,8 @@ impl EditorState {
         // intact unless the resolved project can actually enter the editor.
         let editor = replacement_editor(opened.project)?;
         let path = crate::media_io::clean_absolute(&path)?;
+        self.vertex_editor = None;
+        self.vertex_return = None;
         self.begin_file_operation();
         self.cancel_save(self.file_operation);
         self.stop();
@@ -306,6 +315,8 @@ impl EditorState {
     }
     pub(super) fn install_new_project(&mut self) -> Result<(), String> {
         let editor = replacement_editor(Project::default())?;
+        self.vertex_editor = None;
+        self.vertex_return = None;
         self.begin_file_operation();
         self.cancel_save(self.file_operation);
         self.stop();

@@ -37,6 +37,7 @@ pub(super) struct Drag {
 fn blocked(s: &EditorState) -> bool {
     s.colors.session.is_some()
         || s.gradient_editor.is_some()
+        || s.vertex_editor.is_some()
         || s.gradient_preview.is_some()
         || s.text_session.is_some()
         || s.media_open
@@ -56,6 +57,7 @@ enum KeyRoute {
 fn key_route(key: TreeKey, s: &EditorState) -> KeyRoute {
     let modal = s.colors.session.is_some()
         || s.gradient_editor.is_some()
+        || s.vertex_editor.is_some()
         || s.media_open
         || s.fonts_open
         || s.recovery.is_some()
@@ -795,6 +797,52 @@ mod tests {
             set(&mut s, false);
         }
     }
+    #[test]
+    fn numeric_vertex_modal_blocks_tree_drag_keys_and_bubbles_modal_escape() {
+        use crate::panels::vertex_editor::{Request, Session};
+        let mut s = scene();
+        edit(&mut s, ContentsEdit::ConvertPath { item: 2, frame: 0 });
+        s.tool = crate::editor::Tool::Pen;
+        let selected = selection(&mut s, 1, &[2]);
+        let collapsed = BTreeSet::new();
+        let drag = Drag::new(&s, &selected, &collapsed, 2, point(px(20.), px(20.)), true).unwrap();
+        let (item, path, local) = contents(&s)
+            .editable_paths(0)
+            .into_iter()
+            .find(|(item, _, _)| *item == 2)
+            .unwrap();
+        let world = s
+            .editor
+            .project()
+            .composition()
+            .world_transform(1, 0)
+            .unwrap()
+            .compose(local);
+        let request = Request::new(
+            &s,
+            1,
+            libre_effects_core::PathTarget::Contents(item),
+            0,
+            path,
+            world,
+        )
+        .unwrap();
+        s.vertex_editor = Some(Session::new(&s, request).unwrap());
+        assert!(!drag.current(&s, &selected, &collapsed));
+        assert!(Drag::new(&s, &selected, &collapsed, 2, point(px(20.), px(20.)), true).is_none());
+        for key in [
+            TreeKey::Delete,
+            TreeKey::Duplicate,
+            TreeKey::Previous,
+            TreeKey::Next,
+            TreeKey::SelectAll,
+        ] {
+            assert_eq!(key_route(key, &s), KeyRoute::Consume);
+        }
+        assert_eq!(key_route(TreeKey::Escape, &s), KeyRoute::Bubble);
+        assert_eq!(key_route(TreeKey::CancelAndBubble, &s), KeyRoute::Bubble);
+    }
+
     #[test]
     fn color_gradient_and_modal_sessions_cancel_a_frozen_tree_drag() {
         let mut s = scene();

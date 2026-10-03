@@ -12,7 +12,7 @@
 
 ### 현재 단계와 다음 개발
 
-**2026-10-03 사용자 우선순위:** 고유 `.lep` (Libre Effects Project) 파일 형식을 먼저 구현·실행 검증하고, 그 뒤 보류한 편집 기능과 나머지 백로그를 재개한다. `.lep`의 서명/컨테이너 버전/체크섬/제한된 청크와 Save/Open/CLI/복구/수집 연결을 구현했고 코어·데스크톱 기본 626개와 FFmpeg 30개, 릴리스 빌드가 통과했다. 기존 `.lfe.json`은 호환 입력으로 유지하며 Save는 `.lep` 사본을 만든다. 네이티브 복구·이동 수집까지 아래 범위의 end-to-end 검증을 마쳤다. 고유 형식의 기본 단계와 이어 재개한 같은 경로 박스 선택/Ctrl+A의 검증을 마쳤다. E04 Contents의 형제 항목 다중 선택·같은 부모 안의 묶음 순서 편집과 저장 포커스 회귀까지 검증을 마쳤다. 이어서 F03/D01의 레이어 전체 Text Fill/Stroke RGB와 Stroke Width 7개 스칼라 애니메이션을 연결하고 최종 네이티브 검증을 마쳤다. 문자별 스타일/타이포그래피 애니메이션은 별도 범위다.
+**2026-10-03 사용자 우선순위:** 고유 `.lep` (Libre Effects Project) 파일 형식을 먼저 구현·실행 검증하고, 그 뒤 보류한 편집 기능과 나머지 백로그를 재개한다. `.lep`의 서명/컨테이너 버전/체크섬/제한된 청크와 Save/Open/CLI/복구/수집 연결을 구현했고 코어·데스크톱 기본 626개와 FFmpeg 30개, 릴리스 빌드가 통과했다. 기존 `.lfe.json`은 호환 입력으로 유지하며 Save는 `.lep` 사본을 만든다. 네이티브 복구·이동 수집까지 아래 범위의 end-to-end 검증을 마쳤다. 고유 형식의 기본 단계와 이어 재개한 같은 경로 박스 선택/Ctrl+A의 검증을 마쳤다. E04 Contents의 형제 항목 다중 선택·같은 부모 안의 묶음 순서 편집과 저장 포커스 회귀까지 검증을 마쳤다. 이어서 F03/D01의 레이어 전체 Text Fill/Stroke RGB와 Stroke Width 7개 스칼라 애니메이션을 연결하고 최종 네이티브 검증을 마쳤다. 문자별 스타일/타이포그래피 애니메이션은 별도 범위다. E02 단일 정점 숫자 모달도 구현·자동/네이티브 검증을 마쳤으며, 다음 P1 단계는 기존 글꼴 관리의 실제 fallback face/미해결 glyph 진단이다.
 
 현재는 **2D 모션 편집·합성 기반을 구현한 단계**다. AE 동등 수준이나 전체 백로그 완료 상태는 아니다. 기능군마다 규모가 달라 단순 항목 수를 완성률로 표시하지 않는다.
 
@@ -21,6 +21,15 @@
 - **정교한 편집에 남은 기능:** D02/D03 다중 채널·공간 보간·Speed Graph 선택 변형, E02/E03 경로 토폴로지·marquee/교차 경로 선택, E04 트리 편집·복합 Colors 애니메이션, G01 가변 Feather·로토베지어, F01–F03 실제 IME 검증·문자별 스타일·텍스트 속성 애니메이션, B01/B05/B07 배치 회귀·단축키/접근성. 스칼라 양방향 시간 보간·Speed Graph, Contents·도형 속성 애니메이션, 직접 텍스트 편집과 B06 공통 색 선택기는 아래 이력의 범위로 이미 구현됐다.
 - **후속 고급 기능:** 패널 도킹·소스 뷰어·최근 프로젝트, 타임라인 고급 시간 편집/검색/가상화, 공간 경로·프리셋·표현식, Shape 연산/SVG·Text Animator, 추가 효과·모션 블러, 고정밀 색/HDR·Proxy/GPU, 템플릿, 설치/업데이트·한글화와 UI 회귀 자동화.
 - **별도 대형 단계:** 3D/카메라/라이트·모델, 추적·로토/Puppet, 플러그인/교환 포맷 연구, 웹/API 제품 범위. AEP/MOGRT 호환은 구현되지 않았다.
+
+### E02 단일 정점 숫자 편집 트랜잭션 — 2026-10-03
+
+- idle Pen에서 명시적으로 선택한 정점 하나를 Edit Vertex 버튼 또는 canvas 전용 Shift+V로 연다. Shape/활성 Contents Path/벡터 Mask의 local anchor X/Y와 상대 incoming/outgoing X/Y 여섯 값을 독립 입력한다. 그룹/레이어/부모 변형 전 좌표이며 tangent mirroring·corner 변환·topology 변경을 하지 않는다. 정밀도를 잃는 두 자리 scrub 대신 round-trip 가능한 숫자 입력을 사용한다.
+- 원본 Project/context를 고정하고 매 입력 후보를 원래 source의 격리 Editor에서 하나의 EditPath로 재구성한다. preview/overlay만 초안을 보며 Save/autosave/export/history에는 원본만 전달한다. unchanged/away-back/Cancel은 중간 프레임 키나 히스토리를 만들지 않고 OK는 한 Undo다. 기존 키 보간과 다른 키/참조 pose는 보존하며 새 키는 기존 Linear 정책을 따른다. 유효한 Path key에는 별도 scalar TemporalHandles를 허용하지 않는 기존 정책을 바꾸지 않았다.
+- field 오류·범위/pose 한도 실패는 마지막 정상 초안을 보존하고 OK를 막는다. serial/context/선택/프레임/도구/transport/교체/창 비활성화·pending save-and-close 경계를 검사한다. 정상 OK/Cancel만 검증한 one-shot 선택을 복구한다. 늦은 Open은 살아 있는 모달을 덮지 않고, 이전 Save 완료는 나중에 승인한 geometry를 dirty 상태로 유지한다.
+- 자동 검증: 코어 251 + 데스크톱 516(기본 767), 명시적 FFmpeg 30, fmt/direct check/릴리스 통과. 신규 41개는 session 14, Pen/Preview 14, UI/routing 4, I/O 4, tree 1, render 4다. 두 독립 영역 리뷰와 pointer 수정 재리뷰에 차단 문제가 없다. parented/reflected Shape, rotated/skewed/reflected Contents, Add/Subtract Mask와 static/중간/기존 eased key를 독립 geometry·native 왕복·픽셀로 검사했다. v2 CLI의 기존 text 32 frame case 28,440,800 RGBA 픽셀도 그대로다.
+- 네이티브 v1은 키보드 승인으로 여섯 field/preview, no-op/away-back/Cancel/invalid Escape, Undo/Redo, nested/mask 및 애니메이션 키, save/reopen 데이터가 통과했다(29 assertion, 22 native 파일, 37 CUA 화면). 단, 실제 OK/Cancel 마우스 클릭은 focus만 이동했다. occluded Preview의 outside mouse-up capture가 release를 삼킨 원인을 수정하고 canvas gesture 정리는 유지했다. v2 자동 회귀와 최종 실제 마우스 검증이 통과했다. standalone Cancel/OK, 밖으로 drag-out한 클릭 취소, invalid OK/field Escape, Undo/Redo·정확한 reopen, 창 비활성화 뒤 Redo 보존, 공통 Gradient의 Add/Cancel/OK와 한 Undo를 확인했다. v2의 17 assertion·12 codec 검증 파일·20 CUA 화면을 별도 보존한다. v1의 더 넓은 target/animation 결과를 v2에서 전부 재실행한 것으로 재표기하지 않는다. 실제 IME·직접 digit 입력·held 중간 상태·Windows/DPI·전체 stale/lock/modal 조합은 미검증이다.
+- Project/LEP 버전과 core 명령은 그대로다. 교차 경로, 여러 정점의 숫자 변형, linked tangent 및 topology animation은 남는다. 다음 제안 P1 단계는 F02의 실제 렌더러가 선택한 glyph/font 진단이며 기존 layout/출력 정책은 유지한다.
 
 ### F03/D01 레이어 전체 Text paint 애니메이션 — 2026-10-03
 

@@ -96,6 +96,42 @@ Actions that open native file choosers request canvas blur; actual focus loss
 clears transient vertex selection. Ordinary Ctrl+S to the existing native file
 keeps focus. Check/reselect vertices after a chooser or another focus change.
 
+### Numeric vertex editing
+
+With the Pen canvas focused and exactly one existing vertex selected, choose
+**Edit Vertex…** beside the Pen hint or press **Shift+V**. Finish or cancel any
+creation, insertion, drag or marquee first. The dialog identifies the path,
+1-based vertex and frozen frame. It edits six numbers: anchor X/Y and incoming/
+outgoing tangent X/Y offsets. Coordinates are **path-local pixels**, before
+Contents-group, layer and parent transforms; tangent values are relative to the
+anchor. Moving the anchor retains both offsets. Tangents edit independently,
+without mirroring, corner conversion or topology changes.
+
+The six fields use full-precision numeric typing, not two-decimal scrubbing.
+Values must be finite and within ±1,000,000. Enter, Tab or field blur validates
+the draft and updates the isolated Composition preview. Invalid fields block OK.
+Escape first reverts a pending/rejected field to its last accepted draft value;
+Escape from dialog focus cancels the whole transaction. Tab stays in the dialog.
+
+OK applies one geometry command and one Undo step. Cancel, unchanged values and
+an edit returning exactly to the opening pose leave source, keys and history
+untouched. The preview never enters autosave, source exports or normal Save.
+With animation enabled, the opening pose is evaluated at the frozen frame; OK
+adds or updates only that frame's geometry key. Existing-key interpolation is
+retained, while a new key uses Linear. Other keys and their referenced geometry
+are preserved. Static paths stay static. Shape, enabled Contents paths and vector
+masks use the same transaction; no new project schema or LEP version is required.
+
+Ordinary OK/Cancel returns only the explicitly validated vertex selection to the
+canvas, so repeated edits do not require guessing a path. Changed source/frame/
+selection/tool/transport, document replacement, pending save-and-close or window
+deactivation invalidates the session and prevents stale selection restoration.
+Document/menu/undo actions cannot edit the source behind the dialog. Multi-vertex
+numeric transforms, linked tangent controls and cross-path editing remain future
+work.
+
+### Path order
+
 Existing vector paths support **Reverse Direction** from their Path property row,
 or **Shift+R** with a nonempty same-path Pen selection. **Shift+F** sets a single
 selected vertex as the first vertex of a **closed** path. An outer square marks
@@ -841,6 +877,7 @@ cargo run -p libre-effects-core --example make_animation_study -- examples/curve
 | Ctrl+M | Add active composition/work area to the render queue |
 | Ctrl+Alt+T | Enable / disable selected footage or precomposition Time Remap |
 | V / H / W / Y | Selection / Hand / Rotation / Anchor Point tool |
+| G / Shift+V (Pen canvas focused) | Pen tool / Edit the single selected vertex numerically |
 | Ctrl+Shift+D | Split selected layers at the playhead |
 | Alt+[ / Alt+] | Trim selected layers' In / Out to the playhead |
 | Arrow keys / Shift+Arrow | Move selected layers 1 / 10 composition pixels |

@@ -5,6 +5,9 @@ use gpui::{Context, KeyDownEvent, Window, div, prelude::*, px, rgb};
 
 impl Shell {
     pub(super) fn open_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.state.read(cx).vertex_editor.is_some() {
+            return;
+        }
         self.search_return_focus = self.menu_return_focus.take().or_else(|| window.focused(cx));
         TextField::commit_active(window, cx);
         self.state.update(cx, |s, cx| s.finish_text(true, cx));
