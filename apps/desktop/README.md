@@ -64,14 +64,36 @@ An ordinary click on a different vertex replaces the selection. Handles remain
 single-target edits. Each completed path or drag is one Undo. Selection-only and
 edit-then-return gestures do not create keys or history entries.
 
+After targeting a path, **Shift-drag blank canvas** to add its anchor centers
+inside a box to the current selection. This is additive, same-path selection;
+points on other paths are not selected. Vertex toggles and tangent hits take
+precedence, while a blank area over a curve/fill can start the box. Drag at least
+four logical screen pixels along either axis to activate it. Smaller blank clicks
+preserve selection. Box edges are inclusive and either drag direction works.
+
+**Ctrl+A**, with the Pen canvas focused, selects all vertices of that targeted
+path. Neither command guesses a path from the layer or Contents Group selection.
+Toggling the last vertex off retains the known target, so a subsequent box or
+Ctrl+A can select it again. Selection alone adds no keys or Undo step. These
+shortcuts do not run in a text field, marked IME composition, color/gradient
+dialog or with unrelated modifiers; repeated Ctrl+A is consumed without editing.
+
+Zoom/pan between gestures retains the path target. A changed canvas layout,
+zoom/pan or preview view during a held pointer cancels its unpublished box or
+geometry edit before using coordinates from the new view. A view change during a
+held path-creation drag discards that unfinished draft; zooming between creation
+points remains supported. Focus/file/context cancellation still clears transient
+selection. Check/reselect the path after a file or dialog action before the next
+multi-vertex gesture.
+
 Delete removes the selected static vertices atomically, retaining at least two
 vertices on open paths and three on closed paths. Animated paths reject topology
 changes without falling through to layer deletion. The same selection workflow
 works on legacy shapes, vector masks and nested Contents paths. Escape, focus,
 time, tool, target or document changes cancel a pending gesture. Opening Settings,
 Help or other shell overlays removes canvas focus before editing shortcuts run.
-File actions such as Save also blur the canvas and clear transient vertex selection;
-reselect vertices before the next multi-vertex gesture.
+File actions such as Save request canvas blur; actual focus loss clears transient
+vertex selection. Check/reselect vertices before the next multi-vertex gesture.
 
 Existing vector paths support **Reverse Direction** from their Path property row,
 or **Shift+R** with a nonempty same-path Pen selection. **Shift+F** sets a single
@@ -87,7 +109,7 @@ Undo, and choosing the current first vertex creates no history entry. Selected
 indices remap so the same geometric points remain selected for the next drag.
 Shortcuts require canvas focus and ignore key repeat or unrelated modifier chords;
 finish/cancel a draft, insertion or held drag before changing path order. Save and
-other focus-changing actions still clear transient Pen selection.
+other file actions request blur; actual focus changes clear transient Pen selection.
 
 The cubic curve is preserved, but its **appearance can change**: reversing one
 contour changes its winding and can create/remove holes in a Non-Zero compound
@@ -101,7 +123,7 @@ are stored in layer coordinates, including parent transformations, in project
 version 29. Existing rectangular masks remain supported. Mask Opacity,
 Feather and Expansion animate in v30; shape/mask vertices and handles animate
 in v31. Enable the Path stopwatch and edit with the Pen at another frame.
-Animated paths require matching topology. Marquee/cross-path selection, topology
+Animated paths require matching topology. Cross-path selection, topology
 changes across keys, variable feather and shape Contents operators remain open.
 
 With an explicitly selected **Contents Group**, starting Pen on empty canvas adds

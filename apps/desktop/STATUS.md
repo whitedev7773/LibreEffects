@@ -1,7 +1,8 @@
 # Current desktop implementation status
 
 Updated 2026-10-03 for the resumed-work, I01 output-preflight and
-E04/E02 editing, D03 time-box, animated path-order and native LEP checkpoints.
+E04/E02 editing, D03 time-box, animated path-order, native LEP and Pen marquee
+checkpoints.
 This is the current checkpoint inventory;
 [DEVELOPMENT_BACKLOG.md](DEVELOPMENT_BACKLOG.md) retains the original audit and
 its dated implementation/test history. Older “remaining” lists and test counts
@@ -43,14 +44,19 @@ does not establish a complete native editing workflow.
   static multi-delete is atomic and enforces minimum path sizes. Selection-only
   and no-net-change gestures preserve keys/history. Pending insertion interruption,
   final mouse-up coordinates/modifiers and overlay focus have regression coverage.
-  Marquee/cross-path selection and topology-changing animation remain open.
+  Additive Shift blank-drag now boxes anchor centers on the known path, and exact
+  canvas Ctrl+A selects all of that path's vertices. Empty retained targets remain
+  usable, but no path is guessed from a layer or Group selection. Held view/layout
+  changes cancel unpublished geometry/box edits before converting coordinates;
+  idle zoom between creation points remains supported. Cross-path selection,
+  numeric vertex editing and topology-changing animation remain open.
 - **Whole-track path order:** Reverse Direction and closed-path Set First Vertex
   reorder base geometry and every stored pose together without changing timing,
   pose references, transforms or paint settings. Canvas shortcuts remap the same
   selected geometric points; a separate outline marks the first point. Pure
   nonempty reorder batches preserve legacy version/assets and exact no-op history.
   Cubic geometry is preserved, but winding/Non-Zero holes and dash placement can
-  intentionally change. Marquee/cross-path and numeric vertex editing remain open.
+  intentionally change. Cross-path and numeric vertex editing remain open.
 - **Selected-group Pen creation:** new open/closed paths can be drawn directly
   into the explicitly selected Contents Group, including empty/nested transformed
   groups. Existing applicable paints are inherited without paint additions; the
@@ -108,7 +114,8 @@ does not establish a complete native editing workflow.
 
 The combined checkpoint includes all prior restoration/I01/Gradient/Pen fixes,
 selected-group creation, Speed Graph time scaling, whole-track path ordering and
-native `.lep` storage integration. Formatting, type checking, all 626 default
+native `.lep` storage integration and same-path marquee/Ctrl+A. Formatting, type
+checking, all 661 default
 tests, the explicit 30-test media suite
 and the optimized release build passed. Native checks are listed separately with
 their tested build and coverage; automated tests do not imply native acceptance.
@@ -116,9 +123,9 @@ their tested build and coverage; automated tests do not imply native acceptance.
 | Check | Result and boundary |
 | --- | --- |
 | Core tests | 227 passed, including 16 codec and one native-budget regression plus prior save-budget, group-space and path-order tests. |
-| Desktop default tests on Linux | 399 passed, including native storage/view/recovery/editor/queue/CLI regressions plus prior editing/focus/I01 tests; 30 FFmpeg tests ignored by default. |
+| Desktop default tests on Linux | 434 passed, including native storage/view/recovery/editor/queue/CLI and 35 new marquee/view regressions plus prior editing/focus/I01 tests; 30 FFmpeg tests ignored by default. |
 | Explicit FFmpeg integration suite | All 30 ignored media tests were explicitly run and passed. They are not included in the default pass count. |
-| Focused editing regressions | 16 modal-transaction tests, 55 Pen tests (including 14 group-creation and 14 path-order tests), 17 Speed-box tests, 5 path-order rendering tests, 3 shell-focus tests and the prior 20 gradient-draft/endpoint tests passed within the desktop suite; do not add these counts a second time. |
+| Focused editing regressions | 16 modal-transaction tests, 89 Pen tests (including 26 marquee, 8 frozen-view, 14 group-creation and 14 path-order tests), 3 Preview tests (one new view snapshot), 17 Speed-box tests, 5 path-order rendering tests, 3 shell-focus tests and the prior 20 gradient-draft/endpoint tests passed within the desktop suite; do not add these counts a second time. |
 | Release build | `cargo build -p libre-effects-desktop --release --locked` succeeded after the final review fixes. The earlier interrupted-build blocker is closed. |
 | Native/legacy CLI equivalence | The pinned LEP release rendered both formats at frames 0, 30 and 60 with exact equality across 691,200 RGBA pixels. Future-version, corrupt-image and truncated inputs exited 1 while preserving existing output bytes. Linked-media native rendering also passed. |
 | Native LEP workflow | Pinned release passed legacy import/native-copy Save with unchanged originals, default .lep names, shared images/view state, edited Save/reopen, rejected Open with state/history preserved, normalized-path collision rejection and imported-original PNG protection. Actual five-second autosave, legacy JSON recovery and corrupt-current/valid-previous fallback each passed Restore/Save/reopen with exact project/image data. Collect Files produced project.lep plus Media; after moving the entire new folder, native Open retained frame 1/100% view and Manage project media showed the moved video Online with 0 missing. CLI rendering matched all 57,600 RGBA pixels before/after collection. Native queue-restart/video-export protection, Windows, OS association, IME and DPI were not exercised in this LEP session; queue/video guard logic is regression-tested. |
@@ -128,9 +135,10 @@ their tested build and coverage; automated tests do not imply native acceptance.
 | Native gradient acceptance, release checkpoint | Actual endpoint drags, single-Undo restoration, color-picker Cancel restoration, OK apply and one Undo passed. Save/reopen preserved the changed endpoint in a 12,346-byte native project; a 1364×1024 screenshot records the result. Mid-mouse-held frame observation and Escape during an active drag were not verified because the input tool executes drags atomically. These checks do not establish complete stop/midpoint or keyboard coverage. CLI output from the native saved file matched an independent linear-gradient calculation at 2,244 interior pixels with maximum RGB error below 0.50/255 and opaque alpha. |
 | Native I01 output preflight | Strict rejection preserved the existing destination; policy and diagnostic survived restart. Fallback produced H.264 320×180 at24fps with exactly two frames and an explicit substitution warning. A renamed output folder produced an actionable missing-parent diagnostic and no output. These UI checks used the initial I01 build; the subsequent v4 envelope guard and migrations passed the final fresh-target tests. |
 | Native modal editor | Initial debug build passed stop/midpoint/RGB/opacity drafts, Cancel, HEX validation, field Escape, multi-change OK and exact one-Undo/Redo. Edit-away-and-back was a no-op preserving prior history. Final release reopened the saved result; its CLI output matched independent color/opacity midpoint math at 2,244 interior pixels with maximum RGB error 1.47/255. No actual AE comparison was performed. |
-| Native Pen and overlay focus, final release | Same-path pair drag passed for legacy Shape, rotated/skewed nested Contents and vector mask; saved JSON confirmed identical local deltas, unchanged unselected positions and all tangent offsets. Selection-only was clean. Static six-to-four deletion, closed-path minimum-size rejection, animated topology rejection with both keys preserved, exact one-Undo/Redo and static save/reopen passed. Ctrl+K/Ctrl+N moved focus off the canvas, preventing Delete behind Settings; field input focus and field/dialog Escape passed. File actions such as Save intentionally blur and clear transient Pen selection. Atomic drag input still prevents intermediate mouse-held observation. |
+| Native Pen and overlay focus, final release | Same-path pair drag passed for legacy Shape, rotated/skewed nested Contents and vector mask; saved JSON confirmed identical local deltas, unchanged unselected positions and all tangent offsets. Selection-only was clean. Static six-to-four deletion, closed-path minimum-size rejection, animated topology rejection with both keys preserved, exact one-Undo/Redo and static save/reopen passed. Ctrl+K/Ctrl+N moved focus off the canvas, preventing Delete behind Settings; field input focus and field/dialog Escape passed. Focus-changing file actions cleared transient Pen selection in those checks. Atomic drag input still prevents intermediate mouse-held observation. |
 | Native selected-group Pen / Speed time box | Optimized release passed nested closed/open curves, repeated group creation, Cancel, one-Undo/Redo, save/reopen and Ctrl-mask/standalone controls. Existing path/paint JSON remained exact; independent group-transform reconstruction matched actual click coordinates within 0.223 pixels per axis. Speed showed only two side handles; vertical-only and return-to-start drags were no-ops, horizontal scaling preserved values/influences with common nominal slope compensation, and one-Undo/Redo/reopen matched saved data. The inset frame-zero handle was visible and draggable without hiding the key glyph. 26 post-hoc assertions and 15 native screenshots record these flows. Alt-centered/differential snap, held-drag interruption, tiny plots and full layout/DPI coverage remain unverified natively. Extremely short plots may omit a handle if no glyph-clear position fits. |
 | Native whole-track path order | Corrected release passed First/Reverse geometry and tangent permutations, independent first-point marker, index-zero no-op history, exact Undo/Redo, remapped pair drag, whole animated base/pose/timing preservation, Properties Reverse, save/reopen at frame 60, and nested/mask routes. Multiple-selection First and unfinished-draft shortcuts were safely rejected. 25 post-hoc assertions and 16 original screenshots record the tested flows; four original fixture hashes were unchanged. Native open-path, locked/stale/modifier/IME and held-input combinations remain unverified after the requested format-priority change. |
+| Native Pen marquee/Ctrl+A | Separately pinned release passed static additive box selection, Ctrl+A whole-path movement, nested rotated/skewed Contents and mask targeting, including box selection from an empty retained mask target. Only intended anchor positions changed by equal local deltas; other vertices, tangents and metadata stayed exact. One-step Undo/Redo matched baseline/results. No-target and selection-only gestures changed no source; animated box/Ctrl+A at frame 30 preserved every pose and timing key without adding keys. Static .lep geometry was saved and actually reopened. A first tightly batched selection/save/drag attempt moved one point; it was undone and the separately observed gesture passed. No general Save-focus guarantee is inferred from that input-timing observation. Held-drag observation/interruption, broader focus/IME, Windows and DPI combinations remain unverified natively. |
 | Windows CI and device behavior | Fresh remote CI has not run: the requested checkpoint is local commits only, with no push or PR. Historical Windows native/device results remain in the backlog; the Windows-only audio-device test was not run on Linux. |
 
 Linux native startup needs a working Vulkan driver, and Open/Save needs a running
@@ -211,7 +219,7 @@ Every original A01–L05 ID appears once below. The labels are deliberately boun
 | ID | Status | Current scope and remaining boundary |
 | --- | --- | --- |
 | E01 | Partial | Drag-created rectangle, rounded rectangle, ellipse, polygon and star; open lines can be drawn with Pen. Dedicated parametric line/tool-default controls and wider native regression remain. |
-| E02 | Partial | Open/closed Bezier Pen, insert/delete/convert points, handles, parametric conversion and same-path multi-vertex moves/static deletion through transforms, animated-safe Reverse/Set First and first-point marker. Marquee/cross-path selection, numeric vertex editing and topology-changing animation remain. |
+| E02 | Partial | Open/closed Bezier Pen, insert/delete/convert points, handles, parametric conversion, same-path additive marquee/Ctrl+A, multi-vertex moves/static deletion through transforms, animated-safe Reverse/Set First and first-point marker. Cross-path selection, numeric vertex editing and topology-changing animation remain. |
 | E03 | Partial | Animated scalar/RGB/opacity paint, cap/join/miter/dash controls, fractional Points and Contents linear/radial Gradient Fill/Stroke. Remaining parametric details, topology editing and complete native coverage are not done. |
 | E04 | Partial | Nested Contents tree, paths/paints, animated group transforms/Skew, Composite ordering, 16 paint blend modes, live gradient ramp drafts, transformed canvas endpoints, transactional modal Gradient Editor and selected-group Pen creation. Compound Colors animation and tree drag/multi-selection remain. |
 | E05 | Partial | Fixed-topology shape/mask path animation exists. Trim Paths, Repeater, Merge/Offset Paths and topology-changing interpolation are not implemented. |
@@ -296,7 +304,10 @@ Project) container end-to-end before any further editing features. Keep legacy
 `.lfe.json` import and source originals intact. Codec, bounded integrity checks,
 Save/Open/Save As, CLI, recovery and Collect Files implementation, automated checks
 and the bounded native acceptance above passed. The dedicated-format milestone
-is complete; resume the preserved same-path marquee/Ctrl+A editing slice next.
+is complete. The preserved same-path marquee/Ctrl+A slice also passes
+focused/aggregate/media/release checks and the bounded native acceptance above.
+Next: E04 Contents sibling multi-selection and same-parent block reordering;
+cross-parent moves need their own coordinate/paint-scope design.
 This does not close the broader A04 backup-management or other backlog extensions.
 
 1. Extend native editing acceptance and retained regression evidence, especially

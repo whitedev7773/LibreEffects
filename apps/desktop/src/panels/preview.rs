@@ -164,6 +164,19 @@ fn geometry(
         ),
     )
 }
+fn pen_view(bounds: Option<Bounds<Pixels>>, state: &EditorState) -> Option<super::pen::View> {
+    let bounds = bounds?;
+    let comp = state.editor.project().composition();
+    let (zoom, origin) = geometry(
+        bounds,
+        comp.width(),
+        comp.height(),
+        state.preview_zoom,
+        point(px(state.preview_pan[0]), px(state.preview_pan[1])),
+        state.viewer.rulers,
+    );
+    Some(super::pen::View::new(bounds, origin, zoom, state))
+}
 fn controls_active(
     comp: &libre_effects_core::Composition,
     layer: &libre_effects_core::Layer,
@@ -378,6 +391,8 @@ impl Preview {
             });
         }
     }
+    // Gradient input retains its existing mapping helper and validity guard.
+    // Pen pointer events use the frozen-view adapter instead.
     fn pen_pointer(&self, position: Point<Pixels>, cx: &Context<Self>) -> Option<[f64; 2]> {
         let s = self.state.read(cx);
         let c = s.editor.project().composition();
@@ -395,6 +410,12 @@ impl Preview {
         ])
     }
     fn down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        // Even a second down routed to rulers or another canvas editor must
+        // discard the old Pen pointer without publishing provisional selection.
+        let state = self.state.read(cx);
+        self.pen.reset_if_stale(state);
+        self.pen.validate_view(pen_view(self.bounds.get(), state));
+        self.pen.abandon_pointer();
         if self.state.read(cx).colors.picking() {
             self.sample_pointer(event.position, cx);
             self.state.update(cx, |s, cx| {
@@ -416,6 +437,7 @@ impl Preview {
         }
 
         let Some(bounds) = self.bounds.get() else {
+            self.pen.validate_view(None);
             return;
         };
         crate::components::TextField::commit_active(window, cx);
@@ -543,13 +565,11 @@ impl Preview {
             }
         }
         if state.tool == Tool::Pen {
-            let command = self.pen.down(
+            let command = self.pen.pointer_down(
                 state,
-                p,
-                zoom as f64,
-                event.modifiers.alt,
-                event.modifiers.shift,
-                event.modifiers.control,
+                event.position,
+                Some(super::pen::View::new(bounds, origin, zoom, state)),
+                event.modifiers,
             );
             self.state.update(cx, |s, cx| {
                 s.dispatch(&Action::Seek(frame), window, cx);
@@ -799,11 +819,13 @@ impl Preview {
             return;
         }
         if self.state.read(cx).tool == Tool::Pen {
-            self.pen.reset_if_stale(self.state.read(cx));
-            if let Some(p) = self.pen_pointer(event.position, cx) {
-                self.pen
-                    .moving(p, event.modifiers.alt, event.modifiers.shift);
-            }
+            let state = self.state.read(cx);
+            self.pen.pointer_move(
+                state,
+                event.position,
+                pen_view(self.bounds.get(), state),
+                event.modifiers,
+            );
             cx.notify();
             return;
         }
@@ -883,17 +905,13 @@ impl Preview {
             return;
         }
         if self.state.read(cx).tool == Tool::Pen {
-            let command = if let Some(p) = self.pen_pointer(event.position, cx) {
-                self.pen.release(
-                    self.state.read(cx),
-                    p,
-                    event.modifiers.alt,
-                    event.modifiers.shift,
-                )
-            } else {
-                self.pen.cancel();
-                None
-            };
+            let state = self.state.read(cx);
+            let command = self.pen.pointer_up(
+                state,
+                event.position,
+                pen_view(self.bounds.get(), state),
+                event.modifiers,
+            );
             if let Some(command) = command {
                 self.state
                     .update(cx, |s, cx| s.dispatch(&Action::Edit(command), window, cx));
@@ -1034,6 +1052,7 @@ impl Render for Preview {
         }
         let state = self.state.read(cx);
         self.pen.reset_if_stale(state);
+        self.pen.validate_view(pen_view(self.bounds.get(), state));
         if state.text_session.is_some() && !self.text_was_active {
             window.focus(&self.focus);
         }
@@ -1172,6 +1191,7 @@ impl Render for Preview {
             }
         }
         let pen_overlay = self.pen.overlay(state);
+        let pen_marquee = self.pen.marquee_overlay(state);
         if let Some(command) = self.gradient_drag.as_ref().and_then(|g| g.command(state)) {
             let mut temporary = libre_effects_core::Editor::default();
             if temporary.replace_project(render_project.clone()).is_ok()
@@ -1236,6 +1256,7 @@ impl Render for Preview {
             .map(|(_, _, _, e)| e.clone());
         let rendered = self.cached.as_ref().map(|(_, _, _, image)| image.clone());
         let measured = self.bounds.clone();
+        let measured_preview = cx.entity().downgrade();
         div()
             .flex()
             .flex_col()
@@ -1294,7 +1315,7 @@ impl Render for Preview {
                     .child(format!(
                         "{}  ›  Active Camera{}",
                         comp.name(),
-                        if text_session.is_some() { "  ·  Text: Ctrl+Enter finish · Esc cancel" } else if self.state.read(cx).colors.picking() { "  ·  Pick composition color · click to sample · Esc to return" } else if gradient_active { if gradient_point == 0 { "  ·  Gradient Start: drag · Tab switch · arrows move · Alt both · Esc close" } else { "  ·  Gradient End: drag · Tab switch · arrows move · Alt both · Esc close" } } else if pen_active { "  ·  Pen: Shift-click select · drag selected · Shift constrain · Delete vertices · Esc cancel" } else if self.pending.is_some() {
+                        if text_session.is_some() { "  ·  Text: Ctrl+Enter finish · Esc cancel" } else if self.state.read(cx).colors.picking() { "  ·  Pick composition color · click to sample · Esc to return" } else if gradient_active { if gradient_point == 0 { "  ·  Gradient Start: drag · Tab switch · arrows move · Alt both · Esc close" } else { "  ·  Gradient End: drag · Tab switch · arrows move · Alt both · Esc close" } } else if pen_active { "  ·  Pen: Shift-click toggle · Shift-drag add box · Ctrl+A path vertices · drag selected · Esc cancel" } else if self.pending.is_some() {
                             "  ·  Rendering…"
                         } else {
                             ""
@@ -1325,6 +1346,14 @@ impl Render for Preview {
                         if this.text_key(event,window,cx) {return;}
                         if this.state.read(cx).colors.session.is_some() || this.state.read(cx).gradient_editor.is_some() { return; }
                         if this.state.read(cx).tool == Tool::Pen {
+                            if this.pen.select_all_key(
+                                event,
+                                this.focus.is_focused(window),
+                                TextField::is_composing(window, cx),
+                                this.state.read(cx),
+                            ) {
+                                cx.stop_propagation(); cx.notify(); return;
+                            }
                             let (ordered, command) = this.pen.order_key(
                                 event,
                                 this.focus.is_focused(window),
@@ -1370,7 +1399,17 @@ impl Render for Preview {
                     .on_mouse_up_out(MouseButton::Left, cx.listener(Self::up))
                     .child(
                         canvas(
-                            move |bounds, _, _| measured.set(Some(bounds)),
+                            move |bounds, _, cx| {
+                                if measured.replace(Some(bounds)) != Some(bounds) {
+                                    let _ = measured_preview.update(cx, |this, cx| {
+                                        // Layout can change fit mapping without a state
+                                        // event. Cancel held Pen input before another
+                                        // pointer event and repaint its stable source.
+                                        this.pen.validate_view(pen_view(Some(bounds), this.state.read(cx)));
+                                        cx.notify();
+                                    });
+                                }
+                            },
                             move |bounds, _, window, cx| {
                                 let (zoom, origin) =
                                     geometry(bounds, comp.width(), comp.height(), zoom, pan,overlay_options.rulers);
@@ -1538,7 +1577,7 @@ impl Render for Preview {
                                             }
                                         },
                                     );
-                                    super::pen::paint(&pen_overlay, origin, zoom, window);
+                                    super::pen::paint(&pen_overlay, pen_marquee, origin, zoom, window);
                                     if let Some(overlay) = &gradient_overlay { gradient_gesture::paint(overlay, gradient_point, origin, zoom, window); }
                                     if let Some(r)=text_box_rect {
                                         let b=Bounds::new(origin+point(px(r[0] as f32*zoom),px(r[1] as f32*zoom)),size(px(r[2] as f32*zoom),px(r[3] as f32*zoom)));
@@ -1651,6 +1690,38 @@ impl Render for Preview {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn pen_view_snapshot_captures_fit_resize_bounds_origin_and_view_settings() {
+        let mut state = EditorState::default();
+        let bounds = Bounds::new(point(px(100.), px(200.)), size(px(1200.), px(500.)));
+        let original = pen_view(Some(bounds), &state).unwrap();
+        assert!(pen_view(None, &state).is_none());
+        let mut resized = bounds;
+        resized.size.height += px(100.);
+        assert!(Some(original) != pen_view(Some(resized), &state));
+        let mut moved = bounds;
+        moved.origin.x += px(1.);
+        assert!(Some(original) != pen_view(Some(moved), &state));
+        state.preview_pan = [25., -35.];
+        assert!(Some(original) != pen_view(Some(bounds), &state));
+        state.preview_pan = [0.; 2];
+        state.viewer.rulers = !state.viewer.rulers;
+        assert!(Some(original) != pen_view(Some(bounds), &state));
+        state.viewer.rulers = !state.viewer.rulers;
+        let comp = state.editor.project().composition();
+        let (fit, _) = geometry(
+            bounds,
+            comp.width(),
+            comp.height(),
+            None,
+            point(px(0.), px(0.)),
+            state.viewer.rulers,
+        );
+        state.preview_zoom = Some(fit);
+        // An explicit zoom can numerically equal Fit, but its mode is still a
+        // different held-gesture context and must not be silently substituted.
+        assert!(Some(original) != pen_view(Some(bounds), &state));
+    }
     #[test]
     fn fitted_stage_reserves_rulers_and_mapping_survives_zoom_and_pan() {
         let bounds = Bounds::new(point(px(100.0), px(200.0)), size(px(1200.0), px(500.0)));

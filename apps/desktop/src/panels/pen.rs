@@ -4,7 +4,9 @@ use crate::{
     editor::{EditorState, Tool},
     ui,
 };
-use gpui::{Bounds, KeyDownEvent, PathBuilder, Pixels, Point, Window, fill, point, px, rgb, size};
+use gpui::{
+    Bounds, KeyDownEvent, Modifiers, PathBuilder, Pixels, Point, Window, fill, point, px, rgb, size,
+};
 use libre_effects_core::{
     Affine, Command, CompositionId, Content, ContentsEdit, ContentsKind, LayerId, PathMask,
     PathMaskMode, PathOrder, PathTarget, PathVertex, Project, Shape, VectorPath,
@@ -158,10 +160,80 @@ struct Selection {
     target: Target,
     vertices: BTreeSet<usize>,
 }
+/// Freeze every input to screen/composition mapping for a held pointer. This is
+/// deliberately separate from selection validity: idle zoom/pan keeps the target.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) struct View {
+    bounds: Bounds<Pixels>,
+    origin: Point<Pixels>,
+    zoom: f32,
+    zoom_setting: Option<f32>,
+    pan: [f32; 2],
+    rulers: bool,
+}
+impl View {
+    pub fn new(bounds: Bounds<Pixels>, origin: Point<Pixels>, zoom: f32, s: &EditorState) -> Self {
+        Self {
+            bounds,
+            origin,
+            zoom,
+            zoom_setting: s.preview_zoom,
+            pan: s.preview_pan,
+            rulers: s.viewer.rulers,
+        }
+    }
+    fn pointer(self, position: Point<Pixels>) -> Option<[f64; 2]> {
+        let p = [
+            f32::from(position.x - self.origin.x) as f64 / self.zoom as f64,
+            f32::from(position.y - self.origin.y) as f64 / self.zoom as f64,
+        ];
+        (self.zoom.is_finite() && self.zoom > 0.0 && p.iter().all(|v| v.is_finite())).then_some(p)
+    }
+}
+struct Marquee {
+    session: Session,
+    start: [f64; 2],
+    end: [f64; 2],
+    zoom: f64,
+    moved: bool,
+    vertices: BTreeSet<usize>,
+}
+impl Marquee {
+    fn bounds(&self) -> [[f64; 2]; 2] {
+        [
+            [
+                self.start[0].min(self.end[0]),
+                self.start[1].min(self.end[1]),
+            ],
+            [
+                self.start[0].max(self.end[0]),
+                self.start[1].max(self.end[1]),
+            ],
+        ]
+    }
+    fn candidates(&self) -> BTreeSet<usize> {
+        let mut selected = self.vertices.clone();
+        if self.moved {
+            let [min, max] = self.bounds();
+            selected.extend(self.session.path.vertices.iter().enumerate().filter_map(
+                |(index, vertex)| {
+                    // Compare transformed anchor centers to the composition-space
+                    // box. An inverse-mapped local AABB is wrong under skew/rotation.
+                    let p = self.session.world.point(vertex.position);
+                    (p[0] >= min[0] && p[0] <= max[0] && p[1] >= min[1] && p[1] <= max[1])
+                        .then_some(index)
+                },
+            ));
+        }
+        selected
+    }
+}
 #[derive(Default)]
 pub(super) struct Pen {
     draft: Option<Session>,
     drag: Option<Drag>,
+    marquee: Option<Marquee>,
+    pointer_view: Option<View>,
     selected: Option<Selection>,
     selected_context: Option<Context>,
     held: bool,
@@ -236,11 +308,92 @@ impl Pen {
     pub fn cancel(&mut self) {
         *self = Self::default();
     }
-    fn abandon_drag(&mut self) {
+    pub fn abandon_pointer(&mut self) {
         if let Some(drag) = self.drag.take() {
             self.clear_transient_selection(&drag);
         }
+        self.marquee = None;
+        self.pointer_view = None;
         self.held = false;
+    }
+    /// A changed/missing view invalidates only an active pointer, not idle
+    /// selection or a creation draft between points. During a held creation
+    /// drag, conservatively discard that whole unpublished draft.
+    pub fn validate_view(&mut self, view: Option<View>) -> bool {
+        if self.pointer_view.is_some() && self.pointer_view != view {
+            if self.held {
+                self.draft = None;
+            }
+            self.abandon_pointer();
+            return false;
+        }
+        view.is_some()
+    }
+    pub fn pointer_down(
+        &mut self,
+        s: &EditorState,
+        position: Point<Pixels>,
+        view: Option<View>,
+        modifiers: Modifiers,
+    ) -> Option<Command> {
+        self.reset_if_stale(s);
+        self.validate_view(view);
+        // A second down always supersedes provisional state, even if canvas
+        // bounds disappeared before the event could be mapped.
+        self.abandon_pointer();
+        let view = view?;
+        let p = view.pointer(position)?;
+        let exact_shift = modifiers.shift
+            && !modifiers.alt
+            && !modifiers.control
+            && !modifiers.platform
+            && !modifiers.function;
+        let command = self.down_impl(
+            s,
+            p,
+            view.zoom as f64,
+            modifiers.alt,
+            modifiers.shift,
+            modifiers.control,
+            exact_shift,
+        );
+        if self.held {
+            self.pointer_view = Some(view);
+        }
+        command
+    }
+    pub fn pointer_move(
+        &mut self,
+        s: &EditorState,
+        position: Point<Pixels>,
+        view: Option<View>,
+        modifiers: Modifiers,
+    ) {
+        self.reset_if_stale(s);
+        // Validate before mapping, including fit resize and missing bounds.
+        if self.validate_view(view)
+            && self.pointer_view.is_some()
+            && let Some(p) = view.and_then(|v| v.pointer(position))
+        {
+            self.moving(p, modifiers.alt, modifiers.shift);
+        }
+    }
+    pub fn pointer_up(
+        &mut self,
+        s: &EditorState,
+        position: Point<Pixels>,
+        view: Option<View>,
+        modifiers: Modifiers,
+    ) -> Option<Command> {
+        self.reset_if_stale(s);
+        if !self.validate_view(view) || self.pointer_view.is_none() {
+            return None;
+        }
+        let Some(p) = view.and_then(|v| v.pointer(position)) else {
+            self.validate_view(None);
+            return None;
+        };
+        self.release(s, p, modifiers.alt, modifiers.shift)
     }
     fn clear_transient_selection(&mut self, drag: &Drag) {
         if drag.start.vertices.len() != drag.original.vertices.len()
@@ -256,6 +409,7 @@ impl Pen {
         if self.selected_context.as_ref().is_some_and(|c| !c.valid(s))
             || self.draft.as_ref().is_some_and(|d| !d.valid(s))
             || self.drag.as_ref().is_some_and(|d| !d.session.valid(s))
+            || self.marquee.as_ref().is_some_and(|d| !d.session.valid(s))
             || s.tool != Tool::Pen
             || s.gradient_editor.is_some()
         {
@@ -303,7 +457,8 @@ impl Pen {
             false
         }
     }
-    pub fn down(
+    #[cfg(test)]
+    fn down(
         &mut self,
         s: &EditorState,
         p: [f64; 2],
@@ -312,12 +467,32 @@ impl Pen {
         shift: bool,
         force_mask: bool,
     ) -> Option<Command> {
+        self.down_impl(
+            s,
+            p,
+            zoom,
+            alt,
+            shift,
+            force_mask,
+            shift && !alt && !force_mask,
+        )
+    }
+    fn down_impl(
+        &mut self,
+        s: &EditorState,
+        p: [f64; 2],
+        zoom: f64,
+        alt: bool,
+        shift: bool,
+        force_mask: bool,
+        exact_shift: bool,
+    ) -> Option<Command> {
         self.reset_if_stale(s);
         if s.tool != Tool::Pen || s.gradient_editor.is_some() {
             return None;
         }
         // A second pointer-down supersedes any gesture whose release was lost.
-        self.abandon_drag();
+        self.abandon_pointer();
         self.held = true;
         let radius = 7.0 / zoom;
         if let Some(d) = &mut self.draft {
@@ -387,6 +562,23 @@ impl Pen {
             }
         }
         if shift {
+            if exact_shift
+                && let Some(selection) = &self.selected
+                && self.selected_context.as_ref().is_some_and(|c| c.valid(s))
+                && let Some((target, path, world)) =
+                    existing.iter().find(|(t, _, _)| *t == selection.target)
+                && selection.vertices.iter().all(|&i| i < path.vertices.len())
+            {
+                self.marquee = Some(Marquee {
+                    session: make(*target, path.clone(), *world),
+                    start: p,
+                    end: p,
+                    zoom,
+                    moved: false,
+                    vertices: selection.vertices.clone(),
+                });
+                return None;
+            }
             self.held = false;
             return None;
         }
@@ -485,7 +677,11 @@ impl Pen {
         if !self.held {
             return;
         }
-        if let Some(d) = &mut self.draft {
+        if let Some(marquee) = &mut self.marquee {
+            marquee.end = p;
+            let delta = sub(p, marquee.start);
+            marquee.moved |= delta[0].abs().max(delta[1].abs()) * marquee.zoom >= 4.0;
+        } else if let Some(d) = &mut self.draft {
             let Some(v) = d.path.vertices.last_mut() else {
                 return;
             };
@@ -557,6 +753,14 @@ impl Pen {
     pub fn up(&mut self, s: &EditorState) -> Option<Command> {
         self.reset_if_stale(s);
         self.held = false;
+        self.pointer_view = None;
+        if let Some(marquee) = self.marquee.take() {
+            self.selected = Some(Selection {
+                target: marquee.session.target,
+                vertices: marquee.candidates(),
+            });
+            return None;
+        }
         let drag = self.drag.take()?;
         let command = drag.command();
         if !command
@@ -572,7 +776,47 @@ impl Pen {
         let result = d.command()?;
         self.draft = None;
         self.held = false;
+        self.pointer_view = None;
         Some(result)
+    }
+    /// Selection-only Ctrl+A follows the app's exact Control convention. Once
+    /// recognized, unavailable/repeated chords are consumed inside the canvas.
+    pub fn select_all_key(
+        &mut self,
+        event: &KeyDownEvent,
+        focused: bool,
+        composing: bool,
+        s: &EditorState,
+    ) -> bool {
+        let m = event.keystroke.modifiers;
+        if !focused
+            || composing
+            || s.tool != Tool::Pen
+            || s.text_session.is_some()
+            || s.colors.session.is_some()
+            || s.gradient_editor.is_some()
+            || !m.control
+            || m.shift
+            || m.alt
+            || m.platform
+            || m.function
+            || !matches!(event.keystroke.key.as_str(), "a" | "A")
+        {
+            return false;
+        }
+        self.reset_if_stale(s);
+        if event.is_held || self.held || self.drag.is_some() || self.draft.is_some() {
+            return true;
+        }
+        if let Some(selection) = &mut self.selected
+            && self.selected_context.as_ref().is_some_and(|c| c.valid(s))
+            && let Some((_, path, _)) = paths(s)
+                .into_iter()
+                .find(|(t, _, _)| *t == selection.target)
+        {
+            selection.vertices = (0..path.vertices.len()).collect();
+        }
+        true
     }
     /// Canvas-only shortcuts. Exact modifiers and focus keep shell shortcuts,
     /// fields and IME input out of this geometry-editing route.
@@ -682,6 +926,16 @@ impl Pen {
     }
     pub fn key(&mut self, key: &str, s: &EditorState) -> (bool, Option<Command>) {
         self.reset_if_stale(s);
+        if self.marquee.is_some() {
+            match key {
+                "backspace" | "delete" => {
+                    self.abandon_pointer();
+                    return (true, None);
+                }
+                "enter" => return (true, None),
+                _ => {}
+            }
+        }
         match key {
             "escape" if self.draft.is_some() || self.drag.is_some() || self.selected.is_some() => {
                 *self = Self::default();
@@ -696,7 +950,7 @@ impl Pen {
                 (true, self.finish())
             }
             "backspace" | "delete" => {
-                self.abandon_drag();
+                self.abandon_pointer();
                 if let Some(d) = &mut self.draft {
                     d.path.vertices.pop();
                     if d.path.vertices.is_empty() {
@@ -772,13 +1026,26 @@ impl Pen {
                     .filter(|_| self.selected_context.as_ref().is_some_and(|c| c.valid(s)))
                     .map(|selection| selection.vertices.clone())
                     .unwrap_or_default();
+                let selected = self
+                    .marquee
+                    .as_ref()
+                    .filter(|m| m.session.target == t && m.session.valid(s))
+                    .map(Marquee::candidates)
+                    .unwrap_or(selected);
                 (p, w, matches!(t, Target::Mask(..)), selected)
             })
             .collect()
     }
+    pub fn marquee_overlay(&self, s: &EditorState) -> Option<[[f64; 2]; 2]> {
+        self.marquee
+            .as_ref()
+            .filter(|m| m.moved && m.session.valid(s))
+            .map(Marquee::bounds)
+    }
 }
 pub(super) fn paint(
     paths: &[(VectorPath, Affine, bool, BTreeSet<usize>)],
+    marquee: Option<[[f64; 2]; 2]>,
     origin: Point<Pixels>,
     zoom: f32,
     window: &mut Window,
@@ -853,6 +1120,23 @@ pub(super) fn paint(
                     color
                 },
             ));
+        }
+    }
+    if let Some([min, max]) = marquee {
+        let mut line = PathBuilder::stroke(px(1.0));
+        for (index, p) in [min, [max[0], min[1]], max, [min[0], max[1]], min]
+            .into_iter()
+            .enumerate()
+        {
+            let p = origin + point(px(p[0] as f32 * zoom), px(p[1] as f32 * zoom));
+            if index == 0 {
+                line.move_to(p);
+            } else {
+                line.line_to(p);
+            }
+        }
+        if let Ok(line) = line.build() {
+            window.paint_path(line, rgb(ui::BLUE));
         }
     }
 }
@@ -1086,3 +1370,11 @@ mod contents_tests;
 #[cfg(test)]
 #[path = "pen_order_tests.rs"]
 mod order_tests;
+
+#[cfg(test)]
+#[path = "pen_marquee_tests.rs"]
+mod marquee_tests;
+
+#[cfg(test)]
+#[path = "pen_view_tests.rs"]
+mod view_tests;
