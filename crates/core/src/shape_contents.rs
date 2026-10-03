@@ -8,6 +8,8 @@ pub enum ContentsParam {
     Width,
     Height,
     Transform(Property),
+    Skew,
+    SkewAxis,
     Shape(ShapeParam),
 }
 impl From<ContentsParam> for String {
@@ -16,6 +18,8 @@ impl From<ContentsParam> for String {
             ContentsParam::Width => "Width".into(),
             ContentsParam::Height => "Height".into(),
             ContentsParam::Transform(p) => format!("Transform.{p:?}"),
+            ContentsParam::Skew => "Skew".into(),
+            ContentsParam::SkewAxis => "SkewAxis".into(),
             ContentsParam::Shape(p) => format!("Shape.{}", String::from(p)),
         }
     }
@@ -28,6 +32,12 @@ impl TryFrom<String> for ContentsParam {
         }
         if s == "Height" {
             return Ok(Self::Height);
+        }
+        if s == "Skew" {
+            return Ok(Self::Skew);
+        }
+        if s == "SkewAxis" {
+            return Ok(Self::SkewAxis);
         }
         if let Some(p) = s.strip_prefix("Shape.") {
             return Ok(Self::Shape(ShapeParam::try_from(p.to_string())?));
@@ -45,12 +55,16 @@ impl ContentsParam {
             Self::Width => "Width".into(),
             Self::Height => "Height".into(),
             Self::Transform(p) => p.label().into(),
+            Self::Skew => "Skew".into(),
+            Self::SkewAxis => "Skew Axis".into(),
             Self::Shape(p) => p.label(),
         }
     }
     pub fn bounds(self) -> (f64, f64) {
         match self {
             Self::Width | Self::Height => (0.001, 32768.),
+            Self::Skew => (-89., 89.),
+            Self::SkewAxis => (-1000000., 1000000.),
             Self::Shape(p) => p.bounds(),
             Self::Transform(Property::Opacity) => (0., 100.),
             Self::Transform(Property::ScaleX | Property::ScaleY) => (-10000., 10000.),
@@ -101,6 +115,7 @@ impl ContentsKind {
                         },
                     )
                 })
+                .chain([(ContentsParam::Skew, 0.), (ContentsParam::SkewAxis, 0.)])
                 .collect::<Vec<_>>(),
             Self::Parametric(k) => {
                 let mut v = vec![
@@ -161,6 +176,30 @@ pub struct ContentsNode {
     pub parameters: BTreeMap<ContentsParam, AnimatedProperty>,
 }
 impl ContentsNode {
+    /// Display order follows the shape-group Transform controls.
+    pub fn parameter_order(&self) -> Vec<ContentsParam> {
+        use ContentsParam::{Skew, SkewAxis, Transform as T};
+        use Property::*;
+        if matches!(self.kind, ContentsKind::Group(_)) {
+            [
+                T(AnchorX),
+                T(AnchorY),
+                T(PositionX),
+                T(PositionY),
+                T(ScaleX),
+                T(ScaleY),
+                Skew,
+                SkewAxis,
+                T(Rotation),
+                T(Opacity),
+            ]
+            .into_iter()
+            .filter(|p| self.parameters.contains_key(p))
+            .collect()
+        } else {
+            self.parameters.keys().copied().collect()
+        }
+    }
     pub fn paint(&self) -> Option<ShapePaint> {
         match self.kind {
             ContentsKind::Fill { .. } => Some(ShapePaint::Fill),
@@ -194,7 +233,28 @@ impl ContentsNode {
         let v = |p| self.value_at(ContentsParam::Transform(p), f);
         let (s, c) = v(Property::Rotation).to_radians().sin_cos();
         let (sx, sy) = (v(Property::ScaleX) / 100., v(Property::ScaleY) / 100.);
-        let (a, b, c, d) = (c * sx, s * sx, -s * sy, c * sy);
+        let rotation = Affine([c, s, -s, c, 0., 0.]);
+        let scale = Affine([sx, 0., 0., sy, 0., 0.]);
+        // Local scale, oriented horizontal shear, then group rotation.
+        // Positive Skew with axis 0 shifts the upper edge to the right.
+        let skew = self.value_at(ContentsParam::Skew, f);
+        let linear = if skew == 0. {
+            rotation.compose(scale)
+        } else {
+            let (sa, ca) = self
+                .value_at(ContentsParam::SkewAxis, f)
+                .to_radians()
+                .sin_cos();
+            let axis = Affine([ca, -sa, sa, ca, 0., 0.]);
+            let unaxis = Affine([ca, sa, -sa, ca, 0., 0.]);
+            let shear = Affine([1., 0., -skew.to_radians().tan(), 1., 0., 0.]);
+            rotation
+                .compose(axis)
+                .compose(shear)
+                .compose(unaxis)
+                .compose(scale)
+        };
+        let [a, b, c, d, _, _] = linear.0;
         Affine([
             a,
             b,
@@ -296,11 +356,15 @@ impl ShapeContents {
         Ok(id)
     }
     pub fn validate(&self, duration: Frame) -> Result<(), String> {
+        self.validate_version(duration, 44)
+    }
+    pub(super) fn validate_version(&self, duration: Frame, version: u32) -> Result<(), String> {
         fn walk(
             nodes: &[ContentsNode],
             depth: usize,
             ids: &mut BTreeSet<u64>,
             duration: Frame,
+            version: u32,
         ) -> Result<(), String> {
             if depth > 8 {
                 return Err("Contents nesting exceeds 8 groups".into());
@@ -314,8 +378,13 @@ impl ShapeContents {
                 {
                     return Err("Invalid Contents identity, name or item count".into());
                 }
+                let mut expected = n.kind.defaults();
+                if version < 44 {
+                    expected.remove(&ContentsParam::Skew);
+                    expected.remove(&ContentsParam::SkewAxis);
+                }
                 if n.parameters.keys().copied().collect::<Vec<_>>()
-                    != n.kind.defaults().keys().copied().collect::<Vec<_>>()
+                    != expected.keys().copied().collect::<Vec<_>>()
                 {
                     return Err("Contents properties do not match the item type".into());
                 }
@@ -333,7 +402,7 @@ impl ShapeContents {
                     }
                 }
                 match &n.kind {
-                    ContentsKind::Group(v) => walk(v, depth + 1, ids, duration)?,
+                    ContentsKind::Group(v) => walk(v, depth + 1, ids, duration, version)?,
                     ContentsKind::Path { path, animation } => {
                         if !path.valid() {
                             return Err("Invalid Contents path".into());
@@ -349,7 +418,7 @@ impl ShapeContents {
             Ok(())
         }
         let mut ids = BTreeSet::new();
-        walk(&self.items, 0, &mut ids, duration)?;
+        walk(&self.items, 0, &mut ids, duration, version)?;
         if self.next_id == 0 || ids.last().is_some_and(|id| *id >= self.next_id) {
             return Err("Invalid next Contents ID".into());
         }
@@ -582,6 +651,32 @@ fn promote(shape: &Shape, width: f64, height: f64, color: u32) -> ShapeContents 
     ShapeContents {
         items: vec![group],
         next_id: 5,
+    }
+}
+pub(super) fn migrate(project: &mut Project) {
+    if project.version != 43 {
+        return;
+    }
+    fn walk(nodes: &mut [ContentsNode]) {
+        for n in nodes {
+            if let ContentsKind::Group(children) = &mut n.kind {
+                n.parameters
+                    .insert(ContentsParam::Skew, AnimatedProperty::new(0.));
+                n.parameters
+                    .insert(ContentsParam::SkewAxis, AnimatedProperty::new(0.));
+                walk(children);
+            }
+        }
+    }
+    let mut changed = false;
+    for l in project.compositions_mut().flat_map(|c| c.layers.iter_mut()) {
+        if let Content::ShapeContents(contents) = &mut l.content {
+            walk(&mut contents.items);
+            changed = true;
+        }
+    }
+    if changed {
+        project.version = 44;
     }
 }
 pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<(), String>> {

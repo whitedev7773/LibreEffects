@@ -18,6 +18,16 @@
 - **후속 고급 기능:** 패널 도킹·소스 뷰어·최근 프로젝트, 타임라인 고급 시간 편집/검색/가상화, 공간 경로·프리셋·표현식, Shape 연산/SVG·Text Animator, 추가 효과·모션 블러, 고정밀 색/HDR·Proxy/GPU, 템플릿, 설치/업데이트·한글화와 UI 회귀 자동화.
 - **별도 대형 단계:** 3D/카메라/라이트·모델, 추적·로토/Puppet, 플러그인/교환 포맷 연구, 웹/API 제품 범위. AEP/MOGRT 호환은 구현되지 않았다.
 
+### 그룹 Skew·Skew Axis와 변형 속성 순서 — 2026-10-03
+
+- E04/D01: Contents 그룹에 Skew(−89°–89°)·Skew Axis와 스톱워치를 추가했다. Properties와 Timeline의 그룹 속성 순서를 Anchor → Position → Scale → Skew → Skew Axis → Rotation → Opacity로 통일했다. 실제 After Effects 2026에서 이 순서와 Skew 45°/Axis 0°일 때 위쪽 변이 오른쪽으로 움직이는 방향을 확인했다. AE의 전체 수치 범위나 픽셀 동등성을 주장하지 않는다.
+- 그룹은 Anchor 차감 → Scale → 축 방향 Skew → Rotation → Position 순서로 적용한다. 중첩 그룹 렌더와 기존 Bezier Pen 편집은 같은 누적 행렬/역행렬을 사용한다. 키 생성/복사/시간 이동·Graph·Undo/Redo·JSON에 공통 트랙으로 연결한다. Skew 보간 오버슈트는 ±89°로 제한하며 현재 값으로 키를 추가하거나 애니메이션을 끌 때 보이는 값을 유지한다.
+- v43 Contents를 읽을 때 기존 버전 스키마를 먼저 검증하고, 모든 컴포지션의 그룹에 기본값 0인 두 속성을 추가해 v44로 변환한다. 기존 기하·페인트·키는 보존한다. v44에서 속성이 빠졌거나 새 속성을 v43으로 위장한 문서는 거부한다. 다른 모델의 구버전 파일은 이 마이그레이션으로 변경하지 않는다.
+- 자동 검증: 코어 183개 + 데스크톱 238개(총 421개) 통과, 외부 미디어/장치 30개 제외. 축 0/45/90°의 독립 좌표, Anchor/Scale/Rotation 순서, 중첩 그룹과 Pen 역변환, 키 복사/시간 이동/Undo/Redo/저장, 잘못된 수치·오버슈트·버전 마이그레이션을 검사했다. 5프레임 Rectangle Preview/출력 RGBA가 독립 기하 계산과 일치했다. Cargo check/fmt/test/release 및 git diff --check 통과(Moon/proto 미설치, 기존 빌드 경고 17개).
+- CLI 검증: 생성한 `target/qa/skew-generated.lfe.json`의 0/15/30/45/60프레임 출력 RGBA 155,517개 샘플이 독립 계산과 일치했다(`verify_skew_fixture.py`). 기존 실제 v43 저장본 `contents-paint-native.lfe.json`도 새 빌드로 읽어 내부/외부 15,951개와 점선/간격 600개 샘플을 다시 통과했다. 생성한 Skew 파일은 네이티브 UI 저장본이 아니다.
+- 네이티브 검증 상태: 새 이름의 빌드를 실행하면 기존 편집기가 닫히고 새 작업 창 하나만 열림을 확인했다. 사용자 보존 원본 SHA256 불변. 도구의 `failed to activate captured window` 오류가 AE 축 입력과 Libre 파일 열기 확정에서 재발했고 창 재선택 후에도 실패했다. **Skew 입력·스톱워치·Graph·Undo/Redo·저장 재열기·기울어진 경로의 실제 Pen 드래그·좁은 창 배치는 아직 미검증**이다. `skew-native.lfe.json`은 v43 사본이며 열기 대화상자에 경로만 입력된 상태로, 검증 완료 파일로 취급하지 않는다.
+- 다음: 위 네이티브 검증을 마친 뒤 페인트 Blend/Composite, Gradient·경로 연산자, 트리 드래그/다중 선택과 선택 그룹으로 새 Pen 경로 삽입을 개발한다. E04 및 전체 백로그는 계속 진행 중이다.
+
 ### Contents 트리·다중 경로/페인트·그룹 변형 — 2026-10-03
 
 - E04/D01: 기존 Shape의 `Create Contents Group`이 경로·Stroke·Fill을 별도 항목으로 분리한다. 기하·경로·색·불투명도·점선 키를 유지하고 한 Undo로 원래 모델을 복원한다. 새 모델은 프로젝트 v43이며 기존 파일은 명시적으로 전환할 때까지 유지한다. 레이어별 안정된 항목 ID를 사용하고 복제 시 하위 항목까지 새 ID를 부여한다. 최대 256항목/8단계 중첩을 검증한다.
@@ -29,7 +39,7 @@
 - 후속 연결: Fill/Stroke 색 스와치에서 공통 HEX/RGB/HSV·불투명도·최근 색·뷰어 샘플링 대화상자를 연다. 취소는 문서를 변경하지 않고 승인은 현재 프레임에서 바뀐 채널만 한 Undo로 적용한다. Stroke의 Cap/Join 선택과 마지막 Dash/Gap 추가·삭제를 연결했다. 다른 트랙은 보존하고 Undo로 제거한 점선 키를 복원하며 행 변경 시 수치·스톱워치도 갱신한다.
 - 후속 검증: 코어 179개 + 데스크톱 237개(416개) 통과, 30개 제외. 색 초안/채널 격리·다른 페인트 보존·시간 보간·잠금·오래된 초안·Undo/Redo·JSON, 점선 한계/행 삭제/키 복원, 같은 Bezier 경로의 9가지 Cap/Join 조합에서 기존 Shape와 Contents의 전체 RGBA 및 Preview/출력 일치를 검사했다. Cargo check/fmt/test/release와 git diff --check 통과, 기존 경고 17개. 기본 다각형과 cubic 표현의 점선 경계 래스터 차이는 픽셀 동등성 범위에서 제외한다.
 - 실제 Windows에서 Fill 색 선택기 취소/HEX 변경/Undo/Redo, Projecting Cap·Bevel Join, Stroke Width 24·Dash 10·Gap 50, Gap 스톱워치 활성화·행 제거 후 Undo·저장 재열기와 작은 창 배치를 확인했다. `target/qa/contents-paint-native.lfe.json`의 0/30/45/60프레임 출력에서 내부/외부 15,951개 및 점선/간격 600개 RGBA 샘플이 독립 계산과 일치했다(`target/qa/verify_contents_paint_native.py`). 작업 창 1개와 보존 원본 SHA256 불변을 확인했다. 이번 네이티브 검사는 Fill HEX 중심이며 Stroke 색 입력·뷰어 샘플링은 별도 조작하지 않았다.
-- 남음: 그룹 Skew, 페인트 Blend/Composite, Gradient·경로 연산자, 트리 드래그/다중 선택과 새 Pen 경로의 선택 그룹 삽입. AE의 그룹 좌표/페인트 합성 픽셀 동등성을 검증한 것은 아니며 E04 전체 완료로 표시하지 않는다.
+- 그룹 Skew는 위 후속 단계에서 구현했다. 남음: 페인트 Blend/Composite, Gradient·경로 연산자, 트리 드래그/다중 선택과 새 Pen 경로의 선택 그룹 삽입. AE의 그룹 좌표/페인트 합성 픽셀 동등성을 검증한 것은 아니며 E04 전체 완료로 표시하지 않는다.
 
 ### 기본 도형 → Bezier 경로 전환 — 2026-10-03
 

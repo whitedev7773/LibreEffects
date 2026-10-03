@@ -1802,13 +1802,13 @@ visual playback. These preview switches left the document clean.
 **Create Contents Group** organizes an existing shape into a Group containing
 separate Path, Stroke and Fill items. It retains existing geometry, path, color,
 opacity and stroke animation; one Undo restores the original. Contents uses
-project version 43 and stable item IDs. Existing files keep their original model
+project version 44 and stable item IDs. Existing ungrouped files keep their original model
 until this command is used.
 
 The Contents tree supports nested groups, add, rename, duplicate, visibility,
 delete, ordering and moving into the group above or out to its parent. Select an
 item to edit its numeric properties; stopwatches and property labels connect to
-the Timeline/Graph. Group Position, Anchor, Scale, Rotation and Opacity animate
+the Timeline/Graph. Group Anchor, Position, Scale, Skew, Skew Axis, Rotation and Opacity animate
 independently of layer transforms. Parametric paths have independent size and
 position and can be converted to editable Bezier paths. Pen edits existing
 Contents paths through the accumulated group/layer transform.
@@ -1817,7 +1817,7 @@ Paints consume paths above them in the same group, including transformed paths
 from child groups. Earlier paints/groups composite in front of later ones.
 A Fill treats its paths as one compound shape, with Non-Zero or Even-Odd fill
 rules; overlapping paths do not multiply a single paint's opacity. Group opacity
-is applied to its combined paints. Group Skew, paint blend/composite options,
+is applied to its combined paints. Paint blend/composite options,
 gradient paints, path operators and dragging Contents rows remain future work.
 Fill and Stroke have a common color picker with HEX/RGB/HSV, opacity, recent
 colors and viewer sampling. Cancel leaves the document unchanged; accepting a
@@ -1826,6 +1826,16 @@ Stroke items expose Line Cap/Line Join choices and add/remove-last dash controls
 Existing dash/gap and offset animation survives these edits; Undo restores a
 removed dash's keys. Numeric controls and watches refresh when dash rows change.
 Curved parametric paths use cubic approximations, as in Bezier conversion.
+
+Group Skew ranges from −89° to 89° to avoid singular transforms. Skew Axis
+rotates the shear direction. The group applies Anchor, Scale, oriented Skew,
+Rotation and Position in that order; positive Skew with axis 0 moves the upper
+edge right. The same accumulated matrix drives nested rendering and Pen edits.
+Skew and Skew Axis support the common stopwatch, keys, Graph, Undo/Redo and
+save/reopen paths. Overshooting curves are clamped to the visible Skew limit.
+Loading v43 Contents adds zero-valued Skew/Skew Axis tracks and upgrades to v44
+without changing existing geometry, paint or animation. Other older models
+are unchanged. AE pixel equivalence and its full numeric range are not claimed.
 
 Properties → **Convert To Bezier Path** converts Rectangle, Rounded Rectangle,
 Ellipse, Polygon or Star into an editable closed path at the current frame.

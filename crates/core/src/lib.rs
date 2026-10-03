@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-const PROJECT_VERSION: u32 = 43;
+const PROJECT_VERSION: u32 = 44;
 pub type Frame = u32;
 pub type LayerId = u64;
 pub type CompositionId = u64;
@@ -593,6 +593,7 @@ impl Project {
         let mut project = document::decode(json)?;
         project.validate()?;
         mask_animation::migrate(&mut project);
+        shape_contents::migrate(&mut project);
         project.sync_assets()?;
         project.validate()?;
         Ok(project)
@@ -658,7 +659,7 @@ impl Project {
                     if self.version < 43 {
                         return Err("Shape Contents requires project version 43".into());
                     }
-                    contents.validate(comp.duration)?;
+                    contents.validate_version(comp.duration, self.version)?;
                 }
                 if self.version < 37
                     && matches!(&layer.content, Content::Shape(s) if !s.stroke_style.is_default())
@@ -775,7 +776,12 @@ impl Project {
                         return Err("Embedded images exceed 128 MiB. Remove unused image layers before importing more.".into());
                     }
                 }
-                editing::validate_content(&layer.content, layer.effects, layer.mask)?;
+                editing::validate_content_version(
+                    &layer.content,
+                    layer.effects,
+                    layer.mask,
+                    self.version,
+                )?;
                 if layer.id == 0
                     || !layer.transform_offset.valid()
                     || !comp.can_parent(layer.id, layer.parent)
@@ -1542,7 +1548,7 @@ impl Editor {
                 .iter()
                 .any(|l| matches!(l.content, Content::ShapeContents(_)))
         }) {
-            next.project.version = next.project.version.max(43);
+            next.project.version = next.project.version.max(44);
         }
         next.project.validate()?;
         if next != self.current {

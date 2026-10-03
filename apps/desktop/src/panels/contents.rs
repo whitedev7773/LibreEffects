@@ -41,9 +41,7 @@ impl ContentsControls {
             .editor
             .selected_layer()
             .and_then(|l| match l.content() {
-                Content::ShapeContents(c) => c
-                    .node(item)
-                    .map(|n| n.parameters.keys().copied().collect::<Vec<_>>()),
+                Content::ShapeContents(c) => c.node(item).map(|n| n.parameter_order()),
                 _ => None,
             })
             .unwrap_or_default();
@@ -286,8 +284,8 @@ impl Render for ContentsControls {
         if !self
             .fields
             .iter()
-            .map(|(p, _)| p)
-            .eq(node.parameters.keys())
+            .map(|(p, _)| *p)
+            .eq(node.parameter_order())
         {
             self.select(id, item, cx);
         }

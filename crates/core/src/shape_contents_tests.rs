@@ -23,6 +23,279 @@ fn contents(e: &Editor) -> &ShapeContents {
     };
     c
 }
+
+fn contents_value(e: &mut Editor, item: u64, parameter: ContentsParam, value: f64) {
+    edit(
+        e,
+        ContentsEdit::Track {
+            item,
+            parameter,
+            edit: TrackEdit::Value { frame: 0, value },
+        },
+    );
+}
+
+#[test]
+fn contents_skew_applies_after_scale_before_rotation_and_preserves_edit_coordinates() {
+    use ContentsParam::{Skew, SkewAxis, Transform as T};
+    let mut e = scene();
+    edit(&mut e, ContentsEdit::Promote);
+    edit(&mut e, ContentsEdit::ConvertPath { item: 2, frame: 0 });
+    contents_value(&mut e, 1, Skew, 45.);
+    for (axis, point) in [(0., [30., -20.]), (90., [10., -10.]), (45., [15., -25.])] {
+        contents_value(&mut e, 1, SkewAxis, axis);
+        let m = contents(&e).node(1).unwrap().transform(0);
+        let actual = m.point([10., -20.]);
+        for i in 0..2 {
+            assert!(
+                (actual[i] - point[i]).abs() < 1e-9,
+                "axis {axis}: {actual:?}"
+            );
+        }
+    }
+    contents_value(&mut e, 1, SkewAxis, 0.);
+    for (p, v) in [
+        (Property::AnchorX, 10.),
+        (Property::AnchorY, 20.),
+        (Property::PositionX, 100.),
+        (Property::PositionY, 200.),
+        (Property::ScaleX, 200.),
+        (Property::ScaleY, 300.),
+        (Property::Rotation, 90.),
+    ] {
+        contents_value(&mut e, 1, T(p), v);
+    }
+    let paths = contents(&e).editable_paths(0);
+    let m = paths[0].2;
+    // (12,23) - anchor -> (2,3); scale -> (4,9); shear -> (-5,9);
+    // rotate 90 -> (-9,-5); translate -> (91,195).
+    let point = m.point([12., 23.]);
+    assert!((point[0] - 91.).abs() < 1e-9 && (point[1] - 195.).abs() < 1e-9);
+    assert_eq!(m.point([10., 20.]), [100., 200.]);
+    for vertex in &paths[0].1.vertices {
+        let restored = m.inverse().unwrap().point(m.point(vertex.position));
+        for i in 0..2 {
+            assert!((restored[i] - vertex.position[i]).abs() < 1e-9);
+        }
+    }
+    // Nested transform order is also the Pen editing order.
+    edit(
+        &mut e,
+        ContentsEdit::Add {
+            parent: 0,
+            kind: ContentsKind::Group(vec![]),
+        },
+    );
+    edit(
+        &mut e,
+        ContentsEdit::Move {
+            item: 1,
+            parent: 5,
+            index: 0,
+        },
+    );
+    contents_value(&mut e, 5, Skew, -45.);
+    let nested = contents(&e).editable_paths(0)[0].2.point([12., 23.]);
+    assert!((nested[0] - 286.).abs() < 1e-9 && (nested[1] - 195.).abs() < 1e-9);
+}
+
+#[test]
+fn contents_skew_animation_roundtrips_retimes_and_rejects_singular_input_atomically() {
+    let mut e = scene();
+    e.execute(Command::SetLayerRange {
+        id: 1,
+        start: 0,
+        end: 120,
+    })
+    .unwrap();
+    edit(&mut e, ContentsEdit::Promote);
+    let baseline = e.project().clone();
+    for parameter in [ContentsParam::Skew, ContentsParam::SkewAxis] {
+        for change in [
+            TrackEdit::ToggleAnimation { frame: 0 },
+            TrackEdit::Value {
+                frame: 60,
+                value: 60.,
+            },
+        ] {
+            edit(
+                &mut e,
+                ContentsEdit::Track {
+                    item: 1,
+                    parameter,
+                    edit: change,
+                },
+            );
+        }
+        assert_eq!(contents(&e).node(1).unwrap().value_at(parameter, 30), 30.);
+    }
+    let saved = e.project().clone();
+    assert_eq!(
+        Project::from_json(&saved.to_json().unwrap()).unwrap(),
+        saved
+    );
+    let path = PropertyPath::Contents {
+        item: 1,
+        parameter: ContentsParam::Skew,
+    };
+    let key = e.selected_layer().unwrap().copy_key(path, 60).unwrap();
+    e.execute(Command::PasteKeys {
+        keys: vec![key],
+        frame: 90,
+        target: None,
+    })
+    .unwrap();
+    e.execute(Command::ShiftLayer { id: 1, delta: 10 }).unwrap();
+    assert_eq!(e.selected_layer().unwrap().track_value(path, 40), Some(30.));
+    assert!(
+        e.selected_layer()
+            .unwrap()
+            .track(path)
+            .unwrap()
+            .keys()
+            .contains_key(&100)
+    );
+    e.undo();
+    e.undo();
+    assert_eq!(e.project(), &saved);
+    for value in [-90., 90., f64::INFINITY, f64::NAN] {
+        assert!(
+            e.execute(Command::Contents {
+                id: 1,
+                edit: ContentsEdit::Track {
+                    item: 1,
+                    parameter: ContentsParam::Skew,
+                    edit: TrackEdit::Value { frame: 0, value }
+                }
+            })
+            .is_err()
+        );
+        assert_eq!(e.project(), &saved);
+    }
+    for _ in 0..4 {
+        e.undo();
+    }
+    assert_eq!(e.project(), &baseline);
+    for _ in 0..4 {
+        e.redo();
+    }
+    assert_eq!(e.project(), &saved);
+}
+
+#[test]
+fn v43_contents_migration_adds_zero_skew_without_changing_existing_tracks() {
+    let mut e = scene();
+    edit(&mut e, ContentsEdit::Promote);
+    edit(
+        &mut e,
+        ContentsEdit::Add {
+            parent: 1,
+            kind: ContentsKind::Group(vec![]),
+        },
+    );
+    contents_value(&mut e, 1, ContentsParam::Transform(Property::Rotation), 33.);
+    let expected = e.project().clone();
+    let mut old = expected.clone();
+    old.version = 43;
+    let Content::ShapeContents(c) = &mut old.composition.layers[0].content else {
+        panic!()
+    };
+    for id in [1, 5] {
+        let node = c.node_mut(id).unwrap();
+        node.parameters.remove(&ContentsParam::Skew);
+        node.parameters.remove(&ContentsParam::SkewAxis);
+    }
+    let before = c.svg_at(0);
+    let json = serde_json::to_string(&old).unwrap();
+    let loaded = Project::from_json(&json).unwrap();
+    assert_eq!(loaded, expected);
+    let Content::ShapeContents(c) = &loaded.composition.layers[0].content else {
+        panic!()
+    };
+    assert_eq!(before, c.svg_at(0));
+    assert_eq!(
+        c.node(1).unwrap().parameter_order(),
+        vec![
+            ContentsParam::Transform(Property::AnchorX),
+            ContentsParam::Transform(Property::AnchorY),
+            ContentsParam::Transform(Property::PositionX),
+            ContentsParam::Transform(Property::PositionY),
+            ContentsParam::Transform(Property::ScaleX),
+            ContentsParam::Transform(Property::ScaleY),
+            ContentsParam::Skew,
+            ContentsParam::SkewAxis,
+            ContentsParam::Transform(Property::Rotation),
+            ContentsParam::Transform(Property::Opacity),
+        ]
+    );
+    old.version = 44;
+    assert!(Project::from_json(&serde_json::to_string(&old).unwrap()).is_err());
+    let mut disguised = expected;
+    disguised.version = 43;
+    assert!(Project::from_json(&serde_json::to_string(&disguised).unwrap()).is_err());
+}
+
+#[test]
+fn skew_overshoot_stays_finite_and_sampling_keeps_the_visible_limit() {
+    for direction in [-2., 3.] {
+        let mut e = scene();
+        edit(&mut e, ContentsEdit::Promote);
+        contents_value(&mut e, 1, ContentsParam::Skew, -89. / 3.);
+        for change in [
+            TrackEdit::ToggleAnimation { frame: 0 },
+            TrackEdit::Value {
+                frame: 40,
+                value: 89. / 3.,
+            },
+            TrackEdit::Interpolate {
+                frame: 0,
+                interpolation: Interpolation::Bezier(Bezier {
+                    x1: 1. / 3.,
+                    y1: direction,
+                    x2: 2. / 3.,
+                    y2: direction,
+                }),
+            },
+        ] {
+            edit(
+                &mut e,
+                ContentsEdit::Track {
+                    item: 1,
+                    parameter: ContentsParam::Skew,
+                    edit: change,
+                },
+            );
+        }
+        let expected = if direction < 0. { -89. } else { 89. };
+        let before = e.project().clone();
+        let n = contents(&e).node(1).unwrap();
+        assert_eq!(n.value_at(ContentsParam::Skew, 20), expected);
+        assert!(n.transform(20).inverse().is_some());
+        for change in [
+            TrackEdit::ToggleKey { frame: 20 },
+            TrackEdit::ToggleAnimation { frame: 20 },
+        ] {
+            edit(
+                &mut e,
+                ContentsEdit::Track {
+                    item: 1,
+                    parameter: ContentsParam::Skew,
+                    edit: change,
+                },
+            );
+            assert_eq!(
+                contents(&e).node(1).unwrap().parameters[&ContentsParam::Skew].value_at(20),
+                expected
+            );
+            assert_eq!(
+                Project::from_json(&e.project().to_json().unwrap()).unwrap(),
+                *e.project()
+            );
+            e.undo();
+            assert_eq!(e.project(), &before);
+        }
+    }
+}
 #[test]
 fn contents_stroke_structure_preserves_other_tracks_and_restores_removed_dash_keys() {
     let mut e = scene();
@@ -155,7 +428,7 @@ fn contents_migration_preserves_tracks_identity_history_and_retiming() {
     let old = e.project().clone();
     edit(&mut e, ContentsEdit::Promote);
     let saved = e.project().clone();
-    assert_eq!(saved.version, 43);
+    assert_eq!(saved.version, 44);
     let Content::Shape(old_shape) = old.composition().layer(1).unwrap().content() else {
         panic!()
     };

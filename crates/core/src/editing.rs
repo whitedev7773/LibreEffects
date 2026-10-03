@@ -163,10 +163,18 @@ pub(super) fn validate_content(
     effects: Effects,
     mask: Option<Mask>,
 ) -> Result<(), String> {
+    validate_content_version(content, effects, mask, PROJECT_VERSION)
+}
+pub(super) fn validate_content_version(
+    content: &Content,
+    effects: Effects,
+    mask: Option<Mask>,
+    version: u32,
+) -> Result<(), String> {
     let valid = match content {
         Content::Rectangle | Content::Solid | Content::Adjustment | Content::Null => true,
         Content::Shape(shape) => shape.valid(),
-        Content::ShapeContents(contents) => contents.validate(u32::MAX).is_ok(),
+        Content::ShapeContents(contents) => contents.validate_version(u32::MAX, version).is_ok(),
         Content::Composition {
             composition,
             start_frame,

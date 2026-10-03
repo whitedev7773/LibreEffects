@@ -41,6 +41,77 @@ fn scene(kind: ShapeKind) -> Editor {
     e
 }
 #[test]
+fn animated_group_skew_matches_independent_inverse_geometry_and_output() {
+    let renderer = crate::rendering::Renderer::new();
+    let mut e = scene(ShapeKind::Rectangle);
+    edit(&mut e, ContentsEdit::Promote);
+    for (p, v) in [
+        (Property::AnchorX, 80.),
+        (Property::AnchorY, 50.),
+        (Property::PositionX, 80.),
+        (Property::PositionY, 50.),
+    ] {
+        value(&mut e, 1, ContentsParam::Transform(p), v);
+    }
+    for (parameter, end) in [(ContentsParam::Skew, 60.), (ContentsParam::SkewAxis, 90.)] {
+        edit(
+            &mut e,
+            ContentsEdit::Track {
+                item: 1,
+                parameter,
+                edit: TrackEdit::ToggleAnimation { frame: 0 },
+            },
+        );
+        edit(
+            &mut e,
+            ContentsEdit::Track {
+                item: 1,
+                parameter,
+                edit: TrackEdit::Value {
+                    frame: 60,
+                    value: end,
+                },
+            },
+        );
+    }
+    let saved = Project::from_json(&e.project().to_json().unwrap()).unwrap();
+    for frame in [0, 15, 30, 45, 60] {
+        let actual = renderer.render(&saved, frame, 400).unwrap();
+        assert_eq!(
+            actual,
+            renderer.render_output(&saved, frame, 400, 240).unwrap()
+        );
+        let skew = (frame as f64).to_radians().tan();
+        let (s, c) = (frame as f64 * 1.5).to_radians().sin_cos();
+        let mut count = 0;
+        for y in (0..240).step_by(3) {
+            for x in (0..400).step_by(3) {
+                // Invert the oriented shear using elementary rotations, not Affine.
+                let (px, py) = (x as f64 + 0.5 - 200., y as f64 + 0.5 - 120.);
+                let (u, v) = (c * px - s * py, s * px + c * py);
+                let u = u + skew * v;
+                let (lx, ly) = (c * u + s * v, -s * u + c * v);
+                // Skip antialiased boundary samples, including amplified shear edges.
+                if (lx.abs() - 80.).abs() < 4. || (ly.abs() - 50.).abs() < 4. {
+                    continue;
+                }
+                let expected = if lx.abs() < 80. && ly.abs() < 50. {
+                    [32, 64, 128, 255]
+                } else {
+                    [0, 0, 0, 0]
+                };
+                assert_eq!(
+                    actual.get_pixel(x, y).0,
+                    expected,
+                    "frame {frame} at {x},{y}"
+                );
+                count += 1;
+            }
+        }
+        assert!(count > 9000);
+    }
+}
+#[test]
 fn contents_stroke_cap_join_and_dash_edits_match_legacy_stroke_output() {
     let renderer = crate::rendering::Renderer::new();
     for cap in StrokeCap::ALL {

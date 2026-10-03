@@ -166,9 +166,9 @@ impl Layer {
                     .rows()
                     .into_iter()
                     .flat_map(|(_, _, n)| {
-                        n.parameters
-                            .keys()
-                            .map(|&parameter| PropertyPath::Contents {
+                        n.parameter_order()
+                            .into_iter()
+                            .map(|parameter| PropertyPath::Contents {
                                 item: n.id,
                                 parameter,
                             })
