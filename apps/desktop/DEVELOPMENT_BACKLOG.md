@@ -18,6 +18,14 @@
 - **후속 고급 기능:** 패널 도킹·소스 뷰어·최근 프로젝트, 타임라인 고급 시간 편집/검색/가상화, 공간 경로·프리셋·표현식, Shape 연산/SVG·Text Animator, 추가 효과·모션 블러, 고정밀 색/HDR·Proxy/GPU, 템플릿, 설치/업데이트·한글화와 UI 회귀 자동화.
 - **별도 대형 단계:** 3D/카메라/라이트·모델, 추적·로토/Puppet, 플러그인/교환 포맷 연구, 웹/API 제품 범위. AEP/MOGRT 호환은 구현되지 않았다.
 
+### 타임라인·그래프 Easy Ease 단축키 — 2026-10-03
+
+- B05/D02의 F9(Easy Ease), Shift+F9(Ease In), Ctrl+Shift+F9(Ease Out)을 구분했다. 그래프가 모든 F9 조합을 양방향 Ease로 처리하던 문제를 수정하고, 타임라인에도 같은 명령을 연결했다. 그래프는 현재 표시한 스칼라 채널, 타임라인은 레이어/속성에 걸친 선택 스칼라 키에 한 번의 Undo로 적용한다. [Adobe 공식 단축키 표](https://helpx.adobe.com/fi/after-effects/desktop/get-started/keyboard-shortcuts/keyboard-shortcuts-reference.html)를 기준으로 하며 내부 수치 보간의 AE 동등성을 뜻하지 않는다.
+- 패널 자체에 포커스가 있고 드래그 중이 아닐 때 적용한다. 키 반복과 Ctrl+F9/Alt 조합은 무시하고 입력 필드는 자체 키 입력을 유지한다. 빈 선택·해당 방향의 인접 구간이 없는 키는 편집하지 않는다. 잠금·사라진 키·경로 포즈가 섞이면 전체 작업을 거부하고 상태 메시지로 알린다. 그래프 버튼 툴팁·도움말·README도 실제 동작과 맞췄다.
+- 검증: 코어 158개 + 데스크톱 206개(총 364개) 통과, 외부 미디어/장치 30개 제외. 여러 레이어·채널의 방향별 핸들, 반대쪽 곡선/시간/값 유지, 원자적 거부, Undo/Redo·JSON·Preview/출력 일치를 검사했다. Cargo check/fmt/test/release build 통과(Moon/proto 미설치), 기존 경고 17개.
+- 실제 Windows에서 그래프 Shift+F9는 60프레임 incoming만, Ctrl+Shift+F9는 outgoing만 0 속도·1/3 영향도로 바꿨다. 원상복원 후 타임라인 키 선택→F9로 양방향 적용, 한 번의 Undo/Redo, 저장·재열기를 확인했다. `target/qa/ease-in-native.lfe.json`, `ease-out-native.lfe.json`, `ease-both-native.lfe.json`의 각 6프레임(총 18개) CLI PNG 중심이 독립 Hermite 계산과 출력 해상도 1px 이내로 일치했다. 최종 사본 재열기 후 67프레임 Position X 1119.64와 미리보기를 확인했다.
+- 경로 포즈의 Ease In/Out, AE 공간 속도·다차원 보간, 타임라인 키 모양의 보간별 구분은 후속 범위다. D02/B05 전체 완료로 표시하지 않는다.
+
 ### 선택 변형 스냅·숫자 입력 포커스 — 2026-10-03
 
 - D03 Value Graph 변형 박스의 움직이는 시간/값 경계에 8 논리 픽셀 스냅을 연결했다. 고정 경계 또는 Alt 중앙 기준점을 유지하며 시간 후보는 선택 키 전체의 반올림 충돌·미선택 키 충돌·컴포지션 범위를 검사한다. 값은 현재 채널의 미선택 키 값에 맞추고 주황색 안내선을 표시한다. Ctrl은 Snap 설정을 반전한다. 박스에서 Alt는 중앙 기준 조절이며, 일반 키 이동의 Alt 스냅 해제와 구분한다.

@@ -8,6 +8,7 @@ mod effects;
 mod footage_interpretation;
 mod graph;
 mod inspector;
+mod key_easing;
 mod markers;
 mod mask_values;
 mod matte;

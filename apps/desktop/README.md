@@ -538,8 +538,14 @@ timeline still limits time zoom to 1–64× and integer viewport start frames.
   Keyframe...; Undo, selection and fitting shortcuts work without another click.
 - Linear and Hold replace the selected key's outgoing segment, clearing its outgoing
   handle and the next key's incoming handle. Other segments remain unchanged.
-- Ease (F9) sets zero velocity and one-third influence on both sides of the selected
-  key; Ease In affects only the incoming side, Ease Out only the outgoing side.
+- Ease (F9) sets zero velocity and one-third influence on both sides of selected
+  keys; Ease In (Shift+F9) affects only the incoming side, Ease Out (Ctrl+Shift+F9)
+  only the outgoing side. Shortcuts work when the graph or timeline itself has
+  focus. The graph edits its displayed scalar channel; the timeline edits selected
+  scalar keys across layers/channels as one Undo. Locked layers, missing keys and
+  path poses reject the entire operation. Empty selections and directions without
+  an adjacent segment do nothing. Key repeat and unrelated modifier chords do not
+  apply easing. Input fields retain their keyboard input.
   Missing endpoint segments are skipped, and each operation is one Undo step.
 - Keyframe... exposes independent incoming/outgoing signed velocity (property units
   per second) and influence (0.1–100%). A last key can edit its incoming segment.
@@ -636,7 +642,9 @@ cargo run -p libre-effects-core --example make_animation_study -- examples/curve
 | P / A / S / R / T | Position / Anchor / Scale / Rotation / Opacity |
 | U | Reveal animated properties |
 | Shift+F3 | Toggle Graph Editor |
-| F9 (graph focused) | Ease selected key's outgoing segment |
+| F9 (timeline/graph focused) | Easy Ease selected scalar keys |
+| Shift+F9 | Easy Ease In: incoming side only |
+| Ctrl+Shift+F9 | Easy Ease Out: outgoing side only |
 | J / K | Previous / Next key on the selected layer |
 | B / N | Work area start / end |
 | + / − | Timeline zoom |

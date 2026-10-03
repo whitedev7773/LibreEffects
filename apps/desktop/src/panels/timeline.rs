@@ -1408,6 +1408,31 @@ impl Render for Timeline {
             .on_mouse_up(MouseButton::Left, cx.listener(Self::up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::up))
             .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+                if let Some((incoming, outgoing)) = super::key_easing::shortcut(event)
+                    && this.focus.is_focused(window)
+                    && this.drag.is_none()
+                    && this.bar_drag.is_none()
+                    && this.marquee.is_none()
+                {
+                    this.state.update(cx, |s, cx| {
+                        let keys = s.selected_keys.iter().copied().collect::<Vec<_>>();
+                        match super::key_easing::selected(
+                            s.editor.project(),
+                            &keys,
+                            incoming,
+                            outgoing,
+                        ) {
+                            Ok(Some(command)) => s.dispatch(&Action::Edit(command), window, cx),
+                            Ok(None) => {}
+                            Err(error) => {
+                                s.status = error;
+                                cx.notify();
+                            }
+                        }
+                    });
+                    cx.stop_propagation();
+                    return;
+                }
                 if event.keystroke.key == "escape" {
                     this.drag = None;
                     this.bar_drag = None;

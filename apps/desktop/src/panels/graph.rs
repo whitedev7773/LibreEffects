@@ -564,14 +564,14 @@ impl Graph {
             if keys.is_empty() {
                 return;
             }
-            let track = state
-                .editor
-                .selected_layer()
-                .unwrap()
-                .track(state.graph_property)
-                .unwrap();
-            let command = selection::ease(track, &keys, incoming, outgoing);
-            state.dispatch(&Action::Edit(command), window, cx);
+            match super::key_easing::selected(state.editor.project(), &keys, incoming, outgoing) {
+                Ok(Some(command)) => state.dispatch(&Action::Edit(command), window, cx),
+                Ok(None) => {}
+                Err(error) => {
+                    state.status = error;
+                    cx.notify();
+                }
+            }
         });
     }
     fn down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -1337,9 +1337,13 @@ impl Render for Graph {
                     cx.stop_propagation();
                     cx.notify();
                 }
-                if key == "f9" {
-                    this.ease(true, true, window, cx);
+                if let Some((incoming, outgoing)) = super::key_easing::shortcut(event)
+                    && this.focus.is_focused(window)
+                    && this.drag.is_none()
+                {
+                    this.ease(incoming, outgoing, window, cx);
                     cx.stop_propagation();
+                    return;
                 }
                 if key == "a" && event.keystroke.modifiers.control && this.focus.is_focused(window)
                 {
@@ -1439,13 +1443,14 @@ impl Render for Graph {
                     })),
             );
         }
-        for (label, incoming, outgoing) in [
-            ("Ease", true, true),
-            ("Ease In", true, false),
-            ("Ease Out", false, true),
+        for (label, incoming, outgoing, shortcut) in [
+            ("Ease", true, true, "Easy Ease (F9)"),
+            ("Ease In", true, false, "Easy Ease In (Shift+F9)"),
+            ("Ease Out", false, true, "Easy Ease Out (Ctrl+Shift+F9)"),
         ] {
             toolbar = toolbar.child(
                 ui::text_button(SharedString::from(format!("ease-{label}")), label)
+                    .tooltip(move |_, cx| cx.new(|_| ui::Tip(shortcut.into())).into())
                     .when(selection.is_none() || locked, |s| s.opacity(0.4))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.ease(incoming, outgoing, window, cx)

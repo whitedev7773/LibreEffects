@@ -155,52 +155,8 @@ pub(super) fn scale(
         .collect::<Result<Vec<_>, String>>()?;
     Ok((Command::ScaleKeys { keys, scale }, moved))
 }
-pub(super) fn ease(
-    track: &AnimatedProperty,
-    keys: &[KeyRef],
-    incoming: bool,
-    outgoing: bool,
-) -> Command {
-    let mut commands = Vec::new();
-    for &KeyRef {
-        id,
-        property,
-        frame,
-    } in keys
-    {
-        let sides = [
-            (
-                true,
-                incoming && track.keys().range(..frame).next_back().is_some(),
-            ),
-            (
-                false,
-                outgoing && track.keys().range(frame + 1..).next().is_some(),
-            ),
-        ];
-        if sides.iter().any(|(_, yes)| *yes) {
-            commands.push(Command::SetTemporalMode {
-                id,
-                property,
-                frame,
-                mode: TemporalMode::Independent,
-            });
-            for (incoming, _) in sides.into_iter().filter(|(_, yes)| *yes) {
-                commands.push(Command::SetTemporalHandle {
-                    id,
-                    property,
-                    frame,
-                    incoming,
-                    handle: TemporalHandle {
-                        slope: 0.0,
-                        influence: 1.0 / 3.0,
-                    },
-                });
-            }
-        }
-    }
-    Command::Batch(commands)
-}
+#[cfg(test)]
+use super::super::key_easing::ease;
 
 #[cfg(test)]
 mod tests {
