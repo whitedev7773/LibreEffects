@@ -44,6 +44,8 @@ mod single_instance;
 mod source_render;
 mod text_edit;
 mod text_flow;
+#[cfg(test)]
+mod text_paint_render_tests;
 mod theme;
 #[cfg(test)]
 mod time_remap_render;

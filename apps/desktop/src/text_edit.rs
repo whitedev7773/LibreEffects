@@ -421,6 +421,10 @@ impl Session {
 }
 
 #[cfg(test)]
+#[path = "text_paint_session_tests.rs"]
+mod paint_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     #[test]

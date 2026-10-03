@@ -1,6 +1,6 @@
 //! One compositing path for preview, stills and frame sequences.
 use base64::{Engine, engine::general_purpose::STANDARD};
-use libre_effects_core::{Content, Project, Property};
+use libre_effects_core::{Content, Project, Property, TextPaint, TextParam};
 use std::{io::Cursor, path::Path, sync::Arc};
 
 fn xml(s: &str) -> String {
@@ -276,6 +276,15 @@ impl Renderer {
         let id = format!("{prefix}-{}", l.id());
         let mut svg = String::new();
         let e = l.effects();
+        // Sample paint once for both measurement and painting. Keep typography
+        // and the source layer untouched, including during in-between frames.
+        let text_paint = matches!(l.content(), Content::Text { .. }).then(|| {
+            let mut style = l.text_style();
+            style.stroke_color = l.text_color_at(TextPaint::Stroke, frame).unwrap();
+            style.stroke_width = l.text_value_at(TextParam::StrokeWidth, frame).unwrap();
+            let fill = format!("#{:06x}", l.text_color_at(TextPaint::Fill, frame).unwrap());
+            (fill, style)
+        });
         let mut effect_bounds = [0.0, 0.0, l.width(), l.height()];
         if matches!(
             l.content(),
@@ -293,10 +302,10 @@ impl Renderer {
                     Content::Text { text, font_size } => layer_text_svg(
                         text,
                         *font_size,
-                        "white",
+                        &text_paint.as_ref().unwrap().0,
                         l.width(),
                         l.height(),
-                        l.text_style()
+                        text_paint.as_ref().unwrap().1.clone()
                     ),
                     _ => unreachable!(),
                 }
@@ -304,14 +313,20 @@ impl Renderer {
             let measured =
                 resvg::usvg::Tree::from_str(&source, &self.options).map_err(|e| e.to_string())?;
             let bounds = measured.root().stroke_bounding_box();
-            let left = f64::from(bounds.left()).min(0.0);
-            let top = f64::from(bounds.top()).min(0.0);
-            effect_bounds = [
-                left,
-                top,
-                f64::from(bounds.right()).max(l.width()) - left,
-                f64::from(bounds.bottom()).max(l.height()) - top,
-            ];
+            let mut left = f64::from(bounds.left()).min(0.0);
+            let mut top = f64::from(bounds.top()).min(0.0);
+            let mut right = f64::from(bounds.right()).max(l.width());
+            let mut bottom = f64::from(bounds.bottom()).max(l.height());
+            if text_paint.is_some() {
+                // The raster backend floors a filter's origin and ceils its
+                // size independently. Outward-round text extents first so a
+                // fractional stroked edge is not dropped by that conversion.
+                left = left.floor();
+                top = top.floor();
+                right = right.ceil();
+                bottom = bottom.ceil();
+            }
+            effect_bounds = [left, top, right - left, bottom - top];
         }
         let (effect_defs, effect_open, effect_close) =
             crate::effect_render::stack(l, frame, &id, effect_bounds)?;
@@ -377,13 +392,14 @@ impl Renderer {
                 svg.push_str(&contents.svg_at_with_prefix(frame, &id))
             }
             Content::Text { text, font_size } => {
+                let (fill, style) = text_paint.as_ref().unwrap();
                 svg.push_str(&layer_text_svg(
                     text,
                     *font_size,
-                    &color,
+                    fill,
                     l.width(),
                     l.height(),
-                    l.text_style(),
+                    style.clone(),
                 ));
             }
             Content::Image { png } => {

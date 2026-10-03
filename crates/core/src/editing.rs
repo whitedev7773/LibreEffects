@@ -741,6 +741,9 @@ pub(super) fn apply_extended(
             }
             Command::SetContent { id, content } => {
                 let layer = editable(state, *id)?;
+                if !layer.text_parameters.is_empty() && !matches!(content, Content::Text { .. }) {
+                    return Err("Text paint tracks require text content".into());
+                }
                 layer.content = content.clone();
                 layer.asset = None;
                 layer.footage_interpretation = Default::default();

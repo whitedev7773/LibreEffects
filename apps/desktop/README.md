@@ -210,7 +210,7 @@ saturation/brightness area, hue strip, RGB and HEX fields, original/new swatches
 and twelve recent colors saved in the local user profile. Arrow keys adjust
 saturation/brightness; Page Up/Down adjusts hue; Shift increases the step.
 
-Layer color accepts RRGGBB or RRGGBBAA. Its **Opacity %** edits the entire layer's
+Layer color accepts RRGGBB or RRGGBBAA. Its **Layer opacity %** edits the entire layer's
 opacity at the current frame, preserving animation and other keys. For shapes,
 Fill and Stroke dialogs instead edit their own paint opacity and RGB animation;
 color plus opacity remains one Undo. Text stroke and composition background
@@ -267,9 +267,38 @@ fills; the join button cycles the three joins. Both support Enter/Space.
 These settings use project version 34 and participate in Undo/Redo. Stroke width
 does not change glyph advances, caret positions or paragraph line breaks. Paint
 is clipped to paragraph bounds; point-text effect bounds include the stroke.
-The miter limit is currently fixed at 4. Per-character paint, paint animation,
+The miter limit is currently fixed at 4. Per-character paint,
 per-character compositing order and color/bitmap-font stroke parity remain
 unimplemented or unverified; this is not full Character-panel parity.
+
+### Animated text paint
+
+Fill RGB, Stroke RGB and Stroke Width are seven layer-wide scalar tracks.
+Character and Properties show the current frame's evaluated colors; Character's
+width field also evaluates the current frame. The color stopwatches toggle their
+three channels together, while width has its own stopwatch. Editing an animated
+paint creates or updates keys at the playhead; an unanimated paint remains static.
+Changing only HEX formatting, accepting an unchanged picker or cancelling it does
+not create keys or history. A changed picker transaction is one Undo step.
+
+Expand the Timeline's Text group for the seven channels and use the shared key
+editing controls or Value/Speed Graph. RGB values use 0–255 units and width uses
+0–1000 px; graph speed units are RGB units/s and px/s respectively. Evaluation
+clamps Bezier overshoot to those bounds. Disabling animation retains the current
+sampled color or width. Partially animated RGB edits preserve existing channels
+and seed missing channel baselines before adding the current-frame color.
+
+The tracks are saved only when needed, in project schema 48. Older static text
+keeps its existing schema, and the native LEP container stays version 1. Source,
+font, paragraph, spacing and paint-switch/order edits retain the paint tracks;
+rendering evaluates paint without changing glyph advances, caret positions or
+wrapping. Pending field drafts are discarded after their source document, layer,
+frame or Graph key selection changes. Fill picker alpha still edits whole-layer
+opacity; it is not a separate text-fill alpha track. Typography, Source Text,
+per-character styles, paint switches/order and compound text animation remain
+outside this seven-channel milestone.
+
+### Canvas text editing
 
 Ctrl+T selects the Text tool. Click to create point text or edit visible text;
 double-click text with the Selection tool to select its contents. Layer → New
@@ -1372,7 +1401,7 @@ otherwise moving the layers into a nested composition would change their visibil
 
 Save and Save As write **Libre Effects Project (`.lep`)** files. This is a binary
 container, not a renamed JSON file or a ZIP archive. Container version **1** is
-independent of the project model's schema version (supported through **47**):
+independent of the project model's schema version (supported through **48**):
 choosing `.lep` does not change the project schema or its editing behavior.
 
 - `PROJ` stores compact JSON metadata for all compositions, layers, animation and

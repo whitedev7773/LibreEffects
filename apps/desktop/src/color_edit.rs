@@ -1,9 +1,93 @@
 //! Color-dialog drafts never mutate the document until accepted.
 use libre_effects_core::{
     Command, Content, ContentsEdit, ContentsParam, Frame, GradientParam, LayerId, Project,
-    Property, ShapePaint, TrackEdit,
+    Property, ShapePaint, TextPaint, TrackEdit,
 };
 use serde::{Deserialize, Serialize};
+
+/// Binding captured when a panel shows its fields. A seek, replacement or layer
+/// switch invalidates pending input even before the next render synchronizes it.
+#[derive(Clone)]
+pub(crate) struct InputTarget {
+    identity: u64,
+    origin: std::sync::Arc<Project>,
+    revision: u64,
+    frame: Frame,
+    layer: LayerId,
+}
+impl InputTarget {
+    fn eligible_layer(s: &crate::editor::EditorState) -> Option<LayerId> {
+        (!s.playing).then_some(())?;
+        s.editor
+            .selected_layer()
+            .filter(|l| !l.locked())
+            .map(|l| l.id())
+    }
+    pub fn new(s: &crate::editor::EditorState) -> Option<Self> {
+        // Resolve eligibility before cloning possibly large project metadata.
+        let layer = Self::eligible_layer(s)?;
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        Some(Self {
+            identity: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            origin: std::sync::Arc::new(s.editor.project().clone()),
+            revision: s.document_revision,
+            frame: s.frame,
+            layer,
+        })
+    }
+    pub fn current(&self, s: &crate::editor::EditorState) -> bool {
+        self.revision == s.document_revision
+            && self.frame == s.frame
+            && Self::eligible_layer(s) == Some(self.layer)
+            && self.origin.as_ref() == s.editor.project()
+    }
+    pub fn refresh(previous: &mut Option<Self>, s: &crate::editor::EditorState) {
+        let Some(layer) = Self::eligible_layer(s) else {
+            *previous = None;
+            return;
+        };
+        // Compare borrowed metadata once. Rerenders and context-only changes
+        // reuse the immutable source; each displayed field keeps its own clone
+        // of this small context so hidden drafts can never be retargeted.
+        if let Some(previous) = previous.as_mut()
+            && previous.origin.as_ref() == s.editor.project()
+        {
+            previous.revision = s.document_revision;
+            previous.frame = s.frame;
+            previous.layer = layer;
+            return;
+        }
+        *previous = Self::new(s);
+    }
+    pub fn binding(&self) -> String {
+        format!(
+            "{}-{}-{}-{}-{}",
+            self.identity,
+            self.origin.active_composition_id(),
+            self.layer,
+            self.revision,
+            self.frame
+        )
+    }
+}
+
+/// Character and Inspector use one semantic RGB path. Format-only changes must
+/// not materialize an interpolated-frame key or a sparse baseline override.
+pub(crate) fn text_hex_command(
+    layer: &libre_effects_core::Layer,
+    paint: TextPaint,
+    frame: Frame,
+    text: &str,
+) -> Result<Option<Command>, String> {
+    let color = crate::ui::parse_hex_color(text).map_err(str::to_owned)?;
+    if layer.locked() || !matches!(layer.content(), Content::Text { .. }) {
+        return Err("Select an unlocked text layer".into());
+    }
+    if layer.text_color_at(paint, frame) == Some(color) {
+        return Ok(None);
+    }
+    layer.text_color_command(paint, color, frame).map(Some)
+}
 
 /// The viewer uses one endpoint tool for effect gradients and Contents paints.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -258,13 +342,17 @@ impl Session {
                             opacity: 100.0,
                         },
                         Content::Text { .. } => Color {
-                            rgb: layer.text_style().stroke_color,
+                            rgb: layer
+                                .text_color_at(TextPaint::Stroke, frame)
+                                .ok_or("Select a text layer")?,
                             opacity: 100.0,
                         },
                         _ => return Err("Select a shape or text layer".into()),
                     },
                     _ => Color {
-                        rgb: layer.color(),
+                        rgb: layer
+                            .text_color_at(TextPaint::Fill, frame)
+                            .unwrap_or_else(|| layer.color()),
                         opacity: layer.property(Property::Opacity).value_at(frame),
                     },
                 }
@@ -449,9 +537,16 @@ impl Session {
             }
             Target::Fill(id) => {
                 if self.color.rgb != self.original.rgb {
-                    commands.push(Command::SetColor {
-                        id,
-                        color: self.color.rgb,
+                    let layer = self.origin.composition().layer(id)?;
+                    commands.push(if matches!(layer.content(), Content::Text { .. }) {
+                        layer
+                            .text_color_command(TextPaint::Fill, self.color.rgb, self.frame)
+                            .ok()?
+                    } else {
+                        Command::SetColor {
+                            id,
+                            color: self.color.rgb,
+                        }
                     });
                 }
                 if self.color.opacity != self.original.opacity {
@@ -466,9 +561,11 @@ impl Session {
             Target::Stroke(id) if self.color.rgb != self.original.rgb => {
                 if let Some(layer) = self.origin.composition().layer(id) {
                     if matches!(layer.content(), Content::Text { .. }) {
-                        let mut style = layer.text_style();
-                        style.stroke_color = self.color.rgb;
-                        commands.push(Command::SetTextStyle { id, style });
+                        commands.push(
+                            layer
+                                .text_color_command(TextPaint::Stroke, self.color.rgb, self.frame)
+                                .ok()?,
+                        );
                     } else if let Content::Shape(shape) = layer.content() {
                         let mut shape = shape.clone();
                         shape.stroke_color = self.color.rgb;
@@ -1143,5 +1240,408 @@ mod tests {
         assert!(Session::new(Target::Contents(1, 999), e.project(), 0, 0).is_err());
         e.execute(Command::ToggleLocked(1)).unwrap();
         assert!(Session::new(Target::Contents(1, 4), e.project(), 0, 0).is_err());
+    }
+}
+#[cfg(test)]
+mod text_paint_controls_tests {
+    #[test]
+    fn text_paint_input_snapshots_reuse_source_for_rerenders_seeks_and_selection_only_changes() {
+        let mut state = crate::editor::EditorState::default();
+        assert!(super::InputTarget::new(&state).is_none());
+        state.editor = scene(true);
+        state
+            .editor
+            .execute(libre_effects_core::Command::AddSolid)
+            .unwrap();
+        state.editor.select(1);
+        let mut source = None;
+        super::InputTarget::refresh(&mut source, &state);
+        let original = source.as_ref().unwrap().clone();
+        for _ in 0..20 {
+            super::InputTarget::refresh(&mut source, &state);
+            assert!(std::sync::Arc::ptr_eq(
+                &original.origin,
+                &source.as_ref().unwrap().origin
+            ));
+            assert_eq!(source.as_ref().unwrap().binding(), original.binding());
+        }
+        state.frame = 30;
+        super::InputTarget::refresh(&mut source, &state);
+        assert!(std::sync::Arc::ptr_eq(
+            &original.origin,
+            &source.as_ref().unwrap().origin
+        ));
+        assert_ne!(source.as_ref().unwrap().binding(), original.binding());
+        assert!(!original.current(&state));
+        state.editor.select(2);
+        super::InputTarget::refresh(&mut source, &state);
+        assert!(std::sync::Arc::ptr_eq(
+            &original.origin,
+            &source.as_ref().unwrap().origin
+        ));
+        assert!(source.as_ref().unwrap().current(&state));
+        state.document_revision += 1;
+        super::InputTarget::refresh(&mut source, &state);
+        assert!(std::sync::Arc::ptr_eq(
+            &original.origin,
+            &source.as_ref().unwrap().origin
+        ));
+        state
+            .editor
+            .execute(libre_effects_core::Command::RenameLayer {
+                id: 2,
+                name: "Changed".into(),
+            })
+            .unwrap();
+        super::InputTarget::refresh(&mut source, &state);
+        assert!(!std::sync::Arc::ptr_eq(
+            &original.origin,
+            &source.as_ref().unwrap().origin
+        ));
+        state.playing = true;
+        super::InputTarget::refresh(&mut source, &state);
+        assert!(source.is_none());
+        assert!(super::InputTarget::new(&state).is_none());
+        state.playing = false;
+        state
+            .editor
+            .execute(libre_effects_core::Command::ToggleLocked(2))
+            .unwrap();
+        assert!(super::InputTarget::new(&state).is_none());
+        state.editor.clear_selection();
+        super::InputTarget::refresh(&mut source, &state);
+        assert!(source.is_none());
+    }
+
+    #[test]
+    fn text_paint_hidden_field_keeps_frozen_target_until_its_visible_sync() {
+        let mut state = crate::editor::EditorState::default();
+        state.editor = scene(true);
+        let mut source = None;
+        super::InputTarget::refresh(&mut source, &state);
+        // All three numeric panels retain a per-field copy at the same time
+        // TextField::sync binds its displayed draft. Hidden rows skip both.
+        let field = std::rc::Rc::new(std::cell::RefCell::new(source.clone()));
+        let old_binding = field.borrow().as_ref().unwrap().binding();
+        state.frame = 30;
+        super::InputTarget::refresh(&mut source, &state);
+        assert!(!field.borrow().as_ref().unwrap().current(&state));
+        assert_eq!(field.borrow().as_ref().unwrap().binding(), old_binding);
+        assert!(std::sync::Arc::ptr_eq(
+            &field.borrow().as_ref().unwrap().origin,
+            &source.as_ref().unwrap().origin
+        ));
+        state
+            .editor
+            .execute(libre_effects_core::Command::RenameLayer {
+                id: 1,
+                name: "Updated".into(),
+            })
+            .unwrap();
+        super::InputTarget::refresh(&mut source, &state);
+        assert!(!field.borrow().as_ref().unwrap().current(&state));
+        assert_eq!(field.borrow().as_ref().unwrap().binding(), old_binding);
+        *field.borrow_mut() = source.clone();
+        assert!(field.borrow().as_ref().unwrap().current(&state));
+        assert_ne!(field.borrow().as_ref().unwrap().binding(), old_binding);
+    }
+
+    #[test]
+    fn text_paint_field_binding_is_stable_on_rerender_but_changes_for_same_epoch_project_edits() {
+        let mut state = crate::editor::EditorState::default();
+        state.editor = scene(true);
+        let mut target = None;
+        super::InputTarget::refresh(&mut target, &state);
+        let first = target.as_ref().unwrap().binding();
+        super::InputTarget::refresh(&mut target, &state);
+        assert_eq!(target.as_ref().unwrap().binding(), first);
+        let frozen = target.as_ref().unwrap().clone();
+        state
+            .editor
+            .execute(libre_effects_core::Command::RenameLayer {
+                id: 1,
+                name: "Changed".into(),
+            })
+            .unwrap();
+        assert!(!frozen.current(&state));
+        super::InputTarget::refresh(&mut target, &state);
+        assert_ne!(target.as_ref().unwrap().binding(), first);
+        assert!(target.as_ref().unwrap().current(&state));
+    }
+
+    use super::*;
+    use libre_effects_core::{Editor, PropertyPath, TextParam, TextStyle};
+
+    fn scene(animated: bool) -> Editor {
+        let mut e = Editor::default();
+        e.execute(Command::AddContent {
+            content: Content::Text {
+                text: "Title".into(),
+                font_size: 48.,
+            },
+            width: 400.,
+            height: 120.,
+            name: "Text".into(),
+        })
+        .unwrap();
+        e.execute(Command::SetColor {
+            id: 1,
+            color: 0x102030,
+        })
+        .unwrap();
+        e.execute(Command::SetTextStyle {
+            id: 1,
+            style: TextStyle {
+                stroke_color: 0x204060,
+                stroke_width: 2.,
+                stroke_enabled: true,
+                ..Default::default()
+            },
+        })
+        .unwrap();
+        if animated {
+            for (paint, end) in [(TextPaint::Fill, 0x90a0b0), (TextPaint::Stroke, 0xa0c0e0)] {
+                let command = e
+                    .selected_layer()
+                    .unwrap()
+                    .text_color_animation_command(paint, 0)
+                    .unwrap();
+                e.execute(command).unwrap();
+                let command = e
+                    .selected_layer()
+                    .unwrap()
+                    .text_color_command(paint, end, 60)
+                    .unwrap();
+                e.execute(command).unwrap();
+            }
+        }
+        e.clear_history();
+        e
+    }
+
+    #[test]
+    fn text_paint_picker_samples_fill_and_stroke_at_zero_midpoint_and_endpoint() {
+        let e = scene(true);
+        for (frame, fill, stroke) in [
+            (0, 0x102030, 0x204060),
+            (30, 0x506070, 0x6080a0),
+            (60, 0x90a0b0, 0xa0c0e0),
+        ] {
+            for (target, expected) in [(Target::Fill(1), fill), (Target::Stroke(1), stroke)] {
+                let session = Session::new(target, e.project(), 7, frame).unwrap();
+                assert_eq!(session.original.rgb, expected);
+                assert_eq!(session.color.rgb, expected);
+                assert!(session.command().is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn text_paint_cancel_unchanged_accept_and_format_only_hex_preserve_exact_keys_and_history() {
+        let mut e = scene(true);
+        // Keep a redo branch to prove a no-op does not clear it.
+        e.execute(Command::RenameLayer {
+            id: 1,
+            name: "temporary".into(),
+        })
+        .unwrap();
+        e.undo();
+        let before = e.project().clone();
+        assert!(!e.can_undo());
+        assert!(e.can_redo());
+        for (paint, target) in [
+            (TextPaint::Fill, Target::Fill(1)),
+            (TextPaint::Stroke, Target::Stroke(1)),
+        ] {
+            let color = e
+                .selected_layer()
+                .unwrap()
+                .text_color_at(paint, 30)
+                .unwrap();
+            let mut session = Session::new(target, e.project(), 2, 30).unwrap();
+            assert!(session.command().is_none());
+            for text in [format!("{color:06x}"), format!(" #{color:06X} ")] {
+                session.input(0, &text).unwrap();
+                assert!(session.command().is_none());
+                assert!(
+                    text_hex_command(e.selected_layer().unwrap(), paint, 30, &text)
+                        .unwrap()
+                        .is_none()
+                );
+            }
+            session.input(0, "ff11ee").unwrap();
+            assert!(session.command().is_some());
+            drop(session); // Cancel leaves exact project, keys, and history untouched.
+        }
+        assert_eq!(e.project(), &before);
+        assert!(!e.can_undo());
+        assert!(e.can_redo());
+        for p in [TextPaint::Fill, TextPaint::Stroke]
+            .into_iter()
+            .flat_map(TextPaint::channels)
+        {
+            assert!(
+                !e.selected_layer()
+                    .unwrap()
+                    .track(PropertyPath::Text(p))
+                    .unwrap()
+                    .keys()
+                    .contains_key(&30)
+            );
+        }
+        e.redo();
+        assert_eq!(e.selected_layer().unwrap().name(), "temporary");
+    }
+
+    #[test]
+    fn text_paint_partial_rgb_picker_seeds_missing_baselines_and_is_one_undo() {
+        for (target, paint, parameter, baseline) in [
+            (
+                Target::Fill(1),
+                TextPaint::Fill,
+                TextParam::FillRed,
+                0x102030,
+            ),
+            (
+                Target::Stroke(1),
+                TextPaint::Stroke,
+                TextParam::StrokeRed,
+                0x204060,
+            ),
+        ] {
+            let mut e = scene(false);
+            e.execute(Command::EditText {
+                id: 1,
+                parameter,
+                edit: TrackEdit::ToggleAnimation { frame: 0 },
+            })
+            .unwrap();
+            e.execute(Command::EditText {
+                id: 1,
+                parameter,
+                edit: TrackEdit::Value {
+                    frame: 60,
+                    value: 144.,
+                },
+            })
+            .unwrap();
+            e.clear_history();
+            let before = e.project().clone();
+            let mut session = Session::new(target, e.project(), 4, 30).unwrap();
+            session.input(0, "abcdef").unwrap();
+            e.execute(session.command().unwrap()).unwrap();
+            let after = e.project().clone();
+            let layer = e.selected_layer().unwrap();
+            assert_eq!(layer.text_color_at(paint, 0), Some(baseline));
+            assert_eq!(layer.text_color_at(paint, 30), Some(0xabcdef));
+            for p in paint.channels() {
+                let keys = layer.track(PropertyPath::Text(p)).unwrap().keys();
+                assert!(keys.contains_key(&0));
+                assert!(keys.contains_key(&30));
+            }
+            assert_eq!(
+                layer.text_style(),
+                before.composition().layer(1).unwrap().text_style()
+            );
+            assert_eq!(
+                layer.color(),
+                before.composition().layer(1).unwrap().color()
+            );
+            e.undo();
+            assert_eq!(e.project(), &before);
+            assert!(!e.can_undo());
+            e.redo();
+            assert_eq!(e.project(), &after);
+        }
+    }
+
+    #[test]
+    fn text_paint_fill_alpha_edits_whole_layer_opacity_and_stroke_stays_rgb_only() {
+        let mut e = scene(true);
+        e.execute(Command::ToggleAnimation {
+            id: 1,
+            property: Property::Opacity,
+            frame: 0,
+        })
+        .unwrap();
+        e.clear_history();
+        let before = e.project().clone();
+        let mut session = Session::new(Target::Fill(1), e.project(), 5, 30).unwrap();
+        session.input(0, "12345680").unwrap();
+        e.execute(session.command().unwrap()).unwrap();
+        let layer = e.selected_layer().unwrap();
+        assert_eq!(layer.text_color_at(TextPaint::Fill, 30), Some(0x123456));
+        assert_eq!(layer.text_color_at(TextPaint::Stroke, 30), Some(0x6080a0));
+        assert_eq!(
+            layer.property(Property::Opacity).value_at(30),
+            128. * 100. / 255.
+        );
+        assert_eq!(layer.property(Property::Opacity).value_at(0), 100.);
+        let mut stroke = Session::new(Target::Stroke(1), e.project(), 6, 30).unwrap();
+        assert!(!stroke.target.alpha());
+        assert!(stroke.input(0, "abcdef80").is_err());
+        assert!(stroke.input(4, "10").is_err());
+        stroke.set_color(Color {
+            rgb: 0xabcdef,
+            opacity: 10.,
+        });
+        assert_eq!(stroke.color.opacity, 100.);
+        e.undo();
+        assert_eq!(e.project(), &before);
+        assert!(!e.can_undo());
+    }
+
+    #[test]
+    fn text_paint_targets_reject_locks_bad_hex_missing_layer_and_stale_document_or_frame() {
+        let mut e = scene(true);
+        let mut session = Session::new(Target::Fill(1), e.project(), 7, 30).unwrap();
+        let original = session.color;
+        for bad in ["123", "1234567", "##123456", "gg3344"] {
+            assert!(session.input(0, bad).is_err());
+            assert_eq!(session.color, original);
+            assert!(
+                text_hex_command(e.selected_layer().unwrap(), TextPaint::Fill, 30, bad).is_err()
+            );
+        }
+        assert!(Session::new(Target::Fill(99), e.project(), 7, 30).is_err());
+        assert!(session.validate(e.project(), 8, 30).is_err());
+        assert!(session.validate(e.project(), 7, 0).is_err());
+        e.execute(Command::ToggleLocked(1)).unwrap();
+        assert!(session.validate(e.project(), 7, 30).is_err());
+        assert!(Session::new(Target::Stroke(1), e.project(), 7, 30).is_err());
+        assert!(
+            text_hex_command(e.selected_layer().unwrap(), TextPaint::Fill, 30, "102030").is_err()
+        );
+    }
+
+    #[test]
+    fn text_paint_field_binding_rejects_seek_switch_lock_playback_and_same_project_new_revision() {
+        let mut s = crate::editor::EditorState::default();
+        s.editor = scene(true);
+        s.frame = 30;
+        let target = InputTarget::new(&s).unwrap();
+        assert!(target.current(&s));
+        let old_binding = target.binding();
+        s.frame = 60;
+        assert!(!target.current(&s));
+        assert_ne!(InputTarget::new(&s).unwrap().binding(), old_binding);
+        s.frame = 30;
+        s.document_revision += 1;
+        assert!(!target.current(&s));
+        s.document_revision -= 1;
+        s.playing = true;
+        assert!(!target.current(&s));
+        s.playing = false;
+        s.editor.execute(Command::AddSolid).unwrap();
+        assert!(!target.current(&s));
+        s.editor.select(1);
+        assert!(!target.current(&s)); // A changed project rejects even at old target.
+        s.editor.undo();
+        s.editor.select(1);
+        assert!(target.current(&s));
+        s.editor.execute(Command::ToggleLocked(1)).unwrap();
+        assert!(!target.current(&s));
+        s.editor.clear_selection();
+        assert!(InputTarget::new(&s).is_none());
     }
 }

@@ -1,10 +1,12 @@
+use crate::color_edit::InputTarget;
 use crate::{
     components::TextField,
     editor::{Action, EditorState},
     ui,
 };
 use gpui::{Context, Entity, Window, div, prelude::*, px, rgb};
-use libre_effects_core::{Command, Content, Mask, Property, PropertyPath, TrackEdit};
+use libre_effects_core::{Command, Content, Mask, Property, PropertyPath, TextPaint, TrackEdit};
+use std::{cell::RefCell, rc::Rc};
 
 pub(crate) struct Inspector {
     matte: Option<(
@@ -20,6 +22,8 @@ pub(crate) struct Inspector {
     parent_open: bool,
     parent_owner: Option<u64>,
     extra: Vec<Entity<TextField>>,
+    extra_source: Option<InputTarget>,
+    extra_targets: Vec<Rc<RefCell<Option<InputTarget>>>>,
     playback: Vec<Entity<TextField>>,
     audio_controls: Entity<super::audio_controls::AudioControls>,
     shape_controls: Entity<super::shape_controls::ShapeControls>,
@@ -144,16 +148,40 @@ impl Inspector {
                 })
             })
             .collect();
+        let extra_targets: Vec<Rc<RefCell<Option<InputTarget>>>> =
+            (0..11).map(|_| Default::default()).collect();
         let extra = (0..11)
             .map(|index| {
                 let edit = state.clone();
+                let target = extra_targets[index].clone();
                 cx.new(|cx| {
                     TextField::new(cx, move |text, window, cx| {
                         edit.update(cx, |s, cx| {
+                            if !target.borrow().as_ref().is_some_and(|t| t.current(s)) {
+                                return;
+                            }
                             let Some(l) = s.editor.selected_layer() else {
                                 return;
                             };
                             let id = l.id();
+                            if index == 2 && matches!(l.content(), Content::Text { .. }) {
+                                match crate::color_edit::text_hex_command(
+                                    l,
+                                    TextPaint::Fill,
+                                    s.frame,
+                                    text,
+                                ) {
+                                    Ok(Some(command)) => {
+                                        s.dispatch(&Action::Edit(command), window, cx)
+                                    }
+                                    Ok(None) => {}
+                                    Err(error) => {
+                                        s.status = error;
+                                        cx.notify();
+                                    }
+                                }
+                                return;
+                            }
                             let number = text.parse::<f64>().ok();
                             let command = match index {
                                 0 => {
@@ -251,6 +279,8 @@ impl Inspector {
             blend: None,
             matte: None,
             extra,
+            extra_source: None,
+            extra_targets,
             state,
             name,
             fields,
@@ -268,6 +298,12 @@ impl Inspector {
 impl Render for Inspector {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.state.read(cx);
+        InputTarget::refresh(&mut self.extra_source, state);
+        let extra_binding = self
+            .extra_source
+            .as_ref()
+            .map(InputTarget::binding)
+            .unwrap_or_default();
         let frame = state.frame;
         let duration = state.editor.project().composition().duration();
         let selected = state.editor.selected_layer().cloned();
@@ -431,6 +467,7 @@ impl Render for Inspector {
             Content::Shape(shape) => {
                 shape.paint_color_at(libre_effects_core::ShapePaint::Fill, layer.color(), frame)
             }
+            Content::Text { .. } => layer.text_color_at(TextPaint::Fill, frame).unwrap(),
             _ => layer.color(),
         };
         let mut entries = vec![(2, "Fill (hex)", format!("{fill_color:06X}"))];
@@ -723,19 +760,12 @@ impl Render for Inspector {
             );
         }
         for (index, label, value) in entries {
+            *self.extra_targets[index].borrow_mut() = self.extra_source.clone();
             self.extra[index].update(cx, |field, _| {
                 if index != 0 && index != 2 {
                     field.set_numeric();
                 }
-                field.sync(
-                    if index == 2 {
-                        format!("{id}-{frame}")
-                    } else {
-                        id.to_string()
-                    },
-                    value.clone(),
-                    window,
-                );
+                field.sync(extra_binding.clone(), value.clone(), window);
             });
             contents = contents.child(
                 div()
@@ -754,6 +784,14 @@ impl Render for Inspector {
                                         shape,
                                         id,
                                         libre_effects_core::ShapePaint::Fill,
+                                        frame,
+                                    ))
+                                } else if matches!(layer.content(), Content::Text { .. }) && !locked
+                                {
+                                    d.child(super::character::color_watch(
+                                        &self.state,
+                                        &layer,
+                                        TextPaint::Fill,
                                         frame,
                                     ))
                                 } else {

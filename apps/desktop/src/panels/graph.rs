@@ -4,6 +4,7 @@ mod speed;
 mod tangent;
 mod transform;
 mod viewport;
+use crate::color_edit::InputTarget;
 use crate::{
     components::TextField,
     editor::{Action, EditorState, Tool},
@@ -16,9 +17,23 @@ use gpui::{
 };
 use libre_effects_core::{
     AnimatedProperty, Bezier, Command, Interpolation, LayerId, PropertyPath, TemporalMode,
-    TrackEdit,
+    TextParam, TrackEdit,
 };
-use std::{cell::Cell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
+
+fn graph_units(property: PropertyPath, speed: bool) -> &'static str {
+    match (property, speed) {
+        (PropertyPath::Text(TextParam::StrokeWidth), false) => "px",
+        (PropertyPath::Text(TextParam::StrokeWidth), true) => "px/s",
+        (PropertyPath::Text(_), false) => "RGB 0–255",
+        (PropertyPath::Text(_), true) => "RGB units/s",
+        (_, true) => "units/s",
+        _ => "",
+    }
+}
 
 #[derive(Clone, Copy)]
 struct View {
@@ -201,6 +216,37 @@ enum Drag {
         space: HandleSpace,
     },
 }
+#[derive(Clone)]
+struct KeyInputTarget {
+    document: InputTarget,
+    selected: (LayerId, u32, PropertyPath),
+    keys: Vec<libre_effects_core::KeyRef>,
+}
+impl KeyInputTarget {
+    #[cfg(test)]
+    fn new(state: &EditorState) -> Option<Self> {
+        let selected = selected(state)?;
+        Some(Self {
+            document: InputTarget::new(state)?,
+            selected,
+            keys: selection::active(state),
+        })
+    }
+    fn current(&self, state: &EditorState) -> bool {
+        self.document.current(state)
+            && selected(state) == Some(self.selected)
+            && selection::active(state) == self.keys
+    }
+    fn binding(&self) -> String {
+        format!(
+            "{}-{:?}-{:?}",
+            self.document.binding(),
+            self.selected,
+            self.keys
+        )
+    }
+}
+
 pub(crate) struct Graph {
     state: Entity<EditorState>,
     plot: Rc<Cell<Option<Bounds<Pixels>>>>,
@@ -209,6 +255,8 @@ pub(crate) struct Graph {
     drag: Option<Drag>,
     drag_revision: u64,
     fields: Vec<Entity<TextField>>,
+    input_targets: Vec<Rc<RefCell<Option<KeyInputTarget>>>>,
+    input_source: Option<InputTarget>,
     details: bool,
     transform_box: bool,
     hand: viewport::TemporaryHand,
@@ -327,13 +375,19 @@ impl Graph {
         })
         .detach();
         let focus = cx.focus_handle();
+        let input_targets: Vec<Rc<RefCell<Option<KeyInputTarget>>>> =
+            (0..12).map(|_| Default::default()).collect();
         let fields = (0..12)
             .map(|index| {
                 let edit = state.clone();
                 let return_focus = focus.clone();
+                let target = input_targets[index].clone();
                 cx.new(|cx| {
                     TextField::new(cx, move |text, window, cx| {
                         edit.update(cx, |state, cx| {
+                            if !target.borrow().as_ref().is_some_and(|t| t.current(state)) {
+                                return;
+                            }
                             let Some((id, frame, property)) = selected(state) else {
                                 return;
                             };
@@ -470,11 +524,30 @@ impl Graph {
             drag: None,
             drag_revision: 0,
             fields,
+            input_targets,
+            input_source: None,
             details: false,
             transform_box: false,
             hand: Default::default(),
             focus_watch: None,
         }
+    }
+    fn sync_input(
+        &mut self,
+        index: usize,
+        target: &Option<KeyInputTarget>,
+        value: String,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Each field retains its own displayed context; hidden controls cannot
+        // inherit a fresh target while still carrying an old pending draft.
+        *self.input_targets[index].borrow_mut() = target.clone();
+        let binding = target
+            .as_ref()
+            .map(KeyInputTarget::binding)
+            .unwrap_or_default();
+        self.fields[index].update(cx, |field, _| field.sync(binding, value, window));
     }
     fn cancel_navigation(&mut self, cx: &mut Context<Self>) {
         self.hand.cancel();
@@ -1272,11 +1345,17 @@ impl Render for Graph {
             .map(|k| k.frame)
             .collect::<std::collections::BTreeSet<_>>();
         let selected_count = selected_frames.len();
-        let scale_identity = format!(
-            "scale-{:?}-{property:?}-{selected_frames:?}-{}",
-            state.editor.selected(),
-            state.document_revision
-        );
+        let input_target = if let Some(selected) = selection {
+            InputTarget::refresh(&mut self.input_source, state);
+            self.input_source.clone().map(|document| KeyInputTarget {
+                document,
+                selected,
+                keys: selection::active(state),
+            })
+        } else {
+            self.input_source = None;
+            None
+        };
         let curve = curve_at(state);
         let locked = layer.as_ref().is_none_or(|l| l.locked());
         let root = div()
@@ -1561,7 +1640,9 @@ impl Render for Graph {
             );
         };
         let Some(track) = layer.track(property).cloned() else {
-            return root.child(div().p_4().child("Select a property in the timeline."));
+            return root.child(div().p_4().child(if matches!(property, PropertyPath::Text(_)) {
+                "Enable this text property's stopwatch or add a key in the timeline to edit its graph."
+            } else { "Select a property in the timeline." }));
         };
         let speed_mode = state.graph_view.speed;
         let mut graph_view = viewport::current(state, &track);
@@ -1912,7 +1993,7 @@ impl Render for Graph {
                         .child(format!("{selected_count} keys selected")),
                 )
             });
-        if let Some((id, frame, _)) = selection {
+        if let Some((_, frame, _)) = selection {
             let key = &track.keys()[&frame];
             if selected_count > 1 {
                 easing = easing
@@ -1924,9 +2005,7 @@ impl Render for Graph {
                             .child("Time: first key · Value: lowest value"),
                     );
                 for (index, label) in [(10, "Time %"), (11, "Value %")] {
-                    self.fields[index].update(cx, |field, _| {
-                        field.sync(scale_identity.clone(), "100".into(), window)
-                    });
+                    self.sync_input(index, &input_target, "100".into(), window, cx);
                     easing = easing.child(
                         div()
                             .h(px(25.0))
@@ -1946,7 +2025,9 @@ impl Render for Graph {
                 ("Frame", frame.to_string()),
                 (
                     "Value",
-                    if property == PropertyPath::TimeRemap {
+                    if matches!(property, PropertyPath::Text(_)) {
+                        key.value.to_string()
+                    } else if property == PropertyPath::TimeRemap {
                         format!("{:.12}", key.value)
                     } else {
                         format!("{:.3}", key.value)
@@ -1956,9 +2037,7 @@ impl Render for Graph {
             .into_iter()
             .enumerate()
             {
-                self.fields[index].update(cx, |field, _| {
-                    field.sync(format!("{id}-{property:?}-{frame}"), value, window)
-                });
+                self.sync_input(index, &input_target, value, window, cx);
                 easing = easing.child(
                     div()
                         .h(px(25.0))
@@ -2052,13 +2131,13 @@ impl Render for Graph {
                                     h.influence * 100.0
                                 }
                             });
-                            self.fields[index].update(cx, |field, _| {
-                                field.sync(
-                                    format!("{id}-{property:?}-{frame}"),
-                                    value.map_or_else(|| "—".into(), |v| format!("{v:.6}")),
-                                    window,
-                                )
-                            });
+                            self.sync_input(
+                                index,
+                                &input_target,
+                                value.map_or_else(|| "—".into(), |v| format!("{v:.6}")),
+                                window,
+                                cx,
+                            );
                             easing = easing.child(
                                 div()
                                     .h(px(25.0))
@@ -2150,13 +2229,13 @@ impl Render for Graph {
                     for column in 0..2 {
                         let index = row * 2 + column;
                         let value = [curve.x1, curve.y1, curve.x2, curve.y2][index];
-                        self.fields[index + 2].update(cx, |field, _| {
-                            field.sync(
-                                format!("{id}-{property:?}-{frame}"),
-                                format!("{value:.3}"),
-                                window,
-                            )
-                        });
+                        self.sync_input(
+                            index + 2,
+                            &input_target,
+                            format!("{value:.3}"),
+                            window,
+                            cx,
+                        );
                         fields = fields
                             .child(div().w(px(22.0)).child(["X1", "Y1", "X2", "Y2"][index]))
                             .child(
@@ -2205,12 +2284,17 @@ impl Render for Graph {
                 .px_2()
                 .text_color(rgb(ui::MUTED))
                 .child(format!(
-                    "{} · {selected_count} selected{}",
+                    "{}{} · {selected_count} selected{}",
                     layer.track_label(property).unwrap_or_default(),
+                    if graph_units(property, speed_mode).is_empty() {
+                        String::new()
+                    } else {
+                        format!(" · {}", graph_units(property, speed_mode))
+                    },
                     if speed_mode && self.transform_box {
-                        " · units/s · side handles: time scale only · Alt: center · Ctrl: snap · Esc: cancel"
+                        " · side handles: time scale only · Alt: center · Ctrl: snap · Esc: cancel"
                     } else if speed_mode {
-                        " · units/s · diamonds: velocity/influence · Alt: split · Shift: keep velocity"
+                        " · diamonds: velocity/influence · Alt: split · Shift: keep velocity"
                     } else if self.transform_box {
                         " · transform handles: time/value scale · Alt: center · Esc: cancel"
                     } else {
@@ -2230,6 +2314,107 @@ impl Render for Graph {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn text_paint_graph_input_context_rejects_stale_key_property_frame_document_and_selection() {
+        use libre_effects_core::{
+            Command, Content, KeyRef, Property, PropertyPath, TextParam, TrackEdit,
+        };
+        for property in [
+            PropertyPath::Text(TextParam::FillRed),
+            Property::PositionX.into(),
+        ] {
+            let mut state = super::EditorState::default();
+            state
+                .editor
+                .execute(Command::AddContent {
+                    content: Content::Text {
+                        text: "Title".into(),
+                        font_size: 48.,
+                    },
+                    width: 400.,
+                    height: 100.,
+                    name: "Text".into(),
+                })
+                .unwrap();
+            for frame in [0, 60] {
+                state
+                    .editor
+                    .execute(Command::EditTrack {
+                        id: 1,
+                        property,
+                        edit: TrackEdit::ToggleKey { frame },
+                    })
+                    .unwrap();
+            }
+            let key = KeyRef {
+                id: 1,
+                property,
+                frame: 0,
+            };
+            let end = KeyRef { frame: 60, ..key };
+            state.graph_property = property;
+            state.graph_key = Some((1, 0));
+            state.selected_keys = [key].into();
+            let target = super::KeyInputTarget::new(&state).unwrap();
+            assert!(target.current(&state));
+            state.frame = 30;
+            assert!(!target.current(&state));
+            assert_ne!(
+                target.binding(),
+                super::KeyInputTarget::new(&state).unwrap().binding()
+            );
+            state.frame = 0;
+            state.selected_keys.insert(end);
+            assert!(!target.current(&state));
+            assert_ne!(
+                target.binding(),
+                super::KeyInputTarget::new(&state).unwrap().binding()
+            );
+            state.graph_key = Some((1, 60));
+            assert!(!target.current(&state));
+            state.selected_keys = [key].into();
+            state.graph_key = Some((1, 0));
+            assert!(target.current(&state));
+            state.graph_property = Property::Rotation.into();
+            assert!(!target.current(&state));
+            state.graph_property = property;
+            state.document_revision += 1;
+            assert!(!target.current(&state));
+            state.document_revision -= 1;
+            state
+                .editor
+                .execute(Command::RenameLayer {
+                    id: 1,
+                    name: "Other".into(),
+                })
+                .unwrap();
+            assert!(!target.current(&state));
+            state.editor.undo();
+            assert!(target.current(&state));
+            state.selected_keys.clear();
+            assert!(!target.current(&state));
+            assert!(super::KeyInputTarget::new(&state).is_none());
+        }
+    }
+
+    #[test]
+    fn text_paint_graph_units_are_channel_and_mode_specific() {
+        for p in libre_effects_core::TextParam::ALL {
+            let path = libre_effects_core::PropertyPath::Text(p);
+            if p == libre_effects_core::TextParam::StrokeWidth {
+                assert_eq!(super::graph_units(path, false), "px");
+                assert_eq!(super::graph_units(path, true), "px/s");
+            } else {
+                assert_eq!(super::graph_units(path, false), "RGB 0–255");
+                assert_eq!(super::graph_units(path, true), "RGB units/s");
+            }
+        }
+        assert_eq!(
+            super::graph_units(libre_effects_core::Property::Opacity.into(), true),
+            "units/s"
+        );
+    }
+
     use super::*;
     #[test]
     fn key_details_require_a_current_selection_after_undo_or_deselect() {

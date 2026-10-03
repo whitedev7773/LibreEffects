@@ -3,7 +3,9 @@
 `.lep` is the native Libre Effects Project file extension. It is a bounded binary
 container for portable project metadata, optional editor view state, and embedded
 images. The container version is **1**. The project's JSON schema version remains
-independent (currently **47**); choosing this format does not upgrade that schema.
+independent (currently **48**); choosing this format does not upgrade that schema.
+Schema 48 adds optional layer-wide text-paint tracks. Documents without those
+tracks retain their otherwise required schema, including legacy static text.
 Existing `.lfe.json` files and `Project::to_json` / `Project::from_json` stay supported.
 
 All integer fields are unsigned and **little-endian**. Lengths count bytes, not

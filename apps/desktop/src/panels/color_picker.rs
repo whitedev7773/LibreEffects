@@ -263,9 +263,19 @@ impl Render for ColorPicker {
             (color.rgb & 255).to_string(),
             format!("{:.2}", color.opacity),
         ];
-        for (index, label) in ["HEX", "Red", "Green", "Blue", "Opacity %"]
-            .into_iter()
-            .enumerate()
+        for (index, label) in [
+            "HEX",
+            "Red",
+            "Green",
+            "Blue",
+            if matches!(target, crate::color_edit::Target::Fill(_)) {
+                "Layer opacity %"
+            } else {
+                "Opacity %"
+            },
+        ]
+        .into_iter()
+        .enumerate()
         {
             if index == 4 && !target.alpha() {
                 continue;
@@ -278,7 +288,7 @@ impl Render for ColorPicker {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(div().w(px(75.0)).child(label))
+                    .child(div().w(px(105.0)).child(label))
                     .child(div().flex_1().child(self.fields[index].clone())),
             );
         }

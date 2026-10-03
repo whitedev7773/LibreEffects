@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-const PROJECT_VERSION: u32 = 47;
+const PROJECT_VERSION: u32 = 48;
 pub type Frame = u32;
 pub type LayerId = u64;
 pub type CompositionId = u64;
@@ -73,7 +73,11 @@ pub use shape_contents::{
 mod shape_contents_tests;
 mod shapes;
 pub use shape_stroke::{ShapeStroke, StrokeCap, StrokeJoin};
+mod text_animation;
 mod text_style;
+pub use text_animation::{TextPaint, TextParam};
+#[cfg(test)]
+mod text_animation_tests;
 pub use shapes::{Shape, ShapeKind};
 pub use text_style::{TextAlign, TextFont, TextStrokeJoin, TextStyle};
 mod temporal;
@@ -252,6 +256,8 @@ impl AnimatedProperty {
 pub struct Layer {
     #[serde(default, skip_serializing_if = "TextStyle::is_default")]
     text_style: TextStyle,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    text_parameters: BTreeMap<TextParam, AnimatedProperty>,
     #[serde(
         default,
         skip_serializing_if = "audio_controls::AudioControls::is_default"
@@ -765,6 +771,7 @@ impl Project {
                 }
                 mask_animation::validate(layer, comp.duration, self.version)?;
                 shape_animation::validate(layer, comp.duration, self.version)?;
+                text_animation::validate(layer, comp.duration, self.version)?;
                 path_animation::validate(layer, comp.duration, self.version)?;
                 audio_controls::validate(layer, comp.duration, self.version)?;
                 layer.markers.validate(comp.duration)?;
@@ -1039,6 +1046,11 @@ pub enum Command {
         id: LayerId,
         effects: Effects,
     },
+    EditText {
+        id: LayerId,
+        parameter: TextParam,
+        edit: TrackEdit,
+    },
     EditShape {
         id: LayerId,
         parameter: ShapeParam,
@@ -1310,7 +1322,11 @@ impl Editor {
         // Apply to a candidate so invalid commands never partially mutate the project.
         let mut next = self.current.clone();
         let reorder_only = command.reorders_only();
+        let text_values_only = text_animation::value_edits_only(&command);
         apply(&mut next, command)?;
+        if text_values_only && next == self.current {
+            return Ok(());
+        }
         if reorder_only {
             // Reindexing needs no schema/asset migration, even for imported projects.
             return self.accept_candidate(next);
@@ -1615,6 +1631,14 @@ impl Editor {
                 .unwrap_or(44);
             next.project.version = next.project.version.max(version);
         }
+        if next
+            .project
+            .compositions()
+            .into_iter()
+            .any(|(_, c)| c.layers.iter().any(|l| !l.text_parameters.is_empty()))
+        {
+            next.project.version = next.project.version.max(48);
+        }
         self.accept_candidate(next)
     }
 }
@@ -1624,6 +1648,9 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
         return result;
     }
     if let Some(result) = shape_conversion::apply(state, &command) {
+        return result;
+    }
+    if let Some(result) = text_animation::apply(state, &command) {
         return result;
     }
     if let Some(result) = shape_animation::apply(state, &command) {
@@ -1901,6 +1928,7 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
                 footage_interpretation: Default::default(),
                 asset: None,
                 text_style: Default::default(),
+                text_parameters: BTreeMap::new(),
                 audio_controls: Default::default(),
                 time_remap: None,
                 track_matte: None,

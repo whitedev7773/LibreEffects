@@ -1,14 +1,114 @@
+use crate::color_edit::InputTarget;
 use crate::{
     components::TextField,
     editor::{Action, EditorState},
     ui,
 };
 use gpui::{Context, Entity, SharedString, Window, div, prelude::*, px, rgb};
-use libre_effects_core::{Command, Content, TextAlign};
-use std::{cell::Cell, rc::Rc};
+use libre_effects_core::{
+    Command, Content, Frame, Layer, PropertyPath, TextAlign, TextPaint, TextParam, TrackEdit,
+};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
+
+fn field_command(
+    layer: &Layer,
+    frame: Frame,
+    index: usize,
+    text: &str,
+) -> Result<Option<Command>, String> {
+    if layer.locked() {
+        return Err("Unlock the text layer before editing".into());
+    }
+    let Content::Text {
+        text: content,
+        font_size,
+    } = layer.content()
+    else {
+        return Err("Select a text layer".into());
+    };
+    let id = layer.id();
+    if index == 3 || index == 5 {
+        return crate::color_edit::text_hex_command(
+            layer,
+            if index == 3 {
+                TextPaint::Fill
+            } else {
+                TextPaint::Stroke
+            },
+            frame,
+            text,
+        );
+    }
+    let value = text
+        .trim()
+        .parse::<f64>()
+        .map_err(|_| "Enter a finite number")?;
+    if !value.is_finite() {
+        return Err("Enter a finite number".into());
+    }
+    if index == 4 {
+        let (lo, hi) = TextParam::StrokeWidth.bounds();
+        if !(lo..=hi).contains(&value) {
+            return Err("Stroke width must be from 0 to 1000 px".into());
+        }
+        return Ok(
+            (layer.text_value_at(TextParam::StrokeWidth, frame) != Some(value)).then_some(
+                Command::EditText {
+                    id,
+                    parameter: TextParam::StrokeWidth,
+                    edit: TrackEdit::Value { frame, value },
+                },
+            ),
+        );
+    }
+    if index == 0 {
+        return Ok((*font_size != value).then_some(Command::SetContent {
+            id,
+            content: Content::Text {
+                text: content.clone(),
+                font_size: value,
+            },
+        }));
+    }
+    // Typography edits always clone the base style, never evaluated paint.
+    let mut style = layer.text_style();
+    if index == 1 {
+        style.leading = value / font_size;
+    } else if index == 2 {
+        style.tracking = value;
+    } else {
+        return Err("Unknown text field".into());
+    }
+    Ok((style != layer.text_style()).then_some(Command::SetTextStyle { id, style }))
+}
+
+pub(super) fn color_watch(
+    state: &Entity<EditorState>,
+    layer: &Layer,
+    paint: TextPaint,
+    frame: Frame,
+) -> impl IntoElement {
+    ui::action_tool(
+        SharedString::from(format!("text-{paint:?}-color-watch")),
+        "stopwatch",
+        "Toggle text color animation",
+        state,
+        Action::Edit(
+            layer
+                .text_color_animation_command(paint, frame)
+                .unwrap_or_else(|_| Command::Batch(vec![])),
+        ),
+        layer.text_color_animated(paint),
+    )
+}
 
 pub(crate) struct Character {
     state: Entity<EditorState>,
+    input_source: Option<InputTarget>,
+    input_targets: Vec<Rc<RefCell<Option<InputTarget>>>>,
     fields: Vec<Entity<TextField>>,
     font_search: Entity<TextField>,
     fonts_open: bool,
@@ -19,63 +119,25 @@ pub(crate) struct Character {
 impl Character {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
+        let input_targets: Vec<Rc<RefCell<Option<InputTarget>>>> =
+            (0..6).map(|_| Default::default()).collect();
         let fields = (0..6)
             .map(|i| {
                 let state = state.clone();
+                let target = input_targets[i].clone();
                 cx.new(|cx| {
                     TextField::new(cx, move |text, w, cx| {
                         state.update(cx, |s, cx| {
+                            if !target.borrow().as_ref().is_some_and(|t| t.current(s)) {
+                                return;
+                            }
                             let Some(l) = s.editor.selected_layer() else {
                                 return;
                             };
-                            if l.locked() {
-                                return;
-                            }
-                            let Content::Text {
-                                text: content,
-                                font_size,
-                            } = l.content()
-                            else {
-                                return;
-                            };
-                            let id = l.id();
-                            let command = (|| -> Result<Command, String> {
-                                if i == 3 {
-                                    return Ok(Command::SetColor {
-                                        id,
-                                        color: ui::parse_hex_color(text)?.into(),
-                                    });
-                                }
-                                if i == 5 {
-                                    let mut style = l.text_style();
-                                    style.stroke_color = ui::parse_hex_color(text)?.into();
-                                    return Ok(Command::SetTextStyle { id, style });
-                                }
-                                let v = text
-                                    .trim()
-                                    .parse::<f64>()
-                                    .map_err(|_| "Enter a finite number")?;
-                                if i == 0 {
-                                    return Ok(Command::SetContent {
-                                        id,
-                                        content: Content::Text {
-                                            text: content.clone(),
-                                            font_size: v,
-                                        },
-                                    });
-                                }
-                                let mut style = l.text_style();
-                                if i == 1 {
-                                    style.leading = v / font_size;
-                                } else if i == 2 {
-                                    style.tracking = v;
-                                } else {
-                                    style.stroke_width = v;
-                                }
-                                Ok(Command::SetTextStyle { id, style })
-                            })();
+                            let command = field_command(l, s.frame, i, text);
                             match command {
-                                Ok(c) => s.dispatch(&Action::Edit(c), w, cx),
+                                Ok(Some(c)) => s.dispatch(&Action::Edit(c), w, cx),
+                                Ok(None) => {}
                                 Err(e) => {
                                     s.status = e;
                                     cx.notify();
@@ -90,6 +152,8 @@ impl Character {
         cx.observe(&font_search, |_, _, cx| cx.notify()).detach();
         Self {
             state,
+            input_source: None,
+            input_targets,
             fields,
             font_search,
             fonts_open: false,
@@ -181,6 +245,7 @@ impl Character {
 }
 impl Render for Character {
     fn render(&mut self, w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let frame = self.state.read(cx).frame;
         let mut panel = div().p_3().flex().flex_col().gap_2();
         let Some(l) = self.state.read(cx).editor.selected_layer().cloned() else {
             return panel.child("Select a text layer.");
@@ -188,6 +253,12 @@ impl Render for Character {
         let Content::Text { font_size, .. } = l.content() else {
             return panel.child("Select a text layer.");
         };
+        InputTarget::refresh(&mut self.input_source, self.state.read(cx));
+        let binding = self
+            .input_source
+            .as_ref()
+            .map(InputTarget::binding)
+            .unwrap_or_default();
         let style = l.text_style();
         let family_bounds = self.picker_bounds[0].clone();
         let style_bounds = self.picker_bounds[1].clone();
@@ -302,13 +373,17 @@ impl Render for Character {
                     .child(warning),
             );
         }
+        let fill_color = l.text_color_at(TextPaint::Fill, frame).unwrap();
+        let stroke_color = l.text_color_at(TextPaint::Stroke, frame).unwrap();
         let values = [
             font_size.to_string(),
             format!("{:.2}", l.text_style().leading * font_size),
             l.text_style().tracking.to_string(),
-            format!("{:06X}", l.color()),
-            format!("{:.2}", style.stroke_width),
-            format!("{:06X}", style.stroke_color),
+            format!("{fill_color:06X}"),
+            l.text_value_at(TextParam::StrokeWidth, frame)
+                .unwrap()
+                .to_string(),
+            format!("{stroke_color:06X}"),
         ];
         for (i, label) in [
             "Font size (px)",
@@ -321,16 +396,50 @@ impl Render for Character {
         .into_iter()
         .enumerate()
         {
-            self.fields[i].update(cx, |f, _| f.sync(l.id().to_string(), values[i].clone(), w));
+            *self.input_targets[i].borrow_mut() = self.input_source.clone();
+            self.fields[i].update(cx, |f, _| f.sync(binding.clone(), values[i].clone(), w));
             panel = panel.child(
                 div()
                     .flex()
                     .items_center()
-                    .child(div().w(px(108.0)).child(label))
+                    .child(
+                        div()
+                            .w(px(108.0))
+                            .flex()
+                            .items_center()
+                            .when(!l.locked() && (i == 3 || i == 5), |d| {
+                                d.child(color_watch(
+                                    &self.state,
+                                    &l,
+                                    if i == 3 {
+                                        TextPaint::Fill
+                                    } else {
+                                        TextPaint::Stroke
+                                    },
+                                    frame,
+                                ))
+                            })
+                            .when(!l.locked() && i == 4, |d| {
+                                d.child(ui::action_tool(
+                                    "text-stroke-width-watch",
+                                    "stopwatch",
+                                    "Toggle stroke width animation",
+                                    &self.state,
+                                    Action::Edit(Command::EditText {
+                                        id: l.id(),
+                                        parameter: TextParam::StrokeWidth,
+                                        edit: TrackEdit::ToggleAnimation { frame },
+                                    }),
+                                    l.track(PropertyPath::Text(TextParam::StrokeWidth))
+                                        .is_some_and(|t| !t.keys().is_empty()),
+                                ))
+                            })
+                            .child(label),
+                    )
                     .when(i == 3, |d| {
                         d.child(super::color_picker::swatch(
                             "text-fill-color",
-                            l.color(),
+                            fill_color,
                             crate::color_edit::Target::Fill(l.id()),
                             l.locked(),
                             &self.state,
@@ -339,7 +448,7 @@ impl Render for Character {
                     .when(i == 5, |d| {
                         d.child(super::color_picker::swatch(
                             "text-stroke-color",
-                            style.stroke_color,
+                            stroke_color,
                             crate::color_edit::Target::Stroke(l.id()),
                             l.locked(),
                             &self.state,
@@ -620,4 +729,133 @@ fn font_button(
                 cx.stop_propagation();
             }
         })
+}
+
+#[cfg(test)]
+mod text_paint_controls_tests {
+    use super::*;
+    use libre_effects_core::Editor;
+
+    fn scene() -> Editor {
+        let mut e = Editor::default();
+        e.execute(Command::AddContent {
+            content: Content::Text {
+                text: "Text".into(),
+                font_size: 48.,
+            },
+            width: 400.,
+            height: 100.,
+            name: "Title".into(),
+        })
+        .unwrap();
+        e.execute(Command::SetColor {
+            id: 1,
+            color: 0x102030,
+        })
+        .unwrap();
+        e
+    }
+    #[test]
+    fn text_paint_width_field_is_animated_bounded_and_format_only_input_is_noop() {
+        let mut e = scene();
+        let before = e.project().clone();
+        let width = e
+            .selected_layer()
+            .unwrap()
+            .text_value_at(TextParam::StrokeWidth, 30)
+            .unwrap();
+        assert!(
+            field_command(e.selected_layer().unwrap(), 30, 4, &format!("{width:.4}"))
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(e.project(), &before);
+        e.execute(Command::EditText {
+            id: 1,
+            parameter: TextParam::StrokeWidth,
+            edit: TrackEdit::ToggleAnimation { frame: 0 },
+        })
+        .unwrap();
+        let command = field_command(e.selected_layer().unwrap(), 60, 4, "12")
+            .unwrap()
+            .unwrap();
+        e.execute(command).unwrap();
+        let mid = (width + 12.) / 2.;
+        assert_eq!(
+            e.selected_layer()
+                .unwrap()
+                .text_value_at(TextParam::StrokeWidth, 0),
+            Some(width)
+        );
+        assert_eq!(
+            e.selected_layer()
+                .unwrap()
+                .text_value_at(TextParam::StrokeWidth, 30),
+            Some(mid)
+        );
+        assert_eq!(
+            e.selected_layer()
+                .unwrap()
+                .text_value_at(TextParam::StrokeWidth, 60),
+            Some(12.)
+        );
+        let before = e.project().clone();
+        assert!(
+            field_command(e.selected_layer().unwrap(), 30, 4, &format!("{mid:.3}"))
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(e.project(), &before);
+        for bad in ["-1", "1000.1", "NaN", "inf", "invalid"] {
+            assert!(field_command(e.selected_layer().unwrap(), 30, 4, bad).is_err());
+        }
+        e.execute(Command::ToggleLocked(1)).unwrap();
+        assert!(field_command(e.selected_layer().unwrap(), 30, 4, "4").is_err());
+    }
+    #[test]
+    fn text_paint_character_hex_and_typography_preserve_base_style_and_tracks() {
+        let mut e = scene();
+        let command = e
+            .selected_layer()
+            .unwrap()
+            .text_color_animation_command(TextPaint::Stroke, 0)
+            .unwrap();
+        e.execute(command).unwrap();
+        let command = field_command(e.selected_layer().unwrap(), 60, 5, "abcdef")
+            .unwrap()
+            .unwrap();
+        e.execute(command).unwrap();
+        let before_style = e.selected_layer().unwrap().text_style();
+        let before_color = e
+            .selected_layer()
+            .unwrap()
+            .text_color_at(TextPaint::Stroke, 30);
+        let tracks: Vec<_> = TextPaint::Stroke
+            .channels()
+            .into_iter()
+            .map(|p| {
+                e.selected_layer()
+                    .unwrap()
+                    .track(PropertyPath::Text(p))
+                    .unwrap()
+                    .clone()
+            })
+            .collect();
+        for (index, text) in [(0, "60"), (1, "80"), (2, "20")] {
+            let command = field_command(e.selected_layer().unwrap(), 30, index, text)
+                .unwrap()
+                .unwrap();
+            e.execute(command).unwrap();
+        }
+        let l = e.selected_layer().unwrap();
+        assert_eq!(l.text_style().stroke_color, before_style.stroke_color);
+        assert_eq!(l.text_style().stroke_width, before_style.stroke_width);
+        assert_eq!(l.text_color_at(TextPaint::Stroke, 30), before_color);
+        for (p, track) in TextPaint::Stroke.channels().into_iter().zip(tracks) {
+            assert_eq!(l.track(PropertyPath::Text(p)), Some(&track));
+        }
+        assert!(field_command(l, 30, 3, " #102030 ").unwrap().is_none());
+        e.execute(Command::AddSolid).unwrap();
+        assert!(field_command(e.selected_layer().unwrap(), 30, 3, "abcdef").is_err());
+    }
 }

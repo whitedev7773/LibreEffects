@@ -1,5 +1,6 @@
 mod key_menu;
 use super::parent_drag::ParentDrag;
+use crate::color_edit::InputTarget;
 use crate::{
     components::TextField,
     editor::{Action, EditorState, PropertyFilter},
@@ -10,11 +11,73 @@ use gpui::{
     SharedString, Window, canvas, div, fill, point, prelude::*, px, relative, rgb, size,
 };
 use libre_effects_core::{
-    Command, KeyRef, LayerId, LayerSwitch, Property, PropertyPath, TrackEdit,
+    Command, KeyRef, LayerId, LayerSwitch, Property, PropertyPath, TextPaint, TextParam, TrackEdit,
 };
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::{cell::Cell, rc::Rc};
+
+fn text_groups(layer: &libre_effects_core::Layer) -> Vec<(String, Vec<PropertyPath>)> {
+    if !matches!(layer.content(), libre_effects_core::Content::Text { .. }) {
+        return vec![];
+    }
+    vec![
+        (
+            "Fill Color".into(),
+            TextPaint::Fill.channels().map(PropertyPath::Text).to_vec(),
+        ),
+        (
+            "Stroke Color".into(),
+            TextPaint::Stroke
+                .channels()
+                .map(PropertyPath::Text)
+                .to_vec(),
+        ),
+        (
+            "Stroke Width".into(),
+            vec![PropertyPath::Text(TextParam::StrokeWidth)],
+        ),
+    ]
+}
+
+fn group_animated(layer: &libre_effects_core::Layer, properties: &[PropertyPath]) -> bool {
+    properties
+        .iter()
+        .any(|p| layer.track(*p).is_some_and(|t| !t.keys().is_empty()))
+}
+fn group_visible(
+    layer: &libre_effects_core::Layer,
+    properties: &[PropertyPath],
+    filter: Option<PropertyFilter>,
+) -> bool {
+    filter.is_none_or(|f| {
+        properties.iter().any(|p| {
+            (match p {
+                PropertyPath::Transform(p) => f.includes(*p),
+                _ => f == PropertyFilter::Animated,
+            }) && (f != PropertyFilter::Animated
+                || layer.track(*p).is_some_and(|t| !t.keys().is_empty()))
+        })
+    })
+}
+fn group_watch(
+    layer: &libre_effects_core::Layer,
+    properties: &[PropertyPath],
+    frame: u32,
+) -> Command {
+    let animated = group_animated(layer, properties);
+    Command::Batch(
+        properties
+            .iter()
+            .filter(|p| layer.track(**p).is_none_or(|t| t.keys().is_empty()) == !animated)
+            .map(|p| Command::EditTrack {
+                id: layer.id(),
+                property: *p,
+                edit: TrackEdit::ToggleAnimation { frame },
+            })
+            .collect(),
+    )
+}
 
 const LEFT: f32 = 560.0;
 #[derive(Clone)]
@@ -34,7 +97,9 @@ pub(crate) struct Timeline {
     blend_pickers: BTreeMap<LayerId, Entity<super::blend::BlendPicker>>,
     left: f32,
     resizing: bool,
-    fields: BTreeMap<(LayerId, PropertyPath), Entity<TextField>>,
+    fields:
+        BTreeMap<(LayerId, PropertyPath), (Entity<TextField>, Rc<RefCell<Option<InputTarget>>>)>,
+    input_source: Option<InputTarget>,
     parent_open: Option<LayerId>,
     bar_drag: Option<(Vec<LayerId>, i32, f64, i64)>,
     marquee: Option<(gpui::Point<Pixels>, gpui::Point<Pixels>)>,
@@ -84,6 +149,7 @@ impl Timeline {
             left: LEFT,
             resizing: false,
             fields: BTreeMap::new(),
+            input_source: None,
             parent_open: None,
             bar_drag: None,
             marquee: None,
@@ -417,14 +483,22 @@ impl Render for Timeline {
         let show_modes = left >= 540.0;
         let show_mattes = left >= 750.0;
         let state = self.state.read(cx);
+        InputTarget::refresh(&mut self.input_source, state);
+        let input_binding = self
+            .input_source
+            .as_ref()
+            .map(InputTarget::binding)
+            .unwrap_or_default();
         let cached_ranges = state.preview_cache.ranges.clone();
         let selected_layers = state.selected_layers.clone();
         let selected_keys = state.selected_keys.clone();
         let comp = state.editor.project().composition().clone();
         self.matte_pickers.retain(|id, _| comp.layer(*id).is_some());
         self.blend_pickers.retain(|id, _| comp.layer(*id).is_some());
-        self.fields
-            .retain(|(id, p), _| comp.layer(*id).is_some_and(|l| l.track(*p).is_some()));
+        self.fields.retain(|(id, p), _| {
+            comp.layer(*id)
+                .is_some_and(|l| l.track_value(*p, state.frame).is_some())
+        });
         let graph_open = state.graph_open;
         let marker_open = state.selected_marker().is_some();
         let graph_property = state.graph_property;
@@ -974,6 +1048,7 @@ impl Render for Timeline {
                 if layer.time_remap().is_some() {
                     groups.push(("Time Remap".into(), vec![PropertyPath::TimeRemap]));
                 }
+                groups.extend(text_groups(layer));
                 let shape_path = PropertyPath::Path(libre_effects_core::PathTarget::Shape);
                 for path in layer
                     .track_paths()
@@ -1036,21 +1111,7 @@ impl Render for Timeline {
                 }
                 let mut last_section = None;
                 for (label, properties) in groups {
-                    if filter.is_some_and(|f| {
-                        !properties.iter().any(|p| {
-                            (match p {
-                                PropertyPath::Transform(p) => f.includes(*p),
-                                PropertyPath::Shape(_)
-                                | PropertyPath::Path(_)
-                                | PropertyPath::Mask { .. }
-                                | PropertyPath::Audio(_)
-                                | PropertyPath::Effect { .. }
-                                | PropertyPath::TimeRemap
-                                | PropertyPath::Contents { .. } => f == PropertyFilter::Animated,
-                            }) && (f != PropertyFilter::Animated
-                                || !layer.track(*p).expect("visible property").keys().is_empty())
-                        })
-                    }) {
+                    if !group_visible(layer, &properties, filter) {
                         continue;
                     }
                     let section = match properties[0] {
@@ -1064,6 +1125,7 @@ impl Render for Timeline {
                             };
                             Some(((3, item), format!("Contents · {name}")))
                         }
+                        PropertyPath::Text(_) => Some(((4, 0), "Text".to_string())),
                         PropertyPath::Shape(_) => Some(((0, 1), "Contents · Shape".to_string())),
                         PropertyPath::Path(libre_effects_core::PathTarget::Shape) => {
                             Some(((0, 0), "Contents · Path".to_string()))
@@ -1127,27 +1189,8 @@ impl Render for Timeline {
                     let prop_id = |suffix: &str| {
                         SharedString::from(format!("prop-{id}-{:?}-{suffix}", properties[0]))
                     };
-                    let animated = properties
-                        .iter()
-                        .any(|p| !layer.track(*p).expect("visible property").keys().is_empty());
-                    let watch = Command::Batch(
-                        properties
-                            .iter()
-                            .filter(|p| {
-                                layer
-                                    .track(**p)
-                                    .expect("visible property")
-                                    .keys()
-                                    .is_empty()
-                                    == !animated
-                            })
-                            .map(|p| Command::EditTrack {
-                                id,
-                                property: *p,
-                                edit: TrackEdit::ToggleAnimation { frame },
-                            })
-                            .collect(),
-                    );
+                    let animated = group_animated(layer, &properties);
+                    let watch = group_watch(layer, &properties, frame);
                     let channel = properties[0];
                     let channel_state = self.state.clone();
                     let mut controls = div()
@@ -1199,15 +1242,32 @@ impl Render for Timeline {
                             ));
                             continue;
                         }
-                        let input = self
+                        let (input, input_target) = self
                             .fields
                             .entry((id, property))
                             .or_insert_with(|| {
                                 let edit = self.state.clone();
-                                cx.new(|cx| {
+                                let target: Rc<RefCell<Option<InputTarget>>> = Default::default();
+                                let captured = target.clone();
+                                let input = cx.new(|cx| {
                                     TextField::new(cx, move |text, window, cx| {
                                         edit.update(cx, |s, cx| {
+                                            if !captured
+                                                .borrow()
+                                                .as_ref()
+                                                .is_some_and(|t| t.current(s))
+                                                || s.editor.selected() != Some(id)
+                                            {
+                                                return;
+                                            }
                                             if let Ok(value) = text.parse::<f64>() {
+                                                if matches!(property, PropertyPath::Text(_))
+                                                    && s.editor.selected_layer().and_then(|l| {
+                                                        l.track_value(property, s.frame)
+                                                    }) == Some(value)
+                                                {
+                                                    return;
+                                                }
                                                 s.dispatch(
                                                     &Action::Edit(Command::EditTrack {
                                                         id,
@@ -1227,17 +1287,21 @@ impl Render for Timeline {
                                         })
                                     })
                                     .numeric()
-                                })
+                                });
+                                (input, target)
                             })
                             .clone();
+                        *input_target.borrow_mut() = self.input_source.clone();
                         input.update(cx, |field, _| {
                             field.sync(
-                                format!("{id}-{frame}"),
+                                input_binding.clone(),
                                 {
                                     let value = layer
                                         .track_value(property, frame)
                                         .expect("visible property");
-                                    if property == PropertyPath::TimeRemap {
+                                    if matches!(property, PropertyPath::Text(_)) {
+                                        value.to_string()
+                                    } else if property == PropertyPath::TimeRemap {
                                         format!("{value:.12}")
                                     } else {
                                         format!("{value:.2}")
@@ -1250,7 +1314,9 @@ impl Render for Timeline {
                             .child(
                                 ui::text_button(
                                     SharedString::from(format!("channel-{id}-{property:?}")),
-                                    if let PropertyPath::Shape(p) = property {
+                                    if let PropertyPath::Text(p) = property {
+                                        TextPaint::component_label(p).unwrap_or("px")
+                                    } else if let PropertyPath::Shape(p) = property {
                                         libre_effects_core::ShapePaint::component_label(p)
                                             .unwrap_or("")
                                     } else if properties.len() == 2 {
@@ -1313,9 +1379,7 @@ impl Render for Timeline {
                         .filter(|p| {
                             layer
                                 .track(**p)
-                                .expect("visible property")
-                                .keys()
-                                .contains_key(&frame)
+                                .is_some_and(|t| t.keys().contains_key(&frame))
                         })
                         .copied()
                         .collect();
@@ -1352,10 +1416,8 @@ impl Render for Timeline {
                         .flat_map(|p| {
                             layer
                                 .track(*p)
-                                .expect("visible property")
-                                .keys()
-                                .keys()
-                                .copied()
+                                .into_iter()
+                                .flat_map(|t| t.keys().keys().copied())
                         })
                         .collect();
                     for key_frame in frames {
@@ -1364,9 +1426,7 @@ impl Render for Timeline {
                             .filter(|p| {
                                 layer
                                     .track(**p)
-                                    .expect("visible property")
-                                    .keys()
-                                    .contains_key(&key_frame)
+                                    .is_some_and(|t| t.keys().contains_key(&key_frame))
                             })
                             .map(|p| KeyRef {
                                 id,
@@ -2102,6 +2162,110 @@ impl Render for Timeline {
 }
 #[cfg(test)]
 mod tests {
+    use libre_effects_core::{
+        Command, Content, Editor, PropertyPath, TextPaint, TextParam, TrackEdit,
+    };
+    #[test]
+    fn text_paint_timeline_groups_keep_sparse_baselines_and_animated_filter_coherent() {
+        let mut e = Editor::default();
+        e.execute(Command::AddContent {
+            content: Content::Text {
+                text: "Text".into(),
+                font_size: 48.,
+            },
+            width: 400.,
+            height: 100.,
+            name: "Title".into(),
+        })
+        .unwrap();
+        let groups = super::text_groups(e.selected_layer().unwrap());
+        assert_eq!(
+            groups
+                .iter()
+                .map(|(s, p)| (s.as_str(), p.len()))
+                .collect::<Vec<_>>(),
+            [("Fill Color", 3), ("Stroke Color", 3), ("Stroke Width", 1)]
+        );
+        assert_eq!(
+            groups
+                .iter()
+                .flat_map(|(_, p)| p.iter())
+                .copied()
+                .collect::<Vec<_>>(),
+            TextParam::ALL.map(PropertyPath::Text)
+        );
+        for (_, properties) in &groups {
+            assert!(super::group_visible(
+                e.selected_layer().unwrap(),
+                properties,
+                None
+            ));
+            assert!(!super::group_visible(
+                e.selected_layer().unwrap(),
+                properties,
+                Some(super::PropertyFilter::Animated)
+            ));
+            assert!(!super::group_visible(
+                e.selected_layer().unwrap(),
+                properties,
+                Some(super::PropertyFilter::Opacity)
+            ));
+            for p in properties {
+                assert!(e.selected_layer().unwrap().track_value(*p, 30).is_some());
+            }
+        }
+        e.execute(Command::EditText {
+            id: 1,
+            parameter: TextParam::FillGreen,
+            edit: TrackEdit::ToggleAnimation { frame: 0 },
+        })
+        .unwrap();
+        let fill = &groups[0].1;
+        assert!(super::group_animated(e.selected_layer().unwrap(), fill));
+        assert!(super::group_visible(
+            e.selected_layer().unwrap(),
+            fill,
+            Some(super::PropertyFilter::Animated)
+        ));
+        let command = super::group_watch(e.selected_layer().unwrap(), fill, 30);
+        e.execute(command).unwrap();
+        assert!(
+            !e.selected_layer()
+                .unwrap()
+                .text_color_animated(TextPaint::Fill)
+        );
+        assert!(
+            e.selected_layer()
+                .unwrap()
+                .track(PropertyPath::Text(TextParam::FillRed))
+                .is_none()
+        );
+        let command = super::group_watch(e.selected_layer().unwrap(), fill, 0);
+        e.execute(command).unwrap();
+        for p in fill {
+            assert!(
+                e.selected_layer()
+                    .unwrap()
+                    .track(*p)
+                    .unwrap()
+                    .keys()
+                    .contains_key(&0)
+            );
+        }
+        assert!(
+            e.selected_layer()
+                .unwrap()
+                .text_color_animated(TextPaint::Fill)
+        );
+        assert!(
+            !e.selected_layer()
+                .unwrap()
+                .text_color_animated(TextPaint::Stroke)
+        );
+        e.execute(Command::AddSolid).unwrap();
+        assert!(super::text_groups(e.selected_layer().unwrap()).is_empty());
+    }
+
     use super::*;
     #[test]
     fn ruler_mapping_accounts_for_pan_zoom_and_edges() {

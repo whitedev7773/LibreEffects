@@ -12,7 +12,7 @@
 
 ### 현재 단계와 다음 개발
 
-**2026-10-03 사용자 우선순위:** 고유 `.lep` (Libre Effects Project) 파일 형식을 먼저 구현·실행 검증하고, 그 뒤 보류한 편집 기능과 나머지 백로그를 재개한다. `.lep`의 서명/컨테이너 버전/체크섬/제한된 청크와 Save/Open/CLI/복구/수집 연결을 구현했고 코어·데스크톱 기본 626개와 FFmpeg 30개, 릴리스 빌드가 통과했다. 기존 `.lfe.json`은 호환 입력으로 유지하며 Save는 `.lep` 사본을 만든다. 네이티브 복구·이동 수집까지 아래 범위의 end-to-end 검증을 마쳤다. 고유 형식의 기본 단계와 이어 재개한 같은 경로 박스 선택/Ctrl+A의 검증을 마쳤다. E04 Contents의 형제 항목 다중 선택·같은 부모 안의 묶음 순서 편집과 저장 포커스 회귀까지 검증을 마쳤다. 다음 제안 단계는 F03/D01의 레이어 전체 Text Fill/Stroke RGB와 Stroke Width 애니메이션이며, 문자별 스타일/타이포그래피 애니메이션은 별도 범위다.
+**2026-10-03 사용자 우선순위:** 고유 `.lep` (Libre Effects Project) 파일 형식을 먼저 구현·실행 검증하고, 그 뒤 보류한 편집 기능과 나머지 백로그를 재개한다. `.lep`의 서명/컨테이너 버전/체크섬/제한된 청크와 Save/Open/CLI/복구/수집 연결을 구현했고 코어·데스크톱 기본 626개와 FFmpeg 30개, 릴리스 빌드가 통과했다. 기존 `.lfe.json`은 호환 입력으로 유지하며 Save는 `.lep` 사본을 만든다. 네이티브 복구·이동 수집까지 아래 범위의 end-to-end 검증을 마쳤다. 고유 형식의 기본 단계와 이어 재개한 같은 경로 박스 선택/Ctrl+A의 검증을 마쳤다. E04 Contents의 형제 항목 다중 선택·같은 부모 안의 묶음 순서 편집과 저장 포커스 회귀까지 검증을 마쳤다. 이어서 F03/D01의 레이어 전체 Text Fill/Stroke RGB와 Stroke Width 7개 스칼라 애니메이션을 연결하고 최종 네이티브 검증을 마쳤다. 문자별 스타일/타이포그래피 애니메이션은 별도 범위다.
 
 현재는 **2D 모션 편집·합성 기반을 구현한 단계**다. AE 동등 수준이나 전체 백로그 완료 상태는 아니다. 기능군마다 규모가 달라 단순 항목 수를 완성률로 표시하지 않는다.
 
@@ -21,6 +21,17 @@
 - **정교한 편집에 남은 기능:** D02/D03 다중 채널·공간 보간·Speed Graph 선택 변형, E02/E03 경로 토폴로지·marquee/교차 경로 선택, E04 트리 편집·복합 Colors 애니메이션, G01 가변 Feather·로토베지어, F01–F03 실제 IME 검증·문자별 스타일·텍스트 속성 애니메이션, B01/B05/B07 배치 회귀·단축키/접근성. 스칼라 양방향 시간 보간·Speed Graph, Contents·도형 속성 애니메이션, 직접 텍스트 편집과 B06 공통 색 선택기는 아래 이력의 범위로 이미 구현됐다.
 - **후속 고급 기능:** 패널 도킹·소스 뷰어·최근 프로젝트, 타임라인 고급 시간 편집/검색/가상화, 공간 경로·프리셋·표현식, Shape 연산/SVG·Text Animator, 추가 효과·모션 블러, 고정밀 색/HDR·Proxy/GPU, 템플릿, 설치/업데이트·한글화와 UI 회귀 자동화.
 - **별도 대형 단계:** 3D/카메라/라이트·모델, 추적·로토/Puppet, 플러그인/교환 포맷 연구, 웹/API 제품 범위. AEP/MOGRT 호환은 구현되지 않았다.
+
+### F03/D01 레이어 전체 Text paint 애니메이션 — 2026-10-03
+
+- Fill RGB·Stroke RGB·Stroke Width의 7개 sparse track을 공통 속성/키 모델에 연결했다. Character·Properties·picker는 현재 프레임의 색/두께를 표시·편집하고 RGB 그룹 스톱워치, Timeline Text 채널, Value/Speed Graph를 제공한다. RGB는 0–255, 두께는 0–1000 px이며 평가 시 Bezier overshoot를 제한한다. 색 선택기의 alpha는 기존 전체 레이어 Opacity이며 독립 Fill alpha로 표시하지 않는다.
+- 기존 static base와 typography/source를 그대로 두고 독립 paint map을 사용한다. map이 필요한 문서만 Project schema 48을 요구하며 native LEP 컨테이너는 v1이다. 기존 비어 있는 map은 저장하지 않고, base와 같은 direct/generic/nested text Value no-op도 기존 schema·Redo·히스토리를 보존한다. lock/type/frame 검증은 생략하지 않는다.
+- 미완료 field draft는 해당 source Project·revision·layer·frame 및 Graph key selection에 고정한다. 일반 편집도 검사하며 hidden field는 다시 표시·sync할 때까지 자체 context를 유지한다. 변하지 않은 redraw와 frame/selection-only 변화는 immutable source를 재사용해 매번 전체 Project를 복제하지 않는다. format-only HEX, unchanged picker OK와 Cancel은 중간 프레임 키를 만들지 않는다.
+- renderer는 평가한 색/두께를 text paint와 effect bounds 양쪽에 재사용한다. 테스트 중 드러난 기존 fractional text filter 경계의 antialias 1픽셀 잘림은 text extents를 바깥 정수 좌표로 반올림해 수정했다. Shape bounds와 glyph advance/caret/wrapping 계산은 바꾸지 않았다. Source 편집·복구 draft·Point/Paragraph 변환·실제 font replacement는 paint key/handle을 보존한다.
+- 최종 자동 검증은 코어 251 + 데스크톱 475(기본 726), 명시적 FFmpeg 30, fmt/direct Cargo check/릴리스가 통과했다. 신규 36개(Core 13, controls 14, render 6, session 3)는 이 집계에 포함한다. Core/UI 독립 리뷰와 수정 재리뷰에 차단 문제가 없다. Moon wrapper는 proto 준비 단계 및 no-actions plugin 경로에서 실패했으므로 통과로 기록하지 않고 같은 pinned Cargo 작업을 직접 검증했다. 네이티브 확인은 아래 범위로 별도 기록한다.
+- 최종 pinned 앱의 실제 화면에서 0/30/60프레임 샘플, Character/Inspector 현재 프레임 RGB, Stroke picker, unchanged OK/changed Cancel 뒤 한 Undo, Fill 그룹 애니메이션 해제와 한 Undo, Timeline 7개 채널, RGB/width Value·Speed 단위와 대표 endpoint 드래그, 30프레임 Source 편집 후 모든 paint track 보존, native Save/reopen PROJ·VIEW 일치를 확인했다. 10개 bounded 사례와 25개 사후 assertion, 13개 파일 CRC/공식 codec 왕복, 24개 CUA 화면을 보존했다. 원본 fixture와 release 해시는 유지됐다. hidden stale draft·실제 IME·전체 temporal/lock/modal 조합·held 중간 화면·Windows/DPI는 네이티브 미검증이며 자동 회귀/CLI 픽셀 결과와 구분한다.
+- 문자별 paint, Source Text·타이포그래피 애니메이션, 독립 fill/stroke alpha, switch/order 애니메이션과 Text Animator는 구현하지 않았다. F03/D01 전체는 Partial이며 다음 제안 단계는 E02의 명시적으로 선택한 정점 하나에 대한 local anchor/tangent 숫자 편집 모달이다.
+- 최종 pinned CLI는 기존 text 예제 9개의 0/30/60프레임(27개)을 이전 릴리스와 정확히 일치시켰다. 새 native 애니메이션의 0/15/30/45/60프레임은 수동으로 독립 구성한 static 문서를 양쪽 릴리스로 출력한 결과와 같다. 32개 frame case의 28,440,800 RGBA 픽셀이 일치했고 원본 fixture/source 해시는 유지됐다. 의도적으로 복원한 fractional filter-edge 픽셀은 별도 identity-effect unit 회귀로 검증한다.
 
 ### E04 Contents 형제 선택·묶음 순서와 키보드 경계 — 2026-10-03
 

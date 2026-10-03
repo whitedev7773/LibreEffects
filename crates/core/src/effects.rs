@@ -354,6 +354,7 @@ impl Layer {
                 }
                 .into_iter(),
             )
+            .chain(self.text_parameters.values_mut())
             .chain(self.time_remap.iter_mut())
             .chain(self.audio_controls.parameters.values_mut())
             .chain(self.path_masks.iter_mut().flat_map(|m| {
