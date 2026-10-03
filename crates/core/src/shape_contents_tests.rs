@@ -805,3 +805,111 @@ fn contents_paths_convert_animate_and_follow_group_transforms() {
     assert!(contents(&e).editable_paths(30).is_empty());
     assert_eq!(contents(&e).svg_at(30), "");
 }
+
+#[test]
+fn group_space_includes_empty_selected_group_and_animated_ancestors() {
+    let mut e = scene();
+    edit(&mut e, ContentsEdit::Promote);
+    for id in [2, 3, 4] {
+        edit(&mut e, ContentsEdit::Remove(id));
+    }
+    edit(
+        &mut e,
+        ContentsEdit::Add {
+            parent: 1,
+            kind: ContentsKind::Group(vec![]),
+        },
+    );
+    for (item, parameter, value) in [
+        (1, ContentsParam::Transform(Property::PositionX), 40.),
+        (1, ContentsParam::Transform(Property::PositionY), 70.),
+        (1, ContentsParam::Transform(Property::Rotation), 90.),
+        (5, ContentsParam::Transform(Property::AnchorX), 3.),
+        (5, ContentsParam::Transform(Property::AnchorY), 4.),
+        (5, ContentsParam::Transform(Property::PositionX), 10.),
+        (5, ContentsParam::Transform(Property::PositionY), 20.),
+        (5, ContentsParam::Transform(Property::ScaleX), -200.),
+        (5, ContentsParam::Transform(Property::ScaleY), 50.),
+        (5, ContentsParam::Skew, 45.),
+    ] {
+        contents_value(&mut e, item, parameter, value);
+    }
+    let parameter = ContentsParam::Transform(Property::PositionX);
+    edit(
+        &mut e,
+        ContentsEdit::Track {
+            item: 1,
+            parameter,
+            edit: TrackEdit::ToggleAnimation { frame: 0 },
+        },
+    );
+    edit(
+        &mut e,
+        ContentsEdit::Track {
+            item: 1,
+            parameter,
+            edit: TrackEdit::Value {
+                frame: 20,
+                value: 60.,
+            },
+        },
+    );
+    let before = e.project().clone();
+    assert!(contents(&e).editable_paths(10).is_empty());
+    for frame in [0, 5, 10, 20] {
+        let transform = contents(&e).group_transform(5, frame).unwrap();
+        for [x, y] in [[0., 0.], [1., 0.], [0., 1.], [-13., 29.]] {
+            // Independent scalar scale/reflection -> shear -> translation, then
+            // the outer 90-degree rotation and linearly animated translation.
+            let inner_x = -2. * (x - 3.) - 0.5 * (y - 4.) + 10.;
+            let inner_y = 0.5 * (y - 4.) + 20.;
+            let expected = [40. + frame as f64 - inner_y, 70. + inner_x];
+            let actual = transform.point([x, y]);
+            assert!((actual[0] - expected[0]).abs() < 1e-9);
+            assert!((actual[1] - expected[1]).abs() < 1e-9);
+        }
+    }
+    assert_eq!(e.project(), &before);
+}
+
+#[test]
+fn group_space_excludes_disabled_ancestry_and_non_groups_without_hiding_singularity() {
+    let mut e = scene();
+    edit(&mut e, ContentsEdit::Promote);
+    edit(
+        &mut e,
+        ContentsEdit::Add {
+            parent: 1,
+            kind: ContentsKind::Group(vec![]),
+        },
+    );
+    assert!(contents(&e).group_transform(5, 0).is_some());
+    for id in [0, 2, 3, 4, 999] {
+        assert!(contents(&e).group_transform(id, 0).is_none());
+    }
+    for id in [1, 5] {
+        edit(
+            &mut e,
+            ContentsEdit::Enabled {
+                item: id,
+                enabled: false,
+            },
+        );
+        assert!(contents(&e).group_transform(5, 0).is_none());
+        edit(
+            &mut e,
+            ContentsEdit::Enabled {
+                item: id,
+                enabled: true,
+            },
+        );
+    }
+    contents_value(&mut e, 5, ContentsParam::Transform(Property::ScaleX), 0.);
+    assert!(
+        contents(&e)
+            .group_transform(5, 0)
+            .unwrap()
+            .inverse()
+            .is_none()
+    );
+}

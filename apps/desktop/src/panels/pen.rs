@@ -6,13 +6,14 @@ use crate::{
 };
 use gpui::{Bounds, PathBuilder, Pixels, Point, Window, fill, point, px, rgb, size};
 use libre_effects_core::{
-    Affine, Command, CompositionId, Content, LayerId, PathMask, PathMaskMode, PathTarget,
-    PathVertex, Project, Shape, VectorPath,
+    Affine, Command, CompositionId, Content, ContentsEdit, ContentsKind, LayerId, PathMask,
+    PathMaskMode, PathTarget, PathVertex, Project, Shape, VectorPath,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Target {
     NewShape,
+    NewContents(LayerId, u64),
     Shape(LayerId),
     Contents(LayerId, u64),
     Mask(LayerId, usize),
@@ -75,6 +76,16 @@ impl Session {
                 width: self.context.project.composition().width() as f64,
                 height: self.context.project.composition().height() as f64,
                 name: "Shape Path".into(),
+            }),
+            Target::NewContents(id, parent) => Some(Command::Contents {
+                id,
+                edit: ContentsEdit::Add {
+                    parent,
+                    kind: ContentsKind::Path {
+                        path: self.path.clone(),
+                        animation: Default::default(),
+                    },
+                },
             }),
             Target::Shape(id) => Some(Command::EditPath {
                 id,
@@ -431,6 +442,26 @@ impl Pen {
                     Target::Mask(l.id(), l.path_masks().len()),
                     comp.world_transform(l.id(), s.frame)?,
                 )
+            } else if let Content::ShapeContents(contents) = l.content()
+                && let Some((composition, layer, item)) = s.contents_selection
+                && composition == s.editor.project().active_composition_id()
+                && layer == l.id()
+            {
+                // Only an explicitly selected Group receives new geometry. A
+                // stale matching item or disabled ancestor must not fall back
+                // to silently creating a separate layer. Keep the existing Pen
+                // layer visibility/in-out policy; enabled Contents ancestry is
+                // the additional boundary for this target.
+                let node = contents.node(item)?;
+                if matches!(node.kind, ContentsKind::Group(_)) {
+                    (
+                        Target::NewContents(l.id(), item),
+                        comp.world_transform(l.id(), s.frame)?
+                            .compose(contents.group_transform(item, s.frame)?),
+                    )
+                } else {
+                    (Target::NewShape, Affine::default())
+                }
             } else {
                 (Target::NewShape, Affine::default())
             }
@@ -923,3 +954,7 @@ mod tests {
 #[cfg(test)]
 #[path = "pen_tests.rs"]
 mod multiselect_tests;
+
+#[cfg(test)]
+#[path = "pen_contents_tests.rs"]
+mod contents_tests;

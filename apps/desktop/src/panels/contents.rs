@@ -411,6 +411,7 @@ impl Render for ContentsControls {
                     )
                     .child(
                         ui::text_button(("contents-item", item), node.name.clone())
+                            .when(is_group, |b| b.tooltip(|_, cx| cx.new(|_| ui::Tip("Select this group to draw new Pen paths inside it. Paths use existing applicable paints; without a paint they remain editable outlines with no rendered output.".into())).into()))
                             .flex_1()
                             .min_w_0()
                             .justify_start()

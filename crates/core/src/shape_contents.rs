@@ -564,6 +564,26 @@ impl ShapeContents {
     pub fn svg_at(&self, f: Frame) -> String {
         self.svg_at_with_prefix(f, "contents")
     }
+    /// Map a group's local geometry into layer space, including the group's own
+    /// evaluated transform. Disabled ancestors exclude their whole subtree. An
+    /// empty group still has a space; a missing or non-group item does not.
+    pub fn group_transform(&self, item: u64, f: Frame) -> Option<Affine> {
+        fn walk(nodes: &[ContentsNode], item: u64, f: Frame, world: Affine) -> Option<Affine> {
+            for node in nodes.iter().filter(|node| node.enabled) {
+                if let ContentsKind::Group(children) = &node.kind {
+                    let world = world.compose(node.transform(f));
+                    if node.id == item {
+                        return Some(world);
+                    }
+                    if let Some(world) = walk(children, item, f, world) {
+                        return Some(world);
+                    }
+                }
+            }
+            None
+        }
+        walk(&self.items, item, f, Affine::default())
+    }
     pub fn svg_at_with_prefix(&self, f: Frame, prefix: &str) -> String {
         let scope = prefix
             .as_bytes()
