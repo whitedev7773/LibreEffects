@@ -31,6 +31,8 @@ mod output_preflight;
 mod output_settings;
 mod panels;
 mod path_mask_render;
+#[cfg(test)]
+mod path_order_render_tests;
 mod preview_cache;
 mod project_browser;
 mod project_io;

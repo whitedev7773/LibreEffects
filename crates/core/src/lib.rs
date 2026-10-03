@@ -54,7 +54,7 @@ pub use path_animation::{PathAnimation, PathTarget};
 mod mask_animation;
 pub use mask_animation::MaskParam;
 mod paths;
-pub use paths::{PathMask, PathMaskMode, PathVertex, VectorPath};
+pub use paths::{PathMask, PathMaskMode, PathOrder, PathVertex, VectorPath};
 mod shape_animation;
 mod shape_stroke;
 pub use shape_animation::ShapeParam;
@@ -1067,6 +1067,12 @@ pub enum Command {
         target: PathTarget,
         edit: TrackEdit,
     },
+    /// Reindex the base path and every stored pose without changing timing.
+    ReorderPath {
+        id: LayerId,
+        target: PathTarget,
+        order: PathOrder,
+    },
     SetPathMasks {
         id: LayerId,
         masks: Vec<PathMask>,
@@ -1206,6 +1212,18 @@ pub enum Command {
     },
 }
 
+impl Command {
+    fn reorders_paths_only(&self) -> bool {
+        match self {
+            Self::ReorderPath { .. } => true,
+            Self::Batch(commands) => {
+                !commands.is_empty() && commands.iter().all(Self::reorders_paths_only)
+            }
+            _ => false,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 struct Snapshot {
     project: Project,
@@ -1280,10 +1298,25 @@ impl Editor {
         }
     }
 
+    fn accept_candidate(&mut self, next: Snapshot) -> Result<(), String> {
+        next.project.validate()?;
+        if next != self.current {
+            document::validate_budget(&next.project)?;
+            let previous = std::mem::replace(&mut self.current, next);
+            self.record(previous);
+        }
+        Ok(())
+    }
+
     pub fn execute(&mut self, command: Command) -> Result<(), String> {
         // Apply to a candidate so invalid commands never partially mutate the project.
         let mut next = self.current.clone();
+        let geometry_only = command.reorders_paths_only();
         apply(&mut next, command)?;
+        if geometry_only {
+            // Reindexing needs no schema/asset migration, even for imported projects.
+            return self.accept_candidate(next);
+        }
         // Older applications must reject projects they cannot render faithfully.
         if next.project.composition.layers.iter().any(|layer| {
             layer.parent.is_some()
@@ -1584,13 +1617,7 @@ impl Editor {
                 .unwrap_or(44);
             next.project.version = next.project.version.max(version);
         }
-        next.project.validate()?;
-        if next != self.current {
-            document::validate_budget(&next.project)?;
-            let previous = std::mem::replace(&mut self.current, next);
-            self.record(previous);
-        }
-        Ok(())
+        self.accept_candidate(next)
     }
 }
 

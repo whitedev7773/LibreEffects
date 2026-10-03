@@ -3,7 +3,7 @@ use crate::{
     ui,
 };
 use gpui::{Div, Entity, SharedString, div, prelude::*, px};
-use libre_effects_core::{Command, Layer, PathTarget, PropertyPath, TrackEdit};
+use libre_effects_core::{Command, Layer, PathOrder, PathTarget, PropertyPath, TrackEdit};
 
 pub(super) fn row(
     state: &Entity<EditorState>,
@@ -44,6 +44,18 @@ pub(super) fn row(
             track.keys().contains_key(&frame),
         ))
         .child(div().flex_1().child("Path"))
+        .child(ui::action_tool(
+            key("reverse"),
+            "arrow-rotate-left",
+            "Reverse Direction across all path poses. Preserves the curve; winding and stroke dashes may change.",
+            state,
+            Action::Edit(Command::ReorderPath {
+                id,
+                target,
+                order: PathOrder::Reverse,
+            }),
+            false,
+        ))
         .child(ui::action_tool(
             key("pen"),
             "pen",

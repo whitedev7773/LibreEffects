@@ -1,5 +1,12 @@
 use serde::{Deserialize, Serialize};
 
+/// Reindex geometry without changing its shape or animation timing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PathOrder {
+    Reverse,
+    FirstVertex(usize),
+}
+
 /// Tangents are offsets from the vertex, in layer coordinates.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PathVertex {
@@ -23,6 +30,34 @@ pub struct VectorPath {
     pub closed: bool,
 }
 impl VectorPath {
+    /// Returns reordered geometry, leaving this path unchanged on success or failure.
+    pub fn reordered(&self, order: PathOrder) -> Result<Self, String> {
+        if !self.valid() {
+            return Err("Invalid vector path".into());
+        }
+        if let PathOrder::FirstVertex(index) = order {
+            if !self.closed {
+                return Err("Set First Vertex requires a closed path".into());
+            }
+            if index >= self.vertices.len() {
+                return Err("Path vertex no longer exists".into());
+            }
+        }
+        let mut path = self.clone();
+        match order {
+            PathOrder::Reverse => {
+                // Keep a closed path's first vertex stable. Open paths exchange endpoints.
+                let first = usize::from(path.closed);
+                path.vertices[first..].reverse();
+                for vertex in &mut path.vertices {
+                    std::mem::swap(&mut vertex.incoming, &mut vertex.outgoing);
+                }
+            }
+            PathOrder::FirstVertex(index) => path.vertices.rotate_left(index),
+        }
+        Ok(path)
+    }
+
     pub fn valid(&self) -> bool {
         (if self.closed { 3 } else { 2 }..=1024).contains(&self.vertices.len())
             && self.vertices.iter().all(|v| {

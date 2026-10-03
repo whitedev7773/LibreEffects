@@ -4,10 +4,10 @@ use crate::{
     editor::{EditorState, Tool},
     ui,
 };
-use gpui::{Bounds, PathBuilder, Pixels, Point, Window, fill, point, px, rgb, size};
+use gpui::{Bounds, KeyDownEvent, PathBuilder, Pixels, Point, Window, fill, point, px, rgb, size};
 use libre_effects_core::{
     Affine, Command, CompositionId, Content, ContentsEdit, ContentsKind, LayerId, PathMask,
-    PathMaskMode, PathTarget, PathVertex, Project, Shape, VectorPath,
+    PathMaskMode, PathOrder, PathTarget, PathVertex, Project, Shape, VectorPath,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -574,6 +574,112 @@ impl Pen {
         self.held = false;
         Some(result)
     }
+    /// Canvas-only shortcuts. Exact modifiers and focus keep shell shortcuts,
+    /// fields and IME input out of this geometry-editing route.
+    pub fn order_key(
+        &mut self,
+        event: &KeyDownEvent,
+        focused: bool,
+        composing: bool,
+        s: &EditorState,
+    ) -> (bool, Option<Command>) {
+        let m = event.keystroke.modifiers;
+        if !focused
+            || composing
+            || s.tool != Tool::Pen
+            || s.text_session.is_some()
+            || s.colors.session.is_some()
+            || s.gradient_editor.is_some()
+            || !m.shift
+            || m.control
+            || m.alt
+            || m.platform
+            || m.function
+        {
+            return (false, None);
+        }
+        let first = match event.keystroke.key.as_str() {
+            "f" | "F" => true,
+            "r" | "R" => false,
+            _ => return (false, None),
+        };
+        // Consume repeats/unavailable edits instead of leaking Shift+R to the
+        // shell's Rotation filter. Never order unpublished gesture indices.
+        if event.is_held || self.held || self.drag.is_some() || self.draft.is_some() {
+            return (true, None);
+        }
+        (true, self.reorder(first, s))
+    }
+    fn reorder(&mut self, first: bool, s: &EditorState) -> Option<Command> {
+        let context = self.selected_context.as_ref().filter(|c| c.valid(s))?;
+        let selection = self.selected.as_ref()?;
+        let (_, path, _) = paths(s)
+            .into_iter()
+            .find(|(target, _, _)| *target == selection.target)?;
+        let count = path.vertices.len();
+        if selection.vertices.is_empty() || selection.vertices.iter().any(|&i| i >= count) {
+            return None;
+        }
+        let order = if first {
+            if !path.closed || selection.vertices.len() != 1 {
+                return None;
+            }
+            PathOrder::FirstVertex(*selection.vertices.first()?)
+        } else {
+            PathOrder::Reverse
+        };
+        let (id, target) = match selection.target {
+            Target::Shape(id) => (id, PathTarget::Shape),
+            Target::Contents(id, item) => (id, PathTarget::Contents(item)),
+            Target::Mask(id, index) => (
+                id,
+                PathTarget::Mask(
+                    context
+                        .project
+                        .composition()
+                        .layer(id)?
+                        .path_masks()
+                        .get(index)?
+                        .id,
+                ),
+            ),
+            Target::NewShape | Target::NewContents(..) => return None,
+        };
+        let command = Command::ReorderPath { id, target, order };
+        if !self.remember_command(&command, s) {
+            return None;
+        }
+        let selection = self.selected.as_mut()?;
+        selection.vertices = selection
+            .vertices
+            .iter()
+            .map(|&old| match order {
+                PathOrder::Reverse if path.closed => (count - old) % count,
+                PathOrder::Reverse => count - 1 - old,
+                PathOrder::FirstVertex(index) => (old + count - index) % count,
+            })
+            .collect();
+        Some(command)
+    }
+    pub fn order_help(&self, s: &EditorState) -> &'static str {
+        if self.held || self.drag.is_some() || self.draft.is_some() {
+            "Path order: finish or cancel the Pen gesture first"
+        } else if self
+            .selected
+            .as_ref()
+            .filter(|_| self.selected_context.as_ref().is_some_and(|c| c.valid(s)))
+            .and_then(|selection| {
+                paths(s)
+                    .into_iter()
+                    .find(|(t, _, _)| *t == selection.target)
+            })
+            .is_some_and(|(_, path, _)| !path.closed)
+        {
+            "Open path: Shift+R switches endpoints · Set First requires a closed path"
+        } else {
+            "Path: Shift+R reverse · Shift+F set first (one closed vertex) · outline = first"
+        }
+    }
     pub fn key(&mut self, key: &str, s: &EditorState) -> (bool, Option<Command>) {
         self.reset_if_stale(s);
         match key {
@@ -705,6 +811,24 @@ pub(super) fn paint(
         }
         for (index, vertex) in path.vertices.iter().enumerate() {
             let p = screen(vertex.position);
+            // First-point identity is independent of the white selection fill.
+            if index == 0 {
+                let mut outline = PathBuilder::stroke(px(1.0));
+                for (i, offset) in [[-5., -5.], [5., -5.], [5., 5.], [-5., 5.], [-5., -5.]]
+                    .into_iter()
+                    .enumerate()
+                {
+                    let at = p + point(px(offset[0]), px(offset[1]));
+                    if i == 0 {
+                        outline.move_to(at);
+                    } else {
+                        outline.line_to(at);
+                    }
+                }
+                if let Ok(outline) = outline.build() {
+                    window.paint_path(outline, color);
+                }
+            }
             for tangent in [vertex.incoming, vertex.outgoing] {
                 if tangent == [0.0; 2] {
                     continue;
@@ -958,3 +1082,7 @@ mod multiselect_tests;
 #[cfg(test)]
 #[path = "pen_contents_tests.rs"]
 mod contents_tests;
+
+#[cfg(test)]
+#[path = "pen_order_tests.rs"]
+mod order_tests;

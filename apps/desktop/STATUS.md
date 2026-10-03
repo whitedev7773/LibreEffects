@@ -1,7 +1,7 @@
 # Current desktop implementation status
 
 Updated 2026-10-03 for the resumed-work, I01 output-preflight and
-E04/E02 editing and D03 time-box checkpoints.
+E04/E02 editing, D03 time-box and animated path-order checkpoints.
 This is the current checkpoint inventory;
 [DEVELOPMENT_BACKLOG.md](DEVELOPMENT_BACKLOG.md) retains the original audit and
 its dated implementation/test history. Older “remaining” lists and test counts
@@ -31,6 +31,13 @@ does not establish a complete native editing workflow.
   and no-net-change gestures preserve keys/history. Pending insertion interruption,
   final mouse-up coordinates/modifiers and overlay focus have regression coverage.
   Marquee/cross-path selection and topology-changing animation remain open.
+- **Whole-track path order:** Reverse Direction and closed-path Set First Vertex
+  reorder base geometry and every stored pose together without changing timing,
+  pose references, transforms or paint settings. Canvas shortcuts remap the same
+  selected geometric points; a separate outline marks the first point. Pure
+  nonempty reorder batches preserve legacy version/assets and exact no-op history.
+  Cubic geometry is preserved, but winding/Non-Zero holes and dash placement can
+  intentionally change. Marquee/cross-path and numeric vertex editing remain open.
 - **Selected-group Pen creation:** new open/closed paths can be drawn directly
   into the explicitly selected Contents Group, including empty/nested transformed
   groups. Existing applicable paints are inherited without paint additions; the
@@ -83,17 +90,17 @@ does not establish a complete native editing workflow.
 ### Verification record for this checkpoint
 
 The combined checkpoint includes all prior restoration/I01/Gradient/Pen fixes,
-selected-group creation and Speed Graph time scaling. Formatting, type checking,
-all 549 default tests, the explicit 30-test media suite
+selected-group creation, Speed Graph time scaling and whole-track path ordering.
+Formatting, type checking, all 579 default tests, the explicit 30-test media suite
 and the optimized release build passed. Native checks are listed separately with
 their tested build and coverage; automated tests do not imply native acceptance.
 
 | Check | Result and boundary |
 | --- | --- |
-| Core tests | 199 passed, including save-budget guards and the new group-space regressions. |
-| Desktop default tests on Linux | 350 passed, including selected-group creation, Speed time scaling and prior modal/Pen/focus/I01 regressions; 30 FFmpeg tests ignored by default. |
+| Core tests | 210 passed, including save-budget guards, group spaces and 11 path-order/Batch regressions. |
+| Desktop default tests on Linux | 369 passed, including 14 new Pen-order and 5 rendering regressions plus prior editing/focus/I01 tests; 30 FFmpeg tests ignored by default. |
 | Explicit FFmpeg integration suite | All 30 ignored media tests were explicitly run and passed. They are not included in the default pass count. |
-| Focused editing regressions | 16 modal-transaction tests, 41 Pen tests (including 14 new group-creation tests), 17 new Speed-box tests, 3 shell-focus tests and the prior 20 gradient-draft/endpoint tests passed within the desktop suite; do not add these counts a second time. |
+| Focused editing regressions | 16 modal-transaction tests, 55 Pen tests (including 14 group-creation and 14 path-order tests), 17 Speed-box tests, 5 path-order rendering tests, 3 shell-focus tests and the prior 20 gradient-draft/endpoint tests passed within the desktop suite; do not add these counts a second time. |
 | Release build | `cargo build -p libre-effects-desktop --release --locked` succeeded after the final review fixes. The earlier interrupted-build blocker is closed. |
 | Vendored grid | Debug and release each passed 215 unit tests and 43 doc tests with all features. |
 | Web/API Moon CI targets | `web:build`, `web:test` and `api:build` passed locally; web has 3 passing tests. API validation is a deployment dry run, not a deployment. |
@@ -103,6 +110,7 @@ their tested build and coverage; automated tests do not imply native acceptance.
 | Native modal editor | Initial debug build passed stop/midpoint/RGB/opacity drafts, Cancel, HEX validation, field Escape, multi-change OK and exact one-Undo/Redo. Edit-away-and-back was a no-op preserving prior history. Final release reopened the saved result; its CLI output matched independent color/opacity midpoint math at 2,244 interior pixels with maximum RGB error 1.47/255. No actual AE comparison was performed. |
 | Native Pen and overlay focus, final release | Same-path pair drag passed for legacy Shape, rotated/skewed nested Contents and vector mask; saved JSON confirmed identical local deltas, unchanged unselected positions and all tangent offsets. Selection-only was clean. Static six-to-four deletion, closed-path minimum-size rejection, animated topology rejection with both keys preserved, exact one-Undo/Redo and static save/reopen passed. Ctrl+K/Ctrl+N moved focus off the canvas, preventing Delete behind Settings; field input focus and field/dialog Escape passed. File actions such as Save intentionally blur and clear transient Pen selection. Atomic drag input still prevents intermediate mouse-held observation. |
 | Native selected-group Pen / Speed time box | Optimized release passed nested closed/open curves, repeated group creation, Cancel, one-Undo/Redo, save/reopen and Ctrl-mask/standalone controls. Existing path/paint JSON remained exact; independent group-transform reconstruction matched actual click coordinates within 0.223 pixels per axis. Speed showed only two side handles; vertical-only and return-to-start drags were no-ops, horizontal scaling preserved values/influences with common nominal slope compensation, and one-Undo/Redo/reopen matched saved data. The inset frame-zero handle was visible and draggable without hiding the key glyph. 26 post-hoc assertions and 15 native screenshots record these flows. Alt-centered/differential snap, held-drag interruption, tiny plots and full layout/DPI coverage remain unverified natively. Extremely short plots may omit a handle if no glyph-clear position fits. |
+| Native whole-track path order | Corrected optimized release is pinned; its native acceptance session is pending. Automated whole-track timing/selection/render guarantees above do not imply that native shortcuts, first-point marker or Properties Reverse have passed yet. |
 | Windows CI and device behavior | Fresh remote CI has not run: the requested checkpoint is local commits only, with no push or PR. Historical Windows native/device results remain in the backlog; the Windows-only audio-device test was not run on Linux. |
 
 Linux native startup needs a working Vulkan driver, and Open/Save needs a running
@@ -183,7 +191,7 @@ Every original A01–L05 ID appears once below. The labels are deliberately boun
 | ID | Status | Current scope and remaining boundary |
 | --- | --- | --- |
 | E01 | Partial | Drag-created rectangle, rounded rectangle, ellipse, polygon and star; open lines can be drawn with Pen. Dedicated parametric line/tool-default controls and wider native regression remain. |
-| E02 | Partial | Open/closed Bezier Pen, insert/delete/convert points, handles, parametric conversion and same-path multi-vertex moves/static deletion through transforms. Marquee/cross-path selection, numeric vertex editing, path direction/first vertex and topology-changing animation remain. |
+| E02 | Partial | Open/closed Bezier Pen, insert/delete/convert points, handles, parametric conversion and same-path multi-vertex moves/static deletion through transforms, animated-safe Reverse/Set First and first-point marker. Marquee/cross-path selection, numeric vertex editing and topology-changing animation remain. |
 | E03 | Partial | Animated scalar/RGB/opacity paint, cap/join/miter/dash controls, fractional Points and Contents linear/radial Gradient Fill/Stroke. Remaining parametric details, topology editing and complete native coverage are not done. |
 | E04 | Partial | Nested Contents tree, paths/paints, animated group transforms/Skew, Composite ordering, 16 paint blend modes, live gradient ramp drafts, transformed canvas endpoints, transactional modal Gradient Editor and selected-group Pen creation. Compound Colors animation and tree drag/multi-selection remain. |
 | E05 | Partial | Fixed-topology shape/mask path animation exists. Trim Paths, Repeater, Merge/Offset Paths and topology-changing interpolation are not implemented. |
@@ -267,8 +275,8 @@ Every original A01–L05 ID appears once below. The labels are deliberately boun
    animation, transformed/mask paths, focus/IME and DPI. Mid-drag preview observation
    remains tool-limited. Remote Windows CI remains unrun while delivery is local
    commits only.
-2. Continue E04 with tree selection/dragging and a deliberately versioned compound
-   Colors/topology model. The current modal
+2. Continue E02 selection/numeric vertex tools and E04 tree selection/dragging plus
+   a deliberately versioned compound Colors/topology model. The current modal
    editor does not require or imply that later animation model.
 3. Extend D02/D03 to multi-channel graphs and vertical Speed Graph transforms;
    specify spatial path/time semantics before adding roving/spatial interpolation.

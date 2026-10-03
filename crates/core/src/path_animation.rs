@@ -1,5 +1,9 @@
 use super::*;
 
+#[cfg(test)]
+#[path = "path_order_tests.rs"]
+mod path_order_tests;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PathTarget {
     Shape,
@@ -28,6 +32,19 @@ impl PathAnimation {
     }
     pub fn animated(&self) -> bool {
         !self.timing.keys.is_empty()
+    }
+    fn reorder(&mut self, base: &mut VectorPath, order: PathOrder) -> Result<(), String> {
+        let reordered_base = base.reordered(order)?;
+        // References are opaque indices: preserve their slots, including unused poses.
+        // Never intern, deduplicate, or touch the timing track during a reindex.
+        let reordered_poses = self
+            .poses
+            .iter()
+            .map(|pose| pose.reordered(order))
+            .collect::<Result<Vec<_>, _>>()?;
+        *base = reordered_base;
+        self.poses = reordered_poses;
+        Ok(())
     }
     pub fn at(&self, base: &VectorPath, frame: Frame) -> VectorPath {
         if self.poses.is_empty() {
@@ -213,9 +230,9 @@ pub(super) fn validate(layer: &Layer, duration: Frame, version: u32) -> Result<(
 }
 pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<(), String>> {
     let (id, target) = match command {
-        Command::EditPath { id, target, .. } | Command::AnimatePath { id, target, .. } => {
-            (*id, *target)
-        }
+        Command::EditPath { id, target, .. }
+        | Command::AnimatePath { id, target, .. }
+        | Command::ReorderPath { id, target, .. } => (*id, *target),
         _ => return None,
     };
     Some((|| {
@@ -224,6 +241,9 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
         let (base, animation) = layer
             .path_animation_mut(target)
             .ok_or("Path no longer exists")?;
+        if let Command::ReorderPath { order, .. } = command {
+            return animation.reorder(base, *order);
+        }
         if let Command::EditPath { frame, path, .. } = command {
             if *frame >= duration
                 || !path.valid()

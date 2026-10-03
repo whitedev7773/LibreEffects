@@ -73,6 +73,28 @@ Help or other shell overlays removes canvas focus before editing shortcuts run.
 File actions such as Save also blur the canvas and clear transient vertex selection;
 reselect vertices before the next multi-vertex gesture.
 
+Existing vector paths support **Reverse Direction** from their Path property row,
+or **Shift+R** with a nonempty same-path Pen selection. **Shift+F** sets a single
+selected vertex as the first vertex of a **closed** path. An outer square marks
+that first vertex independently of the white selection fill. Open paths cannot
+rotate their start index; Reverse Direction exchanges their endpoints instead.
+Closed reversal keeps the existing first vertex and swaps traversal direction.
+
+These operations reorder the base path and every stored animation pose together,
+preserving key timing, opaque pose references, paints, transforms and stable path
+IDs. Incoming/outgoing tangent offsets swap during reversal. Each change is one
+Undo, and choosing the current first vertex creates no history entry. Selected
+indices remap so the same geometric points remain selected for the next drag.
+Shortcuts require canvas focus and ignore key repeat or unrelated modifier chords;
+finish/cancel a draft, insertion or held drag before changing path order. Save and
+other focus-changing actions still clear transient Pen selection.
+
+The cubic curve is preserved, but its **appearance can change**: reversing one
+contour changes its winding and can create/remove holes in a Non-Zero compound
+fill. Reversal or a new first vertex can change stroke dash placement without
+changing dash settings. Even-Odd mask coverage is direction-independent. These
+controls do not implement Trim Paths, path text or AE-equivalent behavior.
+
 Properties contains shape Fill/Stroke and Closed Path controls, and ordered
 mask Add/Subtract/Intersect/None, Invert, reorder and remove controls. Paths
 are stored in layer coordinates, including parent transformations, in project

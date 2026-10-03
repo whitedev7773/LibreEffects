@@ -1,4 +1,5 @@
 use crate::{
+    components::TextField,
     editor::{Action, EditorState, Tool},
     ui,
 };
@@ -1182,6 +1183,7 @@ impl Render for Preview {
         let gradient_overlay = gradient_gesture::Overlay::current(state, &render_project);
         let gradient_point = self.gradient_point;
         let pen_active = state.tool == Tool::Pen;
+        let pen_order_help = self.pen.order_help(state);
         let comp = render_project.composition().clone();
         let gradient_gesture = state
             .gradient_editor
@@ -1299,6 +1301,20 @@ impl Render for Preview {
                         }
                     )),
             )
+            .when(pen_active && text_session.is_none() && !gradient_active, |view| {
+                view.child(
+                    div()
+                        .id("pen-path-order-help")
+                        .h(px(20.0))
+                        .flex_none()
+                        .px_3()
+                        .overflow_hidden()
+                        .text_size(px(11.0))
+                        .text_color(rgb(ui::MUTED))
+                        .tooltip(|_, cx| cx.new(|_| ui::Tip("Reorders the base and all animation poses. Curve geometry and key timing stay unchanged. Reverse may change Non-Zero compound fill holes; either action may change stroke dash placement.".into())).into())
+                        .child(pen_order_help),
+                )
+            })
             .child(
                 div()
                     .id("composition-canvas")
@@ -1309,7 +1325,17 @@ impl Render for Preview {
                         if this.text_key(event,window,cx) {return;}
                         if this.state.read(cx).colors.session.is_some() || this.state.read(cx).gradient_editor.is_some() { return; }
                         if this.state.read(cx).tool == Tool::Pen {
-                            let (handled, command) = this.pen.key(&event.keystroke.key, this.state.read(cx));
+                            let (ordered, command) = this.pen.order_key(
+                                event,
+                                this.focus.is_focused(window),
+                                TextField::is_composing(window, cx),
+                                this.state.read(cx),
+                            );
+                            let (handled, command) = if ordered {
+                                (true, command)
+                            } else {
+                                this.pen.key(&event.keystroke.key, this.state.read(cx))
+                            };
                             if handled {
                                 if let Some(command) = command { this.state.update(cx, |s,cx| s.dispatch(&Action::Edit(command), window, cx)); }
                                 cx.stop_propagation(); cx.notify(); return;
