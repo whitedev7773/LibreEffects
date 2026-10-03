@@ -1,6 +1,7 @@
 mod key_menu;
 use super::parent_drag::ParentDrag;
 use crate::color_edit::InputTarget;
+use crate::view_state::GraphChannel;
 use crate::{
     components::TextField,
     editor::{Action, EditorState, PropertyFilter},
@@ -418,7 +419,7 @@ impl Timeline {
                         .find(|key| {
                             key.property == s.graph_property && s.editor.selected() == Some(key.id)
                         })
-                        .map(|key| (key.id, key.frame));
+                        .copied();
                 }
             });
         }
@@ -502,6 +503,12 @@ impl Render for Timeline {
         let graph_open = state.graph_open;
         let marker_open = state.selected_marker().is_some();
         let graph_property = state.graph_property;
+        let pinned_channels = state
+            .graph_channels
+            .pinned
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
         let frame = state.frame;
         let start = state.timeline_start;
         let visible = state.visible_frames();
@@ -1219,8 +1226,13 @@ impl Render for Timeline {
                                 })
                                 .on_click(move |_, _, cx| {
                                     channel_state.update(cx, |s, cx| {
-                                        s.editor.select(id);
-                                        s.graph_property = channel;
+                                        s.graph_activate_property(
+                                            GraphChannel {
+                                                id,
+                                                property: channel,
+                                            },
+                                            true,
+                                        );
                                         if matches!(channel, PropertyPath::Path(_)) {
                                             s.graph_open = false;
                                             s.tool = crate::editor::Tool::Pen;
@@ -1352,9 +1364,45 @@ impl Render for Timeline {
                                     let state = self.state.clone();
                                     move |_, _, cx| {
                                         state.update(cx, |s, cx| {
-                                            s.editor.select(id);
-                                            s.graph_property = property;
+                                            s.graph_activate_property(
+                                                GraphChannel { id, property },
+                                                true,
+                                            );
                                             s.graph_key = None;
+                                            cx.notify();
+                                        })
+                                    }
+                                }),
+                            )
+                            .child(
+                                ui::text_button(
+                                    SharedString::from(format!("pin-channel-{id}-{property:?}")),
+                                    if pinned_channels.contains(&GraphChannel { id, property }) {
+                                        "◆"
+                                    } else {
+                                        "+"
+                                    },
+                                )
+                                .w(px(18.0))
+                                .tooltip(|_, cx| {
+                                    cx.new(|_| ui::Tip("Pin / unpin this channel in Graph".into()))
+                                        .into()
+                                })
+                                .when(
+                                    pinned_channels.contains(&GraphChannel { id, property }),
+                                    |s| s.text_color(rgb(ui::BLUE)),
+                                )
+                                .on_click({
+                                    let state = self.state.clone();
+                                    move |_, _, cx| {
+                                        state.update(cx, |s, cx| {
+                                            let channel = GraphChannel { id, property };
+                                            if s.graph_channels.is_pinned(channel) {
+                                                s.graph_unpin_channel(channel);
+                                            } else if let Err(error) = s.graph_pin_channel(channel)
+                                            {
+                                                s.status = error;
+                                            }
                                             cx.notify();
                                         })
                                     }
@@ -1513,8 +1561,15 @@ impl Render for Timeline {
                                                     s.selected_keys =
                                                         key_refs.iter().copied().collect();
                                                 }
-                                                s.graph_property = property;
-                                                s.graph_key = Some((id, key_frame));
+                                                s.graph_activate_property(
+                                                    GraphChannel { id, property },
+                                                    true,
+                                                );
+                                                s.graph_key = Some(KeyRef {
+                                                    id,
+                                                    property,
+                                                    frame: key_frame,
+                                                });
                                                 s.dispatch(&Action::Seek(key_frame), window, cx);
                                             });
                                             this.drag = Some(KeyDrag {
@@ -1566,6 +1621,9 @@ impl Render for Timeline {
             .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
                 if this.key_menu_key(event, window, cx) {
                     cx.stop_propagation();
+                    return;
+                }
+                if !this.focus.is_focused(window) {
                     return;
                 }
                 if let Some((incoming, outgoing)) = super::key_easing::shortcut(event)

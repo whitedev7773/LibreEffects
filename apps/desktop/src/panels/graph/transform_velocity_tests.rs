@@ -417,7 +417,7 @@ fn velocity_snap_converts_rational_fps_once_freezes_targets_and_inverts_ctrl() {
     let end = t.start + point(px(4000.0), px(-52.0)); // raw 23.2 units/frame
     state.frame = 75;
     state.snapping = false;
-    assert!(t.is_current(&state));
+    assert!(!t.is_current(&state)); // A seek cancels commit; detached snap math stays frozen.
     t.update_pointer(end, false, false);
     assert_eq!(t.guides.frame, None);
     assert!((t.guides.value.unwrap() - 23.0 * fps).abs() < 1e-9);

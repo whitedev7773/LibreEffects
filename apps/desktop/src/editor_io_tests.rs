@@ -955,3 +955,76 @@ fn numeric_vertex_accepted_edit_stays_dirty_after_an_older_save_completes() {
     assert_eq!(state.editor.project(), &edited);
     assert!(state.dirty());
 }
+
+#[test]
+fn malformed_v2_open_preserves_explicit_graph_channels_and_full_editor_boundary() {
+    use crate::view_state::GraphChannel;
+    let directory = tempfile::tempdir().unwrap();
+    let address =
+        serde_json::json!({"id":1,"property":{"kind":"transform","parameter":"PositionX"}});
+    for (name, metadata) in [
+        (
+            "duplicate-v2.lep",
+            serde_json::json!({
+                "version":2,"compositions":{"1":{"graph_channels":{
+                    "version":1,"pinned":[address.clone(),address.clone()],"active":address.clone(),"ranges":[]
+                }}},"workspace":{}
+            }),
+        ),
+        (
+            "future-address-v2.lep",
+            serde_json::json!({
+                "version":2,"compositions":{"1":{"graph_channels":{
+                    "version":2,"pinned":[address.clone()],"active":address.clone(),"ranges":[]
+                }}},"workspace":{}
+            }),
+        ),
+        (
+            "unknown-time-remap-v2.lep",
+            serde_json::json!({
+                "version":2,"compositions":{"1":{"graph_channels":{
+                    "version":1,"pinned":[],"active":{"id":1,"property":{"kind":"time_remap","future":true}},"ranges":[]
+                }}},"workspace":{}
+            }),
+        ),
+    ] {
+        let metadata = serde_json::to_vec(&metadata).unwrap();
+        let bytes =
+            libre_effects_core::project_file::encode(&Project::default(), Some(&metadata)).unwrap();
+        let path = directory.path().join(name);
+        std::fs::write(&path, &bytes).unwrap();
+        let recovery_root = directory.path().join(format!("recovery-{name}"));
+        let mut state = dirty_state(&recovery_root);
+        let x = GraphChannel {
+            id: 1,
+            property: Property::PositionX.into(),
+        };
+        let a = GraphChannel {
+            id: 2,
+            property: Property::Opacity.into(),
+        };
+        state.graph_pin_channel(x).unwrap();
+        state.graph_pin_channel(a).unwrap();
+        state.graph_set_channel_height(x, false, Some([-300., 900.]));
+        state.graph_set_channel_height(x, true, Some([-40., 40.]));
+        state.graph_set_channel_height(a, false, Some([0., 100.]));
+        state.graph_view.speed = true;
+        state.graph_open = true;
+        state.remember_view();
+        let channels = state.graph_channels.clone();
+        let graph_view = state.graph_view.clone();
+        let graph_key = state.graph_key;
+        let graph_property = state.graph_property;
+        let selected_keys = state.selected_keys.clone();
+        let before = Before::capture(&state, &recovery_root);
+        assert!(open_test_project(&mut state, &path).is_err());
+        assert_eq!(state.graph_channels, channels);
+        assert_eq!(state.graph_view, graph_view);
+        assert_eq!(state.graph_key, graph_key);
+        assert_eq!(state.graph_property, graph_property);
+        assert_eq!(state.selected_keys, selected_keys);
+        assert!(state.graph_open);
+        before.assert_unchanged(&mut state, &recovery_root);
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    }
+}

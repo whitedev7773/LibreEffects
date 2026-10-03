@@ -3,6 +3,10 @@ use libre_effects_core::{CompositionId, Project};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+#[path = "graph_channels.rs"]
+mod channels;
+pub(crate) use channels::{GraphChannel, GraphChannels, GraphRanges, MAX_PINNED_CHANNELS};
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct GraphView {
@@ -38,6 +42,8 @@ pub(crate) struct CompositionView {
     pub graph_open: bool,
     pub graph_view: GraphView,
     pub expanded: bool,
+    #[serde(default, skip_serializing_if = "GraphChannels::is_legacy")]
+    pub graph_channels: GraphChannels,
 }
 impl Default for CompositionView {
     fn default() -> Self {
@@ -53,6 +59,7 @@ impl Default for CompositionView {
             graph_open: false,
             graph_view: Default::default(),
             expanded: true,
+            graph_channels: Default::default(),
         }
     }
 }
@@ -139,27 +146,37 @@ impl ProjectViews {
         self.compositions.retain(|id, view| {
             if let Some(comp) = project.composition_by_id(*id) {
                 view.normalize(comp.duration());
+                view.graph_channels.prune(comp);
                 true
             } else {
                 false
             }
         });
         self.workspace.normalize();
+        self.version = if self
+            .compositions
+            .values()
+            .any(|v| !v.graph_channels.is_legacy())
+        {
+            2
+        } else {
+            1
+        };
     }
     pub fn read(json: &str, project: &Project) -> Self {
         #[derive(Deserialize)]
         struct Envelope {
             #[serde(default)]
-            editor_view: Option<ProjectViews>,
+            editor_view: Option<serde_json::Value>,
         }
-        // Optional UI metadata must never stop an otherwise valid document opening.
-        let mut views = serde_json::from_str::<Envelope>(json)
+        // Optional legacy metadata must never prevent a valid document opening.
+        // Both explicitly versioned schemas use the same validation as native VIEW.
+        serde_json::from_str::<Envelope>(json)
             .ok()
             .and_then(|v| v.editor_view)
-            .filter(|v| v.version == 1)
-            .unwrap_or_default();
-        views.normalize(project);
-        views
+            .and_then(|value| serde_json::to_vec(&value).ok())
+            .and_then(|bytes| Self::read_native(&bytes, project).ok())
+            .unwrap_or_default()
     }
     /// The native VIEW chunk is versioned data, so unsupported or malformed
     /// metadata must be reported instead of silently replaced with defaults.
@@ -178,25 +195,28 @@ impl ProjectViews {
             }
             Ok(object)
         }
-        let value: serde_json::Value = serde_json::from_slice(bytes)
-            .map_err(|error| format!("Invalid native editor view: {error}"))?;
+        let value = strict_view_json(bytes)?;
         let root = object(
             &value,
             &["version", "compositions", "workspace"],
             "editor view",
         )?;
-        if root.get("version").and_then(|version| version.as_u64()) != Some(1) {
-            return Err("Unsupported native editor view version; expected version 1".into());
+        let version = root.get("version").and_then(|version| version.as_u64());
+        if !matches!(version, Some(1 | 2)) {
+            return Err("Unsupported native editor view version; expected version 1 or 2".into());
         }
         let compositions = root
             .get("compositions")
             .and_then(|value| value.as_object())
             .ok_or("Invalid native editor view: compositions must be an object")?;
+        if compositions.len() > 1000 {
+            return Err("Native composition view count exceeds limit".into());
+        }
         for (id, view) in compositions {
             if id
                 .parse::<CompositionId>()
                 .ok()
-                .is_none_or(|value| value.to_string() != *id)
+                .is_none_or(|value| value == 0 || value.to_string() != *id)
             {
                 return Err("Invalid native composition view ID".into());
             }
@@ -214,9 +234,34 @@ impl ProjectViews {
                     "graph_open",
                     "graph_view",
                     "expanded",
+                    "graph_channels",
                 ],
                 "composition view",
             )?;
+            if version == Some(1) && view.contains_key("graph_channels") {
+                return Err("Graph channels require native editor view version 2".into());
+            }
+            if let Some(channels) = view.get("graph_channels") {
+                let channels = object(
+                    channels,
+                    &["version", "pinned", "active", "ranges"],
+                    "Graph channels",
+                )?;
+                for field in ["version", "pinned", "active", "ranges"] {
+                    if !channels.contains_key(field) {
+                        return Err(format!("Invalid native Graph channels: missing {field}"));
+                    }
+                }
+                let pinned = channels["pinned"]
+                    .as_array()
+                    .ok_or("Invalid native Graph pins: expected an array")?;
+                let ranges = channels["ranges"]
+                    .as_array()
+                    .ok_or("Invalid native Graph ranges: expected an array")?;
+                if pinned.len() > MAX_PINNED_CHANNELS || ranges.len() > MAX_PINNED_CHANNELS + 1 {
+                    return Err("Graph channel count exceeds limit".into());
+                }
+            }
             if let Some(graph) = view.get("graph_view") {
                 object(graph, &["speed", "height"], "graph view")?;
             }
@@ -260,16 +305,32 @@ impl ProjectViews {
         Ok(views)
     }
     pub fn encode_native(&self, project: &Project) -> Result<Vec<u8>, String> {
-        if self.version != 1 {
-            return Err("Unsupported native editor view version; expected version 1".into());
+        let views = self.for_encoding(project)?;
+        let bytes = serde_json::to_vec(&views).map_err(|error| error.to_string())?;
+        if bytes.len() > MAX_VIEW_BYTES {
+            return Err("Native editor view exceeds 16 MiB".into());
+        }
+        Ok(bytes)
+    }
+    fn for_encoding(&self, project: &Project) -> Result<Self, String> {
+        if !matches!(self.version, 1 | 2) {
+            return Err("Unsupported native editor view version; expected version 1 or 2".into());
         }
         let mut views = self.clone();
         views.normalize(project);
-        serde_json::to_vec(&views).map_err(|error| error.to_string())
+        views.version = if views
+            .compositions
+            .values()
+            .any(|v| !v.graph_channels.is_legacy())
+        {
+            2
+        } else {
+            1
+        };
+        Ok(views)
     }
     pub fn write(&self, project: &Project) -> Result<String, String> {
-        let mut views = self.clone();
-        views.normalize(project);
+        let views = self.for_encoding(project)?;
         let metadata = serde_json::to_string_pretty(&views).map_err(|e| e.to_string())?;
         // Avoid reparsing/cloning embedded image data just to attach desktop metadata.
         let mut json = project.to_json()?;
@@ -282,6 +343,82 @@ impl ProjectViews {
     }
 }
 
+const MAX_VIEW_BYTES: usize = 16 * 1024 * 1024;
+
+fn strict_view_json(bytes: &[u8]) -> Result<serde_json::Value, String> {
+    if bytes.len() > MAX_VIEW_BYTES {
+        return Err("Native editor view exceeds 16 MiB".into());
+    }
+    struct Unique(serde_json::Value);
+    impl<'de> Deserialize<'de> for Unique {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            struct Visitor;
+            impl<'de> serde::de::Visitor<'de> for Visitor {
+                type Value = Unique;
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("JSON with unique object keys")
+                }
+                fn visit_bool<E: serde::de::Error>(self, v: bool) -> Result<Unique, E> {
+                    Ok(Unique(v.into()))
+                }
+                fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Unique, E> {
+                    Ok(Unique(v.into()))
+                }
+                fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Unique, E> {
+                    Ok(Unique(v.into()))
+                }
+                fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<Unique, E> {
+                    serde_json::Number::from_f64(v)
+                        .map(|v| Unique(v.into()))
+                        .ok_or_else(|| E::custom("Invalid number"))
+                }
+                fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Unique, E> {
+                    Ok(Unique(v.into()))
+                }
+                fn visit_string<E: serde::de::Error>(self, v: String) -> Result<Unique, E> {
+                    Ok(Unique(v.into()))
+                }
+                fn visit_unit<E: serde::de::Error>(self) -> Result<Unique, E> {
+                    Ok(Unique(serde_json::Value::Null))
+                }
+                fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                    self,
+                    mut seq: A,
+                ) -> Result<Unique, A::Error> {
+                    let mut values = Vec::new();
+                    while let Some(Unique(value)) = seq.next_element::<Unique>()? {
+                        values.push(value);
+                    }
+                    Ok(Unique(values.into()))
+                }
+                fn visit_map<A: serde::de::MapAccess<'de>>(
+                    self,
+                    mut map: A,
+                ) -> Result<Unique, A::Error> {
+                    let mut values = serde_json::Map::new();
+                    while let Some(key) = map.next_key::<String>()? {
+                        if values.contains_key(&key) {
+                            return Err(serde::de::Error::custom(
+                                "Duplicate native editor view key",
+                            ));
+                        }
+                        values.insert(key, map.next_value::<Unique>()?.0);
+                    }
+                    Ok(Unique(values.into()))
+                }
+            }
+            deserializer.deserialize_any(Visitor)
+        }
+    }
+    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
+    let value = Unique::deserialize(&mut deserializer)
+        .map_err(|e| format!("Invalid native editor view: {e}"))?;
+    deserializer
+        .end()
+        .map_err(|e| format!("Invalid native editor view: {e}"))?;
+    Ok(value.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -292,7 +429,7 @@ mod tests {
         let base: serde_json::Value = serde_json::from_slice(&valid).unwrap();
         let mut invalid = Vec::new();
         for value in [
-            serde_json::json!(2),
+            serde_json::json!(3),
             serde_json::json!("1"),
             serde_json::Value::Null,
         ] {
@@ -416,6 +553,7 @@ mod tests {
                     height: Some([-200.0, 300.0]),
                 },
                 expanded: false,
+                graph_channels: Default::default(),
             },
         );
         views.workspace.fractions = [0.8, 0.25, 0.7, 0.5];
@@ -480,5 +618,235 @@ mod tests {
             (Some(0.5), [0.0, 32768.0], 1)
         );
         assert_eq!(views.workspace.fractions, [0.84, 0.12, 0.78, 0.2]);
+    }
+
+    fn channel_fixture() -> (Project, ProjectViews) {
+        use libre_effects_core::{Command, Editor, Property};
+        let mut editor = Editor::default();
+        editor.execute(Command::AddRectangle).unwrap();
+        let x = GraphChannel {
+            id: 1,
+            property: Property::PositionX.into(),
+        };
+        let y = GraphChannel {
+            id: 1,
+            property: Property::PositionY.into(),
+        };
+        let mut view = CompositionView::default();
+        view.graph_channels.pin(x).unwrap();
+        view.graph_channels.activate(y);
+        view.graph_channels.ranges.insert(
+            x,
+            GraphRanges {
+                value: Some([-10., 20.]),
+                speed: Some([-1., 2.]),
+            },
+        );
+        let mut views = ProjectViews::default();
+        views.compositions.insert(1, view);
+        (editor.project().clone(), views)
+    }
+
+    #[test]
+    fn native_v1_emission_is_byte_identical_until_channels_are_needed() {
+        let project = Project::default();
+        let views = ProjectViews::default();
+        assert_eq!(
+            String::from_utf8(views.encode_native(&project).unwrap()).unwrap(),
+            r#"{"version":1,"compositions":{},"workspace":{"fractions":[0.84,0.2,0.615,0.615],"timeline_left":560.0,"sidebar_expanded":[true,false,false,false],"extra_sidebar_expanded":[false,false,false],"effect_controls_open":false,"snapping":true,"align_to_selection":false}}"#
+        );
+        let mut views = views;
+        views.compositions.insert(
+            1,
+            CompositionView {
+                graph_view: GraphView {
+                    speed: true,
+                    height: Some([-40., 80.]),
+                },
+                ..Default::default()
+            },
+        );
+        let bytes = views.encode_native(&project).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["version"], 1);
+        assert!(value["compositions"]["1"].get("graph_channels").is_none());
+        assert_eq!(
+            ProjectViews::read_native(&bytes, &project)
+                .unwrap()
+                .encode_native(&project)
+                .unwrap(),
+            bytes
+        );
+        // A stale live pin cannot force a file to use v2 once the saved copy is pruned.
+        views
+            .compositions
+            .get_mut(&1)
+            .unwrap()
+            .graph_channels
+            .pin(GraphChannel {
+                id: 99,
+                property: libre_effects_core::Property::Opacity.into(),
+            })
+            .unwrap();
+        assert_eq!(views.encode_native(&project).unwrap(), bytes);
+    }
+
+    #[test]
+    fn native_v2_roundtrips_typed_ranges_and_preserves_source_document() {
+        let (project, views) = channel_fixture();
+        let source = project.to_json().unwrap();
+        let bytes = views.encode_native(&project).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["version"], 2);
+        assert_eq!(value["compositions"]["1"]["graph_channels"]["version"], 1);
+        assert_eq!(
+            value["compositions"]["1"]["graph_channels"]["pinned"][0]["property"]["kind"],
+            "transform"
+        );
+        let loaded = ProjectViews::read_native(&bytes, &project).unwrap();
+        assert_eq!(loaded.encode_native(&project).unwrap(), bytes);
+        let native = libre_effects_core::project_file::encode(&project, Some(&bytes)).unwrap();
+        let opened = crate::project_io::decode_project(&native).unwrap();
+        assert_eq!(opened.project.to_json().unwrap(), source);
+        assert_eq!(opened.views.encode_native(&opened.project).unwrap(), bytes);
+        let json = views.write(&project).unwrap();
+        assert_eq!(Project::from_json(&json).unwrap(), project);
+        assert_eq!(
+            ProjectViews::read(&json, &project)
+                .encode_native(&project)
+                .unwrap(),
+            bytes
+        );
+    }
+
+    #[test]
+    fn native_v2_rejects_invalid_addresses_duplicates_limits_and_v1_smuggling() {
+        let (project, views) = channel_fixture();
+        let bytes = views.encode_native(&project).unwrap();
+        let base: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let mut invalid = Vec::new();
+        for version in [0, 1, 3, 999] {
+            let mut value = base.clone();
+            value["version"] = version.into();
+            invalid.push(value);
+        }
+        for version in [0, 2, 999] {
+            let mut value = base.clone();
+            value["compositions"]["1"]["graph_channels"]["version"] = version.into();
+            invalid.push(value);
+        }
+        for field in ["version", "pinned", "active", "ranges"] {
+            let mut value = base.clone();
+            value["compositions"]["1"]["graph_channels"]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+            invalid.push(value);
+        }
+        let address = base["compositions"]["1"]["graph_channels"]["pinned"][0].clone();
+        for pins in [
+            serde_json::json!([address.clone(), address.clone()]),
+            serde_json::json!(vec![address.clone(); 17]),
+            serde_json::json!({}),
+        ] {
+            let mut value = base.clone();
+            value["compositions"]["1"]["graph_channels"]["pinned"] = pins;
+            invalid.push(value);
+        }
+        for path in [
+            serde_json::json!({"kind":"transform","parameter":"FutureParameter"}),
+            serde_json::json!({"kind":"path","target":"Shape"}),
+            serde_json::json!({"kind":"time_remap","future":true}),
+            serde_json::json!({"kind":"transform","parameter":"PositionX","unknown":true}),
+            serde_json::json!({"kind":"effect","effect":0,"parameter":"Radius"}),
+            serde_json::json!({"kind":"contents","item":0,"parameter":"Width"}),
+            serde_json::json!({"kind":"mask","mask":0,"parameter":"Opacity"}),
+            serde_json::json!({"kind":"shape","parameter":"DashLength255"}),
+        ] {
+            let mut value = base.clone();
+            value["compositions"]["1"]["graph_channels"]["active"]["property"] = path;
+            invalid.push(value);
+        }
+        for id in [
+            serde_json::json!(0),
+            serde_json::json!(-1),
+            serde_json::json!("1"),
+        ] {
+            let mut value = base.clone();
+            value["compositions"]["1"]["graph_channels"]["active"]["id"] = id;
+            invalid.push(value);
+        }
+        let range = base["compositions"]["1"]["graph_channels"]["ranges"][0].clone();
+        for ranges in [
+            serde_json::json!([range.clone(), range.clone()]),
+            serde_json::json!(vec![range.clone(); 18]),
+        ] {
+            let mut value = base.clone();
+            value["compositions"]["1"]["graph_channels"]["ranges"] = ranges;
+            invalid.push(value);
+        }
+        let mut value = base.clone();
+        value["compositions"]["1"]["graph_channels"]["ranges"][0]["channel"]["id"] = 99.into();
+        invalid.push(value);
+        let mut value = base.clone();
+        value["compositions"]["1"]["graph_channels"]["ranges"][0]["value"] = serde_json::json!([0]);
+        invalid.push(value);
+        for value in invalid {
+            let bytes = serde_json::to_vec(&value).unwrap();
+            assert!(
+                ProjectViews::read_native(&bytes, &project).is_err(),
+                "{value}"
+            );
+            let native = libre_effects_core::project_file::encode(&project, Some(&bytes)).unwrap();
+            assert!(
+                crate::project_io::decode_project(&native).is_err(),
+                "{value}"
+            );
+        }
+        let text = String::from_utf8(bytes).unwrap();
+        for duplicate in [
+            text.replacen("\"version\":2", "\"version\":2,\"version\":2", 1),
+            text.replacen("\"id\":1", "\"id\":1,\"id\":1", 1),
+        ] {
+            assert!(ProjectViews::read_native(duplicate.as_bytes(), &project).is_err());
+        }
+        assert!(ProjectViews::read_native(&vec![b' '; MAX_VIEW_BYTES + 1], &project).is_err());
+        let mut oversized = base.clone();
+        oversized["compositions"] = serde_json::Value::Object(
+            (1..=1001)
+                .map(|id| (id.to_string(), serde_json::json!({})))
+                .collect(),
+        );
+        assert!(
+            ProjectViews::read_native(&serde_json::to_vec(&oversized).unwrap(), &project).is_err()
+        );
+    }
+
+    #[test]
+    fn v2_open_prunes_unavailable_addresses_without_materializing_source_tracks() {
+        let (project, views) = channel_fixture();
+        let bytes = views.encode_native(&project).unwrap();
+        let mut value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let channels = &mut value["compositions"]["1"]["graph_channels"];
+        channels["pinned"][0]["property"] = serde_json::json!({"kind":"time_remap"});
+        channels["active"] = channels["pinned"][0].clone();
+        channels["ranges"][0]["channel"] = channels["pinned"][0].clone();
+        let source = project.to_json().unwrap();
+        let loaded =
+            ProjectViews::read_native(&serde_json::to_vec(&value).unwrap(), &project).unwrap();
+        assert!(!loaded.compositions[&1].graph_channels.explicit);
+        assert!(loaded.compositions[&1].graph_channels.pinned.is_empty());
+        assert!(
+            project
+                .composition()
+                .layer(1)
+                .unwrap()
+                .time_remap()
+                .is_none()
+        );
+        assert_eq!(project.to_json().unwrap(), source);
+        let encoded: serde_json::Value =
+            serde_json::from_slice(&loaded.encode_native(&project).unwrap()).unwrap();
+        assert_eq!(encoded["version"], 1);
     }
 }

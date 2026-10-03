@@ -29,7 +29,11 @@ pub(super) fn scene(frames: &[u32]) -> (EditorState, View, Bounds<Pixels>) {
             frame,
         });
     }
-    state.graph_key = frames.get(1).map(|&frame| (1, frame));
+    state.graph_key = frames.get(1).map(|&frame| KeyRef {
+        id: 1,
+        property: state.graph_property,
+        frame,
+    });
     state.editor.clear_history();
     (
         state,
@@ -487,7 +491,7 @@ fn speed_box_snapping_freezes_targets_switch_and_view_and_has_no_value_guide() {
     state.snapping = false;
     state.timeline_start = 90;
     state.graph_view.height = Some([0.0, 5.0]);
-    assert!(t.is_current(&state));
+    assert!(!t.is_current(&state)); // Preview stays frozen, but a changed viewport cancels commit.
     let end = t.start + point(px(105.0), px(-4000.0));
     t.update_pointer(end, false, false);
     assert_eq!(
@@ -705,7 +709,7 @@ fn speed_box_curve_sampling_stays_with_frozen_view_after_timeline_zoom() {
     let before = t.view.speed_curves(preview, fps);
     state.timeline_start = 90;
     state.graph_view.height = Some([-1.0, 1.0]);
-    assert!(t.is_current(&state));
+    assert!(!t.is_current(&state)); // Sampling remains frozen even after the draft is stale.
     let after = t.view.speed_curves(preview, fps);
     assert_eq!(after, before);
     assert_eq!(after.first().unwrap().first().unwrap().0, 0.0);

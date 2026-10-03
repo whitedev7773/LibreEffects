@@ -657,7 +657,8 @@ a diamond to change its timing.
   closes on outside click, focus loss, document/selection changes or graph entry.
   Each edit is one Undo and validates the whole selection. Locked layers and path
   keys disable unsupported operations; path keys still support outgoing segment
-  interpolation and deletion. Graph opening preserves selection and keyboard focus.
+  interpolation and deletion. Graph opening retains included-channel selection
+  and keyboard focus; keys outside its numeric channel scope are pruned.
 - Moving a key onto an occupied frame is rejected, preserving both keys.
 - Ctrl/Shift-click diamonds or drag a selection box to select multiple keys. Drag
   selected keys to shift them together across layers/channels in one undo step.
@@ -701,9 +702,76 @@ Click the graph icon in the timeline, use Animation → Toggle Graph Editor, or 
 Shift+F3. Click a property label or its X/Y channel in the persistent layer list. The value graph shares timeline
 zoom and pan; its vertical range fits the visible curve.
 
+### Pinning channels and editing across lanes
+
+Use **+ / ◆** beside a scalar Timeline component to pin/unpin it, or the Graph
+channel controls. Pins remain while another property becomes active. Up to 16
+pins plus one unpinned active channel are supported per composition; the limit
+never evicts another pin. The active transient is replaced when another unpinned
+channel is chosen. A pin uses an existing scalar track: enable animation or add a
+key first for a sparse paint property without one. Static Text paint labels still
+focus the text layer/Inspector without creating tracks or numeric lanes.
+
+Each channel has a labeled, independently scaled lane with layer/item identities,
+raw units, color and locked state. Duplicate effect/Contents names remain distinct.
+The time axis is shared; unlike pixels, degrees, RGB or seconds are never silently
+normalized onto one unlabeled value axis. Lane headers/chips activate a channel
+without dropping keys selected in other pinned lanes. The Inspector primary layer
+and the active Graph channel are not used interchangeably to find key data.
+
+Plain key click selects/activates; Shift/Ctrl toggles. Marquee selection spans
+visible lanes. **Ctrl+A** selects all included channels, including scrolled-off
+pins; a lane's **Select all** adds that lane's keys. Same-frame keys in different
+channels are distinct. Removing/excluding a channel prunes its Graph selection.
+
+When selection spans multiple channels, key drags and transform-box edges edit
+**time only**. Collisions are checked per track, not globally by frame. A selected
+source frame can be another selected destination. Scaling needs two distinct
+selected times; same-time groups can translate. Any lock, collision, stale source
+or invalid member rejects the entire operation. One-channel selections retain
+Value/Speed, tangent and vertical endpoint-velocity tools.
+
+**Keyframe... → All selected keys** provides **Offset frames** and **Time %**.
+**Active frame/value/velocity/influence** fields target only the labeled active
+key; absolute mixed-unit values are never broadcast. Value % is available only
+for a one-channel selection. Delete, interpolation, temporal modes and Ease apply
+atomically to the included selected keys. Left/Right nudge selected key times by
+one frame (Shift: ten); unsupported Graph editing chords are consumed rather than
+nudging/duplicating layers. Text fields retain their own caret/editing keys.
+
+Graph **Copy/Cut** uses only included selected keys. **Paste** uses the existing
+key clipboard: a single source layer targets the active Graph layer; multiple
+source layers retain their IDs. Every destination scalar channel must already be
+included (offscreen pins count), otherwise activate/pin it first. Empty Paste
+changes nothing; occupied destinations, incompatible effects, locks and invalid
+frames reject atomically. It never falls through to the layer clipboard.
+
+With multiple lanes, ordinary wheel input scrolls the lane list. Shift+wheel pans
+shared time; Alt+wheel zooms shared time; Ctrl+wheel zooms the hovered lane's height.
+Hand/middle-button drag pans shared time and that lane's manual height. Fit All
+uses included-channel time bounds, Fit Selection uses selected keys' time union,
+and each lane fits its own ordinate. **Fit Y** changes only its lane. Time guides
+span lanes; value/velocity guides remain local. Value and Speed ranges are stored
+separately after channel opt-in. Existing one-channel navigation remains available.
+
+Pins and ranges are view-only: they add no document Undo or dirty flag. Deleted
+objects leave compact unavailable pins during the session so Undo can restore the
+same identity/range. Explicit Unpin is not undone with document edits, and ordinary
+ID reuse does not bind an old pin to a different object. Save prunes a copy of
+unavailable entries; Open prunes stale addresses. Selected keys and drafts remain
+transient. Recovery retains its default-view policy.
+
+Projects using new persisted channel state write desktop **VIEW metadata v2**;
+older desktop readers reject that view version. Legacy single-channel activation,
+pan/zoom/fit still emit exact VIEW v1 when no new channel state is needed. Both
+versions are readable here; the `.lep` container/chunk version remains 1 and the
+render-project schema is unchanged. See the [format specification](../../docs/lep-format-v1.md).
+
+### Navigation and single-channel refinement
+
 The bottom toolbar includes **Auto Zoom Height**, **Fit Selection** (target icon),
 and **Fit All** (dashed square). With the graph focused, F fits all keys in the
-displayed channel; Shift+F fits its selected keys. Fitting adjusts time and value
+included channels; Shift+F fits selected keys. Fitting adjusts shared time and each lane's value
 scales and freezes the height, including selected direction handles. Fit All on
 an unanimated channel shows the composition range. The shared timeline limits
 horizontal zoom to 64×; fitting one key never creates a zero-width view.
@@ -713,9 +781,10 @@ about the pointer with Ctrl+wheel. Shift+wheel pans time; Alt+wheel zooms time
 about the pointer. Auto Zoom Height prevents vertical wheel navigation. These
 gestures are ignored during key/handle drags. Graph type and height, like the
 timeline view, are saved per composition as optional desktop metadata; they do
-not change the rendered document or add Undo entries. Switching graph type
-restores automatic height for the new units. Manual height remains fixed when
-switching channels; use Fit All or Auto Zoom Height to frame the new values.
+not change the rendered document or add Undo entries. In legacy single-channel mode, switching graph type
+restores automatic height for the new units and channel changes retain its manual
+height. After opt-in, each channel restores its separate Value/Speed range; use
+Fit All, Fit Y or Auto Zoom Height to frame the values.
 
 Use **H** (Hand tool) and drag inside the graph to move the view, or drag with
 the middle mouse button while using any tool. Manual height allows both axes;
@@ -742,8 +811,8 @@ timeline still limits time zoom to 1–64× and integer viewport start frames.
 
 - Click a key to select it; Shift/Ctrl-click toggles membership. Drag empty graph
   space to box-select keys; Shift/Ctrl adds to the selection. Ctrl+A selects all
-  keys in the displayed channel, including keys outside the visible time range.
-- Drag a selected key to translate the group in time and value without changing
+  keys in all included channels, including keys outside the visible time/lane range.
+- Within one channel, drag a selected key to translate the group in time and value without changing
   spacing or value differences. Shift constrains the dominant axis. Boundary
   limits apply to the entire group; selected source frames can be destinations.
   Release commits one undo step. Escape cancels; collisions with unselected keys
@@ -765,7 +834,7 @@ timeline still limits time zoom to 1–64× and integer viewport start frames.
     and tangent mode are preserved. In Speed Graph, Value % still scales the
     underlying property values. Custom pivots and reversed time scaling remain pending.
   Fields edit the active key; interpolation/mode/Ease buttons act on all selected
-  keys in the displayed channel. Mixed modes have no highlighted mode button.
+  included keys across channels. Mixed modes have no highlighted mode button.
   Escape or Close dismisses it. Delete removes the selected graph keys in one Undo.
   The diamond adds/removes a key at the playhead.
 - The square icon enables a transform box for two or more selected Value Graph
@@ -830,7 +899,7 @@ timeline still limits time zoom to 1–64× and integer viewport start frames.
   pointer/modifiers and commits one Undo. Exact identity, affine fixed points and
   return-to-start preserve handles, legacy schema/assets and Undo/Redo. A real
   edit uses existing temporal schema 35/36 where needed; LEP remains v1.
-  Multi-channel graphs, Speed corner transforms and AE equivalence remain separate.
+  Mixed-channel vertical transforms, Speed corners and AE equivalence remain separate.
 - Graph numeric fields return keyboard focus to the graph after Enter/Escape.
   Enter commits, Escape cancels the field draft, and Escape from the graph closes
   Keyframe...; Undo, selection and fitting shortcuts work without another click.
@@ -839,8 +908,8 @@ timeline still limits time zoom to 1–64× and integer viewport start frames.
 - Ease (F9) sets zero velocity and one-third influence on both sides of selected
   keys; Ease In (Shift+F9) affects only the incoming side, Ease Out (Ctrl+Shift+F9)
   only the outgoing side. Shortcuts work when the graph or timeline itself has
-  focus. The graph edits its displayed scalar channel; the timeline edits selected
-  scalar keys across layers/channels as one Undo. Locked layers, missing keys and
+  focus. The graph edits selected scalar keys across its included channels; the
+  timeline edits selected scalar keys across layers/channels as one Undo. Locked layers, missing keys and
   path poses reject the entire operation. Empty selections and directions without
   an adjacent segment do nothing. Key repeat and unrelated modifier chords do not
   apply easing. Input fields retain their keyboard input.
@@ -881,31 +950,30 @@ timeline still limits time zoom to 1–64× and integer viewport start frames.
   shape-preserving scalar policy, not a claim of numerical parity with AE's Auto.
   Linked modes require project version 36 / effect preset version 3. Old independent
   handles and legacy files retain their existing representation and samples.
-- This is still a single-channel value graph. Spatial paths, multi-channel graph
-  editing, automatic Alt-rejoining of split handles and full AE
-  Easy Ease compatibility remain unfinished.
+- Spatial paths, multi-channel vertical transforms, automatic Alt-rejoining of
+  split handles and full AE Easy Ease compatibility remain unfinished.
   Geometry path timing tracks do not yet support these scalar velocity handles.
 
 Use **Value Graph / Speed Graph** in the graph toolbar to switch views. Speed
-Graph shows the signed derivative of the selected scalar channel in property
+Graph shows each included scalar channel's signed derivative in its own lane and property
 units per second (a decreasing value has negative velocity). It uses the same
 Linear/Smooth/Bezier/independent/linked/automatic curve as playback, with FPS conversion.
 Separate strokes represent each segment; Hold jumps and vertical tangents are
 gaps rather than artificial finite spikes. The zero axis remains visible.
 
 At a key, the left marker edits incoming velocity and the right marker outgoing
-velocity. Drag horizontally to retime selected keys and vertically to offset that
+velocity. Within one channel, drag horizontally to retime selected keys and vertically to offset that
 side's velocities by the same amount, preserving each influence and property value.
 Keys without that adjacent segment are retimed but receive no velocity edit. Release is
 one Undo step; collisions/invalid velocities reject the entire edit and Escape
 cancels. Keyframe... still edits precise time/value/velocity/influence. View
-switching changes no project content; graph type is currently session-local.
+switching changes no project content; graph type and applicable ranges are saved as view metadata.
 
 This is a scalar channel graph (including separate Position X/Y), not the
 magnitude of a combined spatial path or the derivative of final composited
 pixels. Property/effect output clamping can therefore differ from raw track
-velocity. Multi-channel selection, vector speed, automatic graph type selection,
-and persisted graph preferences remain open work.
+velocity. Vector speed, automatic graph type selection, overlaid/normalized axes,
+mixed-channel vertical transforms and Speed corner transforms remain open work.
 
 Open `examples/curve-parent-study.lfe.json` for an overshooting Bezier animation
 with a child layer. The source generator is

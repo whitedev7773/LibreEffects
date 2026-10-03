@@ -1,5 +1,6 @@
 //! Graph navigation changes only optional desktop view state.
 use super::*;
+use crate::view_state::GraphChannel;
 use std::collections::BTreeSet;
 
 /// Distinguish a Space tap (preview) from a Space+drag (temporary Hand).
@@ -35,6 +36,8 @@ pub(super) struct Pan {
     view: View,
     time: (u32, f32),
     height: Option<[f64; 2]>,
+    channel: Option<GraphChannel>,
+    speed: bool,
     bounds: Bounds<Pixels>,
     start: Point<Pixels>,
     pub button: MouseButton,
@@ -49,7 +52,11 @@ impl Pan {
         Self {
             view,
             time: (state.timeline_start, state.timeline_zoom),
-            height: state.graph_view.height,
+            height: state
+                .graph_active_channel()
+                .and_then(|c| state.graph_channel_height(c, state.graph_view.speed)),
+            channel: state.graph_active_channel(),
+            speed: state.graph_view.speed,
             bounds,
             start: event.position,
             button: event.button,
@@ -62,12 +69,19 @@ impl Pan {
         self.restore(state);
         horizontal(state, dx, 0.0, false);
         if self.height.is_some() {
-            state.graph_view.height = Some(vertical(self.view, dy, 0.0, false));
+            self.set_height(state, Some(vertical(self.view, dy, 0.0, false)));
+        }
+    }
+    fn set_height(self, state: &mut EditorState, height: Option<[f64; 2]>) {
+        if let Some(channel) = self.channel
+            && state.graph_channel_height(channel, self.speed) != height
+        {
+            state.graph_set_channel_height(channel, self.speed, height);
         }
     }
     pub fn restore(self, state: &mut EditorState) {
         (state.timeline_start, state.timeline_zoom) = self.time;
-        state.graph_view.height = self.height;
+        self.set_height(state, self.height);
     }
 }
 
@@ -103,7 +117,8 @@ impl Zoom {
         let fy = f32::from(b.bottom() - p.y) as f64 / f32::from(b.size.height).max(1.0) as f64;
         horizontal(state, x, fx, true);
         if self.origin.height.is_some() {
-            state.graph_view.height = Some(vertical(self.origin.view, y, fy, true));
+            self.origin
+                .set_height(state, Some(vertical(self.origin.view, y, fy, true)));
         }
     }
     pub fn moving(self, state: &mut EditorState, end: Point<Pixels>) {
@@ -164,13 +179,26 @@ impl Zoom {
                     high: center + half_span,
                     ..view
                 };
-                state.graph_view.height = Some(vertical(centered, factor, 0.5, true));
+                self.origin
+                    .set_height(state, Some(vertical(centered, factor, 0.5, true)));
             }
         }
     }
 }
 
 pub(super) fn current(state: &EditorState, track: &AnimatedProperty) -> View {
+    let channel = state.graph_active_channel().unwrap_or(GraphChannel {
+        id: state.editor.selected().unwrap_or(0),
+        property: state.graph_property,
+    });
+    current_channel(state, channel, track)
+}
+
+pub(super) fn current_channel(
+    state: &EditorState,
+    channel: GraphChannel,
+    track: &AnimatedProperty,
+) -> View {
     let fps = state.editor.project().composition().fps().as_f64();
     let mut result = view(
         track,
@@ -179,17 +207,20 @@ pub(super) fn current(state: &EditorState, track: &AnimatedProperty) -> View {
         state.graph_view.speed,
         fps,
     );
-    if let Some([low, high]) = state.graph_view.height {
+    if let Some([low, high]) = state.graph_channel_height(channel, state.graph_view.speed) {
         result.low = low;
         result.high = high;
         result
     } else {
+        let frames = state
+            .selected_keys
+            .iter()
+            .filter(|k| k.id == channel.id && k.property == channel.property)
+            .map(|k| k.frame)
+            .collect();
         tangent::fit_view(
             result,
-            &tangent::for_selection(
-                track,
-                &selection::active(state).iter().map(|k| k.frame).collect(),
-            ),
+            &tangent::for_selection(track, &frames),
             state.graph_view.speed,
             fps,
         )
@@ -197,27 +228,29 @@ pub(super) fn current(state: &EditorState, track: &AnimatedProperty) -> View {
 }
 
 pub(super) fn fit(state: &mut EditorState, selected_only: bool) -> bool {
-    let Some(layer) = state.editor.selected_layer() else {
-        return false;
-    };
-    let Some(track) = layer.track(state.graph_property) else {
-        return false;
-    };
+    let channels = state.graph_included_channels();
     let comp = state.editor.project().composition();
     let duration = comp.duration();
-    let frames: BTreeSet<_> = if selected_only {
-        selection::active(state).iter().map(|k| k.frame).collect()
-    } else {
-        track
-            .keys()
-            .keys()
+    let included = channels::all_keys(state.editor.project(), &channels);
+    let chosen: BTreeSet<_> = if selected_only {
+        included
+            .intersection(&state.selected_keys)
             .copied()
-            .filter(|&f| f < duration)
             .collect()
+    } else {
+        included
     };
-    if selected_only && frames.is_empty() {
+    if selected_only && chosen.is_empty() {
         return false;
     }
+    if channels.is_empty() {
+        return false;
+    }
+    let frames: BTreeSet<_> = chosen
+        .iter()
+        .map(|k| k.frame)
+        .filter(|&f| f < duration)
+        .collect();
     let (first, last) = frames
         .first()
         .zip(frames.last())
@@ -230,17 +263,41 @@ pub(super) fn fit(state: &mut EditorState, selected_only: bool) -> bool {
     let start = ((first as u64 + last as u64).saturating_sub(visible as u64) / 2) as u32;
     let start = start.min(duration.saturating_sub(visible));
     let fps = comp.fps().as_f64();
-    // Fit the chosen keys and the curve between them, independently of nearby,
-    // unselected extreme values that happen to lie inside the padded time range.
-    let fitted = tangent::fit_view(
-        view(track, first, last - first, state.graph_view.speed, fps),
-        &tangent::for_selection(track, &frames),
-        state.graph_view.speed,
-        fps,
-    );
+    let mut heights = Vec::new();
+    for channel in channels {
+        let Some(track) = comp
+            .layer(channel.id)
+            .and_then(|l| l.track(channel.property))
+        else {
+            continue;
+        };
+        let frames: BTreeSet<_> = chosen
+            .iter()
+            .filter(|k| k.id == channel.id && k.property == channel.property)
+            .map(|k| k.frame)
+            .collect();
+        // Fit Selection must not change a lane with no selected keys. Each lane
+        // fits its own values/velocities, never a mixed-unit union.
+        if selected_only && frames.is_empty() {
+            continue;
+        }
+        let (first, last) = frames
+            .first()
+            .zip(frames.last())
+            .map_or((first, last), |(&a, &b)| (a, b));
+        let fitted = tangent::fit_view(
+            view(track, first, last - first, state.graph_view.speed, fps),
+            &tangent::for_selection(track, &frames),
+            state.graph_view.speed,
+            fps,
+        );
+        heights.push((channel, [fitted.low, fitted.high]));
+    }
     state.timeline_start = start;
     state.timeline_zoom = zoom;
-    state.graph_view.height = Some([fitted.low, fitted.high]);
+    for (channel, height) in heights {
+        state.graph_set_channel_height(channel, state.graph_view.speed, Some(height));
+    }
     true
 }
 
@@ -427,7 +484,7 @@ mod tests {
                 frame: 30,
             };
             s.selected_keys.insert(key);
-            s.graph_key = Some((1, 30));
+            s.graph_key = Some(key);
             s.frame = 30;
             let before = s.editor.project().clone();
             let destination = zoom.origin.start + point(px(100.0), px(-50.0));
@@ -449,7 +506,7 @@ mod tests {
             zoom.finish(&mut s, point(px(1e8), px(-1e8)));
             assert_eq!(s.timeline_zoom, 64.0);
             assert_eq!(s.selected_keys, [key].into());
-            assert_eq!((s.graph_key, s.frame), (Some((1, 30)), 30));
+            assert_eq!((s.graph_key, s.frame), (Some(key), 30));
             assert_eq!(s.editor.project(), &before);
             s.editor.undo();
             assert!(!s.editor.selected_layer().unwrap().locked());
@@ -459,6 +516,7 @@ mod tests {
                 1,
                 crate::view_state::CompositionView {
                     graph_view: s.graph_view.clone(),
+                    graph_channels: s.graph_channels.clone(),
                     timeline_start: s.timeline_start,
                     timeline_zoom: s.timeline_zoom,
                     ..Default::default()
@@ -570,7 +628,7 @@ mod tests {
                     frame: 30,
                 };
                 s.selected_keys.insert(key);
-                s.graph_key = Some((1, 30));
+                s.graph_key = Some(key);
                 s.editor.execute(Command::ToggleLocked(1)).unwrap();
                 let before = s.editor.project().clone();
                 let bounds = Bounds::new(point(px(100.0), px(100.0)), size(px(1000.0), px(200.0)));
@@ -594,7 +652,7 @@ mod tests {
                 assert_eq!((s.timeline_start, s.timeline_zoom, s.frame), (39, 2.5, 30));
                 assert_eq!(s.graph_view.height, (!automatic).then_some([0.0, 400.0]));
                 assert_eq!(s.selected_keys, [key].into());
-                assert_eq!(s.graph_key, Some((1, 30)));
+                assert_eq!(s.graph_key, Some(key));
                 assert_eq!(s.editor.project(), &before);
                 pan.restore(&mut s);
                 assert_eq!(s.timeline_start, 45);
@@ -629,6 +687,7 @@ mod tests {
             1,
             crate::view_state::CompositionView {
                 graph_view: s.graph_view.clone(),
+                graph_channels: s.graph_channels.clone(),
                 timeline_start: s.timeline_start,
                 timeline_zoom: s.timeline_zoom,
                 ..Default::default()
@@ -644,6 +703,24 @@ mod tests {
                 renderer.render(s.editor.project(), frame, 384).unwrap(),
                 renderer.render_output(&loaded, frame, 384, 216).unwrap()
             );
+        }
+    }
+    #[test]
+    fn ordinary_navigation_preserves_legacy_view_and_no_op_restore_is_exact() {
+        for automatic in [false, true] {
+            let (mut state, zoom) = zoom_scene(automatic, false);
+            let before_view = state.graph_view.clone();
+            let before_channels = state.graph_channels.clone();
+            let before_time = (state.timeline_start, state.timeline_zoom);
+            zoom.restore(&mut state);
+            assert_eq!(state.graph_view, before_view);
+            assert_eq!(state.graph_channels, before_channels);
+            assert_eq!((state.timeline_start, state.timeline_zoom), before_time);
+            zoom.finish(&mut state, zoom.origin.start);
+            assert!(!state.graph_channels.explicit);
+            assert!(fit(&mut state, false));
+            assert!(!state.graph_channels.explicit);
+            assert!(state.graph_view.height.is_some());
         }
     }
 }

@@ -89,6 +89,48 @@ The core's validation-only visitor does not build a value tree for array element
 or string values in `VIEW`; object keys are retained while needed for duplicate-key
 checks. Neither view parsing nor its schema assumes a particular project version.
 
+#### Desktop view metadata versions
+
+The desktop currently reads view metadata **versions 1 and 2**. These are the
+JSON root's `version`, not the LEP container or chunk version; both remain 1.
+Version 1 retains the original composition/workspace fields, including one
+`graph_view` with `speed` and `height`. Version 2 additionally permits optional
+`graph_channels` in each composition view.
+
+The channel object has its own address-schema `version: 1` and these fields:
+
+- `pinned`: ordered channel addresses, at most 16.
+- `active`: a channel address or `null`; one unpinned active address can add a
+  seventeenth included lane.
+- `ranges`: at most 17 unique entries, each with `channel` and nullable `value`
+  and `speed` two-number ranges. Each range must belong to a pin or active channel.
+
+A channel is `{ "id": <positive layer ID>, "property": <typed address> }`.
+The property's `kind` is `transform`, `shape`, `text` or `audio` with a typed
+`parameter`; `contents` also requires a positive `item` ID, `mask` a positive
+`mask` ID, and `effect` a positive `effect` ID. `time_remap` has no additional
+fields. Parameter values use the existing typed scalar enums. Geometry Path
+timing is not a numeric Graph channel. Names are labels, not identities.
+
+Unknown fields/variants, unsupported root/address versions, duplicate addresses
+or ranges, malformed address/range shapes and over-limit counts are rejected.
+Finite range bounds outside ±1e15, or ranges narrower than 1e-6, normalize to
+automatic height. Addresses that do not resolve to an existing scalar track are
+pruned against the loaded composition; reading views never creates source tracks.
+Selected keys, active key, pending input, drag state and runtime-only unavailable
+pin markers are not serialized.
+
+Writers normalize a **copy** against the project. They emit exact version-1
+metadata when no saved composition needs channel state, or version 2 when any
+composition retains pins, an explicit active channel or per-channel ranges.
+Inactive compositions participate in this choice. Save does not remove live
+unavailable pins retained for Undo, and there is no sticky “once version 2” flag.
+
+Older desktop readers that only understand view metadata v1 reject native files
+containing v2 view metadata, even when their render-project data is unchanged.
+The core container API still treats either payload as bounded opaque JSON. This
+view extension does not change the render-project schema or the `.lep` extension.
+
 ### `IMAG`: zero to 1000
 
 | Payload offset | Size | Field |

@@ -549,6 +549,7 @@ pub(super) struct Transform {
     pub keys: Vec<KeyRef>,
     pub active: usize,
     revision: u64,
+    context: planning::FrozenContext,
     tool: Tool,
     transport_generation: u64,
     graph_open: bool,
@@ -571,10 +572,15 @@ impl Transform {
         bounds: Bounds<Pixels>,
         start: Point<Pixels>,
     ) -> Option<Self> {
-        if state.editor.selected_layer()?.locked() {
+        if planning::multiple_channels(&selection::included(state)) {
+            return None; // Mixed-unit selections use the shared time-only draft.
+        }
+        let channel = state.graph_active_channel()?;
+        let layer = state.editor.project().composition().layer(channel.id)?;
+        if layer.locked() {
             return None;
         }
-        let track = state.editor.selected_layer()?.track(state.graph_property)?;
+        let track = layer.track(channel.property)?;
         let keys = selection::active(state);
         let area = SelectionBox::new(
             track,
@@ -599,6 +605,7 @@ impl Transform {
             value_origin: 0.0,
             value_scale: 1.0,
         };
+        let context = planning::FrozenContext::new(state, bounds).ok()?;
         Some(Self {
             view,
             bounds,
@@ -610,12 +617,13 @@ impl Transform {
                 .unwrap_or(0),
             keys,
             revision: state.document_revision,
+            context: context.clone(),
             tool: state.tool,
             transport_generation: state.transport_generation(),
             graph_open: state.graph_open,
             snap: state.snapping,
             original: track.clone(),
-            source: velocity.then(|| std::sync::Arc::new(state.editor.project().clone())),
+            source: velocity.then(|| context.source.clone()),
             duration: state.editor.project().composition().duration(),
             fps: state.editor.project().composition().fps().as_f64(),
             viewport: (
@@ -646,7 +654,8 @@ impl Transform {
     }
     /// Reject stale previews even if an observer has not run before mouse-up.
     pub fn is_current(&self, state: &EditorState) -> bool {
-        state.document_revision == self.revision
+        self.context.current(state, Some(self.bounds))
+            && state.document_revision == self.revision
             && state.tool == self.tool
             && state.graph_view.speed == self.area.speed
             && state.editor.project().composition().fps().as_f64() == self.fps
@@ -654,9 +663,10 @@ impl Transform {
                 .source
                 .as_ref()
                 .is_none_or(|source| source.as_ref() == state.editor.project())
-            && self.keys.first().is_some_and(|key| {
-                state.editor.selected() == Some(key.id) && state.graph_property == key.property
-            })
+            && self
+                .keys
+                .first()
+                .is_some_and(|key| state.graph_active_channel() == Some(planning::channel(*key)))
             && (self.velocity_scale.is_none()
                 || (Self::velocity_context_available(state)
                     && self.transport_generation == state.transport_generation()
@@ -669,12 +679,22 @@ impl Transform {
                         state.graph_view.height,
                     ))
             && selection::active(state) == self.keys
-            && state.editor.selected_layer().is_some_and(|layer| {
-                !layer.locked() && layer.track(state.graph_property) == Some(&self.original)
-            })
+            && state
+                .graph_active_channel()
+                .and_then(|c| {
+                    state
+                        .editor
+                        .project()
+                        .composition()
+                        .layer(c.id)
+                        .map(|l| (c, l))
+                })
+                .is_some_and(|(c, layer)| {
+                    !layer.locked() && layer.track(c.property) == Some(&self.original)
+                })
     }
     pub fn geometry_current(&self, bounds: Option<Bounds<Pixels>>) -> bool {
-        self.velocity_scale.is_none() || bounds == Some(self.bounds)
+        bounds == Some(self.bounds)
     }
     pub fn has_changes(&self) -> bool {
         self.preview

@@ -181,7 +181,10 @@ impl Timeline {
                 let first = anchor;
                 s.dispatch(&Action::GraphProperty(first.id, first.property), window, cx);
                 s.selected_keys = keys.into_iter().collect();
-                s.graph_key = Some((first.id, first.frame));
+                s.graph_key = Some(first);
+                let included = s.graph_included_channels();
+                s.selected_keys
+                    .retain(|key| included.contains(&crate::view_state::GraphChannel::from(*key)));
                 cx.notify();
             } else {
                 s.dispatch(&Action::Edit(command), window, cx);

@@ -267,7 +267,8 @@ pub(crate) struct EditorState {
     pub vertex_editor: Option<crate::panels::vertex_editor::Session>,
     pub vertex_return: Option<crate::panels::vertex_editor::Request>,
     pub graph_property: PropertyPath,
-    pub graph_key: Option<(LayerId, Frame)>,
+    pub graph_key: Option<KeyRef>,
+    pub graph_channels: crate::view_state::GraphChannels,
     playback_origin: Option<(Instant, Frame)>,
     playback_generation: u64,
 }
@@ -361,6 +362,7 @@ impl Default for EditorState {
             vertex_return: None,
             graph_property: Property::PositionX.into(),
             graph_key: None,
+            graph_channels: Default::default(),
             playback_origin: None,
             playback_generation: 0,
         }
@@ -432,6 +434,11 @@ impl EditorState {
                 .find(|m| m.id() == id)?,
         ))
     }
+    /// Graph paste planning reads key data without falling back to layer paste.
+    pub(crate) fn graph_clipboard(&self) -> &[KeyCopy] {
+        &self.clipboard
+    }
+
     fn clear_clipboard(&mut self) {
         self.media_open = false;
         self.media_entries.clear();
@@ -475,24 +482,26 @@ impl EditorState {
         {
             self.selected_layers.insert(id);
         }
-        if self
-            .editor
-            .selected_layer()
-            .is_some_and(|l| l.track(self.graph_property).is_none())
+        self.normalize_graph_channels(false);
+        if !self.graph_channels.explicit
+            && self
+                .editor
+                .selected_layer()
+                .is_some_and(|l| l.track(self.graph_property).is_none())
         {
             self.graph_property = Property::PositionX.into();
             self.graph_key = None;
         }
-        if self.graph_key.is_some_and(|(id, frame)| {
-            self.editor.selected() != Some(id)
+        if self.graph_key.is_some_and(|key| {
+            self.graph_active_channel() != Some(key.into())
                 || !self
                     .editor
                     .project()
                     .composition()
-                    .layer(id)
+                    .layer(key.id)
                     .is_some_and(|l| {
-                        l.track(self.graph_property)
-                            .is_some_and(|t| t.keys().contains_key(&frame))
+                        l.track(key.property)
+                            .is_some_and(|t| t.keys().contains_key(&key.frame))
                     })
         }) {
             self.graph_key = None;
@@ -525,6 +534,9 @@ impl EditorState {
         } else {
             self.editor.undo();
         }
+        // Reconcile cached views before restoring a composition, so Undo may
+        // revive its unavailable pins without restoring a key selection or focus.
+        self.normalize_graph_channels(true);
         if previous != self.editor.project().active_composition_id() {
             self.composition_changed();
         }
@@ -532,6 +544,7 @@ impl EditorState {
         // instead of retaining a now-inactive head after redoing a layer split.
         self.selected_layers = self.editor.selected().into_iter().collect();
         self.selected_keys.clear();
+        self.graph_key = None;
         self.normalize();
         self.status = "History updated".into();
     }
@@ -889,6 +902,7 @@ impl EditorState {
                     self.selected_keys.clear();
                     self.graph_key = None;
                     self.graph_property = *property;
+                    self.graph_external_activation(*id, *property);
                     self.graph_open = !matches!(property, PropertyPath::Path(_));
                     if matches!(property, PropertyPath::Path(_)) {
                         self.tool = Tool::Pen;
@@ -954,6 +968,7 @@ impl EditorState {
                     self.editor.clear_selection();
                 }
                 self.selected_keys.clear();
+                self.graph_external_layer_selection();
             }
             Action::CopySelection => {
                 if self.selected_keys.is_empty() {
@@ -1177,6 +1192,9 @@ impl EditorState {
                     );
                     if self.status.starts_with("Edited") && (enabled || freeze) {
                         self.graph_property = PropertyPath::TimeRemap;
+                        if let Some(id) = self.editor.selected() {
+                            self.graph_external_activation(id, PropertyPath::TimeRemap);
+                        }
                         self.graph_key = None;
                         self.expanded = true;
                         self.property_filter = None;
@@ -1242,7 +1260,12 @@ impl EditorState {
             Action::CancelExport => self
                 .export_cancel
                 .store(true, std::sync::atomic::Ordering::Relaxed),
-            Action::ToggleGraph => self.graph_open = !self.graph_open,
+            Action::ToggleGraph => {
+                self.graph_open = !self.graph_open;
+                if self.graph_open {
+                    self.graph_prune_excluded_keys();
+                }
+            }
             Action::ZoomTimeline(factor) => {
                 self.timeline_zoom = (self.timeline_zoom * factor).clamp(1.0, 64.0);
                 self.timeline_start = self.frame.saturating_sub(self.visible_frames() / 2);
@@ -1376,6 +1399,7 @@ impl EditorState {
                 self.selected_layers.clear();
                 self.selected_layers.insert(*id);
                 self.selected_keys.clear();
+                self.graph_external_layer_selection();
             }
             Action::Seek(frame) => {
                 self.stop();
@@ -1581,7 +1605,11 @@ mod tests {
             })
             .unwrap();
         state.graph_property = property;
-        state.graph_key = Some((1, 0));
+        state.graph_key = Some(KeyRef {
+            id: 1,
+            property,
+            frame: 0,
+        });
         state.selected_keys = [KeyRef {
             id: 1,
             property,

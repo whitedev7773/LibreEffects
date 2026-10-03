@@ -8,19 +8,32 @@ pub(super) struct Sample {
     pub value: f64,
     pub handle: Option<TemporalHandle>,
 }
+/// Selection in the active lane, used by scalar value/velocity refinement.
 pub(super) fn active(state: &EditorState) -> Vec<KeyRef> {
+    let Some(channel) = state.graph_active_channel() else {
+        return vec![];
+    };
+    included(state)
+        .into_iter()
+        .filter(|key| key.id == channel.id && key.property == channel.property)
+        .collect()
+}
+/// Included means pinned + active, independent of lane scrolling/painting.
+pub(super) fn included(state: &EditorState) -> Vec<KeyRef> {
+    let channels: BTreeSet<_> = state.graph_included_channels().into_iter().collect();
     state
         .selected_keys
         .iter()
         .copied()
-        .filter(|k| {
-            Some(k.id) == state.editor.selected()
-                && k.property == state.graph_property
+        .filter(|key| {
+            channels.contains(&planning::channel(*key))
                 && state
                     .editor
-                    .selected_layer()
-                    .and_then(|l| l.track(k.property))
-                    .is_some_and(|t| t.keys().contains_key(&k.frame))
+                    .project()
+                    .composition()
+                    .layer(key.id)
+                    .and_then(|layer| layer.track(key.property))
+                    .is_some_and(|track| track.keys().contains_key(&key.frame))
         })
         .collect()
 }
@@ -76,6 +89,11 @@ pub(super) fn translate(
     amount: f64,
     incoming: Option<bool>,
 ) -> Result<Command, String> {
+    if amount != 0.0
+        && planning::multiple_channels(&keys.iter().map(|sample| sample.key).collect::<Vec<_>>())
+    {
+        return Err("Mixed-channel graph selections can only move in time".into());
+    }
     if !amount.is_finite() {
         return Err("Enter a finite graph offset".into());
     }
@@ -125,22 +143,33 @@ pub(super) fn scale(
     time: bool,
     factor: f64,
 ) -> Result<(Command, Vec<KeyRef>), String> {
-    let keys = active(state);
+    let keys = included(state);
+    if !time && planning::multiple_channels(&keys) {
+        return Err("Select one channel to scale values".into());
+    }
+    if time && planning::time_bounds(&keys).is_some_and(|(first, last)| first == last) {
+        return Err("Select keys at two distinct times to scale time".into());
+    }
     if keys.len() < 2 {
         return Err("Select at least two keys to scale".into());
     }
     let track = state
         .editor
-        .selected_layer()
-        .and_then(|l| l.track(state.graph_property))
+        .project()
+        .composition()
+        .layer(keys[0].id)
+        .and_then(|l| l.track(keys[0].property))
         .ok_or("Select a scalar graph channel")?;
     let scale = libre_effects_core::KeyScale {
         time_origin: keys.iter().map(|k| k.frame).min().unwrap() as f64,
         time_scale: if time { factor } else { 1.0 },
-        value_origin: keys
-            .iter()
-            .map(|k| track.keys()[&k.frame].value)
-            .fold(f64::INFINITY, f64::min),
+        value_origin: if time {
+            0.0
+        } else {
+            keys.iter()
+                .map(|k| track.keys()[&k.frame].value)
+                .fold(f64::INFINITY, f64::min)
+        },
         value_scale: if time { 1.0 } else { factor },
     };
     let duration = state.editor.project().composition().duration();
