@@ -18,6 +18,13 @@
 - **후속 고급 기능:** 패널 도킹·소스 뷰어·최근 프로젝트, 타임라인 고급 시간 편집/검색/가상화, 공간 경로·프리셋·표현식, Shape 연산/SVG·Text Animator, 추가 효과·모션 블러, 고정밀 색/HDR·Proxy/GPU, 템플릿, 설치/업데이트·한글화와 UI 회귀 자동화.
 - **별도 대형 단계:** 3D/카메라/라이트·모델, 추적·로토/Puppet, 플러그인/교환 포맷 연구, 웹/API 제품 범위. AEP/MOGRT 호환은 구현되지 않았다.
 
+### 도형 곡선의 한계값 유지 — 2026-10-03
+
+- D01/E03: 유효한 Bezier 곡선의 중간 값이 속성 한계를 넘을 때, 키 추가·애니메이션 해제가 `Invalid shape property or keyframe`으로 거부되는 문제를 회귀 테스트로 재현하고 수정했다. 이 두 조작은 현재 렌더에서 평가한 한계값을 저장하며, 직접 입력한 범위 밖 수치는 계속 거부한다. 기존 키/핸들·다른 속성은 보존하고 한 번의 Undo/Redo로 복원한다. Timeline 숫자 필드와 잠긴 행도 공통 속성 평가 값을 사용한다. Graph 곡선은 조절 가능한 원래 보간 곡선을 유지한다.
+- 코어 회귀 검사는 Width·Miter·Offset·Fill/Stroke Opacity·RGB의 상·하한 오버슈트, 두 조작, 이전 키 보존, Undo/Redo·JSON과 잘못된 시간의 원자적 거부를 포함한다. 실제 Windows에서는 Fill Red가 286.875로 오버슈트하는 프레임에 RGB 키를 추가하여 255로 저장했고, 키 추가 및 스톱워치 해제 각각 Undo/Redo를 확인했다.
+- 실제 저장본 `target/qa/shape-bounds-native.lfe.json`의 Fill RGB는 255/159.5/191.5로 고정된다. 0/15/30/45/60프레임 출력 6,300개 샘플이 기대 색/알파와 2단계 이내로 일치하며, 30프레임 전체 RGBA는 해제 전후 정확히 동일하다(`target/qa/verify_shape_bounds_native.py`). 모델로 만든 원래 곡선 사본과 실제 UI에서 편집·저장한 사본을 구분해 보존했다.
+- 최종 검증: 코어 170개 + 데스크톱 230개(총 400개) 통과, 외부 미디어/장치 30개 제외. Cargo check/fmt/test/release build와 git diff --check 통과(Moon/proto 미설치), 기존 경고 17개. 최종 릴리스에서 원래 곡선의 Timeline R 표시 255.00을 확인했고, 실제 편집 저장본 재열기 후 Fill FFA0C0·꺼진 색상 스톱워치·미리보기 유지를 확인했다. 실제 작업 창 1개와 사용자 보존 원본 SHA256 불변을 확인했다.
+
 ### 도형 Fill·Stroke 색상 애니메이션 — 2026-10-03
 
 - E03/D01: Properties의 Fill/Stroke 색상 스톱워치가 RGB 세 채널을 함께 켜고 끈다. 다른 프레임의 HEX 입력·색 선택기는 RGB 키를 한 Undo로 편집한다. Timeline의 Fill Color/Stroke Color 그룹과 R/G/B별 Graph 선택, 공통 키 복사·시간 편집·보간을 연결했다. 일부 채널만 붙여넣은 경우 색상 편집 시 나머지 채널의 기본색을 최초 색상 키 시점에 보존한다.

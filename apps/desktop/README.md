@@ -104,6 +104,9 @@ at the earliest existing color key. Disabling the color stopwatch retains the
 current color. Color tracks use project version 41; plain static edits keep the
 older format. RGB interpolation operates on 0–255 encoded channel values, with
 display/output values clamped and rounded to 8-bit RGB.
+Adding a key or disabling shape animation samples that same bounded value,
+including when a Bezier curve overshoots the property's limits. Direct numeric
+edits outside the limits still report an error.
 
 ## Color selection
 

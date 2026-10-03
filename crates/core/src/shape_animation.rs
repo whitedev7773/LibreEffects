@@ -221,12 +221,18 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
         if !shape.has_parameter(*parameter) {
             return Err("Dash or gap no longer exists".into());
         }
-        time_remap::edit_track(
-            shape.shape_track_mut(*parameter, fill_color),
-            duration,
-            edit,
-            |v| parameter.accepts(v),
-        )
+        let track = shape.shape_track_mut(*parameter, fill_color);
+        time_remap::edit_track(track, duration, edit, |v| parameter.accepts(v))?;
+        // Sampling a curve must retain the bounded value visible in the viewer.
+        // Explicit numeric/keyframe edits still use the strict validator above.
+        if let TrackEdit::ToggleAnimation { frame } | TrackEdit::ToggleKey { frame } = edit {
+            let (min, max) = parameter.bounds();
+            track.value = track.value.clamp(min, max);
+            if let Some(key) = track.keys.get_mut(frame) {
+                key.value = key.value.clamp(min, max);
+            }
+        }
+        Ok(())
     })())
 }
 
@@ -254,6 +260,95 @@ mod tests {
             edit,
         })
         .unwrap();
+    }
+    #[test]
+    fn sampling_overshooting_shape_curves_keeps_the_visible_bounded_value() {
+        for parameter in [
+            ShapeParam::StrokeWidth,
+            ShapeParam::MiterLimit,
+            ShapeParam::DashOffset,
+            ShapeParam::FillOpacity,
+            ShapeParam::StrokeOpacity,
+            ShapeParam::FillRed,
+            ShapeParam::StrokeBlue,
+        ] {
+            for direction in [-2., 3.] {
+                let mut e = scene();
+                let (min, max) = parameter.bounds();
+                let path = PropertyPath::Shape(parameter);
+                edit(
+                    &mut e,
+                    parameter,
+                    TrackEdit::Value {
+                        frame: 0,
+                        value: min + (max - min) / 3.,
+                    },
+                );
+                edit(&mut e, parameter, TrackEdit::ToggleAnimation { frame: 0 });
+                edit(
+                    &mut e,
+                    parameter,
+                    TrackEdit::Value {
+                        frame: 40,
+                        value: min + 2. * (max - min) / 3.,
+                    },
+                );
+                edit(
+                    &mut e,
+                    parameter,
+                    TrackEdit::Interpolate {
+                        frame: 0,
+                        interpolation: Interpolation::Bezier(Bezier {
+                            x1: 1. / 3.,
+                            y1: direction,
+                            x2: 2. / 3.,
+                            y2: direction,
+                        }),
+                    },
+                );
+                let before = e.project().clone();
+                let expected = if direction < 0. { min } else { max };
+                let layer = e.selected_layer().unwrap();
+                assert_eq!(layer.track_value(path, 20), Some(expected));
+                assert!(!parameter.accepts(layer.track(path).unwrap().value_at(20)));
+                for operation in [
+                    TrackEdit::ToggleKey { frame: 20 },
+                    TrackEdit::ToggleAnimation { frame: 20 },
+                ] {
+                    edit(&mut e, parameter, operation.clone());
+                    let after = e.project().clone();
+                    let track = e.selected_layer().unwrap().track(path).unwrap();
+                    assert_eq!(track.value_at(20), expected);
+                    if matches!(operation, TrackEdit::ToggleKey { .. }) {
+                        let original = before.composition().layer(1).unwrap().track(path).unwrap();
+                        assert_eq!(track.keys[&0], original.keys[&0]);
+                        assert_eq!(track.keys[&40], original.keys[&40]);
+                        assert_eq!(track.keys.len(), 3);
+                    } else {
+                        assert!(track.keys.is_empty());
+                        assert_eq!(track.value_at(99), expected);
+                    }
+                    assert_eq!(
+                        Project::from_json(&after.to_json().unwrap()).unwrap(),
+                        after
+                    );
+                    e.undo();
+                    assert_eq!(e.project(), &before);
+                    e.redo();
+                    assert_eq!(e.project(), &after);
+                    e.undo();
+                }
+                assert!(
+                    e.execute(Command::EditTrack {
+                        id: 1,
+                        property: path,
+                        edit: TrackEdit::ToggleAnimation { frame: u32::MAX },
+                    })
+                    .is_err()
+                );
+                assert_eq!(e.project(), &before);
+            }
+        }
     }
     #[test]
     fn paint_opacity_is_independent_versioned_and_preserves_history() {

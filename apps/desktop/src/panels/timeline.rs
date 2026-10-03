@@ -1211,9 +1211,8 @@ impl Render for Timeline {
                                 format!("{id}-{frame}"),
                                 {
                                     let value = layer
-                                        .track(property)
-                                        .expect("visible property")
-                                        .value_at(frame);
+                                        .track_value(property, frame)
+                                        .expect("visible property");
                                     if property == PropertyPath::TimeRemap {
                                         format!("{value:.12}")
                                     } else {
@@ -1279,9 +1278,8 @@ impl Render for Timeline {
                                         s.child(format!(
                                             "{:.1}",
                                             layer
-                                                .track(property)
+                                                .track_value(property, frame)
                                                 .expect("visible property")
-                                                .value_at(frame)
                                         ))
                                     }),
                             );
