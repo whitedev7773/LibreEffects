@@ -1858,11 +1858,20 @@ Using Above Previous Composite raises either model to version 46.
 Midpoints control interpolation toward the next stop in spatial order, using a
 power curve in sRGB. Radial highlights are limited to ±99.9% of the radius.
 Rendering merges separate color and opacity stops into an adaptively sampled
-gradient; Preview and output share the same 8-bit rasterizer. The ramp preview
-shows opacity over a checkerboard. Stop topology changes are static, and adding
-a stop can change other animation frames. AE's compound Colors animation,
-draggable Gradient Editor stops/midpoints, Composition handles and color-space
-or pixel equivalence remain separate work.
+gradient; Preview and output share the same 8-bit rasterizer. The Properties ramp
+shows opacity over a checkerboard, opacity stops above it and color stops below
+it. Drag a stop or a diamond midpoint; the ramp previews the draft and release
+applies one Undo step at the current frame. Escape, focus/window changes or a
+changed document/frame/selection cancel the draft. The Composition updates on
+release. Click empty space in either stop row to add at that location. Up/Down
+selects handles, Left/Right adjusts by 1% (Shift: 10%), Home/End goes to the allowed
+limits, and Delete removes a stop while retaining at least two of each kind.
+Existing numeric fields and color swatches remain available. Coincident stops
+retain their IDs; zero-length intervals have no draggable midpoint.
+Stop topology changes are static, and adding a stop can change other animation
+frames. AE's modal Gradient Editor/compound Colors animation, Composition
+handles and color-space or pixel equivalence remain separate work. Native ramp
+gesture verification is pending; see DEVELOPMENT_BACKLOG.md.
 
 Group Skew ranges from −89° to 89° to avoid singular transforms. Skew Axis
 rotates the shear direction. The group applies Anchor, Scale, oriented Skew,

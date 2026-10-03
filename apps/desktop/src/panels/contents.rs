@@ -13,6 +13,8 @@ use libre_effects_core::{
     StrokeJoin, TrackEdit,
 };
 use std::{cell::Cell, rc::Rc};
+mod gradient_ramp;
+use gradient_ramp::RampDrag;
 
 struct PaintMenu {
     layer: u64,
@@ -40,6 +42,10 @@ pub(crate) struct ContentsControls {
     add_open: bool,
     collapsed: std::collections::BTreeSet<u64>,
     gradient_stop: Option<u64>,
+    ramp_drag: Option<RampDrag>,
+    ramp_selected: Option<GradientParam>,
+    ramp_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    ramp_focus: FocusHandle,
     paint_menu: Option<PaintMenu>,
     paint_focus: [FocusHandle; 2],
     paint_bounds: [Rc<Cell<Option<Bounds<Pixels>>>>; 2],
@@ -49,6 +55,13 @@ impl ContentsControls {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
         cx.observe(&state, |this, _, cx| {
             let s = this.state.read(cx);
+            if this
+                .ramp_drag
+                .as_ref()
+                .is_some_and(|d| !d.current(s, this.selected))
+            {
+                this.ramp_drag = None;
+            }
             if this.paint_menu.as_ref().is_some_and(|m| {
                 m.revision != s.document_revision || s.editor.selected() != Some(m.layer)
             }) {
@@ -66,6 +79,10 @@ impl ContentsControls {
             add_open: false,
             collapsed: Default::default(),
             gradient_stop: None,
+            ramp_drag: None,
+            ramp_selected: None,
+            ramp_bounds: Default::default(),
+            ramp_focus: cx.focus_handle(),
             paint_menu: None,
             paint_focus: [cx.focus_handle(), cx.focus_handle()],
             paint_bounds: Default::default(),
@@ -74,6 +91,8 @@ impl ContentsControls {
     }
     fn select(&mut self, layer: u64, item: u64, cx: &mut Context<Self>) {
         self.paint_menu = None;
+        self.ramp_drag = None;
+        self.ramp_selected = None;
         if self.owner != Some(layer) || self.selected != Some(item) {
             self.gradient_stop = None;
         }
@@ -200,8 +219,13 @@ impl Render for ContentsControls {
             watches.push(cx.observe_window_activation(w, |this, w, cx| {
                 if !w.is_window_active() {
                     this.paint_menu = None;
+                    this.ramp_drag = None;
                     cx.notify();
                 }
+            }));
+            watches.push(cx.on_blur(&self.ramp_focus, w, |this, _, cx| {
+                this.ramp_drag = None;
+                cx.notify();
             }));
             self.paint_watches = Some(watches);
         }
@@ -739,38 +763,7 @@ impl Render for ContentsControls {
             );
         }
         if let Some(gradient) = node.kind.gradient() {
-            let samples = gradient.preview(node, frame, 256);
-            root = root.child(
-                gpui::canvas(
-                    |_, _, _| (),
-                    move |bounds, _, window, _| {
-                        let width = f32::from(bounds.size.width).ceil().max(1.) as usize;
-                        for x in 0..width {
-                            let c = samples[x * 255 / (width - 1).max(1)];
-                            for row in 0..2 {
-                                let background = if (x / 8 + row) % 2 == 0 { 85. } else { 153. };
-                                let rgb_value = c[..3].iter().fold(0u32, |rgb, value| {
-                                    (rgb << 8)
-                                        | (value * 255. * c[3] + background * (1. - c[3])).round()
-                                            as u32
-                                });
-                                window.paint_quad(gpui::fill(
-                                    gpui::Bounds::new(
-                                        gpui::point(
-                                            bounds.left() + px(x as f32),
-                                            bounds.top() + bounds.size.height * (row as f32 / 2.),
-                                        ),
-                                        gpui::size(px(1.5), bounds.size.height / 2. + px(0.5)),
-                                    ),
-                                    rgb(rgb_value),
-                                ));
-                            }
-                        }
-                    },
-                )
-                .w_full()
-                .h(px(20.)),
-            );
+            root = root.child(self.gradient_ramp(node, frame, locked, cx));
             let mut types = div().flex().gap_1().child("Type");
             for (index, radial) in [false, true].into_iter().enumerate() {
                 let state = self.state.clone();
@@ -819,6 +812,7 @@ impl Render for ContentsControls {
                         .on_click(cx.listener(move |this, _, w, cx| {
                             TextField::commit_active(w, cx);
                             this.gradient_stop = Some(stop);
+                            this.ramp_selected = None;
                             cx.notify();
                         })),
                     );

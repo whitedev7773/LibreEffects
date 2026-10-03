@@ -18,6 +18,15 @@
 - **후속 고급 기능:** 패널 도킹·소스 뷰어·최근 프로젝트, 타임라인 고급 시간 편집/검색/가상화, 공간 경로·프리셋·표현식, Shape 연산/SVG·Text Animator, 추가 효과·모션 블러, 고정밀 색/HDR·Proxy/GPU, 템플릿, 설치/업데이트·한글화와 UI 회귀 자동화.
 - **별도 대형 단계:** 3D/카메라/라이트·모델, 추적·로토/Puppet, 플러그인/교환 포맷 연구, 웹/API 제품 범위. AEP/MOGRT 호환은 구현되지 않았다.
 
+### Gradient 색상바 직접 편집 — 2026-10-03
+
+- E04/B05: Properties의 색상바 위에 불투명도 스톱, 아래에 색상 스톱과 구간별 중간점 다이아몬드를 추가했다. 스톱/중간점을 드래그하면 임시 색상바가 갱신되고 놓을 때 현재 프레임의 트랙에 한 Undo로 반영한다. Composition은 놓은 뒤 갱신한다. Escape·포커스/창 전환·문서/프레임/레이어/항목 변경은 드래그 초안을 취소한다.
+- 빈 스톱 행 클릭으로 해당 위치에 현재 색/불투명도를 샘플링해 추가한다. Up/Down 선택, Left/Right 1% 이동(Shift 10%), Home/End 경계 이동, Delete 삭제를 제공한다. 기존 숫자 필드·색 선택기·최소 2/최대 32스톱 제한을 유지한다. 중간점은 공간상 다음 스톱과의 상대 위치이며 겹친 스톱의 길이 0 구간에는 표시하지 않는다. [Adobe Shape Gradient 설명](https://helpx.adobe.com/in/after-effects/desktop/drawing-painting-and-paths/shapes-and-shape-attributes/shape-attributes-paint-operations-path.html)을 참고했다.
+- 자동 검사: 드래프트가 원본/키/히스토리를 변경하지 않는지, 범위 제한·잘못된 값, 서로 다른 행의 선택, 겹침/교차 시 안정된 ID와 중간점 소유자, 120/216/300px 좌표, 키 한 번 생성·Undo/Redo·저장 왕복과 오래된 프레임/선택 거부를 검증했다. 기존 Gradient Preview/출력 수식 테스트를 포함한 전체 435개(코어 189 + 데스크톱 246) 통과, 외부 장치/미디어 30개 제외.
+- **네이티브 드래그·키보드·추가/삭제·저장 재열기 검증은 미완료:** Windows 컴퓨터 사용 도구가 `failed to activate captured window`를 반환했고 창을 재선택한 복구 시도도 실패했다. 실제 AE에서는 기존 작업 화면과 Fill Options를 열어 확인했지만 Gradient Editor 화면은 아직 대조하지 못했다. 실제 사용자 조작까지 완료로 표시하지 않는다.
+- 남음: 네이티브 조작 검증, AE형 모달 Gradient Editor, 편집 중 Composition 실시간 반영, Composition 끝점 손잡이, Colors 단일 복합 트랙/토폴로지 애니메이션. 이번 색상바는 현재 파일 형식을 유지하며 E04 전체는 진행 중이다.
+- **사용자 요청으로 일시 중지:** 최종 소스의 Cargo check/fmt 및 전체 435개 테스트는 통과했다. 마지막 키보드 입력 시 드래그 취소 수정 전 릴리스 빌드는 성공했지만, 해당 수정 후의 최종 릴리스 재빌드는 중지 요청에 따라 중단했다. 재개 시 릴리스 빌드와 네이티브 조작 검증부터 이어간다. 저장된 QA 편집기 프로세스는 빌드 파일 잠금 해제를 위해 종료했으며 사용자 보존 원본 SHA256은 변하지 않았다. 실제 AE에는 비교용 Fill Options 대화상자가 열린 상태일 수 있다.
+
 ### 페인트 Blend Mode와 드롭다운 정리 — 2026-10-03
 
 - E04/B05: 단색/Gradient Fill·Stroke에 Normal·Darken·Multiply·Color Burn·Lighten·Screen·Color Dodge·Overlay·Soft Light·Hard Light·Difference·Exclusion·Hue·Saturation·Color·Luminosity를 연결했다. Composite가 정한 합성 순서에서 같은 그룹의 뒤쪽 페인트와 섞고, 그룹을 분리해 바깥 페인트가 내부 블렌딩에 유입되지 않게 한다. 그룹 불투명도와 레이어 마스크/효과는 이후 적용한다.

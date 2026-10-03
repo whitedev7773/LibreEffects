@@ -101,6 +101,26 @@ impl Default for ShapeGradient {
 }
 impl ShapeGradient {
     pub const MAX_STOPS: usize = 32;
+    /// Sample a temporary editor gesture without changing tracks or history.
+    pub fn preview_edit(
+        &self,
+        n: &ContentsNode,
+        frame: Frame,
+        count: usize,
+        parameter: GradientParam,
+        value: f64,
+    ) -> Vec<[f64; 4]> {
+        let mut draft = n.clone();
+        if value.is_finite()
+            && let Some(track) = draft
+                .parameters
+                .get_mut(&ContentsParam::Gradient(parameter))
+        {
+            let (min, max) = parameter.bounds();
+            *track = AnimatedProperty::new(value.clamp(min, max));
+        }
+        self.preview(&draft, frame, count)
+    }
     pub fn preview(&self, n: &ContentsNode, frame: Frame, count: usize) -> Vec<[f64; 4]> {
         let colors = self.stops(n, frame, false);
         let opacity = self.stops(n, frame, true);
@@ -427,6 +447,41 @@ mod tests {
                 parameter: ContentsParam::Gradient(p),
                 edit: TrackEdit::Value { frame: 0, value },
             },
+        );
+    }
+    #[test]
+    fn gradient_ramp_draft_samples_do_not_change_keys_or_persist_invalid_values() {
+        let mut e = scene();
+        edit(
+            &mut e,
+            ContentsEdit::Track {
+                item: 5,
+                parameter: ContentsParam::Gradient(GradientParam::ColorMidpoint(1)),
+                edit: TrackEdit::ToggleAnimation { frame: 0 },
+            },
+        );
+        let before = e.project().clone();
+        let n = node(&e);
+        let g = n.kind.gradient().unwrap();
+        let base = g.preview(n, 30, 5);
+        let draft = g.preview_edit(n, 30, 5, GradientParam::ColorMidpoint(1), 25.);
+        assert_eq!(draft[1], [0.5, 0.5, 0.5, 1.]);
+        assert_ne!(draft, base);
+        assert_eq!(
+            g.preview_edit(n, 30, 5, GradientParam::ColorMidpoint(1), f64::NAN),
+            base
+        );
+        assert_eq!(
+            g.preview_edit(n, 30, 5, GradientParam::ColorPosition(999), 30.),
+            base
+        );
+        let alpha = g.preview_edit(n, 30, 5, GradientParam::Opacity(3), -100.);
+        assert_eq!(alpha[0], [0., 0., 0., 0.]);
+        assert_eq!(alpha[4], [1., 1., 1., 1.]);
+        assert_eq!(e.project(), &before);
+        assert_eq!(
+            Project::from_json(&before.to_json().unwrap()).unwrap(),
+            before
         );
     }
     #[test]
