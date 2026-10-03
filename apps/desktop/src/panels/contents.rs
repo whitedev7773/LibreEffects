@@ -35,7 +35,7 @@ fn paint_options(picker: usize) -> Vec<&'static str> {
 }
 pub(crate) struct ContentsControls {
     state: Entity<EditorState>,
-    owner: Option<u64>,
+    owner: Option<(libre_effects_core::CompositionId, u64)>,
     selected: Option<u64>,
     fields: Vec<(ContentsParam, Entity<TextField>)>,
     name: Option<Entity<TextField>>,
@@ -55,16 +55,17 @@ impl ContentsControls {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
         cx.observe(&state, |this, _, cx| {
             let s = this.state.read(cx);
-            if this
+            let cancel_ramp = this
                 .ramp_drag
                 .as_ref()
-                .is_some_and(|d| !d.current(s, this.selected))
-            {
-                this.ramp_drag = None;
-            }
-            if this.paint_menu.as_ref().is_some_and(|m| {
+                .is_some_and(|d| !d.current(s, this.selected));
+            let cancel_menu = this.paint_menu.as_ref().is_some_and(|m| {
                 m.revision != s.document_revision || s.editor.selected() != Some(m.layer)
-            }) {
+            });
+            if cancel_ramp {
+                this.cancel_ramp(cx);
+            }
+            if cancel_menu {
                 this.paint_menu = None;
             }
             cx.notify();
@@ -91,13 +92,24 @@ impl ContentsControls {
     }
     fn select(&mut self, layer: u64, item: u64, cx: &mut Context<Self>) {
         self.paint_menu = None;
-        self.ramp_drag = None;
+        self.cancel_ramp(cx);
         self.ramp_selected = None;
-        if self.owner != Some(layer) || self.selected != Some(item) {
+        let composition = self.state.read(cx).editor.project().active_composition_id();
+        if self.owner != Some((composition, layer)) || self.selected != Some(item) {
             self.gradient_stop = None;
         }
-        self.owner = Some(layer);
+        self.owner = Some((composition, layer));
         self.selected = Some(item);
+        self.state.update(cx, |s, cx| {
+            s.contents_selection = Some((composition, layer, item));
+            if matches!(
+                s.gradient_controls,
+                Some(crate::color_edit::GradientTarget::Contents(..))
+            ) {
+                s.gradient_controls = None;
+            }
+            cx.notify();
+        });
         self.add_open = false;
         let params = self
             .state
@@ -219,12 +231,12 @@ impl Render for ContentsControls {
             watches.push(cx.observe_window_activation(w, |this, w, cx| {
                 if !w.is_window_active() {
                     this.paint_menu = None;
-                    this.ramp_drag = None;
+                    this.cancel_ramp(cx);
                     cx.notify();
                 }
             }));
             watches.push(cx.on_blur(&self.ramp_focus, w, |this, _, cx| {
-                this.ramp_drag = None;
+                this.cancel_ramp(cx);
                 cx.notify();
             }));
             self.paint_watches = Some(watches);
@@ -245,8 +257,16 @@ impl Render for ContentsControls {
         let Content::ShapeContents(contents) = layer.content() else {
             return root;
         };
-        if self.owner != Some(id) || self.selected.is_some_and(|n| contents.node(n).is_none()) {
-            self.owner = Some(id);
+        let composition = self.state.read(cx).editor.project().active_composition_id();
+        if self.owner != Some((composition, id))
+            || self.selected.is_some_and(|n| contents.node(n).is_none())
+        {
+            self.cancel_ramp(cx);
+            self.owner = Some((composition, id));
+            self.state.update(cx, |s, cx| {
+                s.contents_selection = None;
+                cx.notify();
+            });
             self.selected = None;
             self.fields.clear();
             self.name = None;
@@ -763,6 +783,30 @@ impl Render for ContentsControls {
             );
         }
         if let Some(gradient) = node.kind.gradient() {
+            let target = crate::color_edit::GradientTarget::Contents(composition, id, item);
+            let active = self.state.read(cx).gradient_controls == Some(target);
+            root = root.child(
+                ui::text_button("contents-gradient-points", "Edit gradient in Composition")
+                    .when(active, |b| b.bg(rgb(0x164a7b)))
+                    .when(locked || !node.enabled, |b| b.opacity(0.4))
+                    .on_click(cx.listener(move |this, _, w, cx| {
+                        TextField::commit_active(w, cx);
+                        this.cancel_ramp(cx);
+                        if this.ramp_node(cx).is_none() {
+                            return;
+                        }
+                        this.state.update(cx, |s, cx| {
+                            s.dispatch(&Action::Seek(s.frame), w, cx);
+                            s.tool = crate::editor::Tool::Select;
+                            s.gradient_controls = if s.gradient_controls == Some(target) {
+                                None
+                            } else {
+                                Some(target)
+                            };
+                            cx.notify();
+                        });
+                    })),
+            );
             root = root.child(self.gradient_ramp(node, frame, locked, cx));
             let mut types = div().flex().gap_1().child("Type");
             for (index, radial) in [false, true].into_iter().enumerate() {

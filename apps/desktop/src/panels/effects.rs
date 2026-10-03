@@ -246,7 +246,7 @@ impl Render for EffectControls {
                 effect.kind(),
                 EffectKind::LinearGradient | EffectKind::RadialGradient
             ) {
-                let target = (composition, id, effect_id);
+                let target = crate::color_edit::GradientTarget::Effect(composition, id, effect_id);
                 let active = gradient_controls == Some(target);
                 let state = self.state.clone();
                 section = section.child(

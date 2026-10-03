@@ -5,6 +5,120 @@ use libre_effects_core::{
 };
 use serde::{Deserialize, Serialize};
 
+/// The viewer uses one endpoint tool for effect gradients and Contents paints.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GradientTarget {
+    Effect(
+        libre_effects_core::CompositionId,
+        LayerId,
+        libre_effects_core::EffectId,
+    ),
+    Contents(libre_effects_core::CompositionId, LayerId, u64),
+}
+impl GradientTarget {
+    pub fn composition(self) -> libre_effects_core::CompositionId {
+        match self {
+            Self::Effect(c, ..) | Self::Contents(c, ..) => c,
+        }
+    }
+    pub fn layer(self) -> LayerId {
+        match self {
+            Self::Effect(_, l, _) | Self::Contents(_, l, _) => l,
+        }
+    }
+}
+
+pub(crate) fn next_gradient_gesture() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// A transient ramp edit is shared with the viewer, never with save/export/history.
+#[derive(Clone)]
+pub(crate) struct GradientDraft {
+    pub gesture_id: u64,
+    origin: std::sync::Arc<Project>,
+    revision: u64,
+    frame: Frame,
+    tool: crate::editor::Tool,
+    pub layer: LayerId,
+    pub item: u64,
+    pub parameter: GradientParam,
+    original: f64,
+    pub value: f64,
+}
+impl GradientDraft {
+    pub fn new(
+        s: &crate::editor::EditorState,
+        item: u64,
+        parameter: GradientParam,
+    ) -> Option<Self> {
+        let layer = s.editor.selected_layer().filter(|l| !l.locked())?;
+        let Content::ShapeContents(contents) = layer.content() else {
+            return None;
+        };
+        let node = contents.node(item)?;
+        node.kind.gradient()?;
+        let path = ContentsParam::Gradient(parameter);
+        node.parameters.get(&path)?;
+        // Match the visible handle and renderer when a legal curve overshoots its bounds.
+        let original = node.value_at(path, s.frame);
+        let draft = Self {
+            gesture_id: next_gradient_gesture(),
+            origin: std::sync::Arc::new(s.editor.project().clone()),
+            revision: s.document_revision,
+            frame: s.frame,
+            tool: s.tool,
+            layer: layer.id(),
+            item,
+            parameter,
+            original,
+            value: original,
+        };
+        draft.current(s).then_some(draft)
+    }
+    pub fn current(&self, s: &crate::editor::EditorState) -> bool {
+        self.origin.as_ref() == s.editor.project()
+            && self.revision == s.document_revision
+            && self.frame == s.frame
+            && self.tool == s.tool
+            && !s.playing
+            && s.colors.session.is_none()
+            && s.text_session.is_none()
+            && s.editor.selected() == Some(self.layer)
+            && s.contents_selection
+                == Some((self.origin.active_composition_id(), self.layer, self.item))
+    }
+    pub fn command(&self) -> Option<Command> {
+        let (lo, hi) = self.parameter.bounds();
+        (self.value.is_finite()
+            && (lo..=hi).contains(&self.value)
+            && (self.value - self.original).abs() > 1e-8)
+            .then(|| Command::Contents {
+                id: self.layer,
+                edit: ContentsEdit::Track {
+                    item: self.item,
+                    parameter: ContentsParam::Gradient(self.parameter),
+                    edit: TrackEdit::Value {
+                        frame: self.frame,
+                        value: self.value,
+                    },
+                },
+            })
+    }
+    pub fn preview(&self, s: &crate::editor::EditorState) -> Option<Project> {
+        if !self.current(s) {
+            return None;
+        }
+        let mut temporary = libre_effects_core::Editor::default();
+        temporary
+            .replace_project(self.origin.as_ref().clone())
+            .ok()?;
+        temporary.execute(self.command()?).ok()?;
+        Some(temporary.project().clone())
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Color {
     pub rgb: u32,
@@ -454,6 +568,112 @@ impl Workflow {
 mod tests {
     use super::*;
     use libre_effects_core::Editor;
+    #[test]
+    fn gradient_ramp_overshoot_press_release_uses_visible_value_without_history() {
+        use libre_effects_core::{Bezier, ContentsKind, Interpolation};
+        for parameter in [
+            GradientParam::ColorPosition(1),
+            GradientParam::OpacityPosition(3),
+            GradientParam::ColorMidpoint(1),
+            GradientParam::OpacityMidpoint(3),
+        ] {
+            for direction in [-2., 3.] {
+                let mut s = crate::editor::EditorState::default();
+                s.editor
+                    .execute(Command::AddContent {
+                        content: Content::Shape(Default::default()),
+                        width: 160.,
+                        height: 100.,
+                        name: "Overshooting gradient".into(),
+                    })
+                    .unwrap();
+                for edit in [
+                    ContentsEdit::Promote,
+                    ContentsEdit::Add {
+                        parent: 1,
+                        kind: ContentsKind::GradientFill {
+                            even_odd: false,
+                            gradient: Default::default(),
+                        },
+                    },
+                ] {
+                    s.editor.execute(Command::Contents { id: 1, edit }).unwrap();
+                }
+                let path = ContentsParam::Gradient(parameter);
+                let (lo, hi) = parameter.bounds();
+                for edit in [
+                    TrackEdit::Value {
+                        frame: 0,
+                        value: lo,
+                    },
+                    TrackEdit::ToggleAnimation { frame: 0 },
+                    TrackEdit::Value {
+                        frame: 40,
+                        value: hi,
+                    },
+                    TrackEdit::Interpolate {
+                        frame: 0,
+                        interpolation: Interpolation::Bezier(Bezier {
+                            x1: 1. / 3.,
+                            y1: direction,
+                            x2: 2. / 3.,
+                            y2: direction,
+                        }),
+                    },
+                ] {
+                    s.editor
+                        .execute(Command::Contents {
+                            id: 1,
+                            edit: ContentsEdit::Track {
+                                item: 5,
+                                parameter: path,
+                                edit,
+                            },
+                        })
+                        .unwrap();
+                }
+                s.editor.clear_history();
+                s.frame = 20;
+                s.contents_selection = Some((s.editor.project().active_composition_id(), 1, 5));
+                let before = s.editor.project().clone();
+                let Content::ShapeContents(contents) = s.editor.selected_layer().unwrap().content()
+                else {
+                    panic!()
+                };
+                let node = contents.node(5).unwrap();
+                let raw = node.parameters[&path].value_at(s.frame);
+                let visible = node.value_at(path, s.frame);
+                assert!(
+                    raw < lo || raw > hi,
+                    "fixture must overshoot: {parameter:?} {raw}"
+                );
+                assert_eq!(visible, if direction < 0. { lo } else { hi });
+                assert_eq!(node.parameters[&path].keys().len(), 2);
+                let mut draft = GradientDraft::new(&s, 5, parameter).unwrap();
+                assert_eq!(draft.original, visible);
+                assert_eq!(draft.value, visible);
+                assert!(draft.command().is_none());
+                // Mouse-up maps the unmoved handle back to its visible clamped value.
+                draft.value = visible;
+                if let Some(command) = draft.command() {
+                    s.editor.execute(command).unwrap();
+                }
+                assert!(draft.preview(&s).is_none());
+                assert_eq!(s.editor.project(), &before);
+                assert!(!s.editor.can_undo());
+                assert!(!s.editor.can_redo());
+                assert!(GradientDraft::new(&s, 5, GradientParam::ColorPosition(999)).is_none());
+                // A real drag away from that boundary still creates exactly one reversible edit.
+                draft.value = (lo + hi) / 2.;
+                s.editor.execute(draft.command().unwrap()).unwrap();
+                assert!(s.editor.can_undo());
+                s.editor.undo();
+                assert_eq!(s.editor.project(), &before);
+                assert!(!s.editor.can_undo());
+            }
+        }
+    }
+
     #[test]
     fn gradient_stop_color_draft_keeps_other_stops_and_opacity_tracks() {
         use libre_effects_core::{ContentsKind, Shape, ShapeGradient};

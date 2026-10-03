@@ -83,11 +83,7 @@ fn move_command(g: &MoveGesture) -> Command {
 pub(crate) struct Preview {
     gradient_drag: Option<gradient_gesture::Gesture>,
     gradient_point: usize,
-    gradient_focus_target: Option<(
-        libre_effects_core::CompositionId,
-        LayerId,
-        libre_effects_core::EffectId,
-    )>,
+    gradient_focus_target: Option<crate::color_edit::GradientTarget>,
     gradient_focus_watch: Option<[gpui::Subscription; 2]>,
     state: Entity<EditorState>,
     text_dragging: bool,
@@ -112,6 +108,7 @@ pub(crate) struct Preview {
     renderer: std::sync::Arc<crate::rendering::Renderer>,
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pending: Option<Request>,
+    gradient_render_context: Option<preview_render::GradientContext>,
     decoder_revision: u64,
     ready: Option<(Request, Result<image::RgbaImage, String>)>,
     failed: Option<(libre_effects_core::Project, u32, u32, String)>,
@@ -216,6 +213,7 @@ impl Preview {
             renderer: std::sync::Arc::new(crate::rendering::Renderer::with_cancel(cancel.clone())),
             cancel,
             pending: None,
+            gradient_render_context: None,
             decoder_revision: 0,
             ready: None,
             failed: None,
@@ -1112,7 +1110,11 @@ impl Render for Preview {
         let time = comp.timecode(frame);
         let pan = point(px(state.preview_pan[0]), px(state.preview_pan[1]));
         let gesture = self.gesture.clone();
-        let mut render_project = state.text_project();
+        let mut render_project = state
+            .gradient_preview
+            .as_ref()
+            .and_then(|draft| draft.preview(state))
+            .unwrap_or_else(|| state.text_project());
         let text_session = state.text_session.clone();
         let text_box_rect = self.text_box_drag.as_ref().map(|d| d.rect());
         let text_input = cx.entity();
@@ -1122,9 +1124,11 @@ impl Render for Preview {
             && g.layer.is_some()
         {
             let mut temporary = libre_effects_core::Editor::default();
-            let _ = temporary.replace_project(render_project.clone());
-            let _ = temporary.execute(move_command(g));
-            render_project = temporary.project().clone();
+            if temporary.replace_project(render_project.clone()).is_ok()
+                && temporary.execute(move_command(g)).is_ok()
+            {
+                render_project = temporary.project().clone();
+            }
         }
         if let Some(command) = self.drawing.as_ref().and_then(|d| d.command(state)) {
             let mut temporary = libre_effects_core::Editor::default();
@@ -1155,6 +1159,18 @@ impl Render for Preview {
         let gradient_point = self.gradient_point;
         let pen_active = state.tool == Tool::Pen;
         let comp = render_project.composition().clone();
+        let gradient_gesture = self
+            .gradient_drag
+            .as_ref()
+            .filter(|g| g.valid(state))
+            .map(|g| g.id)
+            .or_else(|| {
+                state
+                    .gradient_preview
+                    .as_ref()
+                    .filter(|d| d.current(state))
+                    .map(|d| d.gesture_id)
+            });
         self.update_render(
             Request {
                 project: render_project.clone(),
@@ -1162,6 +1178,7 @@ impl Render for Preview {
                 dimension: max_dimension,
                 revision,
                 transport,
+                gradient_gesture,
             },
             playing,
             channel,

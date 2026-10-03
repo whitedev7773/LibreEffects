@@ -3,6 +3,10 @@
 use super::*;
 use std::sync::atomic::Ordering;
 
+// Only snapshots from the same active gradient gesture may display an intermediate frame.
+// Frame, resolution, decoder revision and transport still form a strict cancellation boundary.
+pub(super) type GradientContext = (u64, u32, u32, u64, u64);
+
 #[derive(Clone)]
 pub(super) struct Request {
     pub project: libre_effects_core::Project,
@@ -10,10 +14,37 @@ pub(super) struct Request {
     pub dimension: u32,
     pub revision: u64,
     pub transport: u64,
+    pub gradient_gesture: Option<u64>,
 }
 impl Request {
+    fn gradient_context(&self) -> Option<GradientContext> {
+        self.gradient_gesture.map(|id| {
+            (
+                id,
+                self.frame,
+                self.dimension,
+                self.revision,
+                self.transport,
+            )
+        })
+    }
+    fn same_gradient(&self, other: &Self) -> bool {
+        self.gradient_context().is_some() && self.gradient_context() == other.gradient_context()
+    }
+    fn discards_gradient_frame(
+        &self,
+        previous: Option<GradientContext>,
+        displayed: Option<(&libre_effects_core::Project, u32, u32)>,
+    ) -> bool {
+        previous.is_some()
+            && previous != self.gradient_context()
+            && displayed.is_some_and(|(p, f, d)| {
+                p != &self.project || f != self.frame || d != self.dimension
+            })
+    }
     fn same_context(&self, other: &Self) -> bool {
         self.project == other.project
+            && self.gradient_gesture == other.gradient_gesture
             && self.dimension == other.dimension
             && self.revision == other.revision
             && self.transport == other.transport
@@ -97,11 +128,23 @@ impl Preview {
         let changed =
             self.ram
                 .configure(&request.project, request.dimension, request.revision, limit);
-        if changed {
+        let gradient_context = request.gradient_context();
+        let keep_gradient_frame =
+            gradient_context.is_some() && gradient_context == self.gradient_render_context;
+        // A drag can return to its original value before Escape. RAM then already
+        // targets the original project, but the displayed intermediate frame may not.
+        let stale_gradient_frame = request.discards_gradient_frame(
+            self.gradient_render_context,
+            self.cached.as_ref().map(|(p, f, d, _)| (p, *f, *d)),
+        );
+        self.gradient_render_context = gradient_context;
+        if changed || stale_gradient_frame {
             self.failed = None;
-            self.raw = None;
-            if let Some((_, _, _, old)) = self.cached.take() {
-                let _ = window.drop_image(old);
+            if !keep_gradient_frame {
+                self.raw = None;
+                if let Some((_, _, _, old)) = self.cached.take() {
+                    let _ = window.drop_image(old);
+                }
             }
         }
         if !caching {
@@ -117,7 +160,7 @@ impl Preview {
         }
         if let Some(pending) = &self.pending {
             let prefill = self.warming.is_some() && request.same_context(pending);
-            if !prefill && !request.accepts(pending, playing) {
+            if !prefill && !request.accepts(pending, playing) && !request.same_gradient(pending) {
                 self.cancel.store(true, Ordering::Release);
             }
         }
@@ -154,6 +197,19 @@ impl Preview {
                         }
                         self.failed = Some((ready.project, ready.frame, ready.dimension, error));
                     }
+                }
+            } else if request.same_gradient(&ready) {
+                // Complete one in-flight frame while the pointer moves, then start the latest
+                // snapshot. Never insert an intermediate project's pixels into the latest RAM cache.
+                if let Ok(pixels) = result {
+                    self.cache_pixels(
+                        ready.project,
+                        ready.frame,
+                        ready.dimension,
+                        std::sync::Arc::new(pixels),
+                        channel,
+                        window,
+                    );
                 }
             }
         }
@@ -259,6 +315,7 @@ mod tests {
             dimension: 1280,
             revision: 1,
             transport: 8,
+            gradient_gesture: None,
         };
         let mut ready = current.clone();
         ready.frame = 29;
@@ -281,5 +338,64 @@ mod tests {
         ready.project = editor.project().clone();
         assert!(!current.accepts(&ready, true));
         assert!(current.accepts(&current, false));
+    }
+    #[test]
+    fn live_gradient_coalesces_only_its_own_frame_and_never_crosses_cancellation_boundaries() {
+        let current = Request {
+            project: Default::default(),
+            frame: 30,
+            dimension: 1280,
+            revision: 1,
+            transport: 8,
+            gradient_gesture: Some(17),
+        };
+        let mut intermediate = current.clone();
+        let mut editor = libre_effects_core::Editor::default();
+        editor.execute(Command::AddRectangle).unwrap();
+        intermediate.project = editor.project().clone();
+        assert!(current.same_gradient(&intermediate));
+        assert!(!current.same_context(&intermediate));
+        assert!(
+            !current.accepts(&intermediate, false),
+            "intermediate pixels are display-only, not a current cache hit"
+        );
+        for mutate in [
+            |r: &mut Request| r.gradient_gesture = None,
+            |r: &mut Request| r.gradient_gesture = Some(18),
+            |r: &mut Request| r.frame += 1,
+            |r: &mut Request| r.dimension /= 2,
+            |r: &mut Request| r.revision += 1,
+            |r: &mut Request| r.transport += 1,
+        ] {
+            let mut next = current.clone();
+            mutate(&mut next);
+            assert!(!next.same_gradient(&intermediate));
+        }
+        let mut ordinary = current.clone();
+        ordinary.gradient_gesture = None;
+        // Cancel/commit can keep the same latest RAM project while a previous
+        // intermediate image is displayed. Drop that image across the boundary.
+        assert!(ordinary.discards_gradient_frame(
+            current.gradient_context(),
+            Some((&intermediate.project, 30, 1280))
+        ));
+        assert!(!ordinary.discards_gradient_frame(
+            current.gradient_context(),
+            Some((&ordinary.project, 30, 1280))
+        ));
+        assert!(ordinary.discards_gradient_frame(
+            current.gradient_context(),
+            Some((&ordinary.project, 29, 1280))
+        ));
+        assert!(ordinary.discards_gradient_frame(
+            current.gradient_context(),
+            Some((&ordinary.project, 30, 640))
+        ));
+        assert!(!current.discards_gradient_frame(
+            current.gradient_context(),
+            Some((&intermediate.project, 30, 1280))
+        ));
+        assert!(!ordinary.same_gradient(&ordinary));
+        assert!(ordinary.accepts(&ordinary, false));
     }
 }

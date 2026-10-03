@@ -1,11 +1,14 @@
-//! Gradient points use the same layer space as the effect renderer.
-use crate::editor::{EditorState, Tool};
+//! Gradient points use the same layer or nested Contents space as the renderer.
+use crate::{
+    color_edit::GradientTarget as Target,
+    editor::{EditorState, Tool},
+};
 use gpui::{Bounds, PathBuilder, Pixels, Point, Window, fill, point, px, rgb, size};
 use libre_effects_core::{
-    Affine, Command, CompositionId, EffectEdit, EffectId, EffectKind, EffectParam, LayerId, Project,
+    Affine, Command, Content, ContentsEdit, ContentsKind, ContentsNode, ContentsParam, EffectEdit,
+    EffectKind, EffectParam, GradientParam, Project, TrackEdit,
 };
 
-type Target = (CompositionId, LayerId, EffectId);
 #[derive(Clone)]
 pub(super) struct Overlay {
     target: Target,
@@ -19,39 +22,67 @@ impl Overlay {
             || s.playing
             || s.text_session.is_some()
             || s.colors.session.is_some()
-            || project.active_composition_id() != target.0
-            || s.editor.selected() != Some(target.1)
+            || project.active_composition_id() != target.composition()
+            || s.editor.selected() != Some(target.layer())
         {
             return None;
         }
         let c = project.composition();
-        let l = c.layer(target.1)?;
-        let e = l.effect_stack().iter().find(|e| e.id() == target.2)?;
-        if l.locked()
-            || e.bypassed()
-            || !super::controls_active(c, l, s.frame, true)
-            || !matches!(
-                e.kind(),
-                EffectKind::LinearGradient | EffectKind::RadialGradient
-            )
-        {
+        let l = c.layer(target.layer())?;
+        if l.locked() || !super::controls_active(c, l, s.frame, true) {
             return None;
         }
-        let world = c.world_transform(target.1, s.frame)?;
+        let mut world = c.world_transform(target.layer(), s.frame)?;
+        let points = match target {
+            Target::Effect(_, _, effect) => {
+                let e = l.effect_stack().iter().find(|e| e.id() == effect)?;
+                if e.bypassed()
+                    || !matches!(
+                        e.kind(),
+                        EffectKind::LinearGradient | EffectKind::RadialGradient
+                    )
+                {
+                    return None;
+                }
+                [
+                    [
+                        e.value_at(EffectParam::StartX, s.frame),
+                        e.value_at(EffectParam::StartY, s.frame),
+                    ],
+                    [
+                        e.value_at(EffectParam::EndX, s.frame),
+                        e.value_at(EffectParam::EndY, s.frame),
+                    ],
+                ]
+            }
+            Target::Contents(composition, layer, item) => {
+                if s.contents_selection != Some((composition, layer, item)) {
+                    return None;
+                }
+                let Content::ShapeContents(contents) = l.content() else {
+                    return None;
+                };
+                let (node, transform) =
+                    paint_space(&contents.items, item, s.frame, Affine::default())?;
+                node.kind.gradient()?;
+                world = world.compose(transform);
+                [
+                    [
+                        node.value_at(ContentsParam::Gradient(GradientParam::StartX), s.frame),
+                        node.value_at(ContentsParam::Gradient(GradientParam::StartY), s.frame),
+                    ],
+                    [
+                        node.value_at(ContentsParam::Gradient(GradientParam::EndX), s.frame),
+                        node.value_at(ContentsParam::Gradient(GradientParam::EndY), s.frame),
+                    ],
+                ]
+            }
+        };
         world.inverse()?;
         Some(Self {
             target,
             world,
-            points: [
-                [
-                    e.value_at(EffectParam::StartX, s.frame),
-                    e.value_at(EffectParam::StartY, s.frame),
-                ],
-                [
-                    e.value_at(EffectParam::EndX, s.frame),
-                    e.value_at(EffectParam::EndY, s.frame),
-                ],
-            ],
+            points,
         })
     }
     pub fn hit(&self, p: [f64; 2], zoom: f32, preferred: usize) -> Option<usize> {
@@ -61,35 +92,57 @@ impl Overlay {
         })
     }
     pub fn command(&self, points: [[f64; 2]; 2], frame: u32) -> Option<Command> {
+        let limit = match self.target {
+            Target::Effect(..) => 32768.0,
+            Target::Contents(..) => 1_000_000.0,
+        };
         if points == self.points
             || points
                 .iter()
                 .flatten()
-                .any(|v| !v.is_finite() || !(-32768.0..=32768.0).contains(v))
+                .any(|v| !v.is_finite() || !(-limit..=limit).contains(v))
         {
             return None;
         }
         Some(Command::Batch(
-            [
-                EffectParam::StartX,
-                EffectParam::StartY,
-                EffectParam::EndX,
-                EffectParam::EndY,
-            ]
-            .into_iter()
-            .zip(points.into_iter().flatten())
-            .zip(self.points.into_iter().flatten())
-            .filter(|((_, v), old)| v != old)
-            .map(|((parameter, value), _)| Command::Effect {
-                id: self.target.1,
-                edit: EffectEdit::SetValue {
-                    effect: self.target.2,
-                    parameter,
-                    frame,
-                    value,
-                },
-            })
-            .collect(),
+            points
+                .into_iter()
+                .flatten()
+                .zip(self.points.into_iter().flatten())
+                .enumerate()
+                .filter(|(_, (value, old))| value != old)
+                .map(|(index, (value, _))| match self.target {
+                    Target::Effect(_, layer, effect) => Command::Effect {
+                        id: layer,
+                        edit: EffectEdit::SetValue {
+                            effect,
+                            parameter: [
+                                EffectParam::StartX,
+                                EffectParam::StartY,
+                                EffectParam::EndX,
+                                EffectParam::EndY,
+                            ][index],
+                            frame,
+                            value,
+                        },
+                    },
+                    Target::Contents(_, layer, item) => Command::Contents {
+                        id: layer,
+                        edit: ContentsEdit::Track {
+                            item,
+                            parameter: ContentsParam::Gradient(
+                                [
+                                    GradientParam::StartX,
+                                    GradientParam::StartY,
+                                    GradientParam::EndX,
+                                    GradientParam::EndY,
+                                ][index],
+                            ),
+                            edit: TrackEdit::Value { frame, value },
+                        },
+                    },
+                })
+                .collect(),
         ))
     }
     pub fn nudge(&self, index: usize, delta: [f64; 2], both: bool, frame: u32) -> Option<Command> {
@@ -104,7 +157,30 @@ impl Overlay {
     }
 }
 
+// The paint's coordinates belong to its containing group, including every enabled ancestor.
+fn paint_space(
+    nodes: &[ContentsNode],
+    item: u64,
+    frame: u32,
+    world: Affine,
+) -> Option<(&ContentsNode, Affine)> {
+    for node in nodes.iter().filter(|n| n.enabled) {
+        if node.id == item {
+            return Some((node, world));
+        }
+        if let ContentsKind::Group(children) = &node.kind {
+            if let Some(found) =
+                paint_space(children, item, frame, world.compose(node.transform(frame)))
+            {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
 pub(super) struct Gesture {
+    pub id: u64,
     overlay: Overlay,
     pointer: [f64; 2],
     pub points: [[f64; 2]; 2],
@@ -126,6 +202,7 @@ impl Gesture {
         s: &EditorState,
     ) -> Self {
         Self {
+            id: crate::color_edit::next_gradient_gesture(),
             points: overlay.points,
             overlay,
             index,
@@ -311,7 +388,7 @@ impl super::Preview {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use libre_effects_core::{Editor, Property, PropertyPath, TemporalHandle};
+    use libre_effects_core::{Editor, LayerId, Property, PropertyPath, TemporalHandle};
     fn scene(kind: EffectKind) -> EditorState {
         let mut s = EditorState::default();
         s.editor.execute(Command::AddRectangle).unwrap();
@@ -322,7 +399,11 @@ mod tests {
             })
             .unwrap();
         s.selected_layers.insert(1);
-        s.gradient_controls = Some((s.editor.project().active_composition_id(), 1, 1));
+        s.gradient_controls = Some(Target::Effect(
+            s.editor.project().active_composition_id(),
+            1,
+            1,
+        ));
         s
     }
     fn drag(s: &EditorState, index: usize) -> Gesture {
@@ -548,6 +629,265 @@ mod tests {
         g.update([g.pointer[0] + 40.0, g.pointer[1] + 20.0], false, true);
         drop(g);
         assert_eq!(s.editor.project(), &before);
+    }
+    fn contents_scene(stroke: bool, radial: bool) -> EditorState {
+        let mut s = EditorState::default();
+        s.editor
+            .execute(Command::AddContent {
+                content: Content::Shape(Default::default()),
+                width: 320.,
+                height: 180.,
+                name: "Gradient shape".into(),
+            })
+            .unwrap();
+        contents_edit(&mut s, ContentsEdit::Promote);
+        let mut gradient = libre_effects_core::ShapeGradient::default();
+        gradient.radial = radial;
+        contents_edit(
+            &mut s,
+            ContentsEdit::Add {
+                parent: 1,
+                kind: if stroke {
+                    ContentsKind::GradientStroke {
+                        gradient,
+                        style: Default::default(),
+                    }
+                } else {
+                    ContentsKind::GradientFill {
+                        gradient,
+                        even_odd: false,
+                    }
+                },
+            },
+        );
+        contents_edit(
+            &mut s,
+            ContentsEdit::Composite {
+                item: 5,
+                mode: libre_effects_core::PaintComposite::AbovePrevious,
+            },
+        );
+        contents_edit(
+            &mut s,
+            ContentsEdit::Add {
+                parent: 0,
+                kind: ContentsKind::Group(vec![]),
+            },
+        );
+        contents_edit(
+            &mut s,
+            ContentsEdit::Move {
+                item: 1,
+                parent: 6,
+                index: 0,
+            },
+        );
+        s.selected_layers.insert(1);
+        let composition = s.editor.project().active_composition_id();
+        s.contents_selection = Some((composition, 1, 5));
+        s.gradient_controls = Some(Target::Contents(composition, 1, 5));
+        s
+    }
+    fn contents_edit(s: &mut EditorState, edit: ContentsEdit) {
+        s.editor.execute(Command::Contents { id: 1, edit }).unwrap();
+    }
+    fn contents_value(s: &mut EditorState, item: u64, parameter: ContentsParam, value: f64) {
+        contents_edit(
+            s,
+            ContentsEdit::Track {
+                item,
+                parameter,
+                edit: TrackEdit::Value { frame: 0, value },
+            },
+        );
+    }
+    fn contents_node(s: &EditorState, item: u64) -> &ContentsNode {
+        let Content::ShapeContents(c) =
+            s.editor.project().composition().layer(1).unwrap().content()
+        else {
+            panic!()
+        };
+        c.node(item).unwrap()
+    }
+    #[test]
+    fn contents_endpoints_follow_parent_nested_group_skew_mirroring_and_local_constraints() {
+        for stroke in [false, true] {
+            for radial in [false, true] {
+                let mut s = contents_scene(stroke, radial);
+                s.editor.execute(Command::AddNull).unwrap();
+                s.editor
+                    .execute(Command::SetParent {
+                        id: 1,
+                        parent: Some(2),
+                        frame: 0,
+                    })
+                    .unwrap();
+                set(&mut s, 2, Property::Rotation, 27.);
+                set(&mut s, 2, Property::ScaleX, -130.);
+                set(&mut s, 1, Property::Rotation, -19.);
+                s.editor.select(1);
+                for (item, parameter, value) in [
+                    (6, ContentsParam::Transform(Property::Rotation), 31.),
+                    (6, ContentsParam::Transform(Property::ScaleY), 65.),
+                    (1, ContentsParam::Skew, 23.),
+                    (1, ContentsParam::SkewAxis, 49.),
+                    (1, ContentsParam::Transform(Property::PositionX), 45.),
+                ] {
+                    contents_value(&mut s, item, parameter, value);
+                }
+                let overlay = Overlay::current(&s, s.editor.project()).unwrap();
+                let world = s
+                    .editor
+                    .project()
+                    .composition()
+                    .world_transform(1, 0)
+                    .unwrap()
+                    .compose(contents_node(&s, 6).transform(0))
+                    .compose(contents_node(&s, 1).transform(0));
+                near(
+                    world.point(overlay.points[1]),
+                    overlay.world.point(overlay.points[1]),
+                );
+                let p = overlay.world.point(overlay.points[1]);
+                assert_eq!(overlay.hit([p[0] + 15., p[1]], 0.5, 1), Some(1));
+                assert_eq!(overlay.hit([p[0] + 17., p[1]], 0.5, 1), None);
+                let mut g = drag(&s, 1);
+                let delta = world.vector([12., 30.]);
+                g.update(
+                    [g.pointer[0] + delta[0], g.pointer[1] + delta[1]],
+                    true,
+                    true,
+                );
+                for i in 0..2 {
+                    near(
+                        g.points[i],
+                        [overlay.points[i][0], overlay.points[i][1] + 30.],
+                    );
+                }
+                let before = s.editor.project().clone();
+                s.editor.execute(g.command(&s).unwrap()).unwrap();
+                let current = Overlay::current(&s, s.editor.project()).unwrap();
+                for i in 0..2 {
+                    near(current.points[i], g.points[i]);
+                }
+                s.editor.undo();
+                assert_eq!(s.editor.project(), &before);
+            }
+        }
+    }
+    #[test]
+    fn contents_endpoint_drag_previews_and_commits_only_changed_animated_coordinates_once() {
+        let renderer = crate::rendering::Renderer::new();
+        for stroke in [false, true] {
+            for radial in [false, true] {
+                let mut s = contents_scene(stroke, radial);
+                for parameter in [GradientParam::EndX, GradientParam::EndY] {
+                    for edit in [
+                        TrackEdit::ToggleAnimation { frame: 0 },
+                        TrackEdit::ToggleKey { frame: 60 },
+                    ] {
+                        contents_edit(
+                            &mut s,
+                            ContentsEdit::Track {
+                                item: 5,
+                                parameter: ContentsParam::Gradient(parameter),
+                                edit,
+                            },
+                        );
+                    }
+                }
+                s.editor.clear_history();
+                s.frame = 30;
+                let before = s.editor.project().clone();
+                let mut g = drag(&s, 1);
+                let delta = g.overlay.world.vector([60., 0.]);
+                g.update(
+                    [g.pointer[0] + delta[0], g.pointer[1] + delta[1]],
+                    false,
+                    false,
+                );
+                let mut temporary = Editor::default();
+                temporary.replace_project(before.clone()).unwrap();
+                temporary.execute(g.command(&s).unwrap()).unwrap();
+                assert_eq!(s.editor.project(), &before);
+                assert!(!s.editor.can_undo());
+                let preview = renderer
+                    .render_preview(temporary.project(), 30, 480)
+                    .unwrap();
+                s.editor.execute(g.command(&s).unwrap()).unwrap();
+                let after = s.editor.project().clone();
+                assert_eq!(temporary.project(), &after);
+                let node = contents_node(&s, 5);
+                assert_eq!(
+                    node.parameters[&ContentsParam::Gradient(GradientParam::EndX)]
+                        .keys()
+                        .keys()
+                        .copied()
+                        .collect::<Vec<_>>(),
+                    vec![0, 30, 60]
+                );
+                assert_eq!(
+                    node.parameters[&ContentsParam::Gradient(GradientParam::EndY)]
+                        .keys()
+                        .keys()
+                        .copied()
+                        .collect::<Vec<_>>(),
+                    vec![0, 60]
+                );
+                let saved = Project::from_json(&after.to_json().unwrap()).unwrap();
+                assert_eq!(
+                    renderer.render_output(&saved, 30, 480, 270).unwrap(),
+                    preview
+                );
+                s.editor.undo();
+                assert_eq!(s.editor.project(), &before);
+                assert!(!s.editor.can_undo());
+                s.editor.redo();
+                assert_eq!(s.editor.project(), &after);
+            }
+        }
+    }
+    #[test]
+    fn contents_endpoints_cancel_on_item_change_hidden_ancestors_singular_and_removed_paints() {
+        for mutate in [
+            |s: &mut EditorState| s.contents_selection = None,
+            |s: &mut EditorState| s.contents_selection.as_mut().unwrap().2 = 4,
+            |s: &mut EditorState| {
+                contents_edit(
+                    s,
+                    ContentsEdit::Enabled {
+                        item: 6,
+                        enabled: false,
+                    },
+                )
+            },
+            |s: &mut EditorState| {
+                contents_edit(
+                    s,
+                    ContentsEdit::Enabled {
+                        item: 5,
+                        enabled: false,
+                    },
+                )
+            },
+            |s: &mut EditorState| {
+                contents_value(s, 1, ContentsParam::Transform(Property::ScaleX), 0.)
+            },
+            |s: &mut EditorState| contents_edit(s, ContentsEdit::Remove(5)),
+        ] {
+            let mut s = contents_scene(false, false);
+            let mut g = drag(&s, 1);
+            g.update([g.pointer[0] + 10., g.pointer[1]], false, false);
+            mutate(&mut s);
+            assert!(Overlay::current(&s, s.editor.project()).is_none());
+            assert!(!g.valid(&s));
+            assert!(g.command(&s).is_none());
+        }
+        let s = contents_scene(false, false);
+        let overlay = Overlay::current(&s, s.editor.project()).unwrap();
+        assert!(overlay.command([[0., 0.], [100_000., 2.]], 0).is_some());
+        assert!(overlay.command([[0., 0.], [1_000_001., 2.]], 0).is_none());
+        assert!(overlay.command([[0., f64::NAN], [20., 2.]], 0).is_none());
     }
     #[test]
     fn saved_gradient_points_match_independent_pixel_formula_and_preview_output() {

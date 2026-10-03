@@ -123,19 +123,21 @@ mod tests {
             .into_iter()
             .find(|h| h.parameter == p)
             .unwrap();
+        let mut state = EditorState::default();
+        state.editor = e;
+        state.document_revision = 7;
+        state.frame = 30;
+        state.contents_selection = Some((state.editor.project().active_composition_id(), 1, 5));
         let mut d = RampDrag {
-            layer: 1,
-            item: 5,
-            revision: 7,
-            frame: 30,
+            draft: crate::color_edit::GradientDraft::new(&state, 5, p).unwrap(),
             handle: h,
             grab_offset: 0.,
-            original: 0.,
-            value: 0.,
+            bounds: Bounds::new(point(px(0.), px(0.)), size(px(216.), px(64.))),
         };
+        let mut e = std::mem::take(&mut state.editor);
         assert!(d.command().is_none());
         for v in [10., 20., 30., 60.] {
-            d.value = d.handle.value(v);
+            d.draft.value = d.handle.value(v);
         }
         assert_eq!(e.project(), &before);
         e.execute(d.command().unwrap()).unwrap();
@@ -155,10 +157,8 @@ mod tests {
             Project::from_json(&saved.to_json().unwrap()).unwrap(),
             saved
         );
-        let mut state = EditorState::default();
+        e.undo();
         state.editor = e;
-        state.document_revision = 7;
-        state.frame = 30;
         assert!(d.current(&state, Some(5)));
         state.frame = 31;
         assert!(!d.current(&state, Some(5)));
@@ -169,6 +169,114 @@ mod tests {
         assert!(!d.current(&state, Some(4)));
         state.editor.clear_selection();
         assert!(!d.current(&state, Some(5)));
+    }
+    #[test]
+    fn live_ramp_preview_isolated_from_save_export_and_history_matches_commit() {
+        let mut s = EditorState::default();
+        s.editor = scene();
+        edit(
+            &mut s.editor,
+            ContentsEdit::Composite {
+                item: 5,
+                mode: PaintComposite::AbovePrevious,
+            },
+        );
+        let p = GradientParam::ColorPosition(1);
+        edit(
+            &mut s.editor,
+            ContentsEdit::Track {
+                item: 5,
+                parameter: ContentsParam::Gradient(p),
+                edit: TrackEdit::ToggleAnimation { frame: 0 },
+            },
+        );
+        s.editor.clear_history();
+        s.frame = 30;
+        s.contents_selection = Some((s.editor.project().active_composition_id(), 1, 5));
+        let before = s.editor.project().clone();
+        let renderer = crate::rendering::Renderer::new();
+        let original_pixels = renderer.render_output(&before, 30, 480, 270).unwrap();
+        let mut draft = crate::color_edit::GradientDraft::new(&s, 5, p).unwrap();
+        for value in [10., 20., 35., 60.] {
+            draft.value = value;
+            s.gradient_preview = Some(draft.clone());
+            let preview = draft.preview(&s).unwrap();
+            assert_ne!(preview, before);
+            assert_eq!(s.editor.project(), &before);
+            assert_eq!(
+                s.text_project(),
+                before,
+                "autosave must never capture the ramp draft"
+            );
+        }
+        let preview = draft.preview(&s).unwrap();
+        let preview_pixels = renderer.render_preview(&preview, 30, 480).unwrap();
+        assert_ne!(preview_pixels, original_pixels);
+        s.gradient_preview = None;
+        assert_eq!(
+            renderer
+                .render_output(s.editor.project(), 30, 480, 270)
+                .unwrap(),
+            original_pixels
+        );
+        s.editor.undo();
+        assert_eq!(s.editor.project(), &before, "drafts must not add history");
+        s.editor.execute(draft.command().unwrap()).unwrap();
+        assert_eq!(s.editor.project(), &preview);
+        assert_eq!(
+            renderer
+                .render_output(s.editor.project(), 30, 480, 270)
+                .unwrap(),
+            preview_pixels
+        );
+        s.editor.undo();
+        assert_eq!(s.editor.project(), &before);
+        s.editor.redo();
+        assert_eq!(s.editor.project(), &preview);
+    }
+
+    #[test]
+    fn ramp_preview_rejects_playback_tools_selection_edits_and_invalid_values() {
+        for mutate in [
+            |s: &mut EditorState| s.playing = true,
+            |s: &mut EditorState| s.tool = crate::editor::Tool::Hand,
+            |s: &mut EditorState| s.frame += 1,
+            |s: &mut EditorState| s.document_revision += 1,
+            |s: &mut EditorState| s.contents_selection = None,
+            |s: &mut EditorState| s.contents_selection.as_mut().unwrap().2 = 4,
+            |s: &mut EditorState| s.editor.clear_selection(),
+            |s: &mut EditorState| {
+                s.editor.execute(Command::ToggleLocked(1)).unwrap();
+            },
+            |s: &mut EditorState| {
+                value(&mut s.editor, GradientParam::EndX, 75.);
+            },
+            |s: &mut EditorState| {
+                edit(&mut s.editor, ContentsEdit::Remove(5));
+            },
+        ] {
+            let mut s = EditorState::default();
+            s.editor = scene();
+            s.contents_selection = Some((s.editor.project().active_composition_id(), 1, 5));
+            let mut draft =
+                crate::color_edit::GradientDraft::new(&s, 5, GradientParam::ColorPosition(1))
+                    .unwrap();
+            draft.value = 30.;
+            assert!(draft.preview(&s).is_some());
+            mutate(&mut s);
+            assert!(!draft.current(&s));
+            assert!(draft.preview(&s).is_none());
+        }
+        let mut s = EditorState::default();
+        s.editor = scene();
+        s.contents_selection = Some((s.editor.project().active_composition_id(), 1, 5));
+        let mut draft =
+            crate::color_edit::GradientDraft::new(&s, 5, GradientParam::ColorMidpoint(1)).unwrap();
+        for value in [f64::NAN, f64::INFINITY, 0., 100.] {
+            draft.value = value;
+            assert!(draft.command().is_none());
+            assert!(draft.preview(&s).is_none());
+        }
     }
 }
 impl Handle {
@@ -262,38 +370,30 @@ fn hit(handles: &[Handle], bounds: Bounds<Pixels>, p: Point<Pixels>) -> Option<H
     })
 }
 pub(super) struct RampDrag {
-    layer: u64,
-    item: u64,
-    revision: u64,
-    frame: Frame,
+    draft: crate::color_edit::GradientDraft,
     handle: Handle,
     grab_offset: f64,
-    original: f64,
-    value: f64,
+    bounds: Bounds<Pixels>,
 }
 impl RampDrag {
     pub(super) fn current(&self, state: &EditorState, item: Option<u64>) -> bool {
-        self.revision == state.document_revision
-            && self.frame == state.frame
-            && state.editor.selected() == Some(self.layer)
-            && item == Some(self.item)
+        self.draft.current(state) && item == Some(self.draft.item)
     }
     fn command(&self) -> Option<Command> {
-        ((self.value - self.original).abs() > 1e-8).then(|| Command::Contents {
-            id: self.layer,
-            edit: ContentsEdit::Track {
-                item: self.item,
-                parameter: ContentsParam::Gradient(self.handle.parameter),
-                edit: TrackEdit::Value {
-                    frame: self.frame,
-                    value: self.value,
-                },
-            },
-        })
+        self.draft.command()
     }
 }
 impl ContentsControls {
-    fn ramp_node(&self, cx: &Context<Self>) -> Option<(u64, ContentsNode, Frame)> {
+    pub(super) fn cancel_ramp(&mut self, cx: &mut Context<Self>) {
+        if self.ramp_drag.take().is_some() {
+            self.state.update(cx, |s, cx| {
+                s.gradient_preview = None;
+                cx.notify();
+            });
+            cx.notify();
+        }
+    }
+    pub(super) fn ramp_node(&self, cx: &Context<Self>) -> Option<(u64, ContentsNode, Frame)> {
         let s = self.state.read(cx);
         let layer = s.editor.selected_layer()?;
         if layer.locked() {
@@ -307,7 +407,7 @@ impl ContentsControls {
         Some((layer.id(), node.clone(), s.frame))
     }
     fn ramp_apply(&mut self, id: u64, edit: ContentsEdit, w: &mut Window, cx: &mut Context<Self>) {
-        self.ramp_drag = None;
+        self.cancel_ramp(cx);
         self.state.update(cx, |s, cx| {
             s.dispatch(&Action::Edit(Command::Contents { id, edit }), w, cx)
         });
@@ -325,16 +425,20 @@ impl ContentsControls {
         if let Some(h) = hit(&handles(&node, frame, None), bounds, e.position) {
             self.gradient_stop = h.parameter.stop();
             self.ramp_selected = Some(h.parameter);
-            let original = node.value_at(ContentsParam::Gradient(h.parameter), frame);
+            let Some(draft) =
+                crate::color_edit::GradientDraft::new(self.state.read(cx), node.id, h.parameter)
+            else {
+                return;
+            };
             self.ramp_drag = Some(RampDrag {
-                layer: id,
-                item: node.id,
-                revision: self.state.read(cx).document_revision,
-                frame,
+                draft: draft.clone(),
                 handle: h,
                 grab_offset: position(bounds, e.position.x) - h.position,
-                original,
-                value: original,
+                bounds,
+            });
+            self.state.update(cx, |s, cx| {
+                s.gradient_preview = Some(draft);
+                cx.notify();
             });
         } else {
             let y = f32::from(e.position.y - bounds.top());
@@ -383,28 +487,48 @@ impl ContentsControls {
         cx.notify();
     }
     fn ramp_move(&mut self, x: Pixels, cx: &mut Context<Self>) {
-        let Some(bounds) = self.ramp_bounds.get() else {
+        if self.ramp_drag.as_ref().is_some_and(|d| {
+            !d.current(self.state.read(cx), self.selected)
+                || self.ramp_bounds.get() != Some(d.bounds)
+        }) {
+            self.cancel_ramp(cx);
             return;
-        };
+        }
         if let Some(d) = &mut self.ramp_drag {
-            d.value = d.handle.value(position(bounds, x) - d.grab_offset);
+            let value = d.handle.value(position(d.bounds, x) - d.grab_offset);
+            if value == d.draft.value || !value.is_finite() {
+                return;
+            }
+            d.draft.value = value;
+            let draft = d.draft.clone();
+            self.state.update(cx, |s, cx| {
+                s.gradient_preview = Some(draft);
+                cx.notify();
+            });
             cx.notify();
         }
     }
     fn ramp_up(&mut self, x: Pixels, w: &mut Window, cx: &mut Context<Self>) {
         self.ramp_move(x, cx);
         if let Some(d) = self.ramp_drag.take() {
-            if d.current(self.state.read(cx), self.selected)
-                && let Some(command) = d.command()
-            {
-                self.state
-                    .update(cx, |s, cx| s.dispatch(&Action::Edit(command), w, cx));
-            }
+            let command = d
+                .current(self.state.read(cx), self.selected)
+                .then(|| d.command())
+                .flatten();
+            self.state.update(cx, |s, cx| {
+                s.gradient_preview = None;
+                if let Some(command) = command {
+                    s.dispatch(&Action::Edit(command), w, cx);
+                }
+                cx.notify();
+            });
             cx.notify();
             cx.stop_propagation();
         }
     }
     fn ramp_key(&mut self, e: &gpui::KeyDownEvent, w: &mut Window, cx: &mut Context<Self>) {
+        // A shortcut must not leave an old pointer gesture armed after it runs.
+        self.cancel_ramp(cx);
         if e.keystroke.modifiers.control
             || e.keystroke.modifiers.alt
             || e.keystroke.modifiers.platform
@@ -412,7 +536,6 @@ impl ContentsControls {
             return;
         }
         if e.keystroke.key == "escape" {
-            self.ramp_drag = None;
             cx.notify();
             cx.stop_propagation();
             return;
@@ -421,7 +544,6 @@ impl ContentsControls {
             return;
         };
         let all = handles(&node, frame, None);
-        self.ramp_drag = None;
         let selected = self
             .ramp_selected
             .filter(|p| p.stop() == self.gradient_stop)
@@ -505,7 +627,7 @@ impl ContentsControls {
         let draft = self
             .ramp_drag
             .as_ref()
-            .map(|d| (d.handle.parameter, d.value));
+            .map(|d| (d.handle.parameter, d.draft.value));
         let g = node.kind.gradient().unwrap();
         let samples = if let Some((p, v)) = draft {
             g.preview_edit(node, frame, 256, p, v)
@@ -534,7 +656,7 @@ impl ContentsControls {
                 .when(locked,|d|d.opacity(0.4)).cursor_crosshair()
                 .on_mouse_down(MouseButton::Left,cx.listener(Self::ramp_down))
                 .on_key_down(cx.listener(Self::ramp_key))
-                .tooltip(|_,cx|cx.new(|_|ui::Tip("Drag a stop or diamond; click an empty stop row to add. Up/Down selects; Left/Right adjusts (Shift: 10); Home/End; Delete removes a stop; Escape cancels a drag. Release applies one edit.".into())).into())
+                .tooltip(|_,cx|cx.new(|_|ui::Tip("Drag a stop or diamond; click an empty stop row to add. Up/Down selects; Left/Right adjusts (Shift: 10); Home/End; Delete removes a stop; Escape cancels a drag. Composition previews the draft; release applies one edit.".into())).into())
                 .child(canvas(move |b,_,_|bounds.set(Some(b)),move |b,_,w,_| {
                     let width=(f32::from(b.size.width)-16.).ceil().max(1.) as usize;
                     for x in 0..width {
