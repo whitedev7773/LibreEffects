@@ -331,3 +331,20 @@ fn metadata_counter_stops_before_visiting_an_oversized_payload() {
     assert!(count_json(&value, false, 0, 64, METADATA_LIMIT_ERROR).is_err());
     assert!(value.0.get() < 10);
 }
+
+#[test]
+fn native_metadata_uses_the_same_exact_budget_as_legacy_json() {
+    let project = budget_project(0);
+    let bytes = crate::project_file::encode(&project, None).unwrap();
+    assert_eq!(
+        crate::project_file::decode(&bytes).unwrap().project,
+        project
+    );
+    let mut oversized = project;
+    oversized.composition.layers[0].name.push('x');
+    assert!(
+        crate::project_file::encode(&oversized, None)
+            .unwrap_err()
+            .contains(METADATA_LIMIT_ERROR)
+    );
+}

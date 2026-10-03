@@ -1,4 +1,4 @@
-//! Portable JSON: image payloads occur once, layer references share immutable memory.
+//! Shared portable metadata and asset resolution for JSON and native projects.
 use super::*;
 use std::sync::Arc;
 pub(super) const MAX_IMAGE_BYTES: usize = 128 * 1024 * 1024;
@@ -145,38 +145,64 @@ fn count_json(
     Ok(writer.bytes)
 }
 
+impl Prepared {
+    fn metadata_value(&self) -> Result<serde_json::Value, String> {
+        let mut value = serde_json::to_value(self.metadata()).map_err(|e| e.to_string())?;
+        if !self.images.is_empty() {
+            each_source(&mut value, |_, layer| {
+                if let Some(image) = layer
+                    .get_mut("content")
+                    .and_then(|v| v.get_mut("Image"))
+                    .and_then(|v| v.as_object_mut())
+                {
+                    let id = image.remove("png").unwrap();
+                    image.insert("asset".into(), id);
+                }
+                Ok(())
+            })?;
+        }
+        if !self.sequences.is_empty() {
+            each_source(&mut value, |_, source| {
+                if let Some(sequence) = source
+                    .get_mut("content")
+                    .and_then(|c| c.get_mut("ImageSequence"))
+                    .and_then(|s| s.as_object_mut())
+                {
+                    let frames = sequence
+                        .remove("frames")
+                        .ok_or("Missing sequence manifest")?;
+                    sequence.insert("manifest".into(), frames[0].clone());
+                }
+                Ok(())
+            })?;
+        }
+        Ok(value)
+    }
+}
+
+pub(super) struct NativeMetadata {
+    pub metadata: Vec<u8>,
+    pub images: BTreeMap<String, Arc<str>>,
+}
+
+/// No image payload enters a JSON value or serialized metadata buffer.
+pub(super) fn prepare_native(project: &Project) -> Result<NativeMetadata, String> {
+    let prepared = Prepared::new(project);
+    prepared.validate_budget()?;
+    let metadata = serde_json::to_vec(&prepared.metadata_value()?).map_err(|e| e.to_string())?;
+    if metadata.len() > MAX_METADATA_BYTES {
+        return Err(METADATA_LIMIT_ERROR.into());
+    }
+    Ok(NativeMetadata {
+        metadata,
+        images: prepared.images,
+    })
+}
+
 pub(super) fn encode(project: &Project) -> Result<String, String> {
     let prepared = Prepared::new(project);
     prepared.validate_budget()?;
-    let mut value = serde_json::to_value(prepared.metadata()).map_err(|e| e.to_string())?;
-    if !prepared.images.is_empty() {
-        each_source(&mut value, |_, layer| {
-            if let Some(image) = layer
-                .get_mut("content")
-                .and_then(|v| v.get_mut("Image"))
-                .and_then(|v| v.as_object_mut())
-            {
-                let id = image.remove("png").unwrap();
-                image.insert("asset".into(), id);
-            }
-            Ok(())
-        })?;
-    }
-    if !prepared.sequences.is_empty() {
-        each_source(&mut value, |_, source| {
-            if let Some(sequence) = source
-                .get_mut("content")
-                .and_then(|c| c.get_mut("ImageSequence"))
-                .and_then(|s| s.as_object_mut())
-            {
-                let frames = sequence
-                    .remove("frames")
-                    .ok_or("Missing sequence manifest")?;
-                sequence.insert("manifest".into(), frames[0].clone());
-            }
-            Ok(())
-        })?;
-    }
+    let mut value = prepared.metadata_value()?;
     if !prepared.images.is_empty() {
         value["image_assets"] = serde_json::to_value(prepared.images).map_err(|e| e.to_string())?;
     }
@@ -222,6 +248,43 @@ pub(super) fn decode(json: &str) -> Result<Project, String> {
     if assets.len() > 1000 || assets.values().map(|s| s.len()).sum::<usize>() > MAX_IMAGE_BYTES {
         return Err("Embedded images exceed 128 MiB".into());
     }
+    resolve(value, assets, false)
+}
+
+pub(super) fn decode_native(
+    value: serde_json::Value,
+    images: BTreeMap<String, Arc<str>>,
+) -> Result<Project, String> {
+    let object = value.as_object().ok_or("Project must be an object")?;
+    if object.contains_key("image_assets") {
+        return Err("Native metadata must not contain inline image_assets".into());
+    }
+    if !images.is_empty()
+        && !value["version"]
+            .as_u64()
+            .is_some_and(|v| (7..=u64::from(PROJECT_VERSION)).contains(&v))
+    {
+        return Err("Image assets require project version 7".into());
+    }
+    finish(resolve(value, images, true)?)
+}
+
+/// Both formats use the same migrations and validate the final resident model.
+pub(super) fn finish(mut project: Project) -> Result<Project, String> {
+    project.validate()?;
+    mask_animation::migrate(&mut project);
+    shape_contents::migrate(&mut project);
+    project.sync_assets()?;
+    project.validate()?;
+    validate_budget(&project)?;
+    Ok(project)
+}
+
+fn resolve(
+    mut value: serde_json::Value,
+    assets: BTreeMap<String, Arc<str>>,
+    native: bool,
+) -> Result<Project, String> {
     let sequences_value = value.as_object_mut().unwrap().remove("sequence_assets");
     if sequences_value.is_some()
         && !value["version"]
@@ -269,6 +332,9 @@ pub(super) fn decode(json: &str) -> Result<Project, String> {
             .and_then(|v| v.get_mut("Image"))
             .and_then(|v| v.as_object_mut())
         {
+            if native && image.contains_key("png") {
+                return Err("Native metadata must not contain inline image png".into());
+            }
             if let Some(reference) = image.remove("asset") {
                 let id = reference
                     .as_str()
@@ -283,6 +349,16 @@ pub(super) fn decode(json: &str) -> Result<Project, String> {
         }
         Ok(())
     })?;
+    if native {
+        let used_sequences: BTreeSet<_> = sequence_refs.values().collect();
+        if sequences.keys().any(|id| !used_sequences.contains(id)) {
+            return Err("Unreferenced native sequence manifest".into());
+        }
+        let used: BTreeSet<_> = refs.values().collect();
+        if assets.keys().any(|id| !used.contains(id)) {
+            return Err("Unreferenced native image chunk".into());
+        }
+    }
     let mut project: Project = serde_json::from_value(value).map_err(|e| e.to_string())?;
     // Legacy inline images are accepted and interned as well.
     let mut intern: BTreeMap<Arc<str>, Arc<str>> = BTreeMap::new();

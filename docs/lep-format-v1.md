@@ -1,0 +1,197 @@
+# Libre Effects Project (`.lep`) container v1
+
+`.lep` is the native Libre Effects Project file extension. It is a bounded binary
+container for portable project metadata, optional editor view state, and embedded
+images. The container version is **1**. The project's JSON schema version remains
+independent (currently **47**); choosing this format does not upgrade that schema.
+Existing `.lfe.json` files and `Project::to_json` / `Project::from_json` stay supported.
+
+All integer fields are unsigned and **little-endian**. Lengths count bytes, not
+characters. MiB means 1,048,576 bytes. There is no alignment padding, compression,
+offset table, trailer, archive extraction, or embedded directory structure.
+
+## File header: 32 bytes
+
+| Offset | Size | Field | v1 value |
+| --- | --- | --- | --- |
+| 0 | 8 | Magic | `89 4c 45 50 0d 0a 1a 0a` (`\x89LEP\r\n\x1a\n`) |
+| 8 | 2 | Container version | `1` |
+| 10 | 2 | Header size | `32` |
+| 12 | 4 | Flags | `0` |
+| 16 | 8 | Total file length | Exact length, including this header and all chunks |
+| 24 | 4 | Chunk count | `1..=1002` |
+| 28 | 4 | Header CRC32 | CRC32 of bytes `[0, 28)` |
+
+Exactly the declared number of chunks follows. The final cursor must equal both
+the declared file length and actual input length. A truncated header/payload,
+trailing byte, extra chunk, missing chunk, or length/count mismatch is an error.
+
+## Chunk header: 20 bytes
+
+| Offset | Size | Field | v1 value |
+| --- | --- | --- | --- |
+| 0 | 4 | Tag | ASCII FourCC: `PROJ`, `VIEW`, or `IMAG` |
+| 4 | 2 | Chunk version | `1` |
+| 6 | 2 | Flags | `0` |
+| 8 | 8 | Payload length | Exact following payload size |
+| 16 | 4 | Chunk CRC32 | CRC32 of header bytes `[0, 16)` followed by the entire payload |
+
+The checksum field itself is excluded from the chunk checksum. Unsupported
+container versions, header sizes, flags, chunk tags, chunk versions, chunk flags,
+or reserved values are rejected. There is no skip-unknown-chunk behavior.
+
+### Checksums
+
+All checksums use **CRC-32/ISO-HDLC**, as implemented by `crc32fast` 1.5.0:
+polynomial `0x04c11db7` (reflected representation `0xedb88320`), reflected input and
+output, initial value `0xffffffff`, and final XOR `0xffffffff`. The standard vector
+`123456789` produces `0xcbf43926`. CRC32 detects accidental corruption; it does
+**not** authenticate a file or prevent an intentional modification.
+
+## Chunk types
+
+### `PROJ`: exactly one
+
+The payload is UTF-8 JSON using the existing project model/schema. Writers emit
+compact JSON. Readers may accept JSON whitespace but reject duplicate object keys
+at every depth, including equivalent escaped spellings of a key. The default
+`serde_json` nesting limit remains enabled.
+
+- Image sources contain `{"Image":{"asset":"image-1"}}` references instead of
+  inline `png` strings. Each reference must resolve to an `IMAG` ID.
+- An `image_assets` table anywhere in the top-level project object is forbidden,
+  even an empty table. Inline `Image.png` fields in layer or asset-library sources
+  are forbidden, including reference-plus-inline combinations.
+- Sequence manifests use the existing `sequence_assets` table and `manifest`
+  references. A manifest reference must resolve and must not coexist with inline
+  `frames`. Unused declared sequence manifests are rejected.
+- Missing image references and unused `IMAG` chunks are rejected. Identical image
+  content under distinct IDs still counts separately against declared-image limits.
+- Video/audio/sequence source paths retain their exact strings. The codec never
+  opens those paths, reads media, or extracts files.
+
+Shared metadata preparation removes image data before constructing JSON values or
+serializing JSON. The native decoder resolves image references directly from a
+bounded map of `Arc<str>` values; it never constructs a base64 `image_assets` JSON
+table or calls the legacy JSON encoder as an intermediate step.
+
+### `VIEW`: zero or one
+
+The payload is independently bounded, well-formed UTF-8 JSON. Duplicate keys and
+excessive nesting are rejected just as for `PROJ`. Core returns the **original
+borrowed bytes**, including whitespace, without normalizing or interpreting the
+view schema. The desktop application owns view-state schema validation and
+normalization. Absent view state is distinct from any present JSON value.
+
+The core's validation-only visitor does not build a value tree for array elements
+or string values in `VIEW`; object keys are retained while needed for duplicate-key
+checks. Neither view parsing nor its schema assumes a particular project version.
+
+### `IMAG`: zero to 1000
+
+| Payload offset | Size | Field |
+| --- | --- | --- |
+| 0 | 2 | ID byte length, `1..=64` |
+| 2 | 1 | Storage kind, `0` or `1` |
+| 3 | 1 | Reserved, must be `0` |
+| 4 | ID length | ID, ASCII `[A-Za-z0-9_-]` only |
+| 4 + ID length | Remaining payload | Nonempty image data |
+
+Image IDs are unique across the file. They are opaque reference identifiers, not
+paths. IDs are case-sensitive. The remainder is the entire image; there is no
+separate inner length or padding.
+
+**Kind 0: original PNG bytes.** The data must start with the eight-byte PNG
+signature `89 50 4e 47 0d 0a 1a 0a`. On load, the exact bytes are encoded using the
+standard padded base64 alphabet to obtain the project's existing image string.
+The encoded-byte charge is `4 * ceil(raw_length / 3)`, computed with checked
+arithmetic. Raw images are at most 9 MiB, equivalent to at most 12 MiB encoded.
+
+**Kind 1: original encoded ASCII.** The data is the exact project image string,
+with no decoding, normalization, padding changes, or pixel transformation. Its
+alphabet is the existing core-compatible `[A-Za-z0-9+/=]`; the core historically
+permits strings that are not canonical base64 or are not PNGs, such as `YWJj`.
+Its encoded-byte charge is the actual payload-string length, at most 12 MiB.
+
+A writer chooses kind 0 **only** when all three checks succeed:
+
+1. `base64::engine::general_purpose::STANDARD.decode(original)` succeeds.
+2. The decoded bytes start with the PNG signature.
+3. `STANDARD.encode(decoded) == original` exactly.
+
+Otherwise it chooses kind 1 and stores the original string verbatim. Kind 1 is a
+lossless compatibility representation, not a guarantee that the image can render.
+No pixels are decoded or re-encoded by this codec. The desktop's `validate_images`
+remains the final PNG-decoding, dimension, and allocation gate before use.
+
+## Ordering, limits, and allocation discipline
+
+Writers produce `PROJ`, optional `VIEW`, then `IMAG` chunks in lexicographic stable
+ID order. Readers accept any chunk order. IDs are generated deterministically by
+the shared metadata preparer; this is not a content-addressed format.
+
+| Limit | Maximum |
+| --- | --- |
+| Total file | 256 MiB |
+| `PROJ` payload | 16 MiB |
+| `VIEW` payload | 16 MiB |
+| Image chunks | 1000 |
+| Reconstructed encoded bytes per image | 12 MiB |
+| Sum of reconstructed encoded bytes for all declared images | 128 MiB |
+| Chunk count | 1002, including `PROJ` and optional `VIEW` |
+| Image ID | 64 ASCII bytes |
+
+Lengths, counts, arithmetic, conversions, and ranges are checked before their
+corresponding allocation or payload access. Chunk payload limits are checked
+before hashing an advertised payload. All declared image sizes are charged before
+image reconstruction or content interning; unused or duplicate-content chunks
+cannot evade the budget. Chunk descriptors borrow the input until the complete
+container framing and declared-image budget have been checked.
+
+The writer reserves a single checked upper bound based on encoded image sizes,
+writes metadata/view, and decodes at most **one image temporary at a time** while
+appending image chunks. It then fills the actual total length and header CRC.
+PNG raw data never exceeds its canonical base64 length, so this does not require
+repeated growth or simultaneous raw buffers for all images.
+
+The native JSON visitor is bounded by the 16 MiB input cap and by a value/key
+budget equal to input bytes (each value/key necessarily consumes at least one
+byte). It does not trust collection size hints and leaves serde's nesting limit
+in place. Native duplicate-key rejection is intentionally separate from the
+legacy JSON parser, preserving that parser's historical behavior.
+
+Both formats finish loading through the same sequence: model validation, mask
+migration, shape-content migration, asset synchronization, model revalidation,
+and resident metadata/image budget validation. This preserves image and sequence
+`Arc` sharing and ensures migrations cannot bypass final document budgets.
+
+## Rust API
+
+The UI-independent `libre_effects_core::project_file` module exports:
+
+```rust
+pub const MAGIC: &[u8; 8];
+pub const MAX_FILE_BYTES: usize;
+
+pub struct DecodedProject<'a> {
+    pub project: Project,
+    pub view: Option<&'a [u8]>,
+}
+
+pub fn encode(project: &Project, view: Option<&[u8]>) -> Result<Vec<u8>, String>;
+pub fn decode(input: &[u8]) -> Result<DecodedProject<'_>, String>;
+```
+
+The codec is pure bytes. File dialogs, atomic writes, recovery selection, legacy
+file detection, view semantics, and media decode validation belong to callers.
+
+## Regression coverage
+
+The core suite checks deterministic layout and the CRC standard vector; rich
+multi-composition projects and external paths; shared image/sequence references;
+exact PNG bytes and legacy-string fallback; absent/present/borrowed view state;
+arbitrary chunk order; every truncation prefix and every single-byte mutation of
+a small complete fixture; validly checksummed malformed headers, references,
+IDs, storage kinds, duplicate chunks, JSON keys, and unsupported versions; exact
+and over-limit JSON/image/count/aggregate budgets; trailing bytes; and unchanged
+legacy migration and metadata-budget behavior.

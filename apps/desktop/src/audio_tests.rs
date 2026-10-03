@@ -1,5 +1,5 @@
 use super::*;
-use libre_effects_core::{Command, Content, Editor, Project};
+use libre_effects_core::{Command, Content, Editor};
 #[test]
 fn metadata_distinguishes_cover_art_and_timed_video_and_validates_bounds() {
     let mut data = serde_json::json!({"format":{"start_time":"2", "duration":"10"}, "streams":[{"codec_type":"video", "start_time":"3", "disposition":{"attached_pic":1}}, {"index":2,"codec_type":"audio","start_time":"2.25", "duration":"9.5", "sample_rate":"48000","channels":2,"channel_layout":"stereo"}]});
@@ -86,12 +86,17 @@ fn standalone_and_embedded_audio_roundtrip_waveforms_and_media_workflow() {
     .unwrap();
     e.execute(Command::AddAssetLayer { asset: 1, frame: 0 })
         .unwrap();
-    let project_path = dir.path().join("audio.lfe.json");
+    let project_path = dir.path().join("audio.lep");
     crate::media_io::save(e.project(), &Default::default(), &project_path).unwrap();
-    let text = std::fs::read_to_string(&project_path).unwrap();
-    assert!(text.contains("opposite stereo.wav"));
-    let loaded =
-        crate::media_io::resolve(&Project::from_json(&text).unwrap(), &project_path).unwrap();
+    let bytes = std::fs::read(&project_path).unwrap();
+    let stored = libre_effects_core::project_file::decode(&bytes)
+        .unwrap()
+        .project;
+    assert_eq!(
+        crate::media_io::video_paths(&stored),
+        std::collections::BTreeSet::from(["opposite stereo.wav".into()])
+    );
+    let loaded = crate::project_io::read_project(&project_path).unwrap();
     assert_eq!(&loaded, e.project());
     assert!(
         crate::rendering::Renderer::new()

@@ -417,7 +417,7 @@ fn v3_queues_default_missing_font_policy_and_preserve_explicit_strict() {
     let path = root.join("queue.json");
     std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
     let loaded = Queue::load(root.clone()).unwrap();
-    assert_eq!(loaded.data.version, 4);
+    assert_eq!(loaded.data.version, QUEUE_VERSION);
     for (index, expected) in [FontPolicy::Fallback, FontPolicy::Strict]
         .into_iter()
         .enumerate()
@@ -430,7 +430,7 @@ fn v3_queues_default_missing_font_policy_and_preserve_explicit_strict() {
     }
     let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     // v3 readers reject this envelope before saving or executing any job.
-    assert_eq!(saved["version"], 4);
+    assert_eq!(saved["version"], QUEUE_VERSION);
     assert_eq!(
         saved["jobs"][0]["outputs"][0]["settings"]["fonts"],
         "Fallback"
@@ -484,7 +484,7 @@ fn v2_queue_migration_preserves_existing_font_policy_while_retaining_silent_audi
     )
     .unwrap();
     let loaded = Queue::load(root).unwrap();
-    assert_eq!(loaded.data.version, 4);
+    assert_eq!(loaded.data.version, QUEUE_VERSION);
     let output = &loaded.data.jobs[0].outputs[0].spec.settings;
     let preset = &loaded.data.presets[0].specs[0].settings;
     for settings in [output, preset] {
@@ -513,7 +513,7 @@ fn unsupported_queue_versions_and_font_policies_preserve_all_existing_files() {
     let orphan = root.join("snapshot-999-999.lfe.json");
     std::fs::write(&orphan, b"retain on rejected load").unwrap();
     let mut cases = Vec::new();
-    for version in [0, 5, u32::MAX] {
+    for version in [0, QUEUE_VERSION + 1, u32::MAX] {
         let mut value = original.clone();
         value["version"] = version.into();
         cases.push(value);
@@ -577,7 +577,7 @@ fn v1_font_policy_extensions_survive_the_entire_migration_chain() {
     )
     .unwrap();
     let loaded = Queue::load(root).unwrap();
-    assert_eq!(loaded.data.version, 4);
+    assert_eq!(loaded.data.version, QUEUE_VERSION);
     for (index, expected) in [FontPolicy::Strict, FontPolicy::Fallback]
         .into_iter()
         .enumerate()
@@ -589,5 +589,186 @@ fn v1_font_policy_extensions_survive_the_entire_migration_chain() {
             assert_eq!(settings.fonts, expected);
             assert_eq!(settings.audio, AudioOutput::Off);
         }
+    }
+}
+
+#[test]
+fn imported_original_protection_survives_queue_restart_native_save_as_and_aliases() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("queue");
+    let source = directory.path().join("original.mp4");
+    let native = directory.path().join("copy.lep");
+    let project = scene();
+    let original = project.project().to_json().unwrap();
+    std::fs::write(&source, &original).unwrap();
+    crate::media_io::save_protected(
+        project.project(),
+        &Default::default(),
+        &native,
+        Some(&source),
+    )
+    .unwrap();
+    let mut queue = Queue::load(root.clone()).unwrap();
+    queue
+        .enqueue_protected(
+            project.project(),
+            Some(native.clone()),
+            Some(source.clone()),
+            0..1,
+            &[Format::Mp4.into()],
+            directory.path(),
+        )
+        .unwrap();
+    let snapshot = root.join(&queue.data.jobs[0].snapshot);
+    assert!(std::fs::read_to_string(&snapshot).unwrap().starts_with('{'));
+    let bytes = std::fs::read(root.join("queue.json")).unwrap();
+    let persisted: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(persisted["version"], 5);
+    assert_eq!(
+        persisted["jobs"][0]["protected_sources"][0],
+        source.to_str().unwrap()
+    );
+    drop(queue);
+    let mut queue = Queue::load(root.clone()).unwrap();
+    assert_eq!(queue.data.jobs[0].project_path, Some(native));
+    assert_eq!(queue.data.jobs[0].protected_sources, [source.clone()]);
+    let hardlink = directory.path().join("original-alias.mp4");
+    std::fs::hard_link(&source, &hardlink).unwrap();
+    for destination in [source.clone(), hardlink.clone()] {
+        let before = queue.data.clone();
+        assert!(
+            queue
+                .edit(|data| {
+                    data.jobs[0].outputs[0].path = destination;
+                    Ok(())
+                })
+                .unwrap_err()
+                .contains("source")
+        );
+        assert_eq!(queue.data, before);
+        assert_eq!(std::fs::read(root.join("queue.json")).unwrap(), bytes);
+    }
+    #[cfg(unix)]
+    {
+        let symlink = directory.path().join("original-link.mp4");
+        std::os::unix::fs::symlink(&source, &symlink).unwrap();
+        assert!(
+            queue
+                .edit(|data| {
+                    data.jobs[0].outputs[0].path = symlink;
+                    Ok(())
+                })
+                .is_err()
+        );
+    }
+    // Recheck at execution too: a destination can become an alias after Begin.
+    queue.begin().unwrap();
+    let output = queue.data.jobs[0].outputs[0].path.clone();
+    std::fs::hard_link(&source, &output).unwrap();
+    let queue = Arc::new(Mutex::new(queue));
+    run(queue.clone());
+    let queue = queue.lock().unwrap();
+    assert_eq!(queue.data.jobs[0].outputs[0].status, Status::Failed);
+    assert!(queue.data.jobs[0].outputs[0].message.contains("source"));
+    assert_eq!(std::fs::read_to_string(&source).unwrap(), original);
+    assert_eq!(std::fs::read_to_string(&output).unwrap(), original);
+    assert_eq!(std::fs::read_to_string(&hardlink).unwrap(), original);
+}
+
+#[test]
+fn queue_original_protection_covers_png_and_native_sources_with_misleading_names() {
+    let directory = tempfile::tempdir().unwrap();
+    let project = scene();
+    let current = directory.path().join("current.lep");
+    for native in [false, true] {
+        let source = directory
+            .path()
+            .join(if native { "native.png" } else { "legacy.png" });
+        let bytes = if native {
+            crate::project_io::encode_native_project(project.project(), None).unwrap()
+        } else {
+            project.project().to_json().unwrap().into_bytes()
+        };
+        std::fs::write(&source, &bytes).unwrap();
+        let original = [source.clone()];
+        for format in [
+            Format::PngAlpha,
+            Format::PngBackground,
+            Format::Mp4,
+            Format::MovAlpha,
+        ] {
+            let error = execute_protected(
+                project.project(),
+                Some(&current),
+                &original,
+                0..1,
+                &Output::new(format, source.clone()),
+                Default::default(),
+                Default::default(),
+            )
+            .unwrap_err();
+            assert!(error.contains("source"), "{error}");
+            assert_eq!(std::fs::read(&source).unwrap(), bytes);
+        }
+    }
+}
+
+#[test]
+fn v4_jobs_migrate_protection_explicitly_and_v5_missing_or_invalid_protection_is_rejected() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("queue");
+    let source = directory.path().join("original.lfe.json");
+    let mut queue = Queue::load(root.clone()).unwrap();
+    queue
+        .enqueue(
+            scene().project(),
+            Some(source.clone()),
+            0..1,
+            &[Format::PngAlpha.into()],
+            directory.path(),
+        )
+        .unwrap();
+    let mut legacy = serde_json::to_value(&queue.data).unwrap();
+    legacy["version"] = 4.into();
+    legacy["jobs"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("protected_sources");
+    std::fs::write(
+        root.join("queue.json"),
+        serde_json::to_vec(&legacy).unwrap(),
+    )
+    .unwrap();
+    let migrated = Queue::load(root.clone()).unwrap();
+    assert_eq!(migrated.data.version, 5);
+    assert_eq!(migrated.data.jobs[0].project_path, Some(source.clone()));
+    assert!(migrated.data.jobs[0].protected_sources.is_empty());
+    // If a legacy producer included protection, migration must retain it.
+    legacy["jobs"][0]["protected_sources"] = serde_json::json!([source]);
+    std::fs::write(
+        root.join("queue.json"),
+        serde_json::to_vec(&legacy).unwrap(),
+    )
+    .unwrap();
+    let migrated = Queue::load(root.clone()).unwrap();
+    assert_eq!(migrated.data.jobs[0].protected_sources, [source]);
+    for protection in [
+        None,
+        Some(serde_json::json!(["relative.png"])),
+        Some(serde_json::json!(null)),
+    ] {
+        let mut invalid = serde_json::to_value(&migrated.data).unwrap();
+        if let Some(value) = protection {
+            invalid["jobs"][0]["protected_sources"] = value;
+        } else {
+            invalid["jobs"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove("protected_sources");
+        }
+        let bytes = serde_json::to_vec(&invalid).unwrap();
+        std::fs::write(root.join("queue.json"), &bytes).unwrap();
+        assert!(Queue::load(root.clone()).is_err());
+        assert_eq!(std::fs::read(root.join("queue.json")).unwrap(), bytes);
     }
 }

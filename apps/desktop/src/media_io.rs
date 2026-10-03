@@ -124,7 +124,20 @@ pub(crate) fn save(
         project_io::protect_source(destination, Path::new(&source))?;
     }
     let copy = portable(project, destination)?;
-    project_io::write_project(destination, &views.write(&copy)?)
+    project_io::write_native_project(destination, &copy, Some(views))
+}
+
+/// Keep an imported legacy original protected even after a successful Save As.
+pub(crate) fn save_protected(
+    project: &Project,
+    views: &ProjectViews,
+    destination: &Path,
+    imported_source: Option<&Path>,
+) -> Result<(), String> {
+    if let Some(source) = imported_source {
+        project_io::protect_source(destination, source)?;
+    }
+    save(project, views, destination)
 }
 
 #[derive(Clone)]
@@ -412,13 +425,13 @@ pub(crate) fn collect(
         progress(index + 1, sources.len())?;
     }
     let collected = project.with_video_paths(|source| Ok(mappings[source].clone()))?;
-    let project_path = staging.path().join("project.lfe.json");
-    let json = views.write(&collected)?;
+    let project_path = staging.path().join("project.lep");
+    let bytes = project_io::encode_native_project(&collected, Some(views))?;
     progress(sources.len(), sources.len())?;
-    project_io::write_project(&project_path, &json)?;
+    project_io::write_bytes(&project_path, &bytes)?;
     let folder = staging.keep();
     Ok(Collection {
-        project_path: folder.join("project.lfe.json"),
+        project_path: folder.join("project.lep"),
         files: copied.len(),
         bytes: total_bytes,
     })
@@ -454,6 +467,77 @@ mod tests {
         e.execute(Command::DuplicateComposition).unwrap();
         e.project().clone()
     }
+
+    #[test]
+    fn native_save_protects_imported_original_and_file_identity_aliases() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("original.lfe.json");
+        let hardlink = dir.path().join("hardlink.lep");
+        let original = Project::default().to_json().unwrap();
+        std::fs::write(&source, &original).unwrap();
+        std::fs::hard_link(&source, &hardlink).unwrap();
+        let project = project_io::read_project(&source).unwrap();
+        for destination in [&source, &hardlink] {
+            assert!(
+                save_protected(&project, &Default::default(), destination, Some(&source)).is_err()
+            );
+            assert_eq!(std::fs::read(destination).unwrap(), original.as_bytes());
+        }
+        #[cfg(unix)]
+        {
+            let symlink = dir.path().join("symlink.lep");
+            std::os::unix::fs::symlink(&source, &symlink).unwrap();
+            assert!(
+                save_protected(&project, &Default::default(), &symlink, Some(&source)).is_err()
+            );
+            assert_eq!(std::fs::read(&symlink).unwrap(), original.as_bytes());
+            assert!(
+                std::fs::symlink_metadata(&symlink)
+                    .unwrap()
+                    .file_type()
+                    .is_symlink()
+            );
+        }
+        let destination = dir.path().join("native.lep");
+        save_protected(&project, &Default::default(), &destination, Some(&source)).unwrap();
+        assert_eq!(
+            project_io::read_editor_project(&destination)
+                .unwrap()
+                .format,
+            project_io::ProjectFormat::Lep
+        );
+        assert_eq!(std::fs::read(&source).unwrap(), original.as_bytes());
+    }
+
+    #[test]
+    fn invalid_native_collection_rolls_back_copies_and_preserves_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("linked.mp4");
+        std::fs::write(&source, b"original source").unwrap();
+        let mut editor = Editor::default();
+        editor.replace_project(scene(&source)).unwrap();
+        editor
+            .execute(Command::AddContent {
+                content: Content::Image { png: "YWJj".into() },
+                width: 10.0,
+                height: 10.0,
+                name: "Broken image".into(),
+            })
+            .unwrap();
+        let before = std::fs::read_dir(dir.path()).unwrap().count();
+        assert!(
+            collect(
+                editor.project(),
+                &Default::default(),
+                dir.path(),
+                |_, _| Ok(())
+            )
+            .is_err()
+        );
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), before);
+        assert_eq!(std::fs::read(&source).unwrap(), b"original source");
+    }
+
     #[test]
     fn portable_save_resolves_after_folder_move_and_save_as_preserves_live_paths() {
         let root = tempfile::tempdir().unwrap();
@@ -462,14 +546,16 @@ mod tests {
         let source = original.join("동영상.mp4");
         std::fs::write(&source, b"source bytes").unwrap();
         let p = scene(&source);
-        let file = original.join("project.lfe.json");
+        let file = original.join("project.lep");
         save(&p, &Default::default(), &file).unwrap();
-        let json = std::fs::read_to_string(&file).unwrap();
-        assert!(json.contains("동영상.mp4"));
-        assert!(!json.contains("원본"));
+        let bytes = std::fs::read(&file).unwrap();
+        let saved = libre_effects_core::project_file::decode(&bytes)
+            .unwrap()
+            .project;
+        assert_eq!(video_paths(&saved), BTreeSet::from(["동영상.mp4".into()]));
         let read = project_io::read_project(&file).unwrap();
         assert_eq!(canonical_paths(&read), canonical_paths(&p));
-        let other = root.path().join("another.lfe.json");
+        let other = root.path().join("another.lep");
         save(&read, &Default::default(), &other).unwrap();
         assert_eq!(
             canonical_paths(&project_io::read_project(&other).unwrap()),
@@ -477,7 +563,7 @@ mod tests {
         );
         let moved = root.path().join("이동");
         std::fs::rename(&original, &moved).unwrap();
-        let read = project_io::read_project(&moved.join("project.lfe.json")).unwrap();
+        let read = project_io::read_project(&moved.join("project.lep")).unwrap();
         assert_eq!(
             video_paths(&read),
             BTreeSet::from([path_string(
@@ -495,7 +581,7 @@ mod tests {
         );
         // An offline project still opens, without resolving against the process CWD.
         std::fs::remove_file(moved.join("동영상.mp4")).unwrap();
-        assert!(project_io::read_project(&moved.join("project.lfe.json")).is_ok());
+        assert!(project_io::read_project(&moved.join("project.lep")).is_ok());
     }
 
     #[cfg(unix)]
@@ -509,7 +595,7 @@ mod tests {
         let source = alias.join("동영상.mp4");
         std::fs::write(&source, b"unchanged source").unwrap();
         let project = scene(&source);
-        let destination = actual.join("project.lfe.json");
+        let destination = actual.join("project.lep");
         let copy = portable(&project, &destination).unwrap();
         assert_eq!(video_paths(&copy), BTreeSet::from(["동영상.mp4".into()]));
         assert_eq!(
@@ -532,7 +618,7 @@ mod tests {
         save(&offline, &Default::default(), &destination).unwrap();
         let moved = root.path().join("이동");
         std::fs::rename(&actual, &moved).unwrap();
-        let restored = project_io::read_project(&moved.join("project.lfe.json")).unwrap();
+        let restored = project_io::read_project(&moved.join("project.lep")).unwrap();
         assert_eq!(
             video_paths(&restored),
             BTreeSet::from([moved
@@ -551,7 +637,7 @@ mod tests {
         std::fs::write(&source, b"unchanged source").unwrap();
         let canonical = std::fs::canonicalize(&source).unwrap();
         let project = scene(&canonical);
-        let copy = portable(&project, &root.path().join("project.lfe.json")).unwrap();
+        let copy = portable(&project, &root.path().join("project.lep")).unwrap();
         assert_eq!(video_paths(&copy), BTreeSet::from(["동영상.mp4".into()]));
         assert!(
             !path_string(&clean_absolute(&canonical).unwrap())
@@ -570,6 +656,12 @@ mod tests {
         std::fs::write(&source, b"original footage").unwrap();
         let p = scene(&source);
         let result = collect(&p, &Default::default(), root.path(), |_, _| Ok(())).unwrap();
+        assert_eq!(result.project_path.file_name().unwrap(), "project.lep");
+        assert!(
+            std::fs::read(&result.project_path)
+                .unwrap()
+                .starts_with(libre_effects_core::project_file::MAGIC)
+        );
         assert_eq!((result.files, result.bytes), (1, 16));
         let restored = project_io::read_project(&result.project_path).unwrap();
         assert_eq!(video_paths(&restored).len(), 1);
@@ -726,7 +818,7 @@ mod tests {
         let moved = root.path().join("moved package");
         std::fs::rename(result.project_path.parent().unwrap(), &moved).unwrap();
         std::fs::remove_file(source).unwrap();
-        let restored = project_io::read_project(&moved.join("project.lfe.json")).unwrap();
+        let restored = project_io::read_project(&moved.join("project.lep")).unwrap();
         crate::footage::clear_cache();
         assert_eq!(renderer.render(&restored, 3, 64).unwrap(), before);
         let output = root.path().join("render.mp4");

@@ -2927,6 +2927,8 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 name = "libre-effects-core"
 version = "0.1.0"
 dependencies = [
+ "base64",
+ "crc32fast",
  "serde",
  "serde_json",
 ]

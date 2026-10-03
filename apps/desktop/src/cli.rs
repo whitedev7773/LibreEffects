@@ -3,7 +3,8 @@ use crate::output_settings::{Field, Format, Settings};
 use std::{ffi::OsString, path::PathBuf};
 
 const HELP: &str = "Libre Effects file renderer\n\
-    --render PROJECT.lfe.json --output FILE.mp4|mov|png [--composition ID] [--start FRAME] [--end FRAME] [--png-background] [--size WIDTHxHEIGHT] [--fps RATE] [--channels auto|rgb|rgba|alpha] [--crf 0..51 | --bitrate KBPS] [--encoder SPEED] [--audio auto|off] [--fonts fallback|strict]\n\
+    --render PROJECT.lep --output FILE.mp4|mov|png [--composition ID] [--start FRAME] [--end FRAME] [--png-background] [--size WIDTHxHEIGHT] [--fps RATE] [--channels auto|rgb|rgba|alpha] [--crf 0..51 | --bitrate KBPS] [--encoder SPEED] [--audio auto|off] [--fonts fallback|strict]\n\
+    Native .lep and legacy JSON projects are detected by file contents.\n\
     Frame range is [start, end). Videos default to the entire composition; PNG defaults to one frame.\n\
     Fonts default to fallback with warnings; strict requires the requested family/style.\n\
     MP4 uses the composition background. MOV and PNG preserve alpha; --png-background makes PNG opaque.";
@@ -97,7 +98,7 @@ fn parse(args: Vec<OsString>) -> Result<Options, String> {
         }
     }
     Ok(Options {
-        project: project.ok_or("Use --render PROJECT.lfe.json")?,
+        project: project.ok_or("Use --render PROJECT.lep")?,
         output: output.ok_or("Use --output FILE.mp4, FILE.mov or FILE.png")?,
         start: start.unwrap_or(0),
         end,
@@ -486,5 +487,108 @@ mod tests {
             )
             .is_err()
         );
+    }
+    #[test]
+    fn native_and_legacy_cli_reads_and_png_pixels_are_identical() {
+        use libre_effects_core::{Command, Editor, Property};
+        let directory = tempfile::tempdir().unwrap();
+        let legacy = directory.path().join("legacy.json");
+        let native = directory.path().join("native.lep");
+        let mut editor = Editor::default();
+        editor
+            .execute(Command::ConfigureComposition {
+                name: "Native CLI".into(),
+                width: 32,
+                height: 24,
+                fps: 24,
+                duration: 3,
+            })
+            .unwrap();
+        editor.execute(Command::AddRectangle).unwrap();
+        editor
+            .execute(Command::SetColor {
+                id: 1,
+                color: 0x3388bb,
+            })
+            .unwrap();
+        editor
+            .execute(Command::SetValue {
+                id: 1,
+                property: Property::Opacity,
+                frame: 0,
+                value: 40.0,
+            })
+            .unwrap();
+        editor
+            .execute(Command::SetCompositionBackground(0x123456))
+            .unwrap();
+        crate::project_io::write_project(&legacy, &editor.project().to_json().unwrap()).unwrap();
+        crate::project_io::write_native_project(&native, editor.project(), None).unwrap();
+        assert_eq!(
+            crate::project_io::read_project(&legacy).unwrap(),
+            crate::project_io::read_project(&native).unwrap()
+        );
+        for background in [false, true] {
+            let mut pixels = Vec::new();
+            for (index, source) in [&legacy, &native].into_iter().enumerate() {
+                let output = directory.path().join(format!("render-{index}.png"));
+                render(Options {
+                    project: source.clone(),
+                    output: output.clone(),
+                    start: 1,
+                    end: None,
+                    composition: None,
+                    png_background: background,
+                    settings: Settings::default(),
+                })
+                .unwrap();
+                pixels.push(image::open(output).unwrap().to_rgba8());
+            }
+            assert_eq!(pixels[0], pixels[1]);
+        }
+    }
+
+    #[test]
+    fn cli_detects_contents_and_preserves_sources_even_when_they_are_named_png() {
+        let directory = tempfile::tempdir().unwrap();
+        for native in [false, true] {
+            let source = directory
+                .path()
+                .join(if native { "native.png" } else { "legacy.png" });
+            let bytes = if native {
+                crate::project_io::encode_native_project(
+                    &libre_effects_core::Project::default(),
+                    None,
+                )
+                .unwrap()
+            } else {
+                libre_effects_core::Project::default()
+                    .to_json()
+                    .unwrap()
+                    .into_bytes()
+            };
+            std::fs::write(&source, &bytes).unwrap();
+            let alias = directory.path().join(if native {
+                "native-alias.png"
+            } else {
+                "legacy-alias.png"
+            });
+            std::fs::hard_link(&source, &alias).unwrap();
+            for destination in [&source, &alias] {
+                let error = render(Options {
+                    project: source.clone(),
+                    output: destination.clone(),
+                    start: 0,
+                    end: None,
+                    composition: None,
+                    png_background: false,
+                    settings: Settings::default(),
+                })
+                .unwrap_err();
+                assert!(error.contains("source"), "{error}");
+                assert_eq!(std::fs::read(&source).unwrap(), bytes);
+                assert_eq!(std::fs::read(&alias).unwrap(), bytes);
+            }
+        }
     }
 }

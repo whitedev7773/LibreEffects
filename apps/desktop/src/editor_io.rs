@@ -1,6 +1,20 @@
 use super::*;
+use crate::project_io::{OpenedProject, ProjectFormat};
 use crate::rendering::Renderer;
 use std::time::Duration;
+
+// A chooser confirms only the selected filename. Never overwrite an existing
+// normalized filename that the user did not actually select.
+fn selected_native_destination(selected: &Path) -> Result<PathBuf, String> {
+    let destination = crate::project_io::native_destination(selected);
+    if destination != selected && std::fs::symlink_metadata(&destination).is_ok() {
+        return Err(format!(
+            "{} already exists. Select that .lep file explicitly to replace it.",
+            destination.display()
+        ));
+    }
+    Ok(destination)
+}
 
 impl EditorState {
     pub fn prepare_replacement(&mut self, cx: &mut Context<Self>) {
@@ -49,26 +63,32 @@ impl EditorState {
         } else {
             None
         };
-        if restore {
+        let cleanup_warning = if restore {
             self.recovery_session
                 .as_ref()
                 .ok_or("Recovery session unavailable".to_string())?
                 .lock()
                 .map_err(|e| e.to_string())?
-                .restore(candidate)?;
+                .restore(candidate)?
         } else {
             candidate.discard()?;
-        }
+            None
+        };
         self.recovery.take();
         if let Some(editor) = replacement {
             self.stop();
             self.document_revision = self.document_revision.wrapping_add(1);
             self.editor = editor;
+            self.begin_file_operation();
+            self.cancel_save(self.file_operation);
             self.clear_clipboard();
             self.load_views(Default::default());
-            self.path = None;
+            self.clear_source_provenance();
             self.work_end = self.editor.project().composition().duration();
             self.status = "Recovered checkpoint. Save as to keep it. Other backups remain available at next startup.".into();
+            if let Some(warning) = cleanup_warning {
+                self.status.push_str(&format!(" {warning}"));
+            }
             self.recovery_pending.clear();
         } else {
             self.recovery = self.recovery_pending.pop_front();
@@ -176,6 +196,9 @@ impl EditorState {
     }
     pub(super) fn open(&mut self, cx: &mut Context<Self>) {
         self.stop();
+        let operation = self.begin_file_operation();
+        let revision = self.document_revision;
+        let previous = self.editor.project().clone();
         let prompt = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -195,52 +218,175 @@ impl EditorState {
                 .spawn(async move { crate::project_io::read_editor_project(&source) })
                 .await;
             let _ = entity.update(cx, |s, cx| {
-                match result {
-                    Ok((project, views)) => {
-                        if let Err(error) = s.install_opened_project(project, views, path) {
-                            s.status = format!("Open failed: {error}");
-                        }
-                    }
-                    Err(e) => s.status = format!("Open failed: {e}"),
+                if let Err(error) = s.finish_open(operation, revision, &previous, result, path) {
+                    s.status = format!("Open failed: {error}");
                 }
                 cx.notify();
             });
         })
         .detach();
     }
+    fn begin_file_operation(&mut self) -> u64 {
+        self.file_operation = self.file_operation.wrapping_add(1);
+        self.file_operation
+    }
+    fn finish_open(
+        &mut self,
+        operation: u64,
+        revision: u64,
+        previous: &Project,
+        result: Result<OpenedProject, String>,
+        path: PathBuf,
+    ) -> Result<(), String> {
+        // A newer Open, New, recovery or Save owns the document now. A late
+        // callback must not overwrite its baseline, provenance or status.
+        if operation != self.file_operation {
+            return Ok(());
+        }
+        if revision != self.document_revision
+            || !self.editor.project().same_document(previous)
+            || self
+                .text_session
+                .as_ref()
+                .is_some_and(|session| session.changed())
+        {
+            return Err("Document changed while opening; open the project again".into());
+        }
+        self.install_opened_project(result?, path)
+    }
     fn install_opened_project(
         &mut self,
-        project: Project,
-        views: crate::view_state::ProjectViews,
+        opened: OpenedProject,
         path: PathBuf,
     ) -> Result<(), String> {
         // Keep the current document, path, saved baseline and recovery slot
         // intact unless the resolved project can actually enter the editor.
-        let editor = replacement_editor(project)?;
+        let editor = replacement_editor(opened.project)?;
+        let path = crate::media_io::clean_absolute(&path)?;
+        self.begin_file_operation();
+        self.cancel_save(self.file_operation);
         self.stop();
         self.reset_recovery(false);
         self.document_revision = self.document_revision.wrapping_add(1);
         self.saved = editor.project().clone();
         self.editor = editor;
         self.clear_clipboard();
+        self.imported_original = (opened.format == ProjectFormat::LegacyJson
+            || crate::project_io::native_destination(&path) != path)
+            .then(|| path.clone());
+        self.source_format = Some(opened.format);
         self.path = Some(path);
         self.frame = 0;
         self.work_start = 0;
         self.work_end = self.editor.project().composition().duration();
         self.timeline_start = 0;
-        self.load_views(views);
+        self.load_views(opened.views);
         self.selected_layers.clear();
         self.selected_keys.clear();
         let missing = crate::font_usage::missing_count(self.editor.project());
+        let message = if self.imported_original.is_some() {
+            "Project imported · Save creates a new .lep copy"
+        } else {
+            "Project opened"
+        };
         self.status = if missing == 0 {
-            "Project opened".into()
+            message.into()
         } else {
             format!(
-                "Project opened · {missing} text layer(s) use unavailable fonts/styles · File → Manage project fonts"
+                "{message} · {missing} text layer(s) use unavailable fonts/styles · File → Manage project fonts"
             )
         };
         self.normalize();
         Ok(())
+    }
+    fn clear_source_provenance(&mut self) {
+        self.path = None;
+        self.source_format = None;
+        self.imported_original = None;
+    }
+    pub(super) fn install_new_project(&mut self) -> Result<(), String> {
+        let editor = replacement_editor(Project::default())?;
+        self.begin_file_operation();
+        self.cancel_save(self.file_operation);
+        self.stop();
+        self.reset_recovery(false);
+        self.document_revision = self.document_revision.wrapping_add(1);
+        self.editor = editor;
+        self.saved = self.editor.project().clone();
+        self.clear_clipboard();
+        self.clear_source_provenance();
+        self.composition_started = false;
+        self.selected_layers.clear();
+        self.selected_keys.clear();
+        self.frame = 0;
+        self.work_start = 0;
+        self.work_end = self.editor.project().composition().duration();
+        self.timeline_start = 0;
+        self.load_views(Default::default());
+        self.status = "New composition".into();
+        Ok(())
+    }
+    fn save_path(&self, choose: bool) -> Option<PathBuf> {
+        self.path
+            .as_ref()
+            .filter(|path| {
+                !choose
+                    && self.source_format == Some(ProjectFormat::Lep)
+                    && crate::project_io::native_destination(path) == **path
+            })
+            .cloned()
+    }
+    fn save_directory(&self) -> PathBuf {
+        self.path
+            .as_ref()
+            .and_then(|path| path.parent())
+            .unwrap_or(Path::new("."))
+            .to_path_buf()
+    }
+    fn suggested_save_name(&self) -> String {
+        let Some(path) = self.path.as_ref() else {
+            return "Untitled.lep".into();
+        };
+        let mut destination = crate::project_io::native_destination(path);
+        if self.source_format == Some(ProjectFormat::LegacyJson) && destination == *path {
+            let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+            destination.set_file_name(format!("{stem}-copy.lep"));
+        }
+        destination
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "Untitled.lep".into())
+    }
+    fn cancel_save(&mut self, operation: u64) {
+        if operation != self.file_operation {
+            return;
+        }
+        self.saving = false;
+        self.close_after_save = false;
+    }
+    fn finish_save(
+        &mut self,
+        operation: u64,
+        snapshot: Project,
+        path: PathBuf,
+        result: Result<(), String>,
+    ) {
+        if operation != self.file_operation {
+            return;
+        }
+        self.saving = false;
+        match result {
+            Ok(()) => {
+                self.saved = snapshot;
+                self.path = Some(path);
+                self.source_format = Some(ProjectFormat::Lep);
+                self.status = "Saved".into();
+            }
+            Err(error) => {
+                self.close_after_save = false;
+                self.status = format!("Save failed: {error}");
+            }
+        }
     }
     pub(super) fn save(&mut self, cx: &mut Context<Self>) {
         self.save_project(false, cx);
@@ -253,18 +399,16 @@ impl EditorState {
             return;
         }
         self.stop();
+        let operation = self.begin_file_operation();
         let views = self.capture_views();
         let snapshot = self.editor.project().clone();
-        let path = if choose { None } else { self.path.clone() };
-        let directory = self
-            .path
-            .as_ref()
-            .and_then(|p| p.parent())
-            .unwrap_or(Path::new("."))
-            .to_path_buf();
+        let path = self.save_path(choose);
+        let suggested_name = self.suggested_save_name();
+        let imported_original = self.imported_original.clone();
+        let directory = self.save_directory();
         let prompt = path
             .is_none()
-            .then(|| cx.prompt_for_new_path(&directory, Some("Untitled.lfe.json")));
+            .then(|| cx.prompt_for_new_path(&directory, Some(&suggested_name)));
         self.saving = true;
         cx.spawn(async move |entity, cx| {
             let path = if let Some(prompt) = prompt {
@@ -272,8 +416,7 @@ impl EditorState {
                     Ok(Ok(Some(p))) => p,
                     _ => {
                         let _ = entity.update(cx, |s, cx| {
-                            s.saving = false;
-                            s.close_after_save = false;
+                            s.cancel_save(operation);
                             cx.notify();
                         });
                         return;
@@ -282,25 +425,31 @@ impl EditorState {
             } else {
                 path.unwrap()
             };
+            let path = match selected_native_destination(&path) {
+                Ok(path) => path,
+                Err(error) => {
+                    let _ = entity.update(cx, |s, cx| {
+                        s.finish_save(operation, snapshot, path, Err(error));
+                        cx.notify();
+                    });
+                    return;
+                }
+            };
             let destination = path.clone();
             let copy = snapshot.clone();
             let result = cx
                 .background_executor()
-                .spawn(async move { crate::media_io::save(&copy, &views, &destination) })
+                .spawn(async move {
+                    crate::media_io::save_protected(
+                        &copy,
+                        &views,
+                        &destination,
+                        imported_original.as_deref(),
+                    )
+                })
                 .await;
             let _ = entity.update(cx, |s, cx| {
-                s.saving = false;
-                match result {
-                    Ok(()) => {
-                        s.saved = snapshot;
-                        s.path = Some(path);
-                        s.status = "Saved".into();
-                    }
-                    Err(e) => {
-                        s.close_after_save = false;
-                        s.status = format!("Save failed: {e}");
-                    }
-                }
+                s.finish_save(operation, snapshot, path, result);
                 cx.notify();
             });
         })
@@ -314,6 +463,7 @@ impl EditorState {
         self.video_job = None;
         let project = self.editor.project().clone();
         let project_path = self.path.clone();
+        let imported_original = self.imported_original.clone();
         let range = if sequence {
             self.work_start..self.work_end
         } else {
@@ -364,6 +514,16 @@ impl EditorState {
             } else {
                 path
             };
+            if let Some(source) = &imported_original {
+                if let Err(error) = crate::project_io::protect_source(&output, source) {
+                    let _ = entity.update(cx, |s, cx| {
+                        s.exporting = false;
+                        s.status = format!("Render preflight failed: {error}");
+                        cx.notify();
+                    });
+                    return;
+                }
+            }
             let project = std::sync::Arc::new(project);
             let (preflight_project, preflight_source, preflight_output, preflight_range, preflight_cancel) =
                 (project.clone(), project_path.clone(), output.clone(), range.clone(), cancel.clone());
@@ -418,6 +578,7 @@ impl EditorState {
                 }
                 let (renderer, project) = (renderer.clone(), project.clone());
                 let project_path = project_path.clone();
+                let imported_original = imported_original.clone();
                 let frame_cancel = cancel.clone();
                 let destination = if sequence {
                     output.join(format!("frame-{frame:06}.png"))
@@ -428,7 +589,7 @@ impl EditorState {
                     .background_executor()
                     .spawn(async move {
                         crate::video_decoder::check_cancel(&frame_cancel)?;
-                        if let Some(source) = &project_path {
+                        for source in project_path.iter().chain(imported_original.iter()) {
                             crate::project_io::protect_source(&destination, source)?;
                         }
                         crate::project_io::validate_render_with(&project, &destination, &(frame..frame + 1), &frame_cancel, &mut |_, _| {})?;

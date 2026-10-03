@@ -122,6 +122,7 @@ impl EditorState {
             window.blur();
             let snapshot = self.editor.project().clone();
             let source = self.path.clone();
+            let imported_original = self.imported_original.clone();
             let range = self.work_start..self.work_end;
             let formats = self.queue_formats.clone();
             let prompt = cx.prompt_for_paths(PathPromptOptions {
@@ -145,7 +146,14 @@ impl EditorState {
                             queue
                                 .lock()
                                 .map_err(|e| e.to_string())?
-                                .enqueue(&snapshot, source, range, &formats, &folder)
+                                .enqueue_protected(
+                                    &snapshot,
+                                    source,
+                                    imported_original,
+                                    range,
+                                    &formats,
+                                    &folder,
+                                )
                                 .map(|_| ())
                         })
                         .await

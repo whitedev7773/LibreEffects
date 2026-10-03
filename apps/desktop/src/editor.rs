@@ -197,6 +197,10 @@ pub(crate) struct EditorState {
     clipboard: Vec<KeyCopy>,
     layer_clipboard: Option<libre_effects_core::LayerClipboard>,
     pub path: Option<PathBuf>,
+    source_format: Option<crate::project_io::ProjectFormat>,
+    // Retain imported-file protection after saving a native copy.
+    imported_original: Option<PathBuf>,
+    file_operation: u64,
     pub composition_started: bool,
     pub new_composition_requested: bool,
     saved: Project,
@@ -282,6 +286,9 @@ impl Default for EditorState {
             clipboard: Vec::new(),
             layer_clipboard: None,
             path: None,
+            source_format: None,
+            imported_original: None,
+            file_operation: 0,
             composition_started: false,
             new_composition_requested: false,
             saved: Project::default(),
@@ -1401,26 +1408,8 @@ impl EditorState {
                 self.step_history(matches!(action, Action::Redo));
             }
             Action::New => {
-                self.clear_clipboard();
-                self.reset_recovery(false);
-                self.document_revision = self.document_revision.wrapping_add(1);
-                self.stop();
-                match self.editor.replace_project(Project::default()) {
-                    Ok(()) => {
-                        self.path = None;
-                        self.composition_started = false;
-                        self.saved = Project::default();
-                        self.editor.clear_history();
-                        self.selected_layers.clear();
-                        self.selected_keys.clear();
-                        self.frame = 0;
-                        self.work_start = 0;
-                        self.work_end = 150;
-                        self.timeline_start = 0;
-                        self.load_views(Default::default());
-                        self.status = "New composition".into();
-                    }
-                    Err(error) => self.status = error,
+                if let Err(error) = self.install_new_project() {
+                    self.status = error;
                 }
             }
             Action::Open => self.open(cx),

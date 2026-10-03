@@ -64,6 +64,8 @@ pub(crate) struct Job {
     pub name: String,
     pub snapshot: String,
     pub project_path: Option<PathBuf>,
+    // Required in v5: older readers must not silently discard original protection.
+    pub protected_sources: Vec<PathBuf>,
     pub range: Range<u32>,
     pub duration: u32,
     pub description: String,
@@ -75,9 +77,9 @@ pub(crate) struct Preset {
     pub name: String,
     pub specs: Vec<Spec>,
 }
-// Version 4 makes font policy consequential: pre-policy (v3) readers must reject
-// the envelope rather than ignore Settings::fonts and silently relax Strict.
-const QUEUE_VERSION: u32 = 4;
+// Version 5 persists imported originals separately from the native project path.
+// Older readers must reject this envelope instead of silently losing protection.
+const QUEUE_VERSION: u32 = 5;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Data {
@@ -237,6 +239,22 @@ impl Queue {
                         // Existing policies (including Strict) survive unchanged.
                         // Settings' serde default fills only absent font policies;
                         // the subsequent atomic save makes them explicit in v4.
+                        value["version"] = 4.into();
+                    }
+                    if value["version"] == 4 {
+                        // Earlier jobs knew only their project_path. Keep it, and
+                        // preserve any explicit source-protection extension.
+                        if let Some(jobs) = value
+                            .get_mut("jobs")
+                            .and_then(serde_json::Value::as_array_mut)
+                        {
+                            for job in jobs {
+                                job.as_object_mut()
+                                    .ok_or("Invalid legacy job")?
+                                    .entry("protected_sources")
+                                    .or_insert_with(|| serde_json::json!([]));
+                            }
+                        }
                         value["version"] = QUEUE_VERSION.into();
                     }
                     serde_json::from_value(value)
@@ -337,10 +355,22 @@ impl Queue {
         }
         Ok(())
     }
+    #[cfg(test)]
     pub fn enqueue(
         &mut self,
         project: &Project,
         project_path: Option<PathBuf>,
+        range: Range<u32>,
+        specs: &[Spec],
+        directory: &Path,
+    ) -> Result<u64, String> {
+        self.enqueue_protected(project, project_path, None, range, specs, directory)
+    }
+    pub fn enqueue_protected(
+        &mut self,
+        project: &Project,
+        project_path: Option<PathBuf>,
+        imported_original: Option<PathBuf>,
         range: Range<u32>,
         specs: &[Spec],
         directory: &Path,
@@ -407,6 +437,7 @@ impl Queue {
             name: comp.name().into(),
             snapshot,
             project_path,
+            protected_sources: imported_original.into_iter().collect(),
             range,
             duration: comp.duration(),
             description: format!("{} × {} · {} fps", comp.width(), comp.height(), comp.fps()),
@@ -449,6 +480,7 @@ impl Queue {
                     .map(PathBuf::from),
             );
             sources.extend(job.project_path.iter().cloned());
+            sources.extend(job.protected_sources.iter().cloned());
         }
         let mut outputs: Vec<&Path> = Vec::new();
         for output in data.jobs.iter().flat_map(|j| &j.outputs) {
@@ -518,7 +550,10 @@ fn validate(data: &Data) -> Result<(), String> {
         {
             return Err("Invalid render queue job".into());
         }
-        if job.project_path.as_ref().is_some_and(|p| !p.is_absolute()) {
+        if job.project_path.as_ref().is_some_and(|p| !p.is_absolute())
+            || job.protected_sources.len() > 1
+            || job.protected_sources.iter().any(|p| !p.is_absolute())
+        {
             return Err("Queue project paths must be absolute".into());
         }
         for output in &job.outputs {
@@ -590,9 +625,10 @@ pub(crate) fn run(queue: Arc<Mutex<Queue>>) {
             };
             let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let project = crate::project_io::read_project(&root.join(&job.snapshot))?;
-                execute(
+                execute_protected(
                     &project,
                     job.project_path.as_deref(),
+                    &job.protected_sources,
                     job.range.clone(),
                     &job.outputs[index],
                     cancel.clone(),
@@ -652,6 +688,7 @@ pub(crate) fn run(queue: Arc<Mutex<Queue>>) {
         });
     }
 }
+#[cfg(test)]
 pub(crate) fn execute(
     project: &Project,
     project_path: Option<&Path>,
@@ -660,6 +697,20 @@ pub(crate) fn execute(
     cancel: Arc<AtomicBool>,
     progress: Arc<AtomicU32>,
 ) -> Result<crate::output_preflight::Report, String> {
+    execute_protected(project, project_path, &[], range, output, cancel, progress)
+}
+pub(crate) fn execute_protected(
+    project: &Project,
+    project_path: Option<&Path>,
+    protected_sources: &[PathBuf],
+    range: Range<u32>,
+    output: &Output,
+    cancel: Arc<AtomicBool>,
+    progress: Arc<AtomicU32>,
+) -> Result<crate::output_preflight::Report, String> {
+    for source in protected_sources {
+        crate::project_io::protect_source(&output.path, source)?;
+    }
     if !output.spec.format.sequence() {
         return crate::video_export::export_video_to(
             project,

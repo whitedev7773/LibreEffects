@@ -25,6 +25,23 @@ remaining milestones, and [the development backlog](apps/desktop/DEVELOPMENT_BAC
 for the dated design and validation history. Original OpenCut copyright and MIT
 license notices are retained.
 
+## Native projects
+
+Save and Save As use **Libre Effects Project (`.lep`)**, a versioned binary
+container with project metadata, optional editor views, and shared embedded PNG
+images. Linked audio, video and image-sequence frames stay external; Collect
+project files creates a portable folder containing `project.lep` and `Media`.
+Existing `.lfe.json` projects remain supported imports. Opening detects the file
+contents, and saving an imported project creates a `.lep` copy without replacing
+the original.
+
+Open [`examples/native-project-study.lep`](examples/native-project-study.lep)
+through File → Open for a 1280 × 720, 30 fps, three-second sample with gradient
+fills, two layers sharing one PNG, animated image rotation, and a saved playhead
+at frame 30. The [desktop guide](apps/desktop/README.md#native-lep-files-and-legacy-imports)
+describes the format, compatibility, limits and sample generator. Historical
+`.lfe.json` examples throughout that guide remain valid imports.
+
 ## Development
 
 Install [proto](https://moonrepo.dev/proto) if you haven't already:

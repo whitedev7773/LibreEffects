@@ -339,13 +339,16 @@ future work.
 - Drag panel dividers to resize; double-click a divider or choose Window → Reset
   default workspace to restore the layout.
 - Save (Ctrl+S) also records panel proportions, the timeline column width, right
-  dock sections, Effect Controls tab, Align target and Snap preference in optional `editor_view`
-  metadata. Each composition remembers its playhead, timeline zoom/position,
+  dock sections, Effect Controls tab, Align target and Snap preference in the
+  optional `.lep` `VIEW` chunk (legacy JSON calls this `editor_view`). Each
+  composition remembers its playhead, timeline zoom/position,
   preview zoom/pan/resolution, checkerboard and graph visibility.
   View changes do not add Undo steps or mark the render document dirty; save
   explicitly to preserve them across reopening. New documents and recovery
-  checkpoints start with default views. Older files without this metadata open
-  normally; invalid/future view metadata is ignored and unsafe ranges are clamped.
+  checkpoints start with default views. Files without this metadata open normally.
+  Native files reject malformed or unsupported view metadata; legacy JSON still
+  ignores invalid/future `editor_view` metadata. Valid view ranges are normalized
+  to safe values.
 - The Timeline has compact layer rows, grouped X/Y transform values, a Parent & Link
   column, and a draggable boundary between its layer list and time area.
 - Wanted Sans and Gravity Icons are embedded in the executable, with their licenses
@@ -446,7 +449,7 @@ future work.
   It reports composition X/Y and the sample buffer resolution; Half/Quarter or
   the existing 1280-pixel preview cap can differ from a full-resolution export.
 - Both viewer menus support Up/Down, Enter/Space and Escape. Display preferences
-  are saved per composition in `editor_view`; they do not create Undo steps or
+  are saved per composition in view metadata; they do not create Undo steps or
   mark the document dirty. Save explicitly after changing only view preferences.
   Guides and all display preferences are excluded from PNG, MP4, MOV and nested
   compositions. No guide preset import/export or custom ruler origin is provided.
@@ -1109,10 +1112,11 @@ report. Search skips symbolic links and is limited to 10,000 entries / 16 levels
 If a checked replacement has incompatible dimensions, the entire edit is rejected.
 
 File → Collect project files creates a new `LibreEffects-collected-*` directory
-inside the chosen parent, with `project.lfe.json` and a `Media` folder. Linked
-videos are copied once per canonical source with unique numbered filenames;
-embedded images and editor views stay in the JSON. The current project and source
-files remain unchanged. Move the complete new folder to relocate the project.
+inside the chosen parent, with `project.lep` and a `Media` folder. Linked
+audio, videos and available image-sequence frames are copied once per canonical
+source with unique numbered filenames; embedded images and editor views stay in
+the `.lep` container. The current project and source files remain unchanged.
+Move the complete new folder to relocate the project.
 Copy errors, changed source files and cancellation remove the incomplete new
 collection. File → Cancel file collection stops copying between 1 MiB chunks.
 The completion path or error also remains in the Project Media dialog.
@@ -1341,30 +1345,94 @@ controls and the alternative "leave attributes" pre-compose mode remain pending.
 Clear Solo switches and disable Guide on selected layers before pre-composing;
 otherwise moving the layers into a nested composition would change their visibility.
 
-Versioned .lfe.json files contain compositions, layer ranges, transforms and
-keyframes. Files from the initial rectangle editor remain readable. Bezier or
-parenting edits upgrade the project to version 2; text, images, masks or effects
-upgrade it to version 3; linked videos require version 4, and altered video playback
-requires version 5. Nonblack composition backgrounds require version 6; shared embedded image assets require version 7, saved work areas require version 8, multiple compositions require version 9, nested layers require version 10, Null/Solo/Shy/Guide require version 11, ordered animated effects require version 12, timeline markers require version 13, rational FPS/nonzero start timecode require version 14, and portable source-path rewrites use version 15. Integer FPS files remain readable; fractional rates serialize as `{numerator, denominator}`. Older applications reject
-unsupported versions. Save writes
-the snapshot captured when clicked using a temporary file before replacement.
-Files are limited to 256 MiB, with up to 128 MiB of unique base64 image data and
-16 MiB of compact metadata when saving. Image payloads are stored once in the
-version 7 asset table; duplicates and Undo snapshots share immutable image memory.
-Older inline-image projects are upgraded when opened. Undo history is capped at
-100 edits and is reset at a
-New/Open document boundary. Failed saves leave the edited project intact.
+### Native `.lep` files and legacy imports
+
+Save and Save As write **Libre Effects Project (`.lep`)** files. This is a binary
+container, not a renamed JSON file or a ZIP archive. Container version **1** is
+independent of the project model's schema version (supported through **47**):
+choosing `.lep` does not change the project schema or its editing behavior.
+
+- `PROJ` stores compact JSON metadata for all compositions, layers, animation and
+  shared assets, referring to embedded images by ID rather than inline base64.
+- Optional `VIEW` stores the desktop workspace and per-composition view state
+  separately from renderable content. Recovery omits it and uses default views.
+- `IMAG` stores each shared image once. Canonical base64 PNGs become their exact
+  original PNG bytes without decoding or re-encoding pixels. The core codec can
+  preserve other legacy encoded image strings verbatim; desktop loading still
+  requires valid, bounded PNG image data.
+- Audio, video and image-sequence frames remain linked files. Saving preserves
+  portable source-path handling; use [Collect project files](#portable-projects-and-missing-media)
+  to copy those dependencies alongside `project.lep`.
+
+The container has a 32-byte header and 20-byte chunk headers, with little-endian
+lengths and CRC32 checksums. Readers validate lengths, counts, checksums, image
+references and duplicate JSON keys, and reject unsupported versions, flags,
+chunks and trailing data. CRC32 detects accidental corruption; it does not
+authenticate project files. Limits are 256 MiB per file, 16 MiB each for `PROJ`
+and `VIEW`, 1,000 images, 12 MiB of reconstructed base64 per image (up to 9 MiB
+of raw PNG), and 128 MiB of reconstructed encoded image data in total.
+
+File → Open and CLI rendering detect native versus legacy JSON from the bytes,
+independently of the filename extension. Existing `.lfe.json` files, including
+the historical examples in this guide and files from the initial rectangle
+editor, remain readable. Older inline-image projects acquire shared assets when
+opened. Integer FPS remains readable; fractional rates retain the model's
+`{numerator, denominator}` representation. Older applications can reject newer
+project schemas and cannot read this new native container.
+
+Opening legacy JSON imports it. The first Ctrl+S asks for a new `.lep` copy;
+Ctrl+Shift+S always chooses a path. Save names ending in `.lfe.json` or `.json`
+are normalized to `.lep`, and other names gain `.lep`. If that normalized target
+already exists, choose the existing `.lep` explicitly to replace it. The imported
+original remains protected against Save, Save As and export destinations,
+including file-identity aliases such as hard links, throughout that document
+session even after a successful native save. Queued jobs retain this protection
+across restarts. Native content opened under a non-`.lep` name also saves as a
+new `.lep` copy.
+
+Save captures the project and views when clicked, validates and encodes them,
+then completes a temporary file before replacing the destination. Failed saves
+leave the edited project intact. Duplicate images and Undo snapshots share
+immutable image memory. Undo history is capped at 100 edits and is reset at a
+New/Open document boundary.
+
+Open [`examples/native-project-study.lep`](../../examples/native-project-study.lep)
+through File → Open for a 1280 × 720, 30 fps, 90-frame study with gradient fills,
+animated image rotation, two image layers sharing the embedded
+[`native-study-image.png`](../../examples/native-study-image.png), and a saved
+playhead at frame 30. Reproduce it from the repository root, choosing a **new**
+output path (the generator refuses to overwrite an existing file):
+
+~~~sh
+cargo run -p libre-effects-core --example make_native_study -- examples/native-project-study-copy.lep
+~~~
+
+For developers, [`libre_effects_core::project_file`](../../crates/core/src/project_file.rs)
+provides `encode(&Project, Option<&[u8]>)` and `decode(&[u8])`; the decoded result
+contains the project and optional borrowed view bytes. The codec performs no
+filesystem/media I/O and does not interpret the view schema. Desktop
+[`project_io`](src/project_io.rs) handles format detection, PNG validation,
+view decoding and atomic writes. The [v1 format specification](../../docs/lep-format-v1.md)
+defines the byte layout, checksums, limits and compatibility representation.
+`Project::to_json` / `Project::from_json` remain available for legacy tooling.
+Effect presets and render-queue snapshots continue
+to use JSON; they are not converted to `.lep` by this project-file change.
+
+### Saving and recovery
 
 An asterisk in the window title indicates unsaved changes. Ctrl+S saves to the
-current file; Ctrl+Shift+S chooses another path. Closing, New and Open offer
-Save / Discard / Cancel when there are changes. Save and continue proceeds only
-after a successful save. Canceling a file picker does not discard the document.
+current native file after the first native save; Ctrl+Shift+S chooses another
+path. Closing, New and Open offer Save / Discard / Cancel when there are changes.
+Save and continue proceeds only after a successful save. Canceling a file picker
+does not discard the document.
 
 Changed unsaved projects are checkpointed every five seconds in a uniquely named
 slot under `%LOCALAPPDATA%/LibreEffects/recovery/`. Each running instance holds an
 OS file lock; other instances neither offer nor remove its checkpoints. Each slot
-keeps a current and previous checkpoint. After an interrupted session, startup
-lets you browse abandoned slots and Restore, Discard, or keep them for later.
+keeps a current `.lep` and previous `.lep.previous` checkpoint. Older JSON session
+slots and their previous checkpoints remain readable with independent locks.
+After an interrupted session, startup lets you browse abandoned slots and
+Restore, Discard, or keep them for later.
 A damaged current checkpoint falls back to the previous one when it is readable.
 Restore first copies the project into the current instance's slot and opens an
 unsaved document; saving the original is an explicit later action. Closing or
@@ -1386,12 +1454,14 @@ compositing remain pending. Playback applications may handle color tags differen
 
 ## Render from the command line
 
-Use `--render PROJECT --output FILE` to render a saved project without opening
-the editor or changing its recovery slot. The output extension selects MP4/H.264,
+Use `--render PROJECT.lep --output FILE` to render a saved project without opening
+the editor or changing its recovery slot. Native `.lep` and legacy JSON are
+detected from file contents. The output extension selects MP4/H.264,
 MOV/ProRes with alpha, or a single PNG. MP4 uses the composition background; PNG
 preserves transparency unless `--png-background` is supplied. The saved active
 composition is used by default; `--composition ID` selects another stable ID
-from the project JSON (`composition_id` or an `other_compositions` key).
+from the project metadata (`composition_id` or an `other_compositions` key in
+native `PROJ` or legacy JSON).
 
 `--start FRAME` is inclusive and `--end FRAME` is exclusive. Video defaults to
 the whole composition; PNG defaults to one frame starting at frame zero.
@@ -1402,12 +1472,12 @@ On Windows, wait explicitly for the GUI-subsystem executable and redirect its
 messages when running in a script:
 
 ~~~powershell
-$job = Start-Process -FilePath '.\target\release\libre-effects.exe' -ArgumentList '--render examples/lower-third.lfe.json --output title.mp4 --start 0 --end 150' -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput render.log -RedirectStandardError render-error.log
+$job = Start-Process -FilePath '.\target\release\libre-effects.exe' -ArgumentList '--render examples/native-project-study.lep --output native-study.mp4 --start 0 --end 90' -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput render.log -RedirectStandardError render-error.log
 $job.ExitCode
 ~~~
 
 Quote paths containing spaces inside the argument string. For an opaque still,
-use `--output title.png --start 30 --png-background`. Use `--help` for syntax.
+use `--output native-study.png --start 30 --png-background`. Use `--help` for syntax.
 
 ## Output preflight
 
@@ -1429,9 +1499,11 @@ replacement as Preview and reports the requested and actual family/face/style.
 Install the font and restart the editor, replace it in Manage project fonts, or
 explicitly choose fallback. The policy checks family/face/style, not glyph-level
 coverage. Queue diagnostics and policy survive restart; CLI warnings go to stderr.
-Saved queues use version 4 so older applications cannot silently ignore a strict
-font policy. Versions 1–3 migrate while preserving explicit policies; absent font
-settings become fallback.
+Saved queues use version 5, preserving strict font policy and the imported
+original project paths protected from replacement. Versions 1–4 migrate while
+preserving explicit policies and known source protections; absent font settings
+become fallback. Earlier queue files cannot recover imported-original paths that
+they never recorded.
 
 For example, add `--fonts strict` to a CLI render to require the requested fonts.
 The quick File exports use fallback with warnings; configured policy is available
@@ -1440,8 +1512,8 @@ manifest on cancellation; queue sequences publish only a completed staging folde
 
 Native Linux QA verified strict rejection without changing an existing output,
 policy/diagnostic persistence after restart, fallback H.264 output with a visible
-font warning, and a missing-parent diagnostic. The sample output was320×180,
-24fps and two frames. Version4 queue migrations are separately regression-tested;
+font warning, and a missing-parent diagnostic. The sample output was 320 × 180,
+24 fps and two frames. Queue migrations are separately regression-tested;
 Windows-native preflight and disk-full simulation were not run.
 
 ## Render queue
@@ -1468,9 +1540,10 @@ failure. PNG sequences are rendered into a temporary sibling directory and only
 published when complete; their destination must be new. MP4/MOV keep the existing
 atomic file replacement behavior. Failed/canceled exports preserve destinations.
 
-The queue and immutable project snapshots are saved separately in the per-user
-LibreEffects/render-queue directory. They restore after restarting the editor,
-including named presets, order, ranges and per-output results. An interrupted
+The queue, named presets and immutable project snapshots remain JSON, saved
+separately from native `.lep` files in the per-user LibreEffects/render-queue
+directory. They restore after restarting the editor, including named presets,
+order, ranges and per-output results. An interrupted
 render is labeled Interrupted and requires Retry; startup never starts renders.
 Changing or opening a project after adding a job does not change that snapshot.
 Linked source files are still external dependencies; replacing their bytes changes
@@ -1482,7 +1555,8 @@ files or undoes an execution. Queue changes do not dirty the open project. Remov
 retains snapshots for in-session Undo, and startup reclaims unreferenced snapshots.
 Limits are 100 jobs, eight outputs/job, 32 named presets, 1 MiB queue metadata and
 1 GiB snapshot storage. Metadata writes are atomic; storage failures stop the run.
-Source projects, linked media, queue files and duplicate destinations are protected.
+Source projects, imported originals captured with a job, linked media, queue files
+and duplicate destinations are protected.
 A damaged/missing snapshot must be removed before the queue can start.
 
 Click an output's format label to expand its settings. Size accepts `comp` or an
@@ -1512,7 +1586,8 @@ Changing settings requeues only that output and participates in queue Undo/Redo.
 Named presets now include each module's size, FPS, channels, quality and speed;
 version 1/2 queue data migrates through the silent-audio compatibility step,
 then version 3 migrates to version 4 while preserving results, presets and any
-explicit font policy. Missing font policies default to fallback. Version 1/2 jobs
+explicit font policy, and version 4 migrates to version 5 with imported-source
+protection metadata. Missing font policies default to fallback. Version 1/2 jobs
 retain silent audio; version 3 audio settings are preserved and new modules
 default to automatic audio.
 PNG sequences with a changed FPS number from zero and record source_range, output

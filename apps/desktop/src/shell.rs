@@ -714,7 +714,7 @@ impl Render for Shell {
                 .as_ref()
                 .and_then(|p| p.file_name())
                 .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or("Untitled".into())
+                .unwrap_or("Untitled.lep".into())
         );
         window.set_window_title(&title);
         if self.replacing

@@ -222,9 +222,10 @@ fn queue_v1_migrates_defaults_without_losing_jobs_presets_or_results() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("queue");
     let mut q = Queue::load(root.clone()).unwrap();
+    let source = dir.path().join("legacy.lfe.json");
     q.enqueue(
         scene().project(),
-        None,
+        Some(source.clone()),
         0..3,
         &[Format::Mp4.into()],
         dir.path(),
@@ -232,6 +233,10 @@ fn queue_v1_migrates_defaults_without_losing_jobs_presets_or_results() {
     .unwrap();
     let mut data = serde_json::to_value(&q.data).unwrap();
     data["version"] = 1.into();
+    data["jobs"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("protected_sources");
     data["jobs"][0]["outputs"][0]
         .as_object_mut()
         .unwrap()
@@ -256,7 +261,11 @@ fn queue_v1_migrates_defaults_without_losing_jobs_presets_or_results() {
     );
     let saved: serde_json::Value =
         serde_json::from_slice(&std::fs::read(root.join("queue.json")).unwrap()).unwrap();
-    assert_eq!(saved["version"], 4);
+    assert_eq!(saved["version"], 5);
+    assert_eq!(q.data.jobs[0].project_path, Some(source.clone()));
+    assert!(q.data.jobs[0].protected_sources.is_empty());
+    assert_eq!(saved["jobs"][0]["project_path"], source.to_str().unwrap());
+    assert_eq!(saved["jobs"][0]["protected_sources"], serde_json::json!([]));
 }
 
 fn command(exe: impl AsRef<std::ffi::OsStr>) -> std::process::Command {

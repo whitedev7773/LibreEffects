@@ -18,6 +18,7 @@ mod compositions;
 mod document;
 mod editing;
 mod key_scale;
+pub mod project_file;
 pub use key_scale::KeyScale;
 mod effects;
 pub use effects::{
@@ -596,14 +597,7 @@ impl Project {
     }
 
     pub fn from_json(json: &str) -> Result<Self, String> {
-        let mut project = document::decode(json)?;
-        project.validate()?;
-        mask_animation::migrate(&mut project);
-        shape_contents::migrate(&mut project);
-        project.sync_assets()?;
-        project.validate()?;
-        document::validate_budget(&project)?;
-        Ok(project)
+        document::finish(document::decode(json)?)
     }
 
     fn validate(&self) -> Result<(), String> {

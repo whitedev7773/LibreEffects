@@ -132,10 +132,29 @@ fn sequence_relink_collect_move_save_and_source_protection_keep_pixels() {
     e.undo();
     assert_eq!(e.project(), &before);
     e.redo();
-    let saved = root.path().join("sequence.lfe.json");
+    let saved = root.path().join("sequence.lep");
     media_io::save(e.project(), &Default::default(), &saved).unwrap();
-    let json = std::fs::read_to_string(&saved).unwrap();
-    assert_eq!(json.matches("Replacement/shot_0001.png").count(), 1);
+    let bytes = std::fs::read(&saved).unwrap();
+    assert_eq!(
+        bytes
+            .windows(b"Replacement/shot_0001.png".len())
+            .filter(|part| *part == b"Replacement/shot_0001.png")
+            .count(),
+        1
+    );
+    let stored = libre_effects_core::project_file::decode(&bytes)
+        .unwrap()
+        .project;
+    let Content::ImageSequence { frames: first, .. } = stored.composition().layers()[0].content()
+    else {
+        panic!()
+    };
+    let Content::ImageSequence { frames: asset, .. } =
+        stored.asset_library().assets()[&1].content()
+    else {
+        panic!()
+    };
+    assert!(std::sync::Arc::ptr_eq(first, asset));
     let loaded = project_io::read_project(&saved).unwrap();
     assert_eq!(pixel(&loaded, 1), pixel(e.project(), 1));
     let source = replacement.join("shot_0001.png");
@@ -151,7 +170,7 @@ fn sequence_relink_collect_move_save_and_source_protection_keep_pixels() {
     std::fs::rename(collected.project_path.parent().unwrap(), &moved).unwrap();
     std::fs::remove_dir_all(&replacement).unwrap();
     std::fs::remove_dir_all(&src).unwrap();
-    let p = project_io::read_project(&moved.join("project.lfe.json")).unwrap();
+    let p = project_io::read_project(&moved.join("project.lep")).unwrap();
     for f in 0..3 {
         assert_eq!(
             pixel(&p, f),
@@ -224,7 +243,7 @@ fn sequence_preview_and_video_exports_match_after_reopen() {
     .unwrap();
     e.execute(Command::SetCompositionBackground(0x204060))
         .unwrap();
-    let save = d.path().join("sequence.lfe.json");
+    let save = d.path().join("sequence.lep");
     media_io::save(e.project(), &Default::default(), &save).unwrap();
     let p = project_io::read_project(&save).unwrap();
     for preset in [VideoPreset::H264, VideoPreset::ProResAlpha] {

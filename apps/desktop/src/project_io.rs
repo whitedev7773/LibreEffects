@@ -1,11 +1,24 @@
 use std::{
     io::{Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use libre_effects_core::{Content, FrameRounding, Project};
 
-const MAX_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_BYTES: u64 = libre_effects_core::project_file::MAX_FILE_BYTES as u64;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ProjectFormat {
+    Lep,
+    LegacyJson,
+}
+
+#[derive(Debug)]
+pub(crate) struct OpenedProject {
+    pub project: Project,
+    pub views: crate::view_state::ProjectViews,
+    pub format: ProjectFormat,
+}
 
 pub(crate) fn protect_source(destination: &Path, source: &Path) -> Result<(), String> {
     // Expected-but-missing sequence frames are sources too: exporting there would
@@ -224,34 +237,104 @@ fn validate_sources(
     Ok(())
 }
 
+/// The extension is a save-dialog convention, never a decoder selector.
+pub(crate) fn native_destination(path: &Path) -> PathBuf {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        let mut name = path.as_os_str().to_os_string();
+        name.push(".lep");
+        return PathBuf::from(name);
+    };
+    let lower = name.to_ascii_lowercase();
+    if lower.ends_with(".lep") {
+        return path.to_path_buf();
+    }
+    let keep = if lower.ends_with(".lfe.json") {
+        name.len() - ".lfe.json".len()
+    } else if lower.ends_with(".json") {
+        name.len() - ".json".len()
+    } else {
+        name.len()
+    };
+    path.with_file_name(format!("{}.lep", &name[..keep]))
+}
+
 pub(crate) fn read_project(path: &Path) -> Result<Project, String> {
-    let json = read_json(path)?;
-    crate::media_io::resolve(&parse_project(&json)?, path)
+    Ok(read_editor_project(path)?.project)
 }
-pub(crate) fn read_editor_project(
-    path: &Path,
-) -> Result<(Project, crate::view_state::ProjectViews), String> {
-    let json = read_json(path)?;
-    let project = crate::media_io::resolve(&parse_project(&json)?, path)?;
-    let views = crate::view_state::ProjectViews::read(&json, &project);
-    Ok((project, views))
+pub(crate) fn read_editor_project(path: &Path) -> Result<OpenedProject, String> {
+    let mut opened = decode_project(&read_bytes(path)?)?;
+    opened.project = crate::media_io::resolve(&opened.project, path)?;
+    Ok(opened)
 }
-fn parse_project(json: &str) -> Result<Project, String> {
-    let project = Project::from_json(json)?;
-    crate::rendering::validate_images(&project)?;
-    Ok(project)
-}
-fn read_json(path: &Path) -> Result<String, String> {
-    let mut json = String::new();
-    std::fs::File::open(path)
-        .map_err(|error| error.to_string())?
-        .take(MAX_BYTES + 1)
-        .read_to_string(&mut json)
-        .map_err(|error| error.to_string())?;
-    if json.len() as u64 > MAX_BYTES {
+
+/// Decode and validate before rebasing any linked media against the outer file.
+pub(crate) fn decode_project(bytes: &[u8]) -> Result<OpenedProject, String> {
+    if bytes.len() as u64 > MAX_BYTES {
         return Err("Project exceeds 256 MiB".into());
     }
-    Ok(json)
+    let (project, views, format) = if bytes.starts_with(libre_effects_core::project_file::MAGIC) {
+        let decoded = libre_effects_core::project_file::decode(bytes)?;
+        crate::rendering::validate_images(&decoded.project)?;
+        let views = match decoded.view {
+            Some(view) => crate::view_state::ProjectViews::read_native(view, &decoded.project)?,
+            None => Default::default(),
+        };
+        (decoded.project, views, ProjectFormat::Lep)
+    } else {
+        // Only JSON objects are supported legacy documents. A damaged native
+        // header or another binary format must never be mistaken for JSON.
+        if bytes.iter().find(|byte| !byte.is_ascii_whitespace()) != Some(&b'{') {
+            return Err(
+                "Unrecognized project format; expected a Libre Effects Project or legacy JSON"
+                    .into(),
+            );
+        }
+        let json = std::str::from_utf8(bytes).map_err(|_| "Legacy project is not valid UTF-8")?;
+        let project = Project::from_json(json)?;
+        crate::rendering::validate_images(&project)?;
+        let views = crate::view_state::ProjectViews::read(json, &project);
+        (project, views, ProjectFormat::LegacyJson)
+    };
+    Ok(OpenedProject {
+        project,
+        views,
+        format,
+    })
+}
+
+/// Bound both existing lengths and files that grow after the metadata check.
+pub(crate) fn read_bytes(path: &Path) -> Result<Vec<u8>, String> {
+    let file = std::fs::File::open(path).map_err(|error| error.to_string())?;
+    if file.metadata().map_err(|error| error.to_string())?.len() > MAX_BYTES {
+        return Err("Project exceeds 256 MiB".into());
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    if bytes.len() as u64 > MAX_BYTES {
+        return Err("Project exceeds 256 MiB".into());
+    }
+    Ok(bytes)
+}
+
+pub(crate) fn encode_native_project(
+    project: &Project,
+    views: Option<&crate::view_state::ProjectViews>,
+) -> Result<Vec<u8>, String> {
+    crate::rendering::validate_images(project)?;
+    let view = views
+        .map(|views| views.encode_native(project))
+        .transpose()?;
+    libre_effects_core::project_file::encode(project, view.as_deref())
+}
+pub(crate) fn write_native_project(
+    path: &Path,
+    project: &Project,
+    views: Option<&crate::view_state::ProjectViews>,
+) -> Result<(), String> {
+    // Finish validation and encoding before creating or replacing any file.
+    write_bytes(path, &encode_native_project(project, views)?)
 }
 
 pub(crate) fn write_project(path: &Path, json: &str) -> Result<(), String> {
@@ -287,6 +370,158 @@ pub(crate) fn write_bytes(path: &Path, data: &[u8]) -> Result<(), String> {
 mod tests {
     use super::*;
     use libre_effects_core::{Command, Editor};
+
+    #[test]
+    fn formats_are_detected_from_bytes_even_with_misleading_extensions() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut editor = Editor::default();
+        editor.execute(Command::AddRectangle).unwrap();
+        let project = editor.project();
+        let legacy = project.to_json().unwrap();
+        let native = encode_native_project(project, None).unwrap();
+        for name in [
+            "project.lep",
+            "project.json",
+            "session.previous",
+            "no-extension",
+        ] {
+            let path = dir.path().join(name);
+            write_bytes(&path, legacy.as_bytes()).unwrap();
+            let opened = read_editor_project(&path).unwrap();
+            assert_eq!(opened.format, ProjectFormat::LegacyJson);
+            assert_eq!(&opened.project, project);
+            assert_eq!(std::fs::read(&path).unwrap(), legacy.as_bytes());
+            write_bytes(&path, &native).unwrap();
+            let opened = read_editor_project(&path).unwrap();
+            assert_eq!(opened.format, ProjectFormat::Lep);
+            assert_eq!(&opened.project, project);
+        }
+        for bytes in [
+            b"\x89LEP".as_slice(),
+            b"\x89LFE\r\n\x1a\n",
+            b"PK\x03\x04",
+            b"[]",
+            b"",
+        ] {
+            assert!(decode_project(bytes).is_err());
+        }
+        let mut corrupt = native;
+        *corrupt.last_mut().unwrap() ^= 1;
+        assert!(decode_project(&corrupt).is_err());
+    }
+
+    #[test]
+    fn native_destination_keeps_unicode_names_and_normalizes_legacy_suffixes() {
+        for (input, expected) in [
+            ("folder/장면.lfe.json", "folder/장면.lep"),
+            ("Scene.JSON", "Scene.lep"),
+            ("Scene.LEP", "Scene.LEP"),
+            ("scene.v2", "scene.v2.lep"),
+            ("scene", "scene.lep"),
+        ] {
+            assert_eq!(native_destination(Path::new(input)), Path::new(expected));
+        }
+    }
+
+    #[test]
+    fn native_image_validation_and_failed_writes_preserve_existing_data() {
+        use base64::Engine;
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().join("sentinel.lep");
+        std::fs::write(&destination, b"original project").unwrap();
+        let mut oversized = std::io::Cursor::new(Vec::new());
+        image::RgbaImage::new(4097, 1)
+            .write_to(&mut oversized, image::ImageFormat::Png)
+            .unwrap();
+        for png in [
+            "YWJj".to_owned(),
+            base64::engine::general_purpose::STANDARD.encode(oversized.into_inner()),
+        ] {
+            let mut editor = Editor::default();
+            editor
+                .execute(Command::AddContent {
+                    content: Content::Image { png: png.into() },
+                    width: 32.0,
+                    height: 32.0,
+                    name: "Invalid image".into(),
+                })
+                .unwrap();
+            // Core preserves accepted image strings; the desktop decoder must
+            // still apply the full image decoder and dimension/allocation limits.
+            let bytes = libre_effects_core::project_file::encode(editor.project(), None).unwrap();
+            assert!(
+                decode_project(&bytes)
+                    .unwrap_err()
+                    .contains("Invalid image")
+            );
+            assert!(write_native_project(&destination, editor.project(), None).is_err());
+            assert_eq!(std::fs::read(&destination).unwrap(), b"original project");
+        }
+        let blocked = dir.path().join("blocked.lep");
+        std::fs::create_dir(&blocked).unwrap();
+        std::fs::write(blocked.join("sentinel"), b"keep me").unwrap();
+        assert!(write_native_project(&blocked, &Project::default(), None).is_err());
+        assert_eq!(std::fs::read(blocked.join("sentinel")).unwrap(), b"keep me");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn native_images_roundtrip_with_shared_assets_and_identical_pixels() {
+        use base64::Engine;
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::RgbaImage::from_pixel(2, 2, image::Rgba([10, 70, 220, 255]))
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        let mut editor = Editor::default();
+        editor
+            .execute(Command::AddContent {
+                content: Content::Image {
+                    png: base64::engine::general_purpose::STANDARD
+                        .encode(png.into_inner())
+                        .into(),
+                },
+                width: 20.0,
+                height: 20.0,
+                name: "Shared PNG".into(),
+            })
+            .unwrap();
+        editor.execute(Command::DuplicateComposition).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("이미지.lep");
+        write_native_project(&path, editor.project(), None).unwrap();
+        let opened = read_project(&path).unwrap();
+        assert_eq!(&opened, editor.project());
+        let images: Vec<_> = opened
+            .compositions()
+            .into_iter()
+            .flat_map(|(_, composition)| composition.layers())
+            .map(|layer| match layer.content() {
+                Content::Image { png } => png,
+                _ => panic!(),
+            })
+            .collect();
+        assert_eq!(images.len(), 2);
+        assert!(std::sync::Arc::ptr_eq(images[0], images[1]));
+        let Content::Image { png: asset } = opened.asset_library().assets()[&1].content() else {
+            panic!()
+        };
+        assert!(std::sync::Arc::ptr_eq(images[0], asset));
+        let renderer = crate::rendering::Renderer::new();
+        assert_eq!(
+            renderer.render(&opened, 0, 64).unwrap(),
+            renderer.render(editor.project(), 0, 64).unwrap()
+        );
+    }
+
+    #[test]
+    fn oversized_disk_files_are_rejected_before_reading_contents() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("huge.lep");
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(MAX_BYTES + 1).unwrap();
+        assert!(read_bytes(&path).unwrap_err().contains("256 MiB"));
+        assert!(read_project(&path).unwrap_err().contains("256 MiB"));
+    }
 
     #[test]
     fn preflight_skips_guide_and_non_solo_media_but_still_protects_their_source() {

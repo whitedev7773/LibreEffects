@@ -161,6 +161,112 @@ impl ProjectViews {
         views.normalize(project);
         views
     }
+    /// The native VIEW chunk is versioned data, so unsupported or malformed
+    /// metadata must be reported instead of silently replaced with defaults.
+    /// Container decoding has already checked UTF-8, size and duplicate keys.
+    pub fn read_native(bytes: &[u8], project: &Project) -> Result<Self, String> {
+        fn object<'a>(
+            value: &'a serde_json::Value,
+            fields: &[&str],
+            context: &str,
+        ) -> Result<&'a serde_json::Map<String, serde_json::Value>, String> {
+            let object = value
+                .as_object()
+                .ok_or_else(|| format!("Invalid native {context}: expected an object"))?;
+            if let Some(field) = object.keys().find(|key| !fields.contains(&key.as_str())) {
+                return Err(format!("Unsupported native {context} field: {field}"));
+            }
+            Ok(object)
+        }
+        let value: serde_json::Value = serde_json::from_slice(bytes)
+            .map_err(|error| format!("Invalid native editor view: {error}"))?;
+        let root = object(
+            &value,
+            &["version", "compositions", "workspace"],
+            "editor view",
+        )?;
+        if root.get("version").and_then(|version| version.as_u64()) != Some(1) {
+            return Err("Unsupported native editor view version; expected version 1".into());
+        }
+        let compositions = root
+            .get("compositions")
+            .and_then(|value| value.as_object())
+            .ok_or("Invalid native editor view: compositions must be an object")?;
+        for (id, view) in compositions {
+            if id
+                .parse::<CompositionId>()
+                .ok()
+                .is_none_or(|value| value.to_string() != *id)
+            {
+                return Err("Invalid native composition view ID".into());
+            }
+            let view = object(
+                view,
+                &[
+                    "frame",
+                    "timeline_start",
+                    "timeline_zoom",
+                    "preview_zoom",
+                    "preview_pan",
+                    "preview_resolution",
+                    "checkerboard",
+                    "viewer",
+                    "graph_open",
+                    "graph_view",
+                    "expanded",
+                ],
+                "composition view",
+            )?;
+            if let Some(graph) = view.get("graph_view") {
+                object(graph, &["speed", "height"], "graph view")?;
+            }
+            if let Some(viewer) = view.get("viewer") {
+                object(
+                    viewer,
+                    &[
+                        "rulers",
+                        "grid",
+                        "guides",
+                        "safe",
+                        "snap_guides",
+                        "snap_grid",
+                        "lock_guides",
+                        "grid_size",
+                        "channel",
+                    ],
+                    "viewer options",
+                )?;
+            }
+        }
+        let workspace = root
+            .get("workspace")
+            .ok_or("Invalid native editor view: missing workspace")?;
+        object(
+            workspace,
+            &[
+                "fractions",
+                "timeline_left",
+                "sidebar_expanded",
+                "extra_sidebar_expanded",
+                "effect_controls_open",
+                "snapping",
+                "align_to_selection",
+            ],
+            "workspace view",
+        )?;
+        let mut views: Self = serde_json::from_value(value)
+            .map_err(|error| format!("Invalid native editor view: {error}"))?;
+        views.normalize(project);
+        Ok(views)
+    }
+    pub fn encode_native(&self, project: &Project) -> Result<Vec<u8>, String> {
+        if self.version != 1 {
+            return Err("Unsupported native editor view version; expected version 1".into());
+        }
+        let mut views = self.clone();
+        views.normalize(project);
+        serde_json::to_vec(&views).map_err(|error| error.to_string())
+    }
     pub fn write(&self, project: &Project) -> Result<String, String> {
         let mut views = self.clone();
         views.normalize(project);
@@ -179,6 +285,87 @@ impl ProjectViews {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_views_reject_future_versions_shapes_and_unknown_fields() {
+        let project = Project::default();
+        let valid = ProjectViews::default().encode_native(&project).unwrap();
+        let base: serde_json::Value = serde_json::from_slice(&valid).unwrap();
+        let mut invalid = Vec::new();
+        for value in [
+            serde_json::json!(2),
+            serde_json::json!("1"),
+            serde_json::Value::Null,
+        ] {
+            let mut view = base.clone();
+            view["version"] = value;
+            invalid.push(view);
+        }
+        for value in [serde_json::json!([]), serde_json::json!(true)] {
+            let mut view = base.clone();
+            view["compositions"] = value;
+            invalid.push(view);
+        }
+        for value in [
+            serde_json::json!({"1": {"preview_pan": [0]}}),
+            serde_json::json!({"1": {"frame": -1}}),
+            serde_json::json!({"1": {"future_field": true}}),
+            serde_json::json!({"1": {"viewer": {"future_field": true}}}),
+            serde_json::json!({"1": {"graph_view": {"future_field": true}}}),
+            serde_json::json!({"01": {}}),
+        ] {
+            let mut view = base.clone();
+            view["compositions"] = value;
+            invalid.push(view);
+        }
+        let mut unknown_workspace = base.clone();
+        unknown_workspace["workspace"]["future_field"] = serde_json::json!(true);
+        invalid.push(unknown_workspace);
+        invalid.push(serde_json::json!({"version": 1}));
+        for value in invalid {
+            let bytes = serde_json::to_vec(&value).unwrap();
+            assert!(
+                ProjectViews::read_native(&bytes, &project).is_err(),
+                "{value}"
+            );
+            let container =
+                libre_effects_core::project_file::encode(&project, Some(&bytes)).unwrap();
+            assert!(
+                crate::project_io::decode_project(&container).is_err(),
+                "{value}"
+            );
+        }
+        assert_eq!(
+            ProjectViews::read_native(&valid, &project).unwrap(),
+            ProjectViews::default()
+        );
+    }
+
+    #[test]
+    fn native_views_normalize_valid_out_of_range_values() {
+        let project = Project::default();
+        let bytes = serde_json::to_vec(&serde_json::json!({
+            "version": 1,
+            "compositions": {
+                "1": {"frame": 9999, "timeline_zoom": -2, "preview_resolution": 9,
+                      "preview_pan": [999999, -999999], "graph_view": {"height": [2, 1]}},
+                "999": {}
+            },
+            "workspace": {"timeline_left": 9999, "fractions": [0, 0, 1, 1]}
+        }))
+        .unwrap();
+        let views = ProjectViews::read_native(&bytes, &project).unwrap();
+        assert_eq!(views.compositions.len(), 1);
+        let view = &views.compositions[&1];
+        assert_eq!(
+            (view.frame, view.timeline_zoom, view.preview_resolution),
+            (149, 1.0, 1)
+        );
+        assert_eq!(view.preview_pan, [32768.0, -32768.0]);
+        assert_eq!(view.graph_view.height, None);
+        assert_eq!(views.workspace.timeline_left, 800.0);
+        assert_eq!(views.workspace.fractions, [0.12, 0.12, 0.78, 0.8]);
+    }
+
     #[test]
     fn invalid_graph_ranges_restore_auto_height_without_changing_graph_type() {
         for height in [
@@ -240,9 +427,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("views.lfe.json");
         crate::project_io::write_project(&path, &json).unwrap();
-        let (loaded, loaded_views) = crate::project_io::read_editor_project(&path).unwrap();
-        assert_eq!(loaded, p);
-        assert_eq!(loaded_views, views);
+        let loaded = crate::project_io::read_editor_project(&path).unwrap();
+        assert_eq!(loaded.project, p);
+        assert_eq!(loaded.views, views);
+        assert_eq!(loaded.format, crate::project_io::ProjectFormat::LegacyJson);
+        let native = dir.path().join("views.lep");
+        crate::project_io::write_native_project(&native, &p, Some(&views)).unwrap();
+        let loaded = crate::project_io::read_editor_project(&native).unwrap();
+        assert_eq!(loaded.project, p);
+        assert_eq!(loaded.views, views);
+        assert_eq!(loaded.format, crate::project_io::ProjectFormat::Lep);
     }
     #[test]
     fn invalid_or_future_views_do_not_break_old_documents_or_layout() {
