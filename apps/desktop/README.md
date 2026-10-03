@@ -64,6 +64,17 @@ in v31. Enable the Path stopwatch and edit with the Pen at another frame.
 Animated paths require matching topology. Multi-vertex selection, topology
 changes across keys, variable feather and shape Contents operators remain open.
 
+Shape Stroke controls in Properties provide Butt/Round/Projecting line caps,
+Miter/Round/Bevel joins and a 1–1024 Miter Limit. Dashes **+** adds alternating
+Dash/Gap lengths; **−** removes the last entry. Up to 16 lengths of 0–8192 layer
+pixels are supported, with a ±32768 px Dash Offset. An odd list repeats to form
+an even cycle; empty or all-zero lists render solid. Round caps with a zero dash
+length create dots. Use Up/Down and Enter in the cap/join menus; Escape closes
+without applying. Scroll Properties to reveal further rows. Each edit is one
+Undo and uses the same preview/output renderer. Nondefault styles use project
+version 37; older shapes retain their Butt/Round/solid appearance. These stroke
+settings are currently static; their animation and grouped Contents remain open.
+
 ## Color selection
 
 Click the color swatch next to Fill in Properties or Character, Stroke in shape

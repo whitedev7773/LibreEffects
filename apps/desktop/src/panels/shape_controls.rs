@@ -7,6 +7,7 @@ use gpui::{Context, Entity, Window, div, prelude::*, px};
 use libre_effects_core::{Command, Content, ShapeKind};
 
 pub(crate) struct ShapeControls {
+    stroke: Entity<super::shape_stroke::StrokeControls>,
     state: Entity<EditorState>,
     fields: Vec<Entity<TextField>>,
 }
@@ -39,7 +40,11 @@ impl ShapeControls {
                 });
             }))
         }).collect();
-        Self { state, fields }
+        Self {
+            stroke: cx.new(|cx| super::shape_stroke::StrokeControls::new(state.clone(), cx)),
+            state,
+            fields,
+        }
     }
 }
 impl Render for ShapeControls {
@@ -172,6 +177,6 @@ impl Render for ShapeControls {
                     ),
             );
         }
-        root
+        root.child(self.stroke.clone())
     }
 }

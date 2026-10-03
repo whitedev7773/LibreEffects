@@ -18,6 +18,7 @@ mod path_masks;
 mod pen;
 mod preview;
 mod shape_controls;
+mod shape_stroke;
 mod sidebar;
 mod timeline;
 mod timeline_snap;

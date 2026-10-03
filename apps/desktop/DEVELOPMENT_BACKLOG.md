@@ -18,6 +18,14 @@
 - **후속 고급 기능:** 패널 도킹·소스 뷰어·최근 프로젝트, 타임라인 고급 시간 편집/검색/가상화, 공간 경로·프리셋·표현식, Shape 연산/SVG·Text Animator, 추가 효과·모션 블러, 고정밀 색/HDR·Proxy/GPU, 템플릿, 설치/업데이트·한글화와 UI 회귀 자동화.
 - **별도 대형 단계:** 3D/카메라/라이트·모델, 추적·로토/Puppet, 플러그인/교환 포맷 연구, 웹/API 제품 범위. AEP/MOGRT 호환은 구현되지 않았다.
 
+### 도형 선 끝·모서리·점선 — 2026-10-03
+
+- E03: 기존 Properties의 Stroke 아래에 Butt/Round/Projecting 끝 모양, Miter/Round/Bevel 모서리, Miter Limit, Dash Offset, Dash/Gap 길이와 추가/제거 버튼을 연결했다. 기본 도형과 Pen 경로에 공통 적용하며 패널 배치는 유지한다. 조작 항목은 [Adobe Shape 속성 설명](https://helpx.adobe.com/in/after-effects/desktop/drawing-painting-and-paths/shapes-and-shape-attributes/shape-attributes-paint-operations-path.html)을 참고했다. 홀수 길이 목록 반복과 전부 0인 목록의 실선 처리는 [SVG 페인팅 규칙](https://www.w3.org/TR/SVG2/painting.html)을 따른다.
+- Miter Limit 1–1024, Dash/Gap 각각 0–8192px 최대 16개, Offset ±32768px를 지원한다. 음수 길이·비유한 값·잠긴 레이어·사라진 항목은 변경을 거부한다. 메뉴는 위/아래·Enter·Escape와 포커스/창 전환 닫기를 지원한다. 메뉴 행을 클릭할 때 포커스가 먼저 빠져 선택이 취소되던 문제를 실제 창에서 찾아 수정했다. 편집은 각각 한 Undo이며 경로·키·변형은 유지한다. 비기본 스타일은 프로젝트 v37을 사용하고 기존 파일의 Butt/Round/실선 결과를 보존한다.
+- 검증: 코어 160개 + 데스크톱 225개(총 385개) 통과, 외부 미디어/장치 30개 제외. 끝 모양·모서리 기하, Miter 제한, 홀수 점선 주기·Offset·길이 0의 둥근 점·전부 0인 실선, 입력 한계와 원자성, Undo/Redo·JSON·반투명 Preview/출력 일치를 검사했다. Cargo check/fmt/test/release build 및 git diff --check 통과(Moon/proto 미설치), 기존 릴리스 경고 17개.
+- 실제 Windows에서 Projecting 클릭, 키보드 Miter 선택, Dash 80/Gap 80/Offset 20 입력, Offset Undo/Redo와 저장·재열기를 확인했다. 실제 저장 파일 `target/qa/shape-stroke-native.lfe.json`의 0/30/60프레임 960×540 PNG에서 점선·빈 간격 264개 샘플이 독립 계산과 일치했고 프레임 사이 정확한 40px 이동도 확인했다(`target/qa/verify_shape_stroke_native.py`). 1920/1442 폭의 속성·메뉴 배치, 실제 작업 창 1개, 사용자 보존 원본 SHA256 불변을 확인했다.
+- 이번 선 스타일은 정적 값이다. Stroke 속성 애니메이션, 다중 Fill/Stroke·Contents 그룹, Gradient Fill/Stroke, 연산자는 남아 있다. E03 전체 완료나 AE 픽셀 동등성으로 표시하지 않는다.
+
 ### Composition 그라디언트 끝점 편집 — 2026-10-03
 
 - G05: Linear/Radial Gradient의 Effect Controls → Edit gradient in Composition에서 시작점·끝점을 직접 편집한다. 선택한 효과 인스턴스의 레이어 좌표를 부모 변형·회전·반전·뷰 확대/이동에 맞춰 표시하고 기존 효과 트랙으로 저장한다. 시작점은 십자, 끝점은 사각형이며 연결선을 표시한다. Shift-drag는 레이어 축 제한, Alt-drag는 양 끝점 이동이다. Composition 포커스에서 Tab으로 끝점을 선택하고 방향키 1px·Shift 10px·Alt 양 끝점 이동을 지원한다.

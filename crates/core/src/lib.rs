@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-const PROJECT_VERSION: u32 = 36;
+const PROJECT_VERSION: u32 = 37;
 pub type Frame = u32;
 pub type LayerId = u64;
 pub type CompositionId = u64;
@@ -53,7 +53,9 @@ mod mask_animation;
 pub use mask_animation::MaskParam;
 mod paths;
 pub use paths::{PathMask, PathMaskMode, PathVertex, VectorPath};
+mod shape_stroke;
 mod shapes;
+pub use shape_stroke::{ShapeStroke, StrokeCap, StrokeJoin};
 mod text_style;
 pub use shapes::{Shape, ShapeKind};
 pub use text_style::{TextAlign, TextFont, TextStrokeJoin, TextStyle};
@@ -642,6 +644,11 @@ impl Project {
                     }
                 }
                 let has_path = matches!(&layer.content, Content::Shape(s) if s.path.is_some());
+                if self.version < 37
+                    && matches!(&layer.content, Content::Shape(s) if !s.stroke_style.is_default())
+                {
+                    return Err("Shape stroke styles require project version 37".into());
+                }
                 if (has_path || !layer.path_masks.is_empty()) && self.version < 29 {
                     return Err("Vector paths require project version 29".into());
                 }
@@ -1462,6 +1469,13 @@ impl Editor {
             })
         }) {
             next.project.version = next.project.version.max(36);
+        }
+        if next.project.compositions().into_iter().any(|(_, c)| {
+            c.layers
+                .iter()
+                .any(|l| matches!(&l.content, Content::Shape(s) if !s.stroke_style.is_default()))
+        }) {
+            next.project.version = next.project.version.max(37);
         }
         next.project.validate()?;
         if next != self.current {
