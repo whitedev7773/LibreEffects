@@ -413,6 +413,12 @@ mod tests {
     }
 }
 impl VideoPreset {
+    pub(crate) fn format(self) -> Format {
+        match self {
+            Self::H264 => Format::Mp4,
+            Self::ProResAlpha => Format::MovAlpha,
+        }
+    }
     pub fn label(self) -> &'static str {
         match self {
             Self::H264 => "H.264 MP4",
@@ -431,7 +437,7 @@ pub(crate) fn ffmpeg_path() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| "ffmpeg".into())
 }
-fn command(executable: &Path) -> Command {
+pub(crate) fn command(executable: &Path) -> Command {
     let mut command = Command::new(executable);
     #[cfg(windows)]
     {
@@ -454,6 +460,7 @@ impl Drop for Encoder {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn export_video(
     project: &Project,
     range: Range<u32>,
@@ -461,7 +468,7 @@ pub(crate) fn export_video(
     destination: &Path,
     cancel: Arc<AtomicBool>,
     progress: Arc<AtomicU32>,
-) -> Result<(), String> {
+) -> Result<crate::output_preflight::Report, String> {
     export_video_with_settings(
         project,
         range,
@@ -472,6 +479,7 @@ pub(crate) fn export_video(
         progress,
     )
 }
+#[cfg(test)]
 pub(crate) fn export_video_with_settings(
     project: &Project,
     range: Range<u32>,
@@ -480,9 +488,32 @@ pub(crate) fn export_video_with_settings(
     destination: &Path,
     cancel: Arc<AtomicBool>,
     progress: Arc<AtomicU32>,
-) -> Result<(), String> {
+) -> Result<crate::output_preflight::Report, String> {
+    export_video_to(
+        project,
+        None,
+        range,
+        preset,
+        settings,
+        destination,
+        cancel,
+        progress,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn export_video_to(
+    project: &Project,
+    project_path: Option<&Path>,
+    range: Range<u32>,
+    preset: VideoPreset,
+    settings: &Settings,
+    destination: &Path,
+    cancel: Arc<AtomicBool>,
+    progress: Arc<AtomicU32>,
+) -> Result<crate::output_preflight::Report, String> {
     encode_with_settings(
         project,
+        project_path,
         range,
         preset,
         settings,
@@ -501,9 +532,10 @@ fn encode(
     executable: &Path,
     cancel: Arc<AtomicBool>,
     progress: Arc<AtomicU32>,
-) -> Result<(), String> {
+) -> Result<crate::output_preflight::Report, String> {
     encode_with_settings(
         project,
+        None,
         range,
         preset,
         &Settings::default(),
@@ -513,8 +545,10 @@ fn encode(
         progress,
     )
 }
+#[allow(clippy::too_many_arguments)]
 fn encode_with_settings(
     project: &Project,
+    project_path: Option<&Path>,
     range: Range<u32>,
     preset: VideoPreset,
     settings: &Settings,
@@ -522,28 +556,26 @@ fn encode_with_settings(
     executable: &Path,
     cancel: Arc<AtomicBool>,
     progress: Arc<AtomicU32>,
-) -> Result<(), String> {
+) -> Result<crate::output_preflight::Report, String> {
     let comp = project.composition();
-    let format = if preset == VideoPreset::H264 {
-        Format::Mp4
-    } else {
-        Format::MovAlpha
-    };
-    let plan = settings.plan(comp, range.clone(), format)?;
-    crate::project_io::validate_render(project, destination, &range)?;
-    if range.is_empty() || range.end > comp.duration() {
-        return Err("Choose a non-empty work area inside the composition".into());
-    }
-    if comp.width() as u64 * comp.height() as u64 > 33_554_432 {
-        return Err("Video export supports up to 32 megapixels per frame".into());
-    }
+    let format = preset.format();
+    let prepared = crate::output_preflight::check(
+        project,
+        project_path,
+        range.clone(),
+        format,
+        settings,
+        destination,
+        crate::output_preflight::Destination::File,
+        executable,
+        &cancel,
+    )
+    .map_err(|report| report.to_string())?;
+    let plan = prepared.plan;
+    let directory = crate::output_preflight::parent(destination);
     if cancel.load(Ordering::Relaxed) {
-        return Err("Render canceled".into());
+        return Err("Render canceled; destination unchanged".into());
     }
-    let directory = destination
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
     let output = tempfile::NamedTempFile::new_in(directory).map_err(|e| e.to_string())?;
     let audio = if settings.audio == crate::output_settings::AudioOutput::Auto {
         crate::audio_mix::prepare(project, &plan, directory, &cancel, &progress)?
@@ -587,65 +619,7 @@ fn encode_with_settings(
     } else {
         cmd.args(["-map", "0:v:0", "-an"]);
     }
-    // Working pixels are nonlinear sRGB. Preserve that transfer function, explicitly
-    // encode a BT.709 YCbCr matrix at limited range, and tag both the stream/container.
-    cmd.args([
-        "-color_primaries",
-        "bt709",
-        "-color_trc",
-        "iec61966-2-1",
-        "-colorspace",
-        "bt709",
-        "-color_range",
-        "tv",
-    ]);
-    match preset {
-        VideoPreset::H264 => {
-            cmd.arg("-vf")
-                .arg(format!(
-                    "pad=ceil(iw/2)*2:ceil(ih/2)*2:color=0x{:06x},scale=in_range=full:out_range=limited:out_color_matrix=bt709,setparams=range=limited:color_primaries=bt709:color_trc=iec61966-2-1:colorspace=bt709",
-                    if settings.channels(format)==crate::output_settings::Channels::Alpha {0} else {comp.background_color()}
-                ))
-                .args([
-                    "-c:v",
-                    "libx264",
-                    "-preset",
-                    settings.encoder_speed.as_deref().unwrap_or("medium"),
-                    "-pix_fmt",
-                    "yuv420p",
-                    "-movflags",
-                    "+faststart",
-                    "-f",
-                    "mp4",
-                ]);
-            match settings.rate_control.unwrap_or(RateControl::Crf(18)) {
-                RateControl::Crf(n) => {
-                    cmd.args(["-crf", &n.to_string()]);
-                }
-                RateControl::Bitrate(n) => {
-                    cmd.args(["-b:v", &format!("{n}k")]);
-                }
-            }
-        }
-        VideoPreset::ProResAlpha => {
-            cmd.args([
-                "-vf",
-                "scale=in_range=full:out_range=limited:out_color_matrix=bt709,setparams=range=limited:color_primaries=bt709:color_trc=iec61966-2-1:colorspace=bt709",
-                "-c:v",
-                "prores_ks",
-                "-profile:v",
-                "4",
-                "-pix_fmt",
-                if settings.channels(format)==crate::output_settings::Channels::Rgba {"yuva444p10le"}else{"yuv444p10le"},
-                "-alpha_bits",
-                if settings.channels(format)==crate::output_settings::Channels::Rgba {"16"}else{"0"},
-                "-movflags",
-                "+write_colr",
-                "-f",
-                "mov",
-            ]);
-        }
-    }
+    add_output_args(&mut cmd, preset, settings, comp.background_color());
     if comp.display_start() != 0 {
         cmd.args(["-timecode", &plan.timecode]);
     }
@@ -745,6 +719,79 @@ fn encode_with_settings(
     {
         return Err("Encoder produced an empty video".into());
     }
+    if cancel.load(Ordering::Relaxed) {
+        return Err("Render canceled; destination unchanged".into());
+    }
     output.persist(destination).map_err(|e| e.to_string())?;
-    Ok(())
+    Ok(prepared.report)
+}
+
+/// Shared by the bounded capability probe and the real encoder, so preflight
+/// exercises the actual codec, filters, pixel format, color tags and container.
+pub(crate) fn add_output_args(
+    cmd: &mut Command,
+    preset: VideoPreset,
+    settings: &Settings,
+    background: u32,
+) {
+    let format = preset.format();
+    // Working pixels are nonlinear sRGB. Preserve that transfer function, explicitly
+    // encode a BT.709 YCbCr matrix at limited range, and tag both the stream/container.
+    cmd.args([
+        "-color_primaries",
+        "bt709",
+        "-color_trc",
+        "iec61966-2-1",
+        "-colorspace",
+        "bt709",
+        "-color_range",
+        "tv",
+    ]);
+    match preset {
+        VideoPreset::H264 => {
+            cmd.arg("-vf")
+                .arg(format!(
+                    "pad=ceil(iw/2)*2:ceil(ih/2)*2:color=0x{:06x},scale=in_range=full:out_range=limited:out_color_matrix=bt709,setparams=range=limited:color_primaries=bt709:color_trc=iec61966-2-1:colorspace=bt709",
+                    if settings.channels(format)==crate::output_settings::Channels::Alpha {0} else {background}
+                ))
+                .args([
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    settings.encoder_speed.as_deref().unwrap_or("medium"),
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-movflags",
+                    "+faststart",
+                    "-f",
+                    "mp4",
+                ]);
+            match settings.rate_control.unwrap_or(RateControl::Crf(18)) {
+                RateControl::Crf(n) => {
+                    cmd.args(["-crf", &n.to_string()]);
+                }
+                RateControl::Bitrate(n) => {
+                    cmd.args(["-b:v", &format!("{n}k")]);
+                }
+            }
+        }
+        VideoPreset::ProResAlpha => {
+            cmd.args([
+                "-vf",
+                "scale=in_range=full:out_range=limited:out_color_matrix=bt709,setparams=range=limited:color_primaries=bt709:color_trc=iec61966-2-1:colorspace=bt709",
+                "-c:v",
+                "prores_ks",
+                "-profile:v",
+                "4",
+                "-pix_fmt",
+                if settings.channels(format)==crate::output_settings::Channels::Rgba {"yuva444p10le"}else{"yuv444p10le"},
+                "-alpha_bits",
+                if settings.channels(format)==crate::output_settings::Channels::Rgba {"16"}else{"0"},
+                "-movflags",
+                "+write_colr",
+                "-f",
+                "mov",
+            ]);
+        }
+    }
 }

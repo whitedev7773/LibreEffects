@@ -27,6 +27,7 @@ mod footage;
 mod image_sequence;
 mod matte_render;
 mod media_io;
+mod output_preflight;
 mod output_settings;
 mod panels;
 mod path_mask_render;

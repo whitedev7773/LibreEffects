@@ -377,3 +377,217 @@ fn queue_multiple_compositions_and_modules_render_exact_snapshots() {
         }
     }
 }
+
+#[test]
+fn v3_queues_default_missing_font_policy_and_preserve_explicit_strict() {
+    use crate::output_settings::FontPolicy;
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("queue");
+    let mut queue = Queue::load(root.clone()).unwrap();
+    queue
+        .enqueue(
+            scene().project(),
+            None,
+            0..1,
+            &[Format::PngAlpha.into(), Format::PngBackground.into()],
+            directory.path(),
+        )
+        .unwrap();
+    queue
+        .edit(|data| {
+            data.presets.push(Preset {
+                name: "Font policies".into(),
+                specs: vec![Format::PngAlpha.into(), Format::PngBackground.into()],
+            });
+            Ok(())
+        })
+        .unwrap();
+    let mut legacy = serde_json::to_value(&queue.data).unwrap();
+    legacy["version"] = 3.into();
+    legacy["jobs"][0]["outputs"][0]["settings"]
+        .as_object_mut()
+        .unwrap()
+        .remove("fonts");
+    legacy["jobs"][0]["outputs"][1]["settings"]["fonts"] = "Strict".into();
+    legacy["presets"][0]["specs"][0]["settings"]
+        .as_object_mut()
+        .unwrap()
+        .remove("fonts");
+    legacy["presets"][0]["specs"][1]["settings"]["fonts"] = "Strict".into();
+    let path = root.join("queue.json");
+    std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+    let loaded = Queue::load(root.clone()).unwrap();
+    assert_eq!(loaded.data.version, 4);
+    for (index, expected) in [FontPolicy::Fallback, FontPolicy::Strict]
+        .into_iter()
+        .enumerate()
+    {
+        assert_eq!(
+            loaded.data.jobs[0].outputs[index].spec.settings.fonts,
+            expected
+        );
+        assert_eq!(loaded.data.presets[0].specs[index].settings.fonts, expected);
+    }
+    let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    // v3 readers reject this envelope before saving or executing any job.
+    assert_eq!(saved["version"], 4);
+    assert_eq!(
+        saved["jobs"][0]["outputs"][0]["settings"]["fonts"],
+        "Fallback"
+    );
+    assert_eq!(
+        saved["jobs"][0]["outputs"][1]["settings"]["fonts"],
+        "Strict"
+    );
+    assert_eq!(
+        saved["presets"][0]["specs"][0]["settings"]["fonts"],
+        "Fallback"
+    );
+    assert_eq!(
+        saved["presets"][0]["specs"][1]["settings"]["fonts"],
+        "Strict"
+    );
+    assert_eq!(Queue::load(root).unwrap().data, loaded.data);
+}
+
+#[test]
+fn v2_queue_migration_preserves_existing_font_policy_while_retaining_silent_audio() {
+    use crate::output_settings::{AudioOutput, FontPolicy};
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("queue");
+    let mut queue = Queue::load(root.clone()).unwrap();
+    queue
+        .enqueue(
+            scene().project(),
+            None,
+            0..1,
+            &[Format::PngAlpha.into()],
+            directory.path(),
+        )
+        .unwrap();
+    queue
+        .edit(|data| {
+            data.presets.push(Preset {
+                name: "Strict legacy".into(),
+                specs: vec![Format::PngAlpha.into()],
+            });
+            Ok(())
+        })
+        .unwrap();
+    let mut legacy = serde_json::to_value(&queue.data).unwrap();
+    legacy["version"] = 2.into();
+    legacy["jobs"][0]["outputs"][0]["settings"]["fonts"] = "Strict".into();
+    legacy["presets"][0]["specs"][0]["settings"]["fonts"] = "Strict".into();
+    std::fs::write(
+        root.join("queue.json"),
+        serde_json::to_vec(&legacy).unwrap(),
+    )
+    .unwrap();
+    let loaded = Queue::load(root).unwrap();
+    assert_eq!(loaded.data.version, 4);
+    let output = &loaded.data.jobs[0].outputs[0].spec.settings;
+    let preset = &loaded.data.presets[0].specs[0].settings;
+    for settings in [output, preset] {
+        assert_eq!(settings.fonts, FontPolicy::Strict);
+        assert_eq!(settings.audio, AudioOutput::Off);
+    }
+}
+
+#[test]
+fn unsupported_queue_versions_and_font_policies_preserve_all_existing_files() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("queue");
+    let mut queue = Queue::load(root.clone()).unwrap();
+    queue
+        .enqueue(
+            scene().project(),
+            None,
+            0..1,
+            &[Format::PngAlpha.into()],
+            directory.path(),
+        )
+        .unwrap();
+    let original = serde_json::to_value(&queue.data).unwrap();
+    let snapshot = root.join(&queue.data.jobs[0].snapshot);
+    let snapshot_bytes = std::fs::read(&snapshot).unwrap();
+    let orphan = root.join("snapshot-999-999.lfe.json");
+    std::fs::write(&orphan, b"retain on rejected load").unwrap();
+    let mut cases = Vec::new();
+    for version in [0, 5, u32::MAX] {
+        let mut value = original.clone();
+        value["version"] = version.into();
+        cases.push(value);
+    }
+    for version in [3, 4] {
+        let mut value = original.clone();
+        value["version"] = version.into();
+        value["jobs"][0]["outputs"][0]["settings"]["fonts"] = "FuturePolicy".into();
+        cases.push(value);
+    }
+    for value in cases {
+        let bytes = serde_json::to_vec(&value).unwrap();
+        std::fs::write(root.join("queue.json"), &bytes).unwrap();
+        assert!(Queue::load(root.clone()).is_err());
+        assert_eq!(std::fs::read(root.join("queue.json")).unwrap(), bytes);
+        assert_eq!(std::fs::read(&snapshot).unwrap(), snapshot_bytes);
+        assert_eq!(std::fs::read(&orphan).unwrap(), b"retain on rejected load");
+    }
+}
+
+#[test]
+fn v1_font_policy_extensions_survive_the_entire_migration_chain() {
+    use crate::output_settings::{AudioOutput, FontPolicy};
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("queue");
+    let mut queue = Queue::load(root.clone()).unwrap();
+    queue
+        .enqueue(
+            scene().project(),
+            None,
+            0..1,
+            &[Format::PngAlpha.into(), Format::PngBackground.into()],
+            directory.path(),
+        )
+        .unwrap();
+    queue
+        .edit(|data| {
+            data.presets.push(Preset {
+                name: "Legacy policies".into(),
+                specs: vec![Format::PngAlpha.into(), Format::PngBackground.into()],
+            });
+            Ok(())
+        })
+        .unwrap();
+    let mut legacy = serde_json::to_value(&queue.data).unwrap();
+    legacy["version"] = 1.into();
+    legacy["jobs"][0]["outputs"][0]["settings"] = serde_json::json!({"fonts":"Strict"});
+    legacy["jobs"][0]["outputs"][1]
+        .as_object_mut()
+        .unwrap()
+        .remove("settings");
+    legacy["presets"][0]["formats"] = serde_json::json!(["PngAlpha", "PngBackground"]);
+    legacy["presets"][0]["specs"][0]["settings"] = serde_json::json!({"fonts":"Strict"});
+    legacy["presets"][0]["specs"][1]
+        .as_object_mut()
+        .unwrap()
+        .remove("settings");
+    std::fs::write(
+        root.join("queue.json"),
+        serde_json::to_vec(&legacy).unwrap(),
+    )
+    .unwrap();
+    let loaded = Queue::load(root).unwrap();
+    assert_eq!(loaded.data.version, 4);
+    for (index, expected) in [FontPolicy::Strict, FontPolicy::Fallback]
+        .into_iter()
+        .enumerate()
+    {
+        for settings in [
+            &loaded.data.jobs[0].outputs[index].spec.settings,
+            &loaded.data.presets[0].specs[index].settings,
+        ] {
+            assert_eq!(settings.fonts, expected);
+            assert_eq!(settings.audio, AudioOutput::Off);
+        }
+    }
+}

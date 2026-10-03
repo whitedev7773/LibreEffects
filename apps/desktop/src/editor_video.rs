@@ -1,5 +1,5 @@
 use super::*;
-use crate::video_export::{VideoPreset, export_video};
+use crate::video_export::{VideoPreset, export_video_to};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicU32, Ordering},
@@ -51,7 +51,7 @@ impl EditorState {
             }
             let output = path.display().to_string();
             let label = format!(
-                "{} · {} × {} · {} fps · frames {}–{} · {}",
+                "{} · {} × {} · {} fps · frames {}–{} · {} · Fonts: fallback",
                 preset.label(),
                 snapshot.composition().width(),
                 snapshot.composition().height(),
@@ -83,13 +83,12 @@ impl EditorState {
             cx.background_executor()
                 .spawn(async move {
                     let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        if let Some(source) = &project_path {
-                            crate::project_io::protect_source(&path, source)?;
-                        }
-                        export_video(
+                        export_video_to(
                             &snapshot,
+                            project_path.as_deref(),
                             range,
                             preset,
+                            &Default::default(),
                             &path,
                             worker_cancel,
                             worker_progress,
@@ -109,7 +108,9 @@ impl EditorState {
                             job.progress = progress.load(Ordering::Relaxed);
                             if let Some(result) = finished {
                                 job.message = match result {
-                                    Ok(()) => format!("Completed · {output}"),
+                                    Ok(report) => {
+                                        report.completion(&format!("Completed · {output}"))
+                                    }
                                     Err(e) => e,
                                 };
                                 s.status = job.message.clone();

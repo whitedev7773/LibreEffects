@@ -1337,6 +1337,41 @@ $job.ExitCode
 Quote paths containing spaces inside the argument string. For an opaque still,
 use `--output title.png --start 30 --png-background`. Use `--help` for syntax.
 
+## Output preflight
+
+CLI renders, native exports and queue jobs share output checks before publishing
+any output. Diagnostics identify invalid settings/ranges, unavailable linked
+sources, protected project/source destinations, and unusable output folders.
+A temporary sibling file tests create/write/sync without replacing an existing
+destination. This is a point-in-time check, not a free-space guarantee.
+
+Video outputs also run one small, bounded FFmpeg encode using the selected
+codec, pixel format, container and audio options before rendering project frames.
+The probe is cancelable, has a ten-second limit, and is repeated for each output
+because executable capabilities and filesystem access can change between jobs.
+
+Render Queue's **Fonts** field and CLI `--fonts fallback|strict` choose the font
+policy. Existing files/presets default to `fallback`: rendering uses the same
+replacement as Preview and reports the requested and actual family/face/style.
+`strict` fails before replacing output if that requested face is unavailable.
+Install the font and restart the editor, replace it in Manage project fonts, or
+explicitly choose fallback. The policy checks family/face/style, not glyph-level
+coverage. Queue diagnostics and policy survive restart; CLI warnings go to stderr.
+Saved queues use version 4 so older applications cannot silently ignore a strict
+font policy. Versions 1–3 migrate while preserving explicit policies; absent font
+settings become fallback.
+
+For example, add `--fonts strict` to a CLI render to require the requested fonts.
+The quick File exports use fallback with warnings; configured policy is available
+in Render Queue. Native PNG sequences retain their documented partial-frame
+manifest on cancellation; queue sequences publish only a completed staging folder.
+
+Native Linux QA verified strict rejection without changing an existing output,
+policy/diagnostic persistence after restart, fallback H.264 output with a visible
+font warning, and a missing-parent diagnostic. The sample output was320×180,
+24fps and two frames. Version4 queue migrations are separately regression-tested;
+Windows-native preflight and disk-full simulation were not run.
+
 ## Render queue
 
 Composition > Add to Render Queue (Ctrl+M) captures the active composition, all
@@ -1403,8 +1438,11 @@ one-pixel padding for odd dimensions. Output size is limited to 16384 per axis
 and 32 megapixels, FPS to 1–240. Reset settings returns to composition defaults.
 Changing settings requeues only that output and participates in queue Undo/Redo.
 Named presets now include each module's size, FPS, channels, quality and speed;
-version 1/2 queue data migrates to version 3 while preserving results and presets.
-Existing saved jobs/presets retain silent audio; new modules default to automatic audio.
+version 1/2 queue data migrates through the silent-audio compatibility step,
+then version 3 migrates to version 4 while preserving results, presets and any
+explicit font policy. Missing font policies default to fallback. Version 1/2 jobs
+retain silent audio; version 3 audio settings are preserved and new modules
+default to automatic audio.
 PNG sequences with a changed FPS number from zero and record source_range, output
 FPS and frame count in sequence.json. Unchanged FPS retains composition numbering.
 Audio auto/off selects 48 kHz stereo AAC (MP4) or 24-bit PCM (MOV). Additional

@@ -45,6 +45,25 @@ pub(crate) fn validate_render(
     destination: &Path,
     range: &std::ops::Range<u32>,
 ) -> Result<(), String> {
+    validate_render_with(
+        project,
+        destination,
+        range,
+        &Default::default(),
+        &mut |_, _| {},
+    )
+}
+
+/// Visits only output-visible layers (including required mattes and nested ranges).
+/// Font diagnostics and source validation deliberately share this traversal.
+pub(crate) fn validate_render_with(
+    project: &Project,
+    destination: &Path,
+    range: &std::ops::Range<u32>,
+    cancel: &std::sync::atomic::AtomicBool,
+    visit: &mut impl FnMut(&libre_effects_core::Composition, &libre_effects_core::Layer),
+) -> Result<(), String> {
+    crate::video_decoder::check_cancel(cancel)?;
     let comp = project.composition();
     if range.is_empty() || range.end > comp.duration() {
         return Err("Choose a non-empty frame range inside the composition".into());
@@ -53,22 +72,16 @@ pub(crate) fn validate_render(
         return Err("Rendering supports up to 32 megapixels per frame".into());
     }
     for path in crate::media_io::video_paths(project) {
+        crate::video_decoder::check_cancel(cancel)?;
         protect_source(destination, Path::new(&path))?;
-    }
-    for layer in project
-        .compositions()
-        .into_iter()
-        .flat_map(|(_, comp)| comp.layers())
-    {
-        if let Content::Video { path, .. } = layer.content() {
-            protect_source(destination, Path::new(path))?;
-        }
     }
     validate_sources(
         project,
         project.active_composition_id(),
         range.clone(),
         &mut Default::default(),
+        cancel,
+        visit,
     )
 }
 
@@ -77,6 +90,8 @@ fn validate_sources(
     id: libre_effects_core::CompositionId,
     range: std::ops::Range<u32>,
     seen: &mut std::collections::BTreeSet<(u64, u32, u32)>,
+    cancel: &std::sync::atomic::AtomicBool,
+    visit: &mut impl FnMut(&libre_effects_core::Composition, &libre_effects_core::Layer),
 ) -> Result<(), String> {
     if seen.len() >= 4096 {
         return Err(
@@ -97,6 +112,7 @@ fn validate_sources(
         .collect();
     let mut checked = std::collections::BTreeSet::new();
     while let Some((layer_id, range)) = pending.pop() {
+        crate::video_decoder::check_cancel(cancel)?;
         let layer = comp.layer(layer_id).ok_or("Missing matte source")?;
         let start = range.start.max(layer.in_frame());
         let end = range.end.min(layer.out_frame(comp.duration()));
@@ -108,6 +124,7 @@ fn validate_sources(
                 "Too many matte time ranges; simplify the composition before rendering".into(),
             );
         }
+        visit(comp, layer);
         if let Some(matte) = layer.track_matte() {
             pending.push((matte.source, start..end));
         }
@@ -123,6 +140,7 @@ fn validate_sources(
             } => {
                 let mut sampled = std::collections::BTreeSet::new();
                 for frame in start..end {
+                    crate::video_decoder::check_cancel(cancel)?;
                     if let Some(index) = layer.sequence_frame(frame, comp.fps()) {
                         if sampled.insert(index) {
                             crate::image_sequence::resolve_frame(frames, index, *missing)?;
@@ -138,23 +156,34 @@ fn validate_sources(
                     .composition_by_id(*composition)
                     .ok_or("Missing source composition")?;
                 if layer.time_remap().is_some() {
-                    let sampled: std::collections::BTreeSet<_> = (start..end)
-                        .filter_map(|frame| layer.composition_frame(frame, comp.fps(), source))
-                        .collect();
+                    let mut sampled = std::collections::BTreeSet::new();
+                    for frame in start..end {
+                        crate::video_decoder::check_cancel(cancel)?;
+                        if let Some(frame) = layer.composition_frame(frame, comp.fps(), source) {
+                            sampled.insert(frame);
+                        }
+                    }
                     let mut interval: Option<std::ops::Range<u32>> = None;
                     for frame in sampled {
                         match &mut interval {
                             Some(r) if r.end == frame => r.end += 1,
                             _ => {
                                 if let Some(r) = interval.take() {
-                                    validate_sources(project, *composition, r, seen)?;
+                                    validate_sources(
+                                        project,
+                                        *composition,
+                                        r,
+                                        seen,
+                                        cancel,
+                                        visit,
+                                    )?;
                                 }
                                 interval = Some(frame..frame + 1);
                             }
                         }
                     }
                     if let Some(r) = interval {
-                        validate_sources(project, *composition, r, seen)?;
+                        validate_sources(project, *composition, r, seen, cancel, visit)?;
                     }
                     continue;
                 }
@@ -179,7 +208,14 @@ fn validate_sources(
                     .saturating_add(1)
                     .min(u64::from(source.duration()));
                 if first < end {
-                    validate_sources(project, *composition, first as u32..end as u32, seen)?;
+                    validate_sources(
+                        project,
+                        *composition,
+                        first as u32..end as u32,
+                        seen,
+                        cancel,
+                        visit,
+                    )?;
                 }
             }
             _ => {}

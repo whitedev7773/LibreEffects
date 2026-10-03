@@ -256,7 +256,7 @@ fn queue_v1_migrates_defaults_without_losing_jobs_presets_or_results() {
     );
     let saved: serde_json::Value =
         serde_json::from_slice(&std::fs::read(root.join("queue.json")).unwrap()).unwrap();
-    assert_eq!(saved["version"], 3);
+    assert_eq!(saved["version"], 4);
 }
 
 fn command(exe: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
@@ -377,6 +377,7 @@ fn configured_video_streams_match_size_rate_codec_channels_and_quality() {
             rate_control: quality,
             encoder_speed: quality.map(|_| "fast".into()),
             audio: Default::default(),
+            fonts: Default::default(),
         };
         let path = dir
             .path()

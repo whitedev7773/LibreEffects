@@ -364,6 +364,41 @@ impl EditorState {
             } else {
                 path
             };
+            let project = std::sync::Arc::new(project);
+            let (preflight_project, preflight_source, preflight_output, preflight_range, preflight_cancel) =
+                (project.clone(), project_path.clone(), output.clone(), range.clone(), cancel.clone());
+            let preflight = cx.background_executor().spawn(async move {
+                crate::output_preflight::check(
+                    &preflight_project,
+                    preflight_source.as_deref(),
+                    preflight_range,
+                    if background { crate::output_settings::Format::PngBackground } else { crate::output_settings::Format::PngAlpha },
+                    &Default::default(),
+                    &preflight_output,
+                    if sequence { crate::output_preflight::Destination::NewSequence } else { crate::output_preflight::Destination::File },
+                    &crate::video_export::ffmpeg_path(),
+                    &preflight_cancel,
+                ).map(|prepared| prepared.report)
+            }).await;
+            let report = match preflight {
+                Ok(report) => report,
+                Err(report) => {
+                    let _ = entity.update(cx, |s, cx| {
+                        s.exporting = false;
+                        s.status = format!("Render preflight failed: {report}");
+                        cx.notify();
+                    });
+                    return;
+                }
+            };
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                let _ = entity.update(cx, |s, cx| {
+                    s.exporting = false;
+                    s.status = "Render canceled; destination unchanged".into();
+                    cx.notify();
+                });
+                return;
+            }
             if sequence && let Err(e) = std::fs::create_dir(&output) {
                 let _ = entity.update(cx, |s, cx| {
                     s.exporting = false;
@@ -372,8 +407,7 @@ impl EditorState {
                 });
                 return;
             }
-            let renderer = std::sync::Arc::new(Renderer::new());
-            let project = std::sync::Arc::new(project);
+            let renderer = std::sync::Arc::new(Renderer::with_cancel(cancel.clone()));
             let count = range.len();
             let first_frame = range.start;
             let mut completed = 0;
@@ -384,6 +418,7 @@ impl EditorState {
                 }
                 let (renderer, project) = (renderer.clone(), project.clone());
                 let project_path = project_path.clone();
+                let frame_cancel = cancel.clone();
                 let destination = if sequence {
                     output.join(format!("frame-{frame:06}.png"))
                 } else {
@@ -392,10 +427,11 @@ impl EditorState {
                 let result = cx
                     .background_executor()
                     .spawn(async move {
+                        crate::video_decoder::check_cancel(&frame_cancel)?;
                         if let Some(source) = &project_path {
                             crate::project_io::protect_source(&destination, source)?;
                         }
-                        crate::project_io::validate_render(&project, &destination, &(frame..frame + 1))?;
+                        crate::project_io::validate_render_with(&project, &destination, &(frame..frame + 1), &frame_cancel, &mut |_, _| {})?;
                         let mut pixels = renderer.render(&project, frame, u32::MAX)?;
                         if background {
                             crate::rendering::composite_background(&mut pixels, project.composition().background_color());
@@ -404,6 +440,7 @@ impl EditorState {
                         pixels
                             .write_to(&mut data, image::ImageFormat::Png)
                             .map_err(|e| e.to_string())?;
+                        crate::video_decoder::check_cancel(&frame_cancel)?;
                         crate::project_io::write_bytes(&destination, &data.into_inner())
                     })
                     .await;
@@ -414,7 +451,7 @@ impl EditorState {
                 completed += 1;
                 if entity
                     .update(cx, |s, cx| {
-                        s.status = format!("Rendering {completed}/{count} frames…");
+                        s.status = report.completion(&format!("Rendering {completed}/{count} frames…"));
                         cx.notify();
                     })
                     .is_err()
@@ -450,10 +487,10 @@ impl EditorState {
                 s.status = if let Some(e) = error {
                     format!("Render failed: {e}")
                 } else {
-                    format!(
+                    report.completion(&format!(
                         "Rendered {completed}/{count} frames to {}",
                         output.display()
-                    )
+                    ))
                 };
                 cx.notify();
             });

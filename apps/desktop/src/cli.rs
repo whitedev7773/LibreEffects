@@ -3,8 +3,9 @@ use crate::output_settings::{Field, Format, Settings};
 use std::{ffi::OsString, path::PathBuf};
 
 const HELP: &str = "Libre Effects file renderer\n\
-    --render PROJECT.lfe.json --output FILE.mp4|mov|png [--composition ID] [--start FRAME] [--end FRAME] [--png-background] [--size WIDTHxHEIGHT] [--fps RATE] [--channels auto|rgb|rgba|alpha] [--crf 0..51 | --bitrate KBPS] [--encoder SPEED] [--audio auto|off]\n\
+    --render PROJECT.lfe.json --output FILE.mp4|mov|png [--composition ID] [--start FRAME] [--end FRAME] [--png-background] [--size WIDTHxHEIGHT] [--fps RATE] [--channels auto|rgb|rgba|alpha] [--crf 0..51 | --bitrate KBPS] [--encoder SPEED] [--audio auto|off] [--fonts fallback|strict]\n\
     Frame range is [start, end). Videos default to the entire composition; PNG defaults to one frame.\n\
+    Fonts default to fallback with warnings; strict requires the requested family/style.\n\
     MP4 uses the composition background. MOV and PNG preserve alpha; --png-background makes PNG opaque.";
 
 #[derive(Debug, PartialEq)]
@@ -32,13 +33,15 @@ fn parse(args: Vec<OsString>) -> Result<Options, String> {
             continue;
         }
         match flag {
-            "--size" | "--fps" | "--channels" | "--crf" | "--bitrate" | "--encoder" | "--audio" => {
+            "--size" | "--fps" | "--channels" | "--crf" | "--bitrate" | "--encoder" | "--audio"
+            | "--fonts" => {
                 let field = match flag {
                     "--size" => Field::Size,
                     "--fps" => Field::Fps,
                     "--channels" => Field::Channels,
                     "--encoder" => Field::Speed,
                     "--audio" => Field::Audio,
+                    "--fonts" => Field::Fonts,
                     _ => Field::Quality,
                 };
                 if !seen.insert(field) {
@@ -135,12 +138,10 @@ fn render(options: Options) -> Result<(), String> {
     if extension == "png" && options.settings.fps.is_some() {
         return Err("--fps requires video or a queue PNG sequence".into());
     }
-    options.settings.validate(format)?;
     let mut project = crate::project_io::read_project(&options.project)?;
     if let Some(id) = options.composition {
         project.activate_composition(id)?;
     }
-    crate::project_io::protect_source(&options.output, &options.project)?;
     let end = options.end.unwrap_or_else(|| {
         if extension == "png" {
             options.start.saturating_add(1)
@@ -151,14 +152,23 @@ fn render(options: Options) -> Result<(), String> {
     if options.start >= end || end > project.composition().duration() {
         return Err("Frame range must be nonempty and inside the composition".into());
     }
-    if extension == "png" {
+    let report = if extension == "png" {
         if end - options.start != 1 {
             return Err("PNG output requires exactly one frame".into());
         }
-        crate::project_io::validate_render(&project, &options.output, &(options.start..end))?;
-        let plan = options
-            .settings
-            .plan(project.composition(), options.start..end, format)?;
+        let prepared = crate::output_preflight::check(
+            &project,
+            Some(&options.project),
+            options.start..end,
+            format,
+            &options.settings,
+            &options.output,
+            crate::output_preflight::Destination::File,
+            &crate::video_export::ffmpeg_path(),
+            &Default::default(),
+        )
+        .map_err(|report| report.to_string())?;
+        let plan = prepared.plan;
         let mut pixels = crate::rendering::Renderer::new().render_output(
             &project,
             options.start,
@@ -174,21 +184,26 @@ fn render(options: Options) -> Result<(), String> {
             &options.output,
             &options.settings.png_bytes(pixels, format)?,
         )?;
+        prepared.report
     } else {
         let preset = if extension == "mp4" {
             crate::video_export::VideoPreset::H264
         } else {
             crate::video_export::VideoPreset::ProResAlpha
         };
-        crate::video_export::export_video_with_settings(
+        crate::video_export::export_video_to(
             &project,
+            Some(&options.project),
             options.start..end,
             preset,
             &options.settings,
             &options.output,
             Default::default(),
             Default::default(),
-        )?;
+        )?
+    };
+    if !report.diagnostics.is_empty() {
+        eprintln!("{report}");
     }
     println!(
         "Rendered frames {}..{} to {}",
@@ -391,5 +406,85 @@ mod tests {
         invalid.composition = Some(99);
         assert!(render(invalid).is_err());
         assert_eq!(std::fs::read(&output_path).unwrap(), previous);
+    }
+    #[test]
+    fn cli_font_policy_strict_preserves_destination_and_fallback_renders() {
+        use libre_effects_core::{Command, Content, Editor, TextStyle};
+        let directory = tempfile::tempdir().unwrap();
+        let project_path = directory.path().join("project.lfe.json");
+        let output_path = directory.path().join("output.png");
+        let mut editor = Editor::default();
+        editor
+            .execute(Command::ConfigureComposition {
+                name: "CLI fonts".into(),
+                width: 64,
+                height: 48,
+                fps: 24,
+                duration: 2,
+            })
+            .unwrap();
+        editor
+            .execute(Command::AddContent {
+                content: Content::Text {
+                    text: "Text".into(),
+                    font_size: 16.0,
+                },
+                width: 60.0,
+                height: 40.0,
+                name: "Text".into(),
+            })
+            .unwrap();
+        editor
+            .execute(Command::SetTextStyle {
+                id: 1,
+                style: TextStyle {
+                    font_family: "Missing CLI font QA".into(),
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        crate::project_io::write_project(&project_path, &editor.project().to_json().unwrap())
+            .unwrap();
+        std::fs::write(&output_path, b"existing output").unwrap();
+        let options = |policy: &str| {
+            parse(vec![
+                "--render".into(),
+                project_path.clone().into_os_string(),
+                "--output".into(),
+                output_path.clone().into_os_string(),
+                "--fonts".into(),
+                policy.into(),
+            ])
+            .unwrap()
+        };
+        assert!(
+            render(options("strict"))
+                .unwrap_err()
+                .contains("Fonts policy: strict")
+        );
+        assert_eq!(std::fs::read(&output_path).unwrap(), b"existing output");
+        render(options("fallback")).unwrap();
+        assert_eq!(image::open(&output_path).unwrap().width(), 64);
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 2);
+        assert!(
+            parse(
+                ["--render", "x", "--output", "y", "--fonts", "silent"]
+                    .into_iter()
+                    .map(OsString::from)
+                    .collect()
+            )
+            .is_err()
+        );
+        assert!(
+            parse(
+                [
+                    "--render", "x", "--output", "y", "--fonts", "strict", "--fonts", "fallback"
+                ]
+                .into_iter()
+                .map(OsString::from)
+                .collect()
+            )
+            .is_err()
+        );
     }
 }

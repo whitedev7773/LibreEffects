@@ -86,8 +86,26 @@ impl AudioOutput {
         }
     }
 }
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum FontPolicy {
+    /// Use the same fallback as preview, and retain an output warning.
+    #[default]
+    Fallback,
+    /// Missing families or substituted faces stop the output before rendering.
+    Strict,
+}
+impl FontPolicy {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Fallback => "fallback",
+            Self::Strict => "strict",
+        }
+    }
+}
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Settings {
+    #[serde(default)]
+    pub fonts: FontPolicy,
     #[serde(default)]
     pub audio: AudioOutput,
     /// None follows composition size/rate. Size is the exact output raster, stretched.
@@ -113,6 +131,7 @@ impl From<Format> for Spec {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Field {
     Audio,
+    Fonts,
     Size,
     Fps,
     Channels,
@@ -120,17 +139,19 @@ pub(crate) enum Field {
     Speed,
 }
 impl Field {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Size,
         Self::Fps,
         Self::Channels,
         Self::Quality,
         Self::Speed,
         Self::Audio,
+        Self::Fonts,
     ];
     pub fn label(self) -> &'static str {
         match self {
             Self::Audio => "Audio",
+            Self::Fonts => "Fonts",
             Self::Size => "Size",
             Self::Fps => "FPS",
             Self::Channels => "Channels",
@@ -172,11 +193,15 @@ impl Settings {
         } else {
             " · Auto PCM · 48 kHz stereo"
         };
-        format!("{size} · {fps} · {channels}{encoding}{audio}")
+        format!(
+            "{size} · {fps} · {channels}{encoding}{audio} · Fonts: {}",
+            self.fonts.label()
+        )
     }
     pub fn value(&self, field: Field) -> String {
         match field {
             Field::Audio => self.audio.label().into(),
+            Field::Fonts => self.fonts.label().into(),
             Field::Size => self.size.map_or("comp".into(), |[w, h]| format!("{w}x{h}")),
             Field::Fps => self.fps.map_or("comp".into(), |f| f.to_string()),
             Field::Channels => self.channels.label().into(),
@@ -191,6 +216,16 @@ impl Settings {
     pub fn change(&mut self, field: Field, value: &str) -> Result<(), String> {
         let value = value.trim().to_ascii_lowercase();
         match field {
+            Field::Fonts => {
+                self.fonts = match value.as_str() {
+                    "fallback" => FontPolicy::Fallback,
+                    "strict" => FontPolicy::Strict,
+                    _ => return Err(
+                        "Fonts: fallback (warn and render) or strict (require exact family/style)"
+                            .into(),
+                    ),
+                }
+            }
             Field::Audio => {
                 self.audio = match value.as_str() {
                     "auto" => AudioOutput::Auto,
@@ -358,6 +393,7 @@ impl Settings {
         Ok(data.into_inner())
     }
 }
+#[derive(Clone, Debug)]
 pub(crate) struct Plan {
     pub width: u32,
     pub height: u32,

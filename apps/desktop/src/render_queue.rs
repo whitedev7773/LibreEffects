@@ -75,6 +75,10 @@ pub(crate) struct Preset {
     pub name: String,
     pub specs: Vec<Spec>,
 }
+// Version 4 makes font policy consequential: pre-policy (v3) readers must reject
+// the envelope rather than ignore Settings::fonts and silently relax Strict.
+const QUEUE_VERSION: u32 = 4;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Data {
     version: u32,
@@ -85,7 +89,7 @@ pub(crate) struct Data {
 impl Default for Data {
     fn default() -> Self {
         Self {
-            version: 3,
+            version: QUEUE_VERSION,
             jobs: Vec::new(),
             presets: Vec::new(),
             stop_on_error: true,
@@ -112,6 +116,17 @@ pub(crate) fn default_root() -> Result<PathBuf, String> {
         .map(|p| p.join("LibreEffects/render-queue"))
         .ok_or("Cannot locate render queue storage".into())
 }
+// Version 1 had no configurable output settings. Preserve an explicit font
+// policy extension if present rather than quietly weakening it during migration.
+// Unknown policy values remain intact so deserialization rejects them safely.
+fn legacy_settings(existing: Option<&serde_json::Value>) -> serde_json::Value {
+    let mut settings = serde_json::to_value(Settings::default()).unwrap();
+    if let Some(fonts) = existing.and_then(|settings| settings.get("fonts")) {
+        settings["fonts"] = fonts.clone();
+    }
+    settings
+}
+
 impl Queue {
     pub fn load(root: PathBuf) -> Result<Self, String> {
         std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
@@ -139,13 +154,11 @@ impl Queue {
                                     .and_then(serde_json::Value::as_array_mut)
                                 {
                                     for output in outputs {
+                                        let settings = legacy_settings(output.get("settings"));
                                         output
                                             .as_object_mut()
                                             .ok_or("Invalid legacy output")?
-                                            .insert(
-                                                "settings".into(),
-                                                serde_json::to_value(Settings::default()).unwrap(),
-                                            );
+                                            .insert("settings".into(), settings);
                                     }
                                 }
                             }
@@ -159,7 +172,20 @@ impl Queue {
                                     .as_array()
                                     .ok_or("Invalid legacy preset")?
                                     .clone();
-                                preset["specs"]=serde_json::Value::Array(formats.into_iter().map(|format|serde_json::json!({"format":format,"settings":Settings::default()})).collect());
+                                let specs = formats
+                                    .into_iter()
+                                    .enumerate()
+                                    .map(|(index, format)| {
+                                        let settings = legacy_settings(
+                                            preset
+                                                .get("specs")
+                                                .and_then(|specs| specs.get(index))
+                                                .and_then(|spec| spec.get("settings")),
+                                        );
+                                        serde_json::json!({"format":format,"settings":settings})
+                                    })
+                                    .collect();
+                                preset["specs"] = serde_json::Value::Array(specs);
                                 preset.as_object_mut().unwrap().remove("formats");
                             }
                         }
@@ -206,6 +232,12 @@ impl Queue {
                             }
                         }
                         value["version"] = 3.into();
+                    }
+                    if value["version"] == 3 {
+                        // Existing policies (including Strict) survive unchanged.
+                        // Settings' serde default fills only absent font policies;
+                        // the subsequent atomic save makes them explicit in v4.
+                        value["version"] = QUEUE_VERSION.into();
                     }
                     serde_json::from_value(value)
                         .map_err(|e| format!("Cannot read saved render queue: {e}"))?
@@ -464,7 +496,7 @@ impl Queue {
     }
 }
 fn validate(data: &Data) -> Result<(), String> {
-    if data.version != 3 || data.jobs.len() > 100 || data.presets.len() > 32 {
+    if data.version != QUEUE_VERSION || data.jobs.len() > 100 || data.presets.len() > 32 {
         return Err("Unsupported or oversized render queue".into());
     }
     let mut ids = BTreeSet::new();
@@ -584,7 +616,10 @@ pub(crate) fn run(queue: Arc<Mutex<Queue>>) {
             } else {
                 Status::Failed
             };
-            output.message = rendered.err().unwrap_or_else(|| "Completed".into());
+            output.message = match rendered {
+                Ok(report) => report.completion("Completed"),
+                Err(error) => error,
+            };
             while output.message.len() > 16000 {
                 output.message.pop();
             }
@@ -624,17 +659,11 @@ pub(crate) fn execute(
     output: &Output,
     cancel: Arc<AtomicBool>,
     progress: Arc<AtomicU32>,
-) -> Result<(), String> {
-    if let Some(path) = project_path {
-        crate::project_io::protect_source(&output.path, path)?;
-    }
-    crate::project_io::validate_render(project, &output.path, &range)?;
-    if cancel.load(Ordering::Relaxed) {
-        return Err("Render canceled".into());
-    }
+) -> Result<crate::output_preflight::Report, String> {
     if !output.spec.format.sequence() {
-        return crate::video_export::export_video_with_settings(
+        return crate::video_export::export_video_to(
             project,
+            project_path,
             range,
             if output.spec.format == Format::Mp4 {
                 crate::video_export::VideoPreset::H264
@@ -647,21 +676,24 @@ pub(crate) fn execute(
             progress,
         );
     }
-    let plan =
-        output
-            .spec
-            .settings
-            .plan(project.composition(), range.clone(), output.spec.format)?;
-    if output.path.exists() {
-        return Err(
-            "PNG sequence destination must be a new folder; choose another output path".into(),
-        );
-    }
+    let prepared = crate::output_preflight::check(
+        project,
+        project_path,
+        range.clone(),
+        output.spec.format,
+        &output.spec.settings,
+        &output.path,
+        crate::output_preflight::Destination::NewSequence,
+        &crate::video_export::ffmpeg_path(),
+        &cancel,
+    )
+    .map_err(|report| report.to_string())?;
+    let plan = prepared.plan;
     let staging = tempfile::Builder::new()
         .prefix(".libre-render-")
         .tempdir_in(output.path.parent().ok_or("Output needs a parent")?)
         .map_err(|e| e.to_string())?;
-    let renderer = crate::rendering::Renderer::new();
+    let renderer = crate::rendering::Renderer::with_cancel(cancel.clone());
     for index in 0..plan.frames {
         let frame = plan.source_frame(index);
         if cancel.load(Ordering::Relaxed) {
@@ -691,5 +723,5 @@ pub(crate) fn execute(
         return Err("Render canceled; sequence destination unchanged".into());
     }
     std::fs::rename(staging.path(), &output.path).map_err(|e| e.to_string())?;
-    Ok(())
+    Ok(prepared.report)
 }

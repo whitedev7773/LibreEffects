@@ -379,7 +379,7 @@ impl Render for RenderDock {
                         "Reset settings",
                         QueueAction::ResetSettings(id, index),
                     ));
-                    row=row.child(controls).child(div().pl_6().text_color(rgb(ui::MUTED)).child("Size: comp / 1920x1080 · FPS: comp / 29.97 · Channels: auto / rgb / rgba / alpha · Quality: auto / crf:18 / kbps:8000 · Encoder: auto / fast / medium / slow · Audio: auto / off"));
+                    row=row.child(controls).child(div().pl_6().text_color(rgb(ui::MUTED)).child("Size: comp / 1920x1080 · FPS: comp / 29.97 · Channels: auto / rgb / rgba / alpha · Quality: auto / crf:18 / kbps:8000 · Encoder: auto / fast / medium / slow · Audio: auto / off · Fonts: fallback (warn) / strict"));
                 }
             }
             list = list.child(row);
