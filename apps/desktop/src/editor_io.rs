@@ -32,34 +32,39 @@ impl EditorState {
             || !self.editor.project().same_document(&self.saved)
     }
     pub fn recover(&mut self, restore: bool, cx: &mut Context<Self>) {
+        if let Err(error) = self.apply_recovery(restore) {
+            self.status = format!("Recovery failed: {error}");
+        }
+        cx.notify();
+    }
+    fn apply_recovery(&mut self, restore: bool) -> Result<(), String> {
         let Some(candidate) = self.recovery.as_ref() else {
-            return;
+            return Ok(());
         };
-        let result = if restore {
+        // Validate the exact project that will become live before writing our
+        // checkpoint or consuming the abandoned slot. Resolved media paths can
+        // exceed the metadata budget even when the stored relative paths fit.
+        let replacement = if restore {
+            Some(replacement_editor(candidate.project.clone())?)
+        } else {
+            None
+        };
+        if restore {
             self.recovery_session
                 .as_ref()
-                .ok_or("Recovery session unavailable".to_string())
-                .and_then(|session| {
-                    session
-                        .lock()
-                        .map_err(|e| e.to_string())?
-                        .restore(candidate)
-                })
+                .ok_or("Recovery session unavailable".to_string())?
+                .lock()
+                .map_err(|e| e.to_string())?
+                .restore(candidate)?;
         } else {
-            candidate.discard()
-        };
-        if let Err(error) = result {
-            self.status = format!("Recovery failed: {error}");
-            cx.notify();
-            return;
+            candidate.discard()?;
         }
-        let candidate = self.recovery.take().unwrap();
-        if restore {
+        self.recovery.take();
+        if let Some(editor) = replacement {
             self.stop();
             self.document_revision = self.document_revision.wrapping_add(1);
-            let _ = self.editor.replace_project(candidate.project);
+            self.editor = editor;
             self.clear_clipboard();
-            self.editor.clear_history();
             self.load_views(Default::default());
             self.path = None;
             self.work_end = self.editor.project().composition().duration();
@@ -70,7 +75,7 @@ impl EditorState {
         }
         self.recovery_ready = self.recovery.is_none();
         self.normalize();
-        cx.notify();
+        Ok(())
     }
     pub fn next_recovery(&mut self, cx: &mut Context<Self>) {
         if let Some(next) = self.recovery_pending.pop_front() {
@@ -192,26 +197,9 @@ impl EditorState {
             let _ = entity.update(cx, |s, cx| {
                 match result {
                     Ok((project, views)) => {
-                        s.stop();
-                        s.reset_recovery(false);
-                        s.document_revision = s.document_revision.wrapping_add(1);
-                        s.saved = project.clone();
-                        let _ = s.editor.replace_project(project);
-                        s.clear_clipboard();
-                        s.editor.clear_history();
-                        s.path = Some(path);
-                        s.frame = 0;
-                        s.work_start = 0;
-                        s.work_end = s.editor.project().composition().duration();
-                        s.timeline_start = 0;
-                        s.load_views(views);
-                        s.selected_layers.clear();
-                        s.selected_keys.clear();
-                        let missing = crate::font_usage::missing_count(s.editor.project());
-                        s.status = if missing == 0 { "Project opened".into() } else {
-                            format!("Project opened · {missing} text layer(s) use unavailable fonts/styles · File → Manage project fonts")
-                        };
-                        s.normalize();
+                        if let Err(error) = s.install_opened_project(project, views, path) {
+                            s.status = format!("Open failed: {error}");
+                        }
                     }
                     Err(e) => s.status = format!("Open failed: {e}"),
                 }
@@ -219,6 +207,40 @@ impl EditorState {
             });
         })
         .detach();
+    }
+    fn install_opened_project(
+        &mut self,
+        project: Project,
+        views: crate::view_state::ProjectViews,
+        path: PathBuf,
+    ) -> Result<(), String> {
+        // Keep the current document, path, saved baseline and recovery slot
+        // intact unless the resolved project can actually enter the editor.
+        let editor = replacement_editor(project)?;
+        self.stop();
+        self.reset_recovery(false);
+        self.document_revision = self.document_revision.wrapping_add(1);
+        self.saved = editor.project().clone();
+        self.editor = editor;
+        self.clear_clipboard();
+        self.path = Some(path);
+        self.frame = 0;
+        self.work_start = 0;
+        self.work_end = self.editor.project().composition().duration();
+        self.timeline_start = 0;
+        self.load_views(views);
+        self.selected_layers.clear();
+        self.selected_keys.clear();
+        let missing = crate::font_usage::missing_count(self.editor.project());
+        self.status = if missing == 0 {
+            "Project opened".into()
+        } else {
+            format!(
+                "Project opened · {missing} text layer(s) use unavailable fonts/styles · File → Manage project fonts"
+            )
+        };
+        self.normalize();
+        Ok(())
     }
     pub(super) fn save(&mut self, cx: &mut Context<Self>) {
         self.save_project(false, cx);
@@ -439,3 +461,15 @@ impl EditorState {
         .detach();
     }
 }
+
+/// Construct a document-boundary replacement without changing the live editor.
+fn replacement_editor(project: Project) -> Result<Editor, String> {
+    let mut editor = Editor::default();
+    editor.replace_project(project)?;
+    editor.clear_history();
+    Ok(editor)
+}
+
+#[cfg(test)]
+#[path = "editor_io_tests.rs"]
+mod tests;

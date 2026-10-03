@@ -4,38 +4,152 @@ use std::sync::Arc;
 pub(super) const MAX_IMAGE_BYTES: usize = 128 * 1024 * 1024;
 const MAX_METADATA_BYTES: usize = 16 * 1024 * 1024;
 
+// The desktop file/recovery envelope has the same cap. Leave room for its
+// optional view state when deciding whether a large document needs compact JSON.
+const MAX_PROJECT_BYTES: usize = 256 * 1024 * 1024;
+const MAX_PRETTY_BYTES: usize = MAX_PROJECT_BYTES - MAX_METADATA_BYTES;
+const METADATA_LIMIT_ERROR: &str = "Project metadata exceeds 16 MiB";
+
+struct Prepared {
+    project: Project,
+    images: BTreeMap<String, Arc<str>>,
+    sequences: BTreeMap<String, Arc<Vec<String>>>,
+    image_references: usize,
+}
+
+#[derive(Serialize)]
+struct Metadata<'a> {
+    #[serde(flatten)]
+    project: &'a Project,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    sequence_assets: &'a BTreeMap<String, Arc<Vec<String>>>,
+}
+
+impl Prepared {
+    fn new(project: &Project) -> Self {
+        let mut project = project.clone();
+        let sequences = super::image_sequence::compact(&mut project);
+        let mut images: BTreeMap<String, Arc<str>> = BTreeMap::new();
+        let mut ids = BTreeMap::new();
+        let mut image_references = 0;
+        let mut visit = |content: &mut Content| {
+            if let Content::Image { png } = content {
+                image_references += 1;
+                let id = ids.entry(png.as_ptr() as usize).or_insert_with(|| {
+                    let id = format!("image-{}", images.len() + 1);
+                    images.insert(id.clone(), png.clone());
+                    id
+                });
+                *png = Arc::from(id.as_str());
+            }
+        };
+        for asset in project.asset_library.assets.values_mut() {
+            visit(&mut asset.content);
+        }
+        for layer in project.compositions_mut().flat_map(|comp| &mut comp.layers) {
+            visit(&mut layer.content);
+        }
+        if !images.is_empty() {
+            project.version = project.version.max(7);
+        }
+        Self {
+            project,
+            images,
+            sequences,
+            image_references,
+        }
+    }
+
+    fn metadata(&self) -> Metadata<'_> {
+        Metadata {
+            project: &self.project,
+            sequence_assets: &self.sequences,
+        }
+    }
+
+    fn validate_budget(&self) -> Result<(), String> {
+        if self.images.len() > 1000
+            || self
+                .images
+                .values()
+                .fold(0usize, |sum, image| sum.saturating_add(image.len()))
+                > MAX_IMAGE_BYTES
+        {
+            return Err("Embedded images exceed 128 MiB".into());
+        }
+        if self.sequences.len() > 1000 {
+            return Err("Sequence manifests exceed project metadata limits".into());
+        }
+        // The on-disk image key is `asset` instead of `png` (+2 bytes per
+        // reference). For sequences, `frames:["id"]` and `manifest:"id"`
+        // have identical compact lengths. Count the actual escaped JSON and
+        // shared manifests once, without allocating JSON or copying image data.
+        count_json(
+            &self.metadata(),
+            false,
+            self.image_references * 2,
+            MAX_METADATA_BYTES,
+            METADATA_LIMIT_ERROR,
+        )?;
+        Ok(())
+    }
+}
+
+/// Check a structurally validated candidate before it can enter editor history.
+/// The 16 MiB metadata + 128 MiB image budgets leave compact output comfortably
+/// below the 256 MiB file/recovery limit, even including asset-table overhead.
+pub(super) fn validate_budget(project: &Project) -> Result<(), String> {
+    Prepared::new(project).validate_budget()
+}
+
+/// A bounded sink: serialization stops at the limit and never stores JSON bytes.
+struct CountingWriter {
+    bytes: usize,
+    limit: usize,
+    message: &'static str,
+}
+impl std::io::Write for CountingWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.bytes = self
+            .bytes
+            .checked_add(bytes.len())
+            .filter(|size| *size <= self.limit)
+            .ok_or_else(|| std::io::Error::other(self.message))?;
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+fn count_json(
+    value: &impl Serialize,
+    pretty: bool,
+    initial_bytes: usize,
+    limit: usize,
+    message: &'static str,
+) -> Result<usize, String> {
+    if initial_bytes > limit {
+        return Err(message.into());
+    }
+    let mut writer = CountingWriter {
+        bytes: initial_bytes,
+        limit,
+        message,
+    };
+    if pretty {
+        serde_json::to_writer_pretty(&mut writer, value)
+    } else {
+        serde_json::to_writer(&mut writer, value)
+    }
+    .map_err(|error| error.to_string())?;
+    Ok(writer.bytes)
+}
+
 pub(super) fn encode(project: &Project) -> Result<String, String> {
-    let mut compact = project.clone();
-    let sequences = super::image_sequence::compact(&mut compact);
-    let mut assets: BTreeMap<String, Arc<str>> = BTreeMap::new();
-    let mut ids = BTreeMap::new();
-    for asset in compact.asset_library.assets.values_mut() {
-        if let Content::Image { png } = &mut asset.content {
-            let id = ids.entry(png.as_ptr() as usize).or_insert_with(|| {
-                let id = format!("image-{}", assets.len() + 1);
-                assets.insert(id.clone(), png.clone());
-                id
-            });
-            *png = Arc::from(id.as_str());
-        }
-    }
-    for layer in compact
-        .compositions_mut()
-        .flat_map(|comp| comp.layers.iter_mut())
-    {
-        if let Content::Image { png } = &mut layer.content {
-            let pointer = png.as_ptr() as usize;
-            let id = ids.entry(pointer).or_insert_with(|| {
-                let id = format!("image-{}", assets.len() + 1);
-                assets.insert(id.clone(), png.clone());
-                id
-            });
-            *png = Arc::from(id.as_str());
-        }
-    }
-    let mut value = serde_json::to_value(&compact).map_err(|e| e.to_string())?;
-    if !assets.is_empty() {
-        value["version"] = project.version.max(7).into();
+    let prepared = Prepared::new(project);
+    prepared.validate_budget()?;
+    let mut value = serde_json::to_value(prepared.metadata()).map_err(|e| e.to_string())?;
+    if !prepared.images.is_empty() {
         each_source(&mut value, |_, layer| {
             if let Some(image) = layer
                 .get_mut("content")
@@ -48,7 +162,7 @@ pub(super) fn encode(project: &Project) -> Result<String, String> {
             Ok(())
         })?;
     }
-    if !sequences.is_empty() {
+    if !prepared.sequences.is_empty() {
         each_source(&mut value, |_, source| {
             if let Some(sequence) = source
                 .get_mut("content")
@@ -62,18 +176,32 @@ pub(super) fn encode(project: &Project) -> Result<String, String> {
             }
             Ok(())
         })?;
-        value["sequence_assets"] = serde_json::to_value(sequences).map_err(|e| e.to_string())?;
     }
-    if serde_json::to_vec(&value).map_err(|e| e.to_string())?.len() > MAX_METADATA_BYTES {
-        return Err("Project metadata exceeds 16 MiB".into());
+    if !prepared.images.is_empty() {
+        value["image_assets"] = serde_json::to_value(prepared.images).map_err(|e| e.to_string())?;
     }
-    if !assets.is_empty() {
-        value["image_assets"] = serde_json::to_value(assets).map_err(|e| e.to_string())?;
+    encode_value(&value, MAX_PRETTY_BYTES)
+}
+
+fn encode_value(value: &serde_json::Value, pretty_limit: usize) -> Result<String, String> {
+    // Deeply nested arrays can expand far beyond the compact metadata budget.
+    // Fall back before allocating that oversized pretty representation.
+    let json = if count_json(value, true, 0, pretty_limit, "Project needs compact JSON").is_ok() {
+        serde_json::to_string_pretty(value)
+    } else {
+        serde_json::to_string(value)
     }
-    serde_json::to_string_pretty(&value).map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+    if json.len() > MAX_PROJECT_BYTES {
+        return Err("Project exceeds 256 MiB".into());
+    }
+    Ok(json)
 }
 
 pub(super) fn decode(json: &str) -> Result<Project, String> {
+    if json.len() > MAX_PROJECT_BYTES {
+        return Err("Project exceeds 256 MiB".into());
+    }
     let mut value: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
     let assets_value = value
         .as_object_mut()
@@ -305,3 +433,7 @@ mod tests {
         assert_eq!(Project::from_json(&json).unwrap(), *e.project());
     }
 }
+
+#[cfg(test)]
+#[path = "document_budget_tests.rs"]
+mod budget_tests;

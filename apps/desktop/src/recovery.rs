@@ -65,7 +65,7 @@ impl Session {
         }
         Ok((session, candidates, warnings))
     }
-    fn in_directory(root: &Path) -> Result<(Self, Vec<Candidate>, Vec<String>), String> {
+    pub(crate) fn in_directory(root: &Path) -> Result<(Self, Vec<Candidate>, Vec<String>), String> {
         std::fs::create_dir_all(root).map_err(|e| e.to_string())?;
         let temporary = tempfile::Builder::new()
             .prefix("session-")

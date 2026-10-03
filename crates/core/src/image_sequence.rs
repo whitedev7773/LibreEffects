@@ -113,12 +113,20 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
 pub(super) fn compact(project: &mut Project) -> BTreeMap<String, std::sync::Arc<Vec<String>>> {
     let mut manifests = BTreeMap::new();
     let mut ids = BTreeMap::new();
+    // Duplicated layers normally share the same Arc. Avoid comparing every
+    // path in a large manifest again for each instance during save preflight.
+    let mut pointers = BTreeMap::new();
     let mut visit = |content: &mut Content| {
         if let Content::ImageSequence { frames, .. } = content {
-            let id = ids.entry(frames.clone()).or_insert_with(|| {
-                let id = format!("sequence-{}", manifests.len() + 1);
-                manifests.insert(id.clone(), frames.clone());
-                id
+            let pointer = std::sync::Arc::as_ptr(frames) as usize;
+            let (_, id) = pointers.entry(pointer).or_insert_with(|| {
+                let id = ids.entry(frames.clone()).or_insert_with(|| {
+                    let id = format!("sequence-{}", manifests.len() + 1);
+                    manifests.insert(id.clone(), frames.clone());
+                    id
+                });
+                // Retain the original Arc so its address cannot be recycled.
+                (frames.clone(), id.clone())
             });
             *frames = std::sync::Arc::new(vec![id.clone()]);
         }

@@ -602,6 +602,7 @@ impl Project {
         shape_contents::migrate(&mut project);
         project.sync_assets()?;
         project.validate()?;
+        document::validate_budget(&project)?;
         Ok(project)
     }
 
@@ -1260,6 +1261,7 @@ impl Editor {
     /// Loading is undoable, so opening a project does not discard current work.
     pub fn replace_project(&mut self, project: Project) -> Result<(), String> {
         project.validate()?;
+        document::validate_budget(&project)?;
         let selected = project.composition.layers.first().map(Layer::id);
         let previous = std::mem::replace(&mut self.current, Snapshot { project, selected });
         self.record(previous);
@@ -1584,6 +1586,7 @@ impl Editor {
         }
         next.project.validate()?;
         if next != self.current {
+            document::validate_budget(&next.project)?;
             let previous = std::mem::replace(&mut self.current, next);
             self.record(previous);
         }
