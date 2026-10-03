@@ -18,6 +18,14 @@
 - **후속 고급 기능:** 패널 도킹·소스 뷰어·최근 프로젝트, 타임라인 고급 시간 편집/검색/가상화, 공간 경로·프리셋·표현식, Shape 연산/SVG·Text Animator, 추가 효과·모션 블러, 고정밀 색/HDR·Proxy/GPU, 템플릿, 설치/업데이트·한글화와 UI 회귀 자동화.
 - **별도 대형 단계:** 3D/카메라/라이트·모델, 추적·로토/Puppet, 플러그인/교환 포맷 연구, 웹/API 제품 범위. AEP/MOGRT 호환은 구현되지 않았다.
 
+### 타임라인 보간 모양·키프레임 메뉴 — 2026-10-03
+
+- D02/B05: 타임라인 키의 왼쪽/오른쪽 절반으로 incoming/outgoing 상태를 구분한다. Linear는 다이아몬드, Hold는 사각형, Auto Bezier는 원형, 수동/Continuous Bezier는 안쪽으로 들어간 모양이다. 인접 키가 없거나 이전 Hold가 incoming을 억제하면 어둡게 표시한다. 결합 행의 채널 상태가 다르면 표시가 있는 다이아몬드와 채널별 툴팁을 제공한다. 선택 윤곽은 유지하며 프로젝트 데이터는 변경하지 않는다. [Adobe 보간 표시 설명](https://helpx.adobe.com/after-effects/desktop/animate-in-after-effects/animation-keyframes/keyframe-interpolation.html)을 참고했다.
+- 키 우클릭 또는 타임라인 포커스의 Shift+F10으로 Easy Ease/In/Out, Auto/Continuous/Independent Bezier, Linear/Hold outgoing segment, Graph 열기, 삭제를 실행한다. 선택된 키의 우클릭은 기존 그룹을 유지한다. 위/아래·Home/End·Enter·Escape로 조작하며 비활성 항목을 건너뛴다. 문서/선택 변경·포커스 이탈·창 비활성화·바깥 클릭은 메뉴를 닫는다. 편집은 전체 선택을 검증한 한 Undo이며 잠금·경로 키의 미지원 명령을 비활성화한다.
+- 검증: 코어 158개 + 데스크톱 215개(총 373개) 통과, 외부 미디어/장치 30개 제외. 모양 분류·결합 행·끝점·Hold·선택 유지·메뉴 무효화·명령 원자성·Undo/Redo·JSON·Preview/출력 회귀를 검사했다. Cargo check/fmt/test/release build 및 git diff --check 통과(Moon/proto 미설치), 기존 경고 17개.
+- 실제 Windows에서 우클릭 Auto Bezier/Hold 적용, 한 번의 Undo/Redo, Shift+F10→키보드 Graph 열기와 포커스, 저장·재열기를 확인했다. 최종 빌드에서 8개 키 선택 유지·End 단일 강조·Escape 취소, 1920/1442 폭의 메뉴 배치를 확인했다. QA 사본 `target/qa/key-menu-native.lfe.json`의 30/45/60/67/75/83/90프레임 PNG 중심은 독립 계산 720/1095/1320/1119.644444/720/720/1320px와 출력 해상도 1px 이내로 일치했다. 재열기 후 83프레임 Position X 720 미리보기를 확인했다. 실제 작업 창 1개와 사용자 보존 원본 SHA256 불변을 확인했다.
+- 남음: AE 공간 보간·다차원 속도, 경로 Ease In/Out, 배율별 접근성/화면 회귀. Graph는 현재 스칼라 채널을 편집하며 메뉴 Linear/Hold는 outgoing 구간을 바꾼다. AE와 픽셀 단위 UI 또는 수치 동등성은 검증하지 않았다. D02/B05 전체 완료로 표시하지 않는다.
+
 ### 타임라인·그래프 Easy Ease 단축키 — 2026-10-03
 
 - B05/D02의 F9(Easy Ease), Shift+F9(Ease In), Ctrl+Shift+F9(Ease Out)을 구분했다. 그래프가 모든 F9 조합을 양방향 Ease로 처리하던 문제를 수정하고, 타임라인에도 같은 명령을 연결했다. 그래프는 현재 표시한 스칼라 채널, 타임라인은 레이어/속성에 걸친 선택 스칼라 키에 한 번의 Undo로 적용한다. [Adobe 공식 단축키 표](https://helpx.adobe.com/fi/after-effects/desktop/get-started/keyboard-shortcuts/keyboard-shortcuts-reference.html)를 기준으로 하며 내부 수치 보간의 AE 동등성을 뜻하지 않는다.

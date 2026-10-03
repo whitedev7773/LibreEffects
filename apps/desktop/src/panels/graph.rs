@@ -295,6 +295,9 @@ fn dispatch_key(
     }
 }
 impl Graph {
+    pub(super) fn focus(&self, window: &mut Window) {
+        window.focus(&self.focus);
+    }
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
         cx.observe(&state, |this, _, cx| {
             if this.drag.as_ref().is_some_and(|drag| {

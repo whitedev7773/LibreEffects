@@ -1,3 +1,4 @@
+mod key_menu;
 use super::parent_drag::ParentDrag;
 use crate::{
     components::TextField,
@@ -50,6 +51,8 @@ pub(crate) struct Timeline {
     snapped_to: Option<u32>,
     drag: Option<KeyDrag>,
     selected_key: Option<(LayerId, PropertyPath, u32)>,
+    key_menu: Option<key_menu::Menu>,
+    menu_focus_watch: Option<[gpui::Subscription; 2]>,
 }
 fn frame_at(x: f32, left: f32, width: f32, start: u32, visible: u32, duration: u32) -> f64 {
     (f64::from(start)
@@ -59,7 +62,17 @@ fn frame_at(x: f32, left: f32, width: f32, start: u32, visible: u32, duration: u
 }
 impl Timeline {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
-        cx.observe(&state, |_, _, cx| cx.notify()).detach();
+        cx.observe(&state, |this, _, cx| {
+            if this
+                .key_menu
+                .as_ref()
+                .is_some_and(|menu| !menu.valid(this.state.read(cx)))
+            {
+                this.key_menu = None;
+            }
+            cx.notify();
+        })
+        .detach();
         let search = cx.new(|cx| TextField::new(cx, |_, _, _| {}));
         cx.observe(&search, |_, _, cx| cx.notify()).detach();
         let waveforms = cx.new(|_| super::audio_waveform::AudioWaveforms::new());
@@ -81,6 +94,8 @@ impl Timeline {
             graph: cx.new(|cx| super::graph::Graph::new(state.clone(), cx)),
             marker_editor: cx.new(|cx| super::markers::MarkerEditor::new(state.clone(), cx)),
             state,
+            key_menu: None,
+            menu_focus_watch: None,
             ruler: Rc::new(Cell::new(None)),
             focus: cx.focus_handle(),
             scrubbing: false,
@@ -380,6 +395,21 @@ fn grid(start: u32, visible: u32, frame: u32) -> impl IntoElement {
 }
 impl Render for Timeline {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.menu_focus_watch.is_none() {
+            self.menu_focus_watch = Some([
+                cx.on_blur(&self.focus.clone(), window, |this, _, cx| {
+                    this.key_menu = None;
+                    cx.notify();
+                }),
+                cx.observe_window_activation(window, |this, window, cx| {
+                    if !window.is_window_active() {
+                        this.key_menu = None;
+                        cx.notify();
+                    }
+                }),
+            ]);
+        }
+        let key_menu = self.render_key_menu(cx);
         self.left = self.state.read(cx).workspace.timeline_left;
         self.hit_keys.borrow_mut().clear();
         self.hit_layers.borrow_mut().clear();
@@ -1308,7 +1338,11 @@ impl Render for Timeline {
                         }
                         let hits = self.hit_keys.clone();
                         let measured = key_refs.clone();
+                        let menu_keys = key_refs.clone();
                         let property = key_refs[0].property;
+                        let (glyph, description) =
+                            super::key_glyph::Glyph::row(layer, &properties, key_frame)
+                                .expect("visible timeline key");
                         keys = keys.child(
                             div()
                                 .id(SharedString::from(format!("key-{id}-{label}-{key_frame}")))
@@ -1318,11 +1352,10 @@ impl Render for Timeline {
                                 .top(px(4.0))
                                 .size(px(13.0))
                                 .cursor_pointer()
-                                .child(ui::icon("diamond").text_color(rgb(if active {
-                                    ui::BLUE
-                                } else {
-                                    0xc8c8c8
-                                })))
+                                .tooltip(move |_, cx| {
+                                    cx.new(|_| ui::Tip(description.clone().into())).into()
+                                })
+                                .child(glyph.element(active))
                                 .child(
                                     canvas(
                                         move |b, _, _| {
@@ -1334,6 +1367,21 @@ impl Render for Timeline {
                                     )
                                     .absolute()
                                     .size_full(),
+                                )
+                                .on_mouse_down(
+                                    MouseButton::Right,
+                                    cx.listener(
+                                        move |this, event: &gpui::MouseDownEvent, window, cx| {
+                                            this.open_key_menu(
+                                                Some(&menu_keys),
+                                                event.position,
+                                                window,
+                                                cx,
+                                            );
+                                            window.prevent_default();
+                                            cx.stop_propagation();
+                                        },
+                                    ),
                                 )
                                 .on_mouse_down(
                                     MouseButton::Left,
@@ -1408,6 +1456,10 @@ impl Render for Timeline {
             .on_mouse_up(MouseButton::Left, cx.listener(Self::up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::up))
             .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+                if this.key_menu_key(event, window, cx) {
+                    cx.stop_propagation();
+                    return;
+                }
                 if let Some((incoming, outgoing)) = super::key_easing::shortcut(event)
                     && this.focus.is_focused(window)
                     && this.drag.is_none()
@@ -1983,6 +2035,7 @@ impl Render for Timeline {
                     .size_full(),
                 )
             })
+            .when_some(key_menu, |d, menu| d.child(menu))
             .when(marker_open, |d| {
                 d.child(
                     gpui::deferred(

@@ -9,6 +9,7 @@ mod footage_interpretation;
 mod graph;
 mod inspector;
 mod key_easing;
+mod key_glyph;
 mod markers;
 mod mask_values;
 mod matte;

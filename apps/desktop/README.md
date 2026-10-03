@@ -405,6 +405,22 @@ a diamond to change its timing.
   value at the current frame. Undo restores the animation.
 - Diamonds add/remove a key at the current frame. Click a timeline diamond to
   select and seek to it; drag it to move it; Delete removes the selected key.
+- Timeline key symbols show incoming/outgoing interpolation separately: diamond
+  halves for Linear, rectangular halves for Hold, rounded halves for Auto Bezier,
+  and indented halves for manual/continuous Bezier. Dark halves indicate missing
+  adjacent keys or an incoming side suppressed by the previous Hold. Selection
+  outlines remain blue. Combined rows with differing channel states use a marked
+  diamond; hover shows each channel's incoming/outgoing state. Symbols describe
+  stored interpolation, including explicit handles with a straight tangent.
+- Right-click a timeline key, or use Shift+F10 with selected visible keys, for
+  Easy Ease/In/Out, Auto/Continuous/Independent Bezier, Linear/Hold outgoing
+  segments, Show in Graph Editor and Delete. Right-clicking an already selected
+  key preserves the group; another key selects its combined row. Up/Down and
+  Home/End navigate enabled entries, Enter applies and Escape dismisses. The menu
+  closes on outside click, focus loss, document/selection changes or graph entry.
+  Each edit is one Undo and validates the whole selection. Locked layers and path
+  keys disable unsupported operations; path keys still support outgoing segment
+  interpolation and deletion. Graph opening preserves selection and keyboard focus.
 - Moving a key onto an occupied frame is rejected, preserving both keys.
 - Ctrl/Shift-click diamonds or drag a selection box to select multiple keys. Drag
   selected keys to shift them together across layers/channels in one undo step.
@@ -645,6 +661,7 @@ cargo run -p libre-effects-core --example make_animation_study -- examples/curve
 | F9 (timeline/graph focused) | Easy Ease selected scalar keys |
 | Shift+F9 | Easy Ease In: incoming side only |
 | Ctrl+Shift+F9 | Easy Ease Out: outgoing side only |
+| Shift+F10 (timeline focused) | Open selected keyframes' context menu |
 | J / K | Previous / Next key on the selected layer |
 | B / N | Work area start / end |
 | + / − | Timeline zoom |
