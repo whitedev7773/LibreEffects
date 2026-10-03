@@ -456,6 +456,13 @@ zoom and pan; its vertical range fits the visible curve.
   limits apply to the entire group; selected source frames can be destinations.
   Release commits one undo step. Escape cancels; collisions with unselected keys
   or invalid values reject the whole edit. Document changes cancel an active drag.
+- Snap shares the workspace Snapping switch. Key drags snap within eight logical
+  pixels to the pre-drag playhead, composition/work-area bounds, layer in/out,
+  marker boundaries and other keys. Value snapping uses unselected keys in the
+  displayed channel (signed velocity in Speed Graph). Orange guides show matches.
+  One offset preserves group spacing; occupied destination frames are skipped.
+  Ctrl temporarily inverts snapping and Alt bypasses it. An unmoved or Shift-locked
+  axis does not snap. Direction-handle drags retain their separate controls.
 - Keyframe... opens a compact popup with Frame and Value fields for precise edits.
   Fields edit the active key; interpolation/mode/Ease buttons act on all selected
   keys in the displayed channel. Mixed modes have no highlighted mode button.

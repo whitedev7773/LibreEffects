@@ -1,4 +1,5 @@
 mod selection;
+mod snapping;
 mod speed;
 mod tangent;
 use crate::{
@@ -158,6 +159,8 @@ enum Drag {
         value: f64,
         velocity: Option<(bool, libre_effects_core::TemporalHandle, f64)>,
         keys: Vec<selection::Sample>,
+        snapping: snapping::Targets,
+        guides: snapping::Guides,
         origin: f64,
         remove_on_click: bool,
         view: View,
@@ -599,6 +602,12 @@ impl Graph {
                 velocity.map(|(side, _, _)| side),
             );
             if !layer.locked() && chosen.contains(&key) {
+                let snapping = snapping::Targets::new(
+                    state,
+                    track,
+                    &samples,
+                    velocity.map(|(side, _, _)| side),
+                );
                 self.drag = Some(Drag::Key {
                     id,
                     property,
@@ -607,6 +616,8 @@ impl Graph {
                     value,
                     velocity,
                     keys: samples,
+                    snapping,
+                    guides: Default::default(),
                     origin: velocity.map_or(value, |(_, h, _)| h.slope),
                     remove_on_click,
                     view,
@@ -719,6 +730,8 @@ impl Graph {
                 value,
                 velocity,
                 keys,
+                snapping,
+                guides,
                 origin,
                 view,
                 bounds,
@@ -739,21 +752,29 @@ impl Graph {
                         dx = 0.0;
                     }
                 }
-                let delta = (dx as f64 / f32::from(bounds.size.width).max(1.0) as f64 * view.span)
-                    .round() as i64;
-                let duration = self
-                    .state
-                    .read(cx)
-                    .editor
-                    .project()
-                    .composition()
-                    .duration();
-                let delta = selection::clamp_delta(keys, delta, duration);
+                let raw_delta =
+                    dx as f64 / f32::from(bounds.size.width).max(1.0) as f64 * view.span;
+                let state = self.state.read(cx);
+                let duration = state.editor.project().composition().duration();
+                let raw_amount = -(dy as f64) / f32::from(bounds.size.height).max(1.0) as f64
+                    * (view.high - view.low)
+                    / velocity.map_or(1.0, |(_, _, fps)| fps);
+                let (delta, amount, matched) = snapping.apply(
+                    keys,
+                    raw_delta,
+                    raw_amount,
+                    *view,
+                    *bounds,
+                    duration,
+                    velocity.map(|(side, _, _)| side),
+                    snapping::enabled(state.snapping, event.modifiers.control, event.modifiers.alt),
+                    dx != 0.0,
+                    dy != 0.0,
+                );
+                *guides = matched;
                 *to = (*from as i64 + delta) as u32;
-                let amount = -(dy as f64) / f32::from(bounds.size.height).max(1.0) as f64
-                    * (view.high - view.low);
-                if let Some((_, handle, fps)) = velocity {
-                    handle.slope = *origin + amount / *fps;
+                if let Some((_, handle, _)) = velocity {
+                    handle.slope = *origin + amount;
                 } else {
                     *value = *origin + amount;
                 }
@@ -1018,6 +1039,27 @@ impl Render for Graph {
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::up))
             .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
                 let key = event.keystroke.key.as_str();
+                if key == "z"
+                    && event.keystroke.modifiers.control
+                    && !event.keystroke.modifiers.alt
+                    && !this.state.read(cx).queue_open
+                {
+                    this.drag = None;
+                    this.state.update(cx, |s, cx| {
+                        s.dispatch(
+                            &if event.keystroke.modifiers.shift {
+                                Action::Redo
+                            } else {
+                                Action::Undo
+                            },
+                            window,
+                            cx,
+                        )
+                    });
+                    window.focus(&this.focus);
+                    cx.stop_propagation();
+                    return;
+                }
                 if key == "escape" {
                     this.drag = None;
                     this.details = false;
@@ -1122,9 +1164,30 @@ impl Render for Graph {
                     })),
             );
         }
+        toolbar = toolbar.child(
+            ui::text_button("graph-snap", "Snap")
+                .when(state.snapping, |s| s.bg(rgb(0x34495c)))
+                .tooltip(|_, cx| {
+                    cx.new(|_| {
+                        ui::Tip(
+                            "Snap keys in time and value · Ctrl-drag toggles · Alt-drag bypasses"
+                                .into(),
+                        )
+                    })
+                    .into()
+                })
+                .on_click(cx.listener(|this, _, window, cx| {
+                    window.focus(&this.focus);
+                    this.state.update(cx, |s, cx| {
+                        s.snapping = !s.snapping;
+                        cx.notify();
+                    });
+                })),
+        );
         toolbar = toolbar.child(div().flex_1()).child(
             ui::text_button("keyframe-details", "Keyframe...").on_click(cx.listener(
-                |this, _, _, cx| {
+                |this, _, window, cx| {
+                    window.focus(&this.focus);
                     this.details = !this.details;
                     cx.notify();
                 },
@@ -1392,6 +1455,26 @@ impl Render for Graph {
                                     ui::BLUE,
                                     1.0,
                                 );
+                                if let Some(Drag::Key { guides, .. }) = &drag {
+                                    if let Some(frame) = guides.frame {
+                                        let x = graph_view.point(bounds, frame as f64, 0.0).x;
+                                        stroke(
+                                            window,
+                                            [point(x, bounds.top()), point(x, bounds.bottom())],
+                                            0xff9c42,
+                                            1.5,
+                                        );
+                                    }
+                                    if let Some(value) = guides.value {
+                                        let y = graph_view.point(bounds, graph_view.start, value).y;
+                                        stroke(
+                                            window,
+                                            [point(bounds.left(), y), point(bounds.right(), y)],
+                                            0xff9c42,
+                                            1.5,
+                                        );
+                                    }
+                                }
                             });
                         },
                     )
