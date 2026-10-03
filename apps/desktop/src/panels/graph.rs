@@ -1,5 +1,6 @@
 mod selection;
 mod speed;
+mod tangent;
 use crate::{
     components::TextField,
     editor::{Action, EditorState},
@@ -127,6 +128,19 @@ impl HandleSpace {
 }
 #[derive(Clone)]
 enum Drag {
+    Tangent {
+        id: LayerId,
+        property: PropertyPath,
+        tangent: tangent::Tangent,
+        handle: libre_effects_core::TemporalHandle,
+        split: bool,
+        start: Point<Pixels>,
+        moved: bool,
+        view: View,
+        bounds: Bounds<Pixels>,
+        fps: f64,
+        speed: bool,
+    },
     Marquee {
         id: LayerId,
         property: PropertyPath,
@@ -264,7 +278,8 @@ impl Graph {
                 let (id, p) = match drag {
                     Drag::Key { id, property, .. }
                     | Drag::Handle { id, property, .. }
-                    | Drag::Marquee { id, property, .. } => (*id, *property),
+                    | Drag::Marquee { id, property, .. }
+                    | Drag::Tangent { id, property, .. } => (*id, *property),
                 };
                 let s = this.state.read(cx);
                 s.editor.selected() != Some(id)
@@ -459,6 +474,11 @@ impl Graph {
             self.speed_mode,
             fps,
         );
+        let tangents = tangent::for_selection(
+            track,
+            &selection::active(state).iter().map(|k| k.frame).collect(),
+        );
+        let view = tangent::fit_view(view, &tangents, self.speed_mode, fps);
         let hit = track
             .keys()
             .iter()
@@ -496,7 +516,39 @@ impl Graph {
                     near(k.value, 0.0).then_some((f, k.value, None))
                 }
             });
-        if hit.is_none() && !layer.locked() && !self.speed_mode {
+        if hit.is_none() && !layer.locked() {
+            if let Some(tangent) = tangents
+                .iter()
+                .find(|t| {
+                    let (_, p) = t.points(view, bounds, self.speed_mode, fps);
+                    bounds.contains(&p)
+                        && f32::from(p.x - event.position.x).abs() < 8.0
+                        && f32::from(p.y - event.position.y).abs() < 8.0
+                })
+                .copied()
+            {
+                self.drag = Some(Drag::Tangent {
+                    id,
+                    property,
+                    tangent,
+                    handle: tangent.handle,
+                    split: event.modifiers.alt,
+                    start: event.position,
+                    moved: false,
+                    view,
+                    bounds,
+                    fps,
+                    speed: self.speed_mode,
+                });
+                self.state.update(cx, |s, cx| {
+                    s.graph_key = Some((id, tangent.frame));
+                    cx.notify();
+                });
+                cx.notify();
+                return;
+            }
+        }
+        if hit.is_none() && tangents.is_empty() && !layer.locked() && !self.speed_mode {
             if let Some((_, frame, _)) = selected(state)
                 && let Some(curve) = curve_at(state)
                 && let Some(space) = HandleSpace::segment(view, bounds, track, frame)
@@ -637,6 +689,27 @@ impl Graph {
             return;
         }
         match &mut self.drag {
+            Some(Drag::Tangent {
+                tangent,
+                handle,
+                split,
+                start,
+                moved,
+                view,
+                bounds,
+                fps,
+                speed,
+                ..
+            }) => {
+                let delta = event.position - *start;
+                if !*moved && f32::from(delta.x).abs() + f32::from(delta.y).abs() < 3.0 {
+                    return;
+                }
+                *moved = true;
+                *split |= event.modifiers.alt;
+                *handle =
+                    tangent.dragged(*view, *bounds, *speed, *fps, delta, event.modifiers.shift);
+            }
             Some(Drag::Marquee { end, .. }) => {
                 *end = event.position;
             }
@@ -740,12 +813,30 @@ impl Graph {
             }
             if matches!(
                 &drag,
-                Drag::Key { moved: false, .. } | Drag::Handle { moved: false, .. }
+                Drag::Key { moved: false, .. }
+                    | Drag::Handle { moved: false, .. }
+                    | Drag::Tangent { moved: false, .. }
             ) {
                 cx.notify();
                 return;
             }
             self.state.update(cx, |state, cx| match drag {
+                Drag::Tangent {
+                    id,
+                    property,
+                    tangent,
+                    handle,
+                    split,
+                    ..
+                } => {
+                    if handle != tangent.handle || split {
+                        state.dispatch(
+                            &Action::Edit(tangent.command(id, property, handle, split)),
+                            window,
+                            cx,
+                        );
+                    }
+                }
                 Drag::Marquee {
                     id,
                     property,
@@ -1050,8 +1141,16 @@ impl Render for Graph {
             return root.child(div().p_4().child("Select a property in the timeline."));
         };
         let speed_mode = self.speed_mode;
-        let mut graph_view = view(&track, start, span, speed_mode, fps);
-        if let Some(Drag::Key { view, .. } | Drag::Marquee { view, .. }) = &self.drag {
+        let mut graph_view = tangent::fit_view(
+            view(&track, start, span, speed_mode, fps),
+            &tangent::for_selection(&track, &selected_frames),
+            speed_mode,
+            fps,
+        );
+        if let Some(
+            Drag::Key { view, .. } | Drag::Marquee { view, .. } | Drag::Tangent { view, .. },
+        ) = &self.drag
+        {
             graph_view = *view;
         }
         if let Some(Drag::Handle { space, .. }) = &self.drag
@@ -1061,7 +1160,21 @@ impl Render for Graph {
         }
         let measured = self.plot.clone();
         let drag = self.drag.clone();
-        let plot_track = track.clone();
+        let plot_track = if let Some(Drag::Tangent {
+            tangent,
+            handle,
+            split,
+            moved: true,
+            ..
+        }) = &self.drag
+        {
+            track
+                .preview_temporal_handle(tangent.frame, tangent.incoming, *handle, *split)
+                .unwrap_or_else(|_| track.clone())
+        } else {
+            track.clone()
+        };
+        let tangents = tangent::for_selection(&plot_track, &selected_frames);
         let selection_mode = [
             TemporalMode::Independent,
             TemporalMode::Continuous,
@@ -1075,7 +1188,7 @@ impl Render for Graph {
                     .all(|f| track.keys()[f].temporal.mode == *mode)
         });
         let speed_curves = if speed_mode {
-            speed::curves(&track, start, span, fps)
+            speed::curves(&plot_track, start, span, fps)
         } else {
             vec![]
         };
@@ -1163,6 +1276,7 @@ impl Render for Graph {
                                     );
                                 }
                                 if !speed_mode
+                                    && tangents.is_empty()
                                     && let Some((_, frame, _)) = selection
                                     && let Some(mut curve) = curve
                                     && let Some(space) =
@@ -1185,6 +1299,13 @@ impl Render for Graph {
                                     );
                                     dot(window, space.point(curve.x1, curve.y1), ui::BLUE);
                                     dot(window, space.point(curve.x2, curve.y2), ui::BLUE);
+                                }
+                                if !locked {
+                                    for &t in &tangents {
+                                        tangent::paint(
+                                            window, t, graph_view, bounds, speed_mode, fps,
+                                        );
+                                    }
                                 }
                                 for (&f, k) in plot_track.keys() {
                                     if speed_mode {
@@ -1579,9 +1700,9 @@ impl Render for Graph {
                     "{} · {selected_count} selected{}",
                     layer.track_label(property).unwrap_or_default(),
                     if speed_mode {
-                        " · signed units/s · left/right: incoming/outgoing · Shift-drag: constrain"
+                        " · units/s · diamonds: velocity/influence · Alt: split · Shift: keep velocity"
                     } else {
-                        " · Shift/Ctrl-click or box select · Shift-drag: constrain"
+                        " · box select · diamonds: tangents · Alt: split · Shift: keep velocity"
                     }
                 )),
         )

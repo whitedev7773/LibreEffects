@@ -114,6 +114,67 @@ pub(super) fn sample(a: &Keyframe, b: &Keyframe, span: f64, time: f64) -> f64 {
     cubic(a.value, y1, y2, b.value, (lo + hi) * 0.5)
 }
 impl AnimatedProperty {
+    /// Preview an individual scalar tangent without changing the source track.
+    /// Uses the same tangent/mode rules as SetTemporalHandle. Layer locks are
+    /// enforced by the document command, not by this detached track preview.
+    pub fn preview_temporal_handle(
+        &self,
+        frame: Frame,
+        incoming: bool,
+        handle: TemporalHandle,
+        independent: bool,
+    ) -> Result<Self, String> {
+        let mut next = self.clone();
+        if independent {
+            next.set_temporal_mode(frame, TemporalMode::Independent)?;
+        }
+        next.set_temporal_handle(frame, incoming, handle)?;
+        Ok(next)
+    }
+    fn set_temporal_handle(
+        &mut self,
+        frame: Frame,
+        incoming: bool,
+        handle: TemporalHandle,
+    ) -> Result<(), String> {
+        if !handle.valid() {
+            return Err("Invalid scalar temporal handle".into());
+        }
+        if !self.keys.contains_key(&frame) {
+            return Err("Select a keyframe first".into());
+        }
+        let segment = if incoming {
+            *self
+                .keys
+                .range(..frame)
+                .next_back()
+                .ok_or("No incoming segment")?
+                .0
+        } else {
+            self.keys
+                .range((std::ops::Bound::Excluded(frame), std::ops::Bound::Unbounded))
+                .next()
+                .ok_or("No outgoing segment")?;
+            frame
+        };
+        if self.keys[&segment].interpolation == Interpolation::Hold {
+            self.keys.get_mut(&segment).unwrap().interpolation = Interpolation::Linear;
+        }
+        if self.keys[&frame].temporal.mode == TemporalMode::Auto {
+            self.set_temporal_mode(frame, TemporalMode::Continuous)?;
+        }
+        let key = self.keys.get_mut(&frame).unwrap();
+        if key.temporal.mode == TemporalMode::Continuous {
+            key.temporal.incoming.as_mut().unwrap().slope = handle.slope;
+            key.temporal.outgoing.as_mut().unwrap().slope = handle.slope;
+        }
+        if incoming {
+            key.temporal.incoming = Some(handle);
+        } else {
+            key.temporal.outgoing = Some(handle);
+        }
+        Ok(())
+    }
     /// Shape-preserving scalar tangent: weighted harmonic mean on monotone runs,
     /// zero at extrema, and the adjacent secant at endpoints. Recomputed at sampling.
     fn auto_slope(&self, frame: Frame) -> f64 {
@@ -403,42 +464,9 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
         if layer.locked {
             return Err("Unlock the layer before editing".into());
         }
-        let track = layer.track_mut(property)?;
-        if !track.keys.contains_key(&frame) {
-            return Err("Select a keyframe first".into());
-        }
-        let segment = if incoming {
-            *track
-                .keys
-                .range(..frame)
-                .next_back()
-                .ok_or("No incoming segment")?
-                .0
-        } else {
-            track
-                .keys
-                .range(frame + 1..)
-                .next()
-                .ok_or("No outgoing segment")?;
-            frame
-        };
-        if track.keys[&segment].interpolation == Interpolation::Hold {
-            track.keys.get_mut(&segment).unwrap().interpolation = Interpolation::Linear;
-        }
-        if track.keys[&frame].temporal.mode == TemporalMode::Auto {
-            track.set_temporal_mode(frame, TemporalMode::Continuous)?;
-        }
-        let key = track.keys.get_mut(&frame).unwrap();
-        if key.temporal.mode == TemporalMode::Continuous {
-            key.temporal.incoming.as_mut().unwrap().slope = handle.slope;
-            key.temporal.outgoing.as_mut().unwrap().slope = handle.slope;
-        }
-        if incoming {
-            key.temporal.incoming = Some(handle);
-        } else {
-            key.temporal.outgoing = Some(handle);
-        }
-        Ok(())
+        layer
+            .track_mut(property)?
+            .set_temporal_handle(frame, incoming, handle)
     })())
 }
 

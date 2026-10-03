@@ -471,10 +471,22 @@ zoom and pan; its vertical range fits the visible curve.
   Equal-valued endpoints can overshoot. Editing a Hold segment converts it to a
   continuous curve. A dash identifies Hold or a vertical legacy tangent; entering
   a value initializes that side from zero velocity / one-third influence.
-- Unedited legacy curves retain their original samples. Their normalized handles
-  remain draggable on the value graph or editable through X1/Y1/X2/Y2 in the popup.
-  Once independent velocity handles affect a segment, use the velocity fields;
-  the legacy normalized handle editor is hidden to avoid showing a different curve.
+- Selected scalar keys show hollow diamond direction handles. In Value Graph,
+  their position represents the actual temporal Bezier control point; in Speed
+  Graph, horizontal distance controls influence and height controls signed velocity.
+  Dragging a handle edits that key/direction, preserving key time and value.
+  Shift keeps its velocity while changing influence. Alt breaks Auto/Continuous
+  linking before editing that side. Without Alt, the existing linked mode applies.
+  Influence is limited to 0.1–100%; missing endpoint sides and Hold/vertical legacy
+  tangents have no finite handle. Use the numeric fields to initialize those sides.
+- Handle drags preview the curve without editing the document until release (one
+  Undo). Escape, document changes, layer/channel changes or view-type switching
+  cancel. Selected handles fit the graph height; its scale stays fixed during a
+  drag. Overlapping handles can still be edited precisely with the numeric fields.
+- Unedited legacy curves retain their original samples. X1/Y1/X2/Y2 and the
+  normalized popup editor remain available until temporal handles affect the
+  segment. The graph uses finite velocity handles where possible; singular legacy
+  segments retain the normalized handle fallback.
 - Tangents follow keys through value edits, moves, copying, Undo/Redo and saving.
   Layer clipboard and effect preset FPS conversion preserves velocity per second.
   These handles require project version 35 (effect preset version 2 when present).
@@ -491,7 +503,7 @@ zoom and pan; its vertical range fits the visible curve.
   Linked modes require project version 36 / effect preset version 3. Old independent
   handles and legacy files retain their existing representation and samples.
 - This is still a single-channel value graph. Spatial paths, multi-channel graph
-  editing, influence-handle dragging and full AE
+  editing, automatic Alt-rejoining of split handles and full AE
   Easy Ease compatibility remain unfinished.
   Geometry path timing tracks do not yet support these scalar velocity handles.
 
