@@ -84,6 +84,7 @@ impl GradientDraft {
             && self.tool == s.tool
             && !s.playing
             && s.colors.session.is_none()
+            && s.gradient_editor.is_none()
             && s.text_session.is_none()
             && s.editor.selected() == Some(self.layer)
             && s.contents_selection

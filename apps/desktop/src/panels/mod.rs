@@ -37,3 +37,5 @@ mod path_controls;
 
 pub(crate) mod color_picker;
 pub(crate) mod font_manager;
+
+pub(crate) mod gradient_editor;

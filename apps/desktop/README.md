@@ -57,7 +57,19 @@ With no selection it creates a shape path; use Ctrl when starting a mask on a
 shape layer. Click an existing vertex or handle to drag it, click a curve to
 insert a vertex without changing the curve, and use Delete on a selected vertex.
 Alt-click converts a vertex to a corner; Alt-drag a handle to break its symmetry.
-Shift constrains handles to an axis. Each completed path or drag is one Undo.
+Shift constrains handles or a vertex drag to a local axis. Shift-click vertices
+on one path to toggle a multi-selection; dragging a selected vertex moves that
+set by the same local delta, preserving tangent offsets and unselected points.
+An ordinary click on a different vertex replaces the selection. Handles remain
+single-target edits. Each completed path or drag is one Undo. Selection-only and
+edit-then-return gestures do not create keys or history entries.
+
+Delete removes the selected static vertices atomically, retaining at least two
+vertices on open paths and three on closed paths. Animated paths reject topology
+changes without falling through to layer deletion. The same selection workflow
+works on legacy shapes, vector masks and nested Contents paths. Escape, focus,
+time, tool, target or document changes cancel a pending gesture. Opening Settings,
+Help or other shell overlays removes canvas focus before editing shortcuts run.
 
 Properties contains shape Fill/Stroke and Closed Path controls, and ordered
 mask Add/Subtract/Intersect/None, Invert, reorder and remove controls. Paths
@@ -65,7 +77,7 @@ are stored in layer coordinates, including parent transformations, in project
 version 29. Existing rectangular masks remain supported. Mask Opacity,
 Feather and Expansion animate in v30; shape/mask vertices and handles animate
 in v31. Enable the Path stopwatch and edit with the Pen at another frame.
-Animated paths require matching topology. Multi-vertex selection, topology
+Animated paths require matching topology. Marquee/cross-path selection, topology
 changes across keys, variable feather and shape Contents operators remain open.
 
 Shape Stroke controls in Properties provide Butt/Round/Projecting line caps,
@@ -1954,9 +1966,25 @@ frames. **Edit gradient in Composition** exposes Start/End handles for the selec
 Gradient Fill/Stroke through nested group and layer transforms. Shift constrains
 a drag to a local axis; Alt translates both endpoints. Tab switches endpoints,
 arrows move 1 unit (Shift: 10), and Escape cancels a drag or exits the tool.
-Linear and radial gradients share these controls. AE's modal Gradient Editor,
-compound Colors/topology animation, and color-space or pixel equivalence remain
-separate work. See STATUS.md for current automated and native validation.
+Linear and radial gradients share these controls.
+
+**Edit Gradient…** opens a modal transaction for the selected Gradient Fill or
+Gradient Stroke. Add/select/remove color and opacity stops, drag stop locations
+or midpoint diamonds, and edit HEX/RGB, location, midpoint and opacity values.
+Up/Down selects ramp handles, Left/Right changes their values (Shift: larger
+steps), and Delete removes stops while retaining two of each kind. Tab remains
+inside the dialog. The draft updates the Composition without changing the saved
+document, autosave, output snapshot or Undo history. **OK** applies all accepted
+changes in one Undo; **Cancel** restores the original gradient. Escape in a text
+field first restores that field; Escape from the dialog cancels the transaction.
+Invalid input stays visible and blocks acceptance until corrected or reverted.
+An unchanged or edit-then-restore transaction does not create keys or history.
+
+This uses the existing independently animated stop channels, not AE's compound
+Colors property. Topology changes remain static. Embedded HSV/eyedropper controls,
+drag-away stop deletion, compound Colors/topology animation, and AE color-space,
+UI or pixel equivalence remain separate work. See STATUS.md for current automated
+and native validation.
 
 Group Skew ranges from −89° to 89° to avoid singular transforms. Skew Axis
 rotates the shear direction. The group applies Anchor, Scale, oriented Skew,
@@ -1992,7 +2020,7 @@ Corresponding vertices and tangents interpolate; animated topology must retain
 the same vertex count and closed state. Turn off Path animation before inserting
 or deleting vertices. Path geometry is edited on the canvas, not as numeric values
 in the graph. Grouped Contents is implemented; shape operators, variable feather,
-roto tools and multiple-vertex selection remain future work.
+roto tools, marquee/cross-path selection and animated topology remain future work.
 
 Version 29 masks migrate to stable IDs; scalar mask tracks use version 30 and
 path animation uses version 31. Compact image and sequence decoding now accepts

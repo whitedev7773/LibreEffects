@@ -3,12 +3,12 @@ use gpui::{MouseButton, MouseDownEvent, PathBuilder, Point, fill, size};
 use libre_effects_core::{ContentsNode, Frame};
 
 #[derive(Clone, Copy, Debug)]
-struct Handle {
-    parameter: GradientParam,
-    position: f64,
-    opacity: bool,
-    span: Option<(f64, f64)>,
-    color: u32,
+pub(crate) struct Handle {
+    pub(crate) parameter: GradientParam,
+    pub(crate) position: f64,
+    pub(crate) opacity: bool,
+    pub(crate) span: Option<(f64, f64)>,
+    pub(crate) color: u32,
 }
 
 #[cfg(test)]
@@ -280,7 +280,7 @@ mod tests {
     }
 }
 impl Handle {
-    fn value(self, position: f64) -> f64 {
+    pub(crate) fn value(self, position: f64) -> f64 {
         let (lo, hi) = self.parameter.bounds();
         match self.span {
             Some((a, b)) => ((position - a) * 100. / (b - a)).clamp(lo, hi),
@@ -288,7 +288,11 @@ impl Handle {
         }
     }
 }
-fn handles(node: &ContentsNode, frame: Frame, draft: Option<(GradientParam, f64)>) -> Vec<Handle> {
+pub(crate) fn handles(
+    node: &ContentsNode,
+    frame: Frame,
+    draft: Option<(GradientParam, f64)>,
+) -> Vec<Handle> {
     let Some(g) = node.kind.gradient() else {
         return vec![];
     };
@@ -348,17 +352,17 @@ fn handles(node: &ContentsNode, frame: Frame, draft: Option<(GradientParam, f64)
     }
     result
 }
-fn position(bounds: Bounds<Pixels>, x: Pixels) -> f64 {
+pub(crate) fn position(bounds: Bounds<Pixels>, x: Pixels) -> f64 {
     (f32::from(x - bounds.left() - px(8.)) / (f32::from(bounds.size.width) - 16.).max(1.)) as f64
         * 100.
 }
-fn at(bounds: Bounds<Pixels>, h: Handle) -> Point<Pixels> {
+pub(crate) fn at(bounds: Bounds<Pixels>, h: Handle) -> Point<Pixels> {
     point(
         bounds.left() + px(8.) + (bounds.size.width - px(16.)) * h.position as f32 / 100.,
         bounds.top() + px(if h.opacity { 8. } else { 56. }),
     )
 }
-fn hit(handles: &[Handle], bounds: Bounds<Pixels>, p: Point<Pixels>) -> Option<Handle> {
+pub(crate) fn hit(handles: &[Handle], bounds: Bounds<Pixels>, p: Point<Pixels>) -> Option<Handle> {
     // Stops win over nearby diamonds; reverse order matches the paint stack for coincident stops.
     [false, true].into_iter().find_map(|midpoint| {
         handles.iter().rev().copied().find(|h| {
@@ -368,6 +372,62 @@ fn hit(handles: &[Handle], bounds: Bounds<Pixels>, p: Point<Pixels>) -> Option<H
                 && f32::from(center.y - p.y).abs() <= 8.
         })
     })
+}
+pub(crate) fn paint_ramp(
+    b: Bounds<Pixels>,
+    samples: &[[f64; 4]],
+    all: &[Handle],
+    selected: Option<GradientParam>,
+    w: &mut Window,
+) {
+    let width = (f32::from(b.size.width) - 16.).ceil().max(1.) as usize;
+    for x in 0..width {
+        let c = samples[x * 255 / (width - 1).max(1)];
+        for row in 0..3 {
+            let bg = if (x / 8 + row) % 2 == 0 { 85. } else { 153. };
+            let color = c[..3].iter().fold(0u32, |acc, v| {
+                (acc << 8) | (v * 255. * c[3] + bg * (1. - c[3])).round() as u32
+            });
+            w.paint_quad(fill(
+                Bounds::new(
+                    point(
+                        b.left() + px(8. + x as f32),
+                        b.top() + px(20. + row as f32 * 8.),
+                    ),
+                    size(px(1.5), px(8.5)),
+                ),
+                rgb(color),
+            ));
+        }
+    }
+    for h in all {
+        let p = at(b, *h);
+        let color = if selected == Some(h.parameter) {
+            ui::BLUE
+        } else {
+            0x999999
+        };
+        if h.span.is_some() {
+            let mut path = PathBuilder::fill();
+            path.move_to(p + point(px(0.), px(-4.)));
+            path.line_to(p + point(px(4.), px(0.)));
+            path.line_to(p + point(px(0.), px(4.)));
+            path.line_to(p + point(px(-4.), px(0.)));
+            path.close();
+            if let Ok(path) = path.build() {
+                w.paint_path(path, rgb(color));
+            }
+        } else {
+            w.paint_quad(fill(
+                Bounds::new(p - point(px(6.), px(6.)), size(px(12.), px(12.))),
+                rgb(color),
+            ));
+            w.paint_quad(fill(
+                Bounds::new(p - point(px(4.), px(4.)), size(px(8.), px(8.))),
+                rgb(h.color),
+            ));
+        }
+    }
 }
 pub(super) struct RampDrag {
     draft: crate::color_edit::GradientDraft,
@@ -658,28 +718,7 @@ impl ContentsControls {
                 .on_key_down(cx.listener(Self::ramp_key))
                 .tooltip(|_,cx|cx.new(|_|ui::Tip("Drag a stop or diamond; click an empty stop row to add. Up/Down selects; Left/Right adjusts (Shift: 10); Home/End; Delete removes a stop; Escape cancels a drag. Composition previews the draft; release applies one edit.".into())).into())
                 .child(canvas(move |b,_,_|bounds.set(Some(b)),move |b,_,w,_| {
-                    let width=(f32::from(b.size.width)-16.).ceil().max(1.) as usize;
-                    for x in 0..width {
-                        let c=samples[x*255/(width-1).max(1)];
-                        for row in 0..3 {
-                            let bg=if (x/8+row)%2==0 {85.} else {153.};
-                            let color=c[..3].iter().fold(0u32,|acc,v|(acc<<8)|(v*255.*c[3]+bg*(1.-c[3])).round() as u32);
-                            w.paint_quad(fill(Bounds::new(point(b.left()+px(8.+x as f32),b.top()+px(20.+row as f32*8.)),size(px(1.5),px(8.5))),rgb(color)));
-                        }
-                    }
-                    for h in &all {
-                        let p=at(b,*h);
-                        let color=if selected==Some(h.parameter) {ui::BLUE} else {0x999999};
-                        if h.span.is_some() {
-                            let mut path=PathBuilder::fill();
-                            path.move_to(p+point(px(0.),px(-4.)));path.line_to(p+point(px(4.),px(0.)));
-                            path.line_to(p+point(px(0.),px(4.)));path.line_to(p+point(px(-4.),px(0.)));path.close();
-                            if let Ok(path)=path.build(){w.paint_path(path,rgb(color));}
-                        } else {
-                            w.paint_quad(fill(Bounds::new(p-point(px(6.),px(6.)),size(px(12.),px(12.))),rgb(color)));
-                            w.paint_quad(fill(Bounds::new(p-point(px(4.),px(4.)),size(px(8.),px(8.))),rgb(h.color)));
-                        }
-                    }
+                    paint_ramp(b, &samples, &all, selected, w);
                     let moving=owner.clone();
                     w.on_mouse_event(move |e:&gpui::MouseMoveEvent,phase,_,cx| {
                         if phase.bubble() && e.pressed_button==Some(MouseButton::Left) {

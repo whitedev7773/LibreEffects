@@ -44,6 +44,9 @@ pub(crate) enum Action {
     CommitText,
     CancelText,
     Preset(presets::PresetAction),
+    OpenGradient(u64),
+    ApplyGradient,
+    CancelGradient,
     OpenColor(crate::color_edit::Target),
     ApplyColor,
     CancelColor,
@@ -245,6 +248,7 @@ pub(crate) struct EditorState {
     pub gradient_controls: Option<crate::color_edit::GradientTarget>,
     pub contents_selection: Option<(CompositionId, LayerId, u64)>,
     pub gradient_preview: Option<crate::color_edit::GradientDraft>,
+    pub gradient_editor: Option<crate::panels::gradient_editor::Session>,
     pub graph_property: PropertyPath,
     pub graph_key: Option<(LayerId, Frame)>,
     playback_origin: Option<(Instant, Frame)>,
@@ -332,6 +336,7 @@ impl Default for EditorState {
             gradient_controls: None,
             contents_selection: None,
             gradient_preview: None,
+            gradient_editor: None,
             graph_property: Property::PositionX.into(),
             graph_key: None,
             playback_origin: None,
@@ -513,6 +518,7 @@ impl EditorState {
         self.gradient_controls = None;
         self.contents_selection = None;
         self.gradient_preview = None;
+        self.gradient_editor = None;
         self.stop();
         self.restore_composition_view();
         self.selected_layers.clear();
@@ -523,6 +529,12 @@ impl EditorState {
     }
 
     pub fn dispatch(&mut self, action: &Action, window: &mut Window, cx: &mut Context<Self>) {
+        self.invalidate_gradient_editor();
+        if self.gradient_editor.is_some()
+            && !matches!(action, Action::ApplyGradient | Action::CancelGradient)
+        {
+            return;
+        }
         if !matches!(action, Action::CancelText | Action::CommitText) {
             self.finish_text(true, cx);
         }
@@ -620,6 +632,24 @@ impl EditorState {
             Action::ManageFonts => {
                 self.stop();
                 self.fonts_open = true;
+            }
+            Action::OpenGradient(item) => {
+                self.stop();
+                self.gradient_preview = None;
+                self.gradient_controls = None;
+                match crate::panels::gradient_editor::Session::new(self, *item) {
+                    Ok(session) => {
+                        self.gradient_editor = Some(session);
+                        self.status =
+                            "Gradient draft · OK applies one edit · Cancel discards".into();
+                    }
+                    Err(error) => self.status = error,
+                }
+            }
+            Action::ApplyGradient => self.accept_gradient_editor(),
+            Action::CancelGradient => {
+                self.gradient_editor = None;
+                self.status = "Gradient edit canceled".into();
             }
             Action::OpenColor(target) => {
                 self.stop();

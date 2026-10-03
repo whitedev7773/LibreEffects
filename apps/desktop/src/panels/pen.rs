@@ -1,11 +1,13 @@
+use std::collections::BTreeSet;
+
 use crate::{
     editor::{EditorState, Tool},
     ui,
 };
 use gpui::{Bounds, PathBuilder, Pixels, Point, Window, fill, point, px, rgb, size};
 use libre_effects_core::{
-    Affine, Command, Content, LayerId, PathMask, PathMaskMode, PathTarget, PathVertex, Project,
-    Shape, VectorPath,
+    Affine, Command, CompositionId, Content, LayerId, PathMask, PathMaskMode, PathTarget,
+    PathVertex, Project, Shape, VectorPath,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -15,23 +17,48 @@ enum Target {
     Contents(LayerId, u64),
     Mask(LayerId, usize),
 }
+/// Transient editor context; vertex selection never enters the project or history.
+#[derive(Clone)]
+struct Context {
+    project: Project,
+    revision: u64,
+    frame: u32,
+    selection: Option<LayerId>,
+    selected_layers: BTreeSet<LayerId>,
+    contents_selection: Option<(CompositionId, LayerId, u64)>,
+}
+impl Context {
+    fn capture(s: &EditorState) -> Self {
+        Self {
+            project: s.editor.project().clone(),
+            revision: s.document_revision,
+            frame: s.frame,
+            selection: s.editor.selected(),
+            selected_layers: s.selected_layers.clone(),
+            contents_selection: s.contents_selection,
+        }
+    }
+    fn valid(&self, s: &EditorState) -> bool {
+        s.tool == Tool::Pen
+            && s.gradient_editor.is_none()
+            && s.document_revision == self.revision
+            && s.frame == self.frame
+            && s.editor.selected() == self.selection
+            && s.selected_layers == self.selected_layers
+            && s.contents_selection == self.contents_selection
+            && s.editor.project() == &self.project
+    }
+}
 #[derive(Clone)]
 struct Session {
     target: Target,
     path: VectorPath,
     world: Affine,
-    project: Project,
-    revision: u64,
-    frame: u32,
-    selection: Option<LayerId>,
+    context: Context,
 }
 impl Session {
     fn valid(&self, s: &EditorState) -> bool {
-        s.tool == Tool::Pen
-            && s.document_revision == self.revision
-            && s.frame == self.frame
-            && s.editor.selected() == self.selection
-            && s.editor.project() == &self.project
+        self.context.valid(s)
     }
     fn command(&self) -> Option<Command> {
         if !self.path.valid() {
@@ -45,27 +72,33 @@ impl Session {
                     stroke_width: if self.path.closed { 0.0 } else { 3.0 },
                     ..Default::default()
                 }),
-                width: self.project.composition().width() as f64,
-                height: self.project.composition().height() as f64,
+                width: self.context.project.composition().width() as f64,
+                height: self.context.project.composition().height() as f64,
                 name: "Shape Path".into(),
             }),
             Target::Shape(id) => Some(Command::EditPath {
                 id,
                 target: PathTarget::Shape,
-                frame: self.frame,
+                frame: self.context.frame,
                 path: self.path.clone(),
             }),
             Target::Contents(id, item) => Some(Command::EditPath {
                 id,
                 target: PathTarget::Contents(item),
-                frame: self.frame,
+                frame: self.context.frame,
                 path: self.path.clone(),
             }),
             Target::Mask(id, index) => {
                 if !self.path.closed {
                     return None;
                 }
-                let mut masks = self.project.composition().layer(id)?.path_masks().to_vec();
+                let mut masks = self
+                    .context
+                    .project
+                    .composition()
+                    .layer(id)?
+                    .path_masks()
+                    .to_vec();
                 if index == masks.len() {
                     masks.push(PathMask {
                         path: self.path.clone(),
@@ -77,7 +110,7 @@ impl Session {
                     return Some(Command::EditPath {
                         id,
                         target: PathTarget::Mask(masks.get(index)?.id),
-                        frame: self.frame,
+                        frame: self.context.frame,
                         path: self.path.clone(),
                     });
                 }
@@ -94,15 +127,32 @@ enum Part {
 }
 struct Drag {
     session: Session,
+    /// The evaluated pose before conversion/insertion, for no-op detection.
+    original: VectorPath,
+    /// The pose at pointer-down; movement is never accumulated between events.
+    start: VectorPath,
+    pointer: [f64; 2],
+    vertices: BTreeSet<usize>,
     vertex: usize,
     part: Part,
+}
+impl Drag {
+    fn command(&self) -> Option<Command> {
+        (self.session.path != self.original)
+            .then(|| self.session.command())
+            .flatten()
+    }
+}
+struct Selection {
+    target: Target,
+    vertices: BTreeSet<usize>,
 }
 #[derive(Default)]
 pub(super) struct Pen {
     draft: Option<Session>,
     drag: Option<Drag>,
-    selected: Option<(Target, usize)>,
-    selected_context: Option<(Project, u32, Option<LayerId>)>,
+    selected: Option<Selection>,
+    selected_context: Option<Context>,
     held: bool,
 }
 fn add(a: [f64; 2], b: [f64; 2]) -> [f64; 2] {
@@ -110,6 +160,13 @@ fn add(a: [f64; 2], b: [f64; 2]) -> [f64; 2] {
 }
 fn sub(a: [f64; 2], b: [f64; 2]) -> [f64; 2] {
     [a[0] - b[0], a[1] - b[1]]
+}
+fn constrain(delta: &mut [f64; 2]) {
+    if delta[0].abs() > delta[1].abs() {
+        delta[1] = 0.0;
+    } else {
+        delta[0] = 0.0;
+    }
 }
 fn distance(a: [f64; 2], b: [f64; 2]) -> f64 {
     (a[0] - b[0]).hypot(a[1] - b[1])
@@ -165,31 +222,75 @@ fn paths(s: &EditorState) -> Vec<(Target, VectorPath, Affine)> {
     paths
 }
 impl Pen {
-    pub fn reset_if_stale(&mut self, s: &EditorState) {
-        if self
-            .selected_context
-            .as_ref()
-            .is_some_and(|(p, f, selection)| {
-                p != s.editor.project() || *f != s.frame || *selection != s.editor.selected()
-            })
-        {
-            self.selected = None;
-            self.selected_context = None;
+    pub fn cancel(&mut self) {
+        *self = Self::default();
+    }
+    fn abandon_drag(&mut self) {
+        if let Some(drag) = self.drag.take() {
+            self.clear_transient_selection(&drag);
         }
-        if self.draft.as_ref().is_some_and(|d| !d.valid(s))
+        self.held = false;
+    }
+    fn clear_transient_selection(&mut self, drag: &Drag) {
+        if drag.start.vertices.len() != drag.original.vertices.len()
+            && let Some(selection) = &mut self.selected
+            && selection.target == drag.session.target
+        {
+            // Inserted indices address the draft, not the unchanged source path.
+            // Keep the target so Delete remains consumed after cancellation.
+            selection.vertices.clear();
+        }
+    }
+    pub fn reset_if_stale(&mut self, s: &EditorState) {
+        if self.selected_context.as_ref().is_some_and(|c| !c.valid(s))
+            || self.draft.as_ref().is_some_and(|d| !d.valid(s))
             || self.drag.as_ref().is_some_and(|d| !d.session.valid(s))
             || s.tool != Tool::Pen
+            || s.gradient_editor.is_some()
         {
-            *self = Self::default();
+            self.cancel();
         }
     }
     pub fn pending(&self, s: &EditorState) -> Option<Command> {
-        self.drag
-            .as_ref()
-            .map(|d| &d.session)
-            .or(self.draft.as_ref())
-            .filter(|d| d.valid(s))?
-            .command()
+        if let Some(d) = self.drag.as_ref().filter(|d| d.session.valid(s)) {
+            d.command()
+        } else {
+            self.draft.as_ref().filter(|d| d.valid(s))?.command()
+        }
+    }
+    fn select_vertex(&mut self, target: Target, index: usize, toggle: bool, s: &EditorState) {
+        if let Some(selection) = &mut self.selected
+            && selection.target == target
+        {
+            if toggle {
+                if !selection.vertices.insert(index) {
+                    selection.vertices.remove(&index);
+                }
+            } else if !selection.vertices.contains(&index) {
+                selection.vertices = [index].into();
+            }
+        } else {
+            self.selected = Some(Selection {
+                target,
+                vertices: [index].into(),
+            });
+        }
+        self.selected_context = Some(Context::capture(s));
+    }
+    // Predict the committed context without touching the live document/history.
+    // A rejected edit retains the current selection (and continues to consume Delete).
+    fn remember_command(&mut self, command: &Command, s: &EditorState) -> bool {
+        let mut next = libre_effects_core::Editor::default();
+        if next.replace_project(s.editor.project().clone()).is_ok()
+            && next.execute(command.clone()).is_ok()
+        {
+            let mut context = Context::capture(s);
+            context.project = next.project().clone();
+            self.selected_context = Some(context);
+            true
+        } else {
+            false
+        }
     }
     pub fn down(
         &mut self,
@@ -197,9 +298,15 @@ impl Pen {
         p: [f64; 2],
         zoom: f64,
         alt: bool,
+        shift: bool,
         force_mask: bool,
     ) -> Option<Command> {
         self.reset_if_stale(s);
+        if s.tool != Tool::Pen || s.gradient_editor.is_some() {
+            return None;
+        }
+        // A second pointer-down supersedes any gesture whose release was lost.
+        self.abandon_drag();
         self.held = true;
         let radius = 7.0 / zoom;
         if let Some(d) = &mut self.draft {
@@ -220,15 +327,12 @@ impl Pen {
             target,
             path,
             world,
-            project: s.editor.project().clone(),
-            revision: s.document_revision,
-            frame: s.frame,
-            selection: s.editor.selected(),
+            context: Context::capture(s),
         };
         let existing = paths(s);
         // Handles precede curve insertion, vertices precede overlapping handles.
-        for (target, path, world) in &existing {
-            for part in [Part::Vertex, Part::Incoming, Part::Outgoing] {
+        for part in [Part::Vertex, Part::Incoming, Part::Outgoing] {
+            for (target, path, world) in &existing {
                 for (index, v) in path.vertices.iter().enumerate() {
                     let at = match part {
                         Part::Vertex => v.position,
@@ -236,13 +340,28 @@ impl Pen {
                         Part::Outgoing => add(v.position, v.outgoing),
                     };
                     if distance(world.point(at), p) <= radius {
+                        self.select_vertex(
+                            *target,
+                            index,
+                            shift && matches!(part, Part::Vertex),
+                            s,
+                        );
+                        if shift && matches!(part, Part::Vertex) {
+                            // Shift-click toggles selection only, even if the pointer moves.
+                            self.held = false;
+                            self.drag = None;
+                            return None;
+                        }
                         let mut session = make(*target, path.clone(), *world);
                         if alt && matches!(part, Part::Vertex) {
                             session.path.vertices[index].incoming = [0.0; 2];
                             session.path.vertices[index].outgoing = [0.0; 2];
                         }
-                        self.selected = Some((*target, index));
                         self.drag = Some(Drag {
+                            original: path.clone(),
+                            start: session.path.clone(),
+                            pointer: world.inverse()?.point(p),
+                            vertices: self.selected.as_ref()?.vertices.clone(),
                             session,
                             vertex: index,
                             part: if alt && matches!(part, Part::Vertex) {
@@ -255,6 +374,10 @@ impl Pen {
                     }
                 }
             }
+        }
+        if shift {
+            self.held = false;
+            return None;
         }
         for (target, path, world) in &existing {
             let mut best = (radius, 0, 0.5);
@@ -277,8 +400,16 @@ impl Pen {
             if best.0 < radius {
                 let mut session = make(*target, path.clone(), *world);
                 if session.path.insert(best.1, best.2) {
-                    self.selected = Some((*target, best.1 + 1));
+                    self.selected = Some(Selection {
+                        target: *target,
+                        vertices: [best.1 + 1].into(),
+                    });
+                    self.selected_context = Some(Context::capture(s));
                     self.drag = Some(Drag {
+                        original: path.clone(),
+                        start: session.path.clone(),
+                        pointer: world.inverse()?.point(p),
+                        vertices: [best.1 + 1].into(),
                         session,
                         vertex: best.1 + 1,
                         part: Part::Vertex,
@@ -308,6 +439,7 @@ impl Pen {
         };
         let local = world.inverse()?.point(p);
         self.selected = None;
+        self.selected_context = None;
         self.draft = Some(make(
             target,
             VectorPath {
@@ -331,11 +463,7 @@ impl Pen {
             };
             let mut delta = sub(inverse.point(p), v.position);
             if shift {
-                if delta[0].abs() > delta[1].abs() {
-                    delta[1] = 0.0;
-                } else {
-                    delta[0] = 0.0;
-                }
+                constrain(&mut delta);
             }
             v.outgoing = delta;
             v.incoming = [-delta[0], -delta[1]];
@@ -343,18 +471,27 @@ impl Pen {
             let Some(inverse) = d.session.world.inverse() else {
                 return;
             };
-            let v = &mut d.session.path.vertices[d.vertex];
             let p = inverse.point(p);
+            d.session.path = d.start.clone();
             match d.part {
-                Part::Vertex => v.position = p,
+                Part::Vertex => {
+                    let mut delta = sub(p, d.pointer);
+                    if shift {
+                        constrain(&mut delta);
+                    }
+                    for &index in &d.vertices {
+                        d.session.path.vertices[index].position =
+                            add(d.start.vertices[index].position, delta);
+                    }
+                }
                 Part::Incoming | Part::Outgoing => {
+                    if p == d.pointer {
+                        return;
+                    }
+                    let v = &mut d.session.path.vertices[d.vertex];
                     let mut delta = sub(p, v.position);
                     if shift {
-                        if delta[0].abs() > delta[1].abs() {
-                            delta[1] = 0.0;
-                        } else {
-                            delta[0] = 0.0;
-                        }
+                        constrain(&mut delta);
                     }
                     let opposite = [-delta[0], -delta[1]];
                     match d.part {
@@ -375,21 +512,29 @@ impl Pen {
             }
         }
     }
+    pub fn release(
+        &mut self,
+        s: &EditorState,
+        p: [f64; 2],
+        alt: bool,
+        shift: bool,
+    ) -> Option<Command> {
+        self.reset_if_stale(s);
+        self.moving(p, alt, shift);
+        self.up(s)
+    }
     pub fn up(&mut self, s: &EditorState) -> Option<Command> {
+        self.reset_if_stale(s);
         self.held = false;
-        let command = self
-            .drag
-            .take()
-            .filter(|d| d.session.valid(s))?
-            .session
-            .command()?;
-        let mut next = libre_effects_core::Editor::default();
-        if next.replace_project(s.editor.project().clone()).is_ok()
-            && next.execute(command.clone()).is_ok()
+        let drag = self.drag.take()?;
+        let command = drag.command();
+        if !command
+            .as_ref()
+            .is_some_and(|command| self.remember_command(command, s))
         {
-            self.selected_context = Some((next.project().clone(), s.frame, s.editor.selected()));
+            self.clear_transient_selection(&drag);
         }
-        Some(command)
+        command
     }
     fn finish(&mut self) -> Option<Command> {
         let d = self.draft.as_ref()?;
@@ -414,6 +559,7 @@ impl Pen {
                 (true, self.finish())
             }
             "backspace" | "delete" => {
+                self.abandon_drag();
                 if let Some(d) = &mut self.draft {
                     d.path.vertices.pop();
                     if d.path.vertices.is_empty() {
@@ -421,27 +567,42 @@ impl Pen {
                     }
                     return (true, None);
                 }
-                if let Some((target, index)) = self.selected {
+                if let Some(selection) = &self.selected {
+                    let target = selection.target;
                     if let Some((_, mut path, world)) =
                         paths(s).into_iter().find(|(t, _, _)| *t == target)
-                        && index < path.vertices.len()
-                        && path.vertices.len() > if path.closed { 3 } else { 2 }
                     {
-                        path.vertices.remove(index);
-                        self.selected = None;
-                        return (
-                            true,
-                            Session {
-                                target,
-                                path,
-                                world,
-                                project: s.editor.project().clone(),
-                                revision: s.document_revision,
-                                frame: s.frame,
-                                selection: s.editor.selected(),
-                            }
-                            .command(),
-                        );
+                        if selection
+                            .vertices
+                            .iter()
+                            .any(|&index| index >= path.vertices.len())
+                        {
+                            self.selected.as_mut().unwrap().vertices.clear();
+                            return (true, None);
+                        }
+                        let count = selection.vertices.len();
+                        if count == 0
+                            || path.vertices.len().saturating_sub(count)
+                                < if path.closed { 3 } else { 2 }
+                        {
+                            return (true, None);
+                        }
+                        for &index in selection.vertices.iter().rev() {
+                            path.vertices.remove(index);
+                        }
+                        let command = Session {
+                            target,
+                            path,
+                            world,
+                            context: Context::capture(s),
+                        }
+                        .command();
+                        if let Some(command) = &command
+                            && self.remember_command(command, s)
+                        {
+                            self.selected.as_mut().unwrap().vertices.clear();
+                        }
+                        return (true, command);
                     }
                     return (true, None);
                 }
@@ -450,8 +611,8 @@ impl Pen {
             _ => (false, None),
         }
     }
-    pub fn overlay(&self, s: &EditorState) -> Vec<(VectorPath, Affine, bool, Option<usize>)> {
-        if s.tool != Tool::Pen {
+    pub fn overlay(&self, s: &EditorState) -> Vec<(VectorPath, Affine, bool, BTreeSet<usize>)> {
+        if s.tool != Tool::Pen || s.gradient_editor.is_some() {
             return Vec::new();
         }
         let mut all = paths(s);
@@ -469,15 +630,18 @@ impl Pen {
             .map(|(t, p, w)| {
                 let selected = self
                     .selected
-                    .filter(|(target, _)| *target == t)
-                    .map(|(_, i)| i);
+                    .as_ref()
+                    .filter(|selection| selection.target == t)
+                    .filter(|_| self.selected_context.as_ref().is_some_and(|c| c.valid(s)))
+                    .map(|selection| selection.vertices.clone())
+                    .unwrap_or_default();
                 (p, w, matches!(t, Target::Mask(..)), selected)
             })
             .collect()
     }
 }
 pub(super) fn paint(
-    paths: &[(VectorPath, Affine, bool, Option<usize>)],
+    paths: &[(VectorPath, Affine, bool, BTreeSet<usize>)],
     origin: Point<Pixels>,
     zoom: f32,
     window: &mut Window,
@@ -528,7 +692,7 @@ pub(super) fn paint(
             }
             window.paint_quad(fill(
                 Bounds::new(p - point(px(3.0), px(3.0)), size(px(6.0), px(6.0))),
-                if *selected == Some(index) {
+                if selected.contains(&index) {
                     rgb(0xffffff)
                 } else {
                     color
@@ -549,7 +713,7 @@ mod tests {
         state
     }
     fn click(pen: &mut Pen, s: &mut EditorState, p: [f64; 2]) {
-        if let Some(c) = pen.down(s, p, 1.0, false, false) {
+        if let Some(c) = pen.down(s, p, 1.0, false, false, false) {
             s.editor.execute(c).unwrap();
         }
         if let Some(c) = pen.up(s) {
@@ -582,13 +746,13 @@ mod tests {
             })
             .unwrap();
         s.frame = 20;
-        pen.down(&s, [20.0, 20.0], 1.0, false, false);
+        pen.down(&s, [20.0, 20.0], 1.0, false, false, false);
         pen.moving([60.0, 40.0], false, false);
         s.editor.execute(pen.up(&s).unwrap()).unwrap();
         s.frame = 10;
         assert_eq!(paths(&s)[0].1.vertices[0].position, [40.0, 30.0]);
         let before = s.editor.project().clone();
-        pen.down(&s, [40.0, 30.0], 1.0, false, false);
+        pen.down(&s, [40.0, 30.0], 1.0, false, false, false);
         pen.moving([45.0, 55.0], false, false);
         s.editor.execute(pen.up(&s).unwrap()).unwrap();
         assert_eq!(paths(&s)[0].1.vertices[0].position, [45.0, 55.0]);
@@ -619,7 +783,7 @@ mod tests {
         assert!(shape.path.as_ref().unwrap().closed);
         s.editor.undo();
         assert_eq!(*s.editor.project(), initial);
-        pen.down(&s, [10.0, 10.0], 1.0, false, false);
+        pen.down(&s, [10.0, 10.0], 1.0, false, false, false);
         pen.moving([50.0, 10.0], false, false);
         pen.up(&s);
         click(&mut pen, &mut s, [150.0, 100.0]);
@@ -635,7 +799,7 @@ mod tests {
         assert_eq!(path.vertices[0].outgoing, [40.0, 0.0]);
         assert_eq!(path.vertices[0].incoming, [-40.0, 0.0]);
         let saved = s.editor.project().clone();
-        pen.down(&s, [400.0, 400.0], 1.0, false, false);
+        pen.down(&s, [400.0, 400.0], 1.0, false, false, false);
         pen.key("escape", &s);
         assert!(pen.pending(&s).is_none());
         assert_eq!(*s.editor.project(), saved);
@@ -646,7 +810,7 @@ mod tests {
         let mut pen = Pen::default();
         closed(&mut pen, &mut s);
         let before = s.editor.project().clone();
-        pen.down(&s, [20.0, 20.0], 1.0, false, false);
+        pen.down(&s, [20.0, 20.0], 1.0, false, false, false);
         pen.moving([35.0, 45.0], false, false);
         s.editor.execute(pen.up(&s).unwrap()).unwrap();
         let Content::Shape(shape) = s.editor.selected_layer().unwrap().content() else {
@@ -676,7 +840,7 @@ mod tests {
             panic!()
         };
         assert_eq!(shape.path.as_ref().unwrap().vertices.len(), 4);
-        pen.down(&s, [20.0, 20.0], 1.0, true, false);
+        pen.down(&s, [20.0, 20.0], 1.0, true, false, false);
         pen.moving([40.0, 20.0], false, false);
         s.editor.execute(pen.up(&s).unwrap()).unwrap();
         let Content::Shape(shape) = s.editor.selected_layer().unwrap().content() else {
@@ -744,14 +908,18 @@ mod tests {
             ) < 1e-8
         );
         let saved = s.editor.project().clone();
-        pen.down(&s, world.point([30.0, 30.0]), 1.0, false, false);
+        pen.down(&s, world.point([30.0, 30.0]), 1.0, false, false, false);
         pen.moving(world.point([50.0, 50.0]), false, false);
         s.frame = 1;
         assert!(pen.up(&s).is_none());
         assert_eq!(*s.editor.project(), saved);
         s.frame = 0;
         s.editor.execute(Command::ToggleLocked(2)).unwrap();
-        pen.down(&s, [0.0, 0.0], 1.0, false, false);
+        pen.down(&s, [0.0, 0.0], 1.0, false, false, false);
         assert!(pen.draft.is_none());
     }
 }
+
+#[cfg(test)]
+#[path = "pen_tests.rs"]
+mod multiselect_tests;

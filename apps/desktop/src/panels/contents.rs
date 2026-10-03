@@ -13,7 +13,7 @@ use libre_effects_core::{
     StrokeJoin, TrackEdit,
 };
 use std::{cell::Cell, rc::Rc};
-mod gradient_ramp;
+pub(super) mod gradient_ramp;
 use gradient_ramp::RampDrag;
 
 struct PaintMenu {
@@ -806,6 +806,18 @@ impl Render for ContentsControls {
                             cx.notify();
                         });
                     })),
+            );
+            let state = self.state.clone();
+            root = root.child(
+                ui::text_button("open-gradient-editor", "Edit Gradient…")
+                    .when(locked, |b| b.opacity(0.4))
+                    .when(!locked, |b| {
+                        b.on_click(move |_, w, cx| {
+                            TextField::commit_active(w, cx);
+                            state
+                                .update(cx, |s, cx| s.dispatch(&Action::OpenGradient(item), w, cx));
+                        })
+                    }),
             );
             root = root.child(self.gradient_ramp(node, frame, locked, cx));
             let mut types = div().flex().gap_1().child("Type");

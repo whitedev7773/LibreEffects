@@ -547,6 +547,7 @@ impl Preview {
                 p,
                 zoom as f64,
                 event.modifiers.alt,
+                event.modifiers.shift,
                 event.modifiers.control,
             );
             self.state.update(cx, |s, cx| {
@@ -788,7 +789,9 @@ impl Preview {
             return;
         }
         self.sample_pointer(event.position, cx);
-        if self.state.read(cx).colors.session.is_some() {
+        if self.state.read(cx).colors.session.is_some()
+            || self.state.read(cx).gradient_editor.is_some()
+        {
             return;
         }
         if event.pressed_button != Some(MouseButton::Left) {
@@ -873,11 +876,24 @@ impl Preview {
             self.text_dragging = false;
             return;
         }
-        if self.state.read(cx).colors.session.is_some() {
+        if self.state.read(cx).colors.session.is_some()
+            || self.state.read(cx).gradient_editor.is_some()
+        {
             return;
         }
         if self.state.read(cx).tool == Tool::Pen {
-            if let Some(command) = self.pen.up(self.state.read(cx)) {
+            let command = if let Some(p) = self.pen_pointer(event.position, cx) {
+                self.pen.release(
+                    self.state.read(cx),
+                    p,
+                    event.modifiers.alt,
+                    event.modifiers.shift,
+                )
+            } else {
+                self.pen.cancel();
+                None
+            };
+            if let Some(command) = command {
                 self.state
                     .update(cx, |s, cx| s.dispatch(&Action::Edit(command), window, cx));
             }
@@ -962,11 +978,13 @@ impl Render for Preview {
             self.gradient_focus_watch = Some([
                 cx.on_blur(&self.focus.clone(), window, |this, _, cx| {
                     this.gradient_drag = None;
+                    this.pen.cancel();
                     cx.notify();
                 }),
                 cx.observe_window_activation(window, |this, window, cx| {
                     if !window.is_window_active() {
                         this.gradient_drag = None;
+                        this.pen.cancel();
                         cx.notify();
                     }
                 }),
@@ -1111,9 +1129,15 @@ impl Render for Preview {
         let pan = point(px(state.preview_pan[0]), px(state.preview_pan[1]));
         let gesture = self.gesture.clone();
         let mut render_project = state
-            .gradient_preview
+            .gradient_editor
             .as_ref()
             .and_then(|draft| draft.preview(state))
+            .or_else(|| {
+                state
+                    .gradient_preview
+                    .as_ref()
+                    .and_then(|draft| draft.preview(state))
+            })
             .unwrap_or_else(|| state.text_project());
         let text_session = state.text_session.clone();
         let text_box_rect = self.text_box_drag.as_ref().map(|d| d.rect());
@@ -1159,17 +1183,23 @@ impl Render for Preview {
         let gradient_point = self.gradient_point;
         let pen_active = state.tool == Tool::Pen;
         let comp = render_project.composition().clone();
-        let gradient_gesture = self
-            .gradient_drag
+        let gradient_gesture = state
+            .gradient_editor
             .as_ref()
-            .filter(|g| g.valid(state))
-            .map(|g| g.id)
+            .filter(|draft| draft.current(state))
+            .map(|draft| draft.id)
             .or_else(|| {
-                state
-                    .gradient_preview
+                self.gradient_drag
                     .as_ref()
-                    .filter(|d| d.current(state))
-                    .map(|d| d.gesture_id)
+                    .filter(|g| g.valid(state))
+                    .map(|g| g.id)
+                    .or_else(|| {
+                        state
+                            .gradient_preview
+                            .as_ref()
+                            .filter(|d| d.current(state))
+                            .map(|d| d.gesture_id)
+                    })
             });
         self.update_render(
             Request {
@@ -1262,7 +1292,7 @@ impl Render for Preview {
                     .child(format!(
                         "{}  ›  Active Camera{}",
                         comp.name(),
-                        if text_session.is_some() { "  ·  Text: Ctrl+Enter finish · Esc cancel" } else if self.state.read(cx).colors.picking() { "  ·  Pick composition color · click to sample · Esc to return" } else if gradient_active { if gradient_point == 0 { "  ·  Gradient Start: drag · Tab switch · arrows move · Alt both · Esc close" } else { "  ·  Gradient End: drag · Tab switch · arrows move · Alt both · Esc close" } } else if pen_active { "  ·  Pen: click / drag · Enter finish · Esc cancel · Delete vertex" } else if self.pending.is_some() {
+                        if text_session.is_some() { "  ·  Text: Ctrl+Enter finish · Esc cancel" } else if self.state.read(cx).colors.picking() { "  ·  Pick composition color · click to sample · Esc to return" } else if gradient_active { if gradient_point == 0 { "  ·  Gradient Start: drag · Tab switch · arrows move · Alt both · Esc close" } else { "  ·  Gradient End: drag · Tab switch · arrows move · Alt both · Esc close" } } else if pen_active { "  ·  Pen: Shift-click select · drag selected · Shift constrain · Delete vertices · Esc cancel" } else if self.pending.is_some() {
                             "  ·  Rendering…"
                         } else {
                             ""
@@ -1277,7 +1307,7 @@ impl Render for Preview {
                         if this.gradient_key(event, window, cx) { cx.stop_propagation(); return; }
                         if event.keystroke.key=="escape" && this.text_box_drag.take().is_some() {cx.stop_propagation();cx.notify();return;}
                         if this.text_key(event,window,cx) {return;}
-                        if this.state.read(cx).colors.session.is_some() { return; }
+                        if this.state.read(cx).colors.session.is_some() || this.state.read(cx).gradient_editor.is_some() { return; }
                         if this.state.read(cx).tool == Tool::Pen {
                             let (handled, command) = this.pen.key(&event.keystroke.key, this.state.read(cx));
                             if handled {

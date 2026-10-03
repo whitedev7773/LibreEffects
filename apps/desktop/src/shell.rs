@@ -13,9 +13,29 @@ mod menu;
 #[path = "shell_search.rs"]
 mod search;
 
+/// Shell-owned overlays that do not install their own initial focus handler.
+/// Keep this separate from save/recovery rendering, and detect each newly opened
+/// overlay so a later confirmation can safely cover an already-open Settings view.
+#[derive(Clone, Copy, Default)]
+struct FocuslessModals {
+    settings: bool,
+    help: bool,
+    media: bool,
+    confirmation: bool,
+}
+impl FocuslessModals {
+    fn opened_since(self, previous: Self) -> bool {
+        (self.settings && !previous.settings)
+            || (self.help && !previous.help)
+            || (self.media && !previous.media)
+            || (self.confirmation && !previous.confirmation)
+    }
+}
+
 pub(crate) struct Shell {
     state: Entity<EditorState>,
     color_picker: Entity<crate::panels::color_picker::ColorPicker>,
+    gradient_editor: Entity<crate::panels::gradient_editor::GradientEditor>,
     font_manager: Entity<crate::panels::font_manager::FontManager>,
     layout: Entity<ResizablePanelGroup>,
     middle: Entity<ResizablePanelGroup>,
@@ -41,7 +61,7 @@ pub(crate) struct Shell {
     closing: bool,
     pending_document: Option<Action>,
     pending_save: bool,
-    modal_active: bool,
+    modal_active: FocuslessModals,
     replacing: bool,
 }
 
@@ -51,6 +71,8 @@ impl Shell {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
         let color_picker =
             cx.new(|cx| crate::panels::color_picker::ColorPicker::new(state.clone(), cx));
+        let gradient_editor =
+            cx.new(|cx| crate::panels::gradient_editor::GradientEditor::new(state.clone(), cx));
         let browser = cx.new(|cx| Browser::new(state.clone(), cx));
         let font_manager =
             cx.new(|cx| crate::panels::font_manager::FontManager::new(state.clone(), cx));
@@ -102,6 +124,7 @@ impl Shell {
         Self {
             state,
             color_picker,
+            gradient_editor,
             font_manager,
             layout,
             middle,
@@ -127,7 +150,7 @@ impl Shell {
             closing: false,
             pending_document: None,
             pending_save: false,
-            modal_active: false,
+            modal_active: FocuslessModals::default(),
             replacing: false,
         }
     }
@@ -139,7 +162,9 @@ impl Shell {
         cx.notify();
     }
     fn dispatch(&mut self, mut action: Action, window: &mut Window, cx: &mut Context<Self>) {
-        if self.state.read(cx).colors.session.is_some() {
+        if self.state.read(cx).colors.session.is_some()
+            || self.state.read(cx).gradient_editor.is_some()
+        {
             return;
         }
         if self.state.read(cx).queue_open && matches!(action, Action::Undo | Action::Redo) {
@@ -181,7 +206,9 @@ impl Shell {
         self.right.update(cx, |p, cx| p.reset(cx));
     }
     fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.state.read(cx).colors.session.is_some() {
+        if self.state.read(cx).colors.session.is_some()
+            || self.state.read(cx).gradient_editor.is_some()
+        {
             return;
         }
         self.settings_new = false;
@@ -203,10 +230,16 @@ impl Shell {
         self.settings_error.clear();
         self.settings = true;
         self.menu = None;
+        // Ctrl+K/Ctrl+N can originate in the Composition. Remove its key target
+        // immediately, before a queued Delete/Escape or the next render.
+        cx.stop_active_drag(window);
+        window.focus(&self.focus);
         cx.notify();
     }
     fn new_composition(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.state.read(cx).colors.session.is_some() {
+        if self.state.read(cx).colors.session.is_some()
+            || self.state.read(cx).gradient_editor.is_some()
+        {
             return;
         }
         self.open_settings(window, cx);
@@ -340,6 +373,7 @@ impl Shell {
             || state.fonts_open
             || state.recovery.is_some()
             || state.colors.session.is_some()
+            || state.gradient_editor.is_some()
         {
             return;
         }
@@ -422,10 +456,18 @@ impl Shell {
         }
         let key = event.keystroke.key.as_str();
         let m = event.keystroke.modifiers;
-        if self.state.read(cx).colors.session.is_some() {
+        if self.state.read(cx).colors.session.is_some()
+            || self.state.read(cx).gradient_editor.is_some()
+        {
             if key == "escape" {
-                self.state
-                    .update(cx, |s, cx| s.dispatch(&Action::CancelColor, window, cx));
+                self.state.update(cx, |s, cx| {
+                    let action = if s.gradient_editor.is_some() {
+                        Action::CancelGradient
+                    } else {
+                        Action::CancelColor
+                    };
+                    s.dispatch(&action, window, cx);
+                });
                 window.focus(&self.focus);
             }
             cx.stop_propagation();
@@ -620,6 +662,12 @@ impl Render for Shell {
             });
             let weak = cx.entity().downgrade();
             window.on_window_should_close(cx, move |window, cx| {
+                let _ = weak.update(cx, |s, cx| {
+                    s.state.update(cx, |state, cx| {
+                        state.gradient_editor = None;
+                        cx.notify();
+                    });
+                });
                 TextField::commit_active(window, cx);
                 // Commit an active field on blur before deciding whether the document
                 // can close. Otherwise an uncommitted typed value could be lost.
@@ -777,7 +825,7 @@ impl Render for Shell {
                     .child(div().mx_2().w(px(1.0)).h(px(20.0)).bg(rgb(0x414141)))
                     .child(ui::action_tool("shape-tool", match tool { Tool::Shape(libre_effects_core::ShapeKind::Ellipse) => "circle", Tool::Shape(libre_effects_core::ShapeKind::Star) => "star", Tool::Shape(libre_effects_core::ShapeKind::Polygon) => "triangle-up", _ => "square" }, "Shape tool (Q cycles shapes) · Drag to draw · Shift constrains · Alt draws from center", &self.state, Action::SetTool(match tool {Tool::Shape(_) => tool, _ => Tool::Shape(libre_effects_core::ShapeKind::Rectangle)}), matches!(tool, Tool::Shape(_))))
                     .child(ui::text_button("shape-menu", "▾").on_click(cx.listener(|this, _, window, cx| {if this.menu == Some("Shape") {this.close_menu(window,cx);} else {this.open_menu("Shape",window,cx);}})))
-                    .child(ui::action_tool("pen-tool", "pen", "Pen (G) · Click vertices, drag curves · Close at first point / Enter · Alt converts corners or breaks handles · Ctrl draws a mask on a shape", &self.state, Action::SetTool(Tool::Pen), tool == Tool::Pen))
+                    .child(ui::action_tool("pen-tool", "pen", "Pen (G) · Shift-click toggles vertices on one path · Drag selected vertices together · Shift during drag constrains local X/Y · Delete selected vertices · Close at first point / Enter · Alt converts corners or breaks handles · Ctrl draws a mask on a shape", &self.state, Action::SetTool(Tool::Pen), tool == Tool::Pen))
                     .child(ui::action_tool("text-tool", "text", "Text tool (Ctrl+T) · Click point text · Drag a paragraph box", &self.state, Action::SetTool(Tool::Text), tool == Tool::Text))
                     .child(div().mx_2().w(px(1.0)).h(px(20.0)).bg(rgb(0x414141)))
                     .child(ui::text_button("toolbar-snapping", if self.state.read(cx).snapping {"☑ Snapping"} else {"☐ Snapping"}).on_click(cx.listener(|this,_,window,cx| {let _ = window; this.state.update(cx, |s,cx| {s.snapping = !s.snapping; cx.notify();});})))
@@ -1222,12 +1270,21 @@ impl Render for Shell {
             );
         }
         let recovering = self.state.read(cx).recovery.is_some();
-        let modal = self.closing || self.pending_document.is_some() || recovering;
-        if modal && !self.modal_active {
+        let confirmation = self.closing || self.pending_document.is_some() || recovering;
+        let focus_modals = FocuslessModals {
+            settings: self.settings,
+            help: self.help,
+            media: self.state.read(cx).media_open,
+            confirmation,
+        };
+        if focus_modals.opened_since(self.modal_active) {
+            cx.stop_active_drag(window);
             window.focus(&self.focus);
         }
-        self.modal_active = modal;
-        if modal {
+        // Do not refocus on later renders: Settings/Media text fields own their
+        // active editing focus. Color, Gradient, Fonts and Search own their focus.
+        self.modal_active = focus_modals;
+        if confirmation {
             let mut dialog = div()
                 .w(px(450.0))
                 .p_5()
@@ -1326,6 +1383,22 @@ impl Render for Shell {
                 .with_priority(5),
             );
         }
+        if self.state.read(cx).gradient_editor.is_some() {
+            root = root.child(
+                gpui::deferred(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(gpui::rgba(0x00000070))
+                        .occlude()
+                        .child(self.gradient_editor.clone()),
+                )
+                .with_priority(4),
+            );
+        }
         if self.state.read(cx).colors.session.is_some() && !self.state.read(cx).colors.picking() {
             root = root.child(
                 gpui::deferred(
@@ -1343,5 +1416,72 @@ impl Render for Shell {
             );
         }
         root
+    }
+}
+
+#[cfg(test)]
+mod modal_focus_tests {
+    use super::FocuslessModals;
+
+    #[test]
+    fn shell_modal_focus_captures_every_focusless_overlay_only_on_open() {
+        for next in [
+            FocuslessModals {
+                settings: true,
+                ..Default::default()
+            },
+            FocuslessModals {
+                help: true,
+                ..Default::default()
+            },
+            FocuslessModals {
+                media: true,
+                ..Default::default()
+            },
+            FocuslessModals {
+                confirmation: true,
+                ..Default::default()
+            },
+        ] {
+            assert!(next.opened_since(FocuslessModals::default()));
+            assert!(
+                !next.opened_since(next),
+                "Re-render must preserve descendant field focus"
+            );
+            assert!(
+                !FocuslessModals::default().opened_since(next),
+                "Closing does not recapture focus"
+            );
+        }
+    }
+    #[test]
+    fn shell_modal_focus_handles_later_confirmation_and_dialog_switches() {
+        let settings = FocuslessModals {
+            settings: true,
+            ..Default::default()
+        };
+        let covered = FocuslessModals {
+            confirmation: true,
+            ..settings
+        };
+        assert!(covered.opened_since(settings));
+        assert!(!settings.opened_since(covered));
+        let help = FocuslessModals {
+            help: true,
+            ..Default::default()
+        };
+        assert!(help.opened_since(settings));
+        assert!(settings.opened_since(FocuslessModals::default()));
+    }
+    #[test]
+    fn shell_modal_settings_help_media_do_not_enable_save_confirmation() {
+        let focus_only = FocuslessModals {
+            settings: true,
+            help: true,
+            media: true,
+            confirmation: false,
+        };
+        assert!(focus_only.opened_since(FocuslessModals::default()));
+        assert!(!focus_only.confirmation);
     }
 }

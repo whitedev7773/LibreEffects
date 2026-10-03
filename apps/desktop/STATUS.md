@@ -1,8 +1,7 @@
 # Current desktop implementation status
 
-Updated 2026-10-03 for the resumed-work and I01 output-preflight checkpoints.
-E04 modal and E02 multi-vertex work are later milestones and are not included
-in these results.
+Updated 2026-10-03 for the resumed-work, I01 output-preflight and
+E04/E02 editing checkpoints.
 This is the current checkpoint inventory;
 [DEVELOPMENT_BACKLOG.md](DEVELOPMENT_BACKLOG.md) retains the original audit and
 its dated implementation/test history. Older “remaining” lists and test counts
@@ -21,8 +20,17 @@ does not establish a complete native editing workflow.
   one Undo step. Preview requests coalesce and preserve the last valid frame;
   cancellation and generation checks reject stale results. Selected Contents
   Gradient Fill/Stroke Start/End handles work through nested group and layer
-  transforms, with axis-constrained or paired endpoint movement. AE's modal
-  Gradient Editor and compound Colors/topology animation remain open.
+  transforms, with axis-constrained or paired endpoint movement. A modal Gradient
+  Editor now isolates multi-control color/opacity-stop edits until one-Undo OK or
+  Cancel; invalid fields block acceptance, field Escape reverts only that field,
+  and no-op transactions preserve animation and history. Compound Colors/topology
+  animation and AE UI/pixel equivalence remain open.
+- **Pen multi-vertex editing:** Shift-click selects vertices on one legacy shape,
+  mask or Contents path. Group moves preserve relative positions and tangents;
+  static multi-delete is atomic and enforces minimum path sizes. Selection-only
+  and no-net-change gestures preserve keys/history. Pending insertion interruption,
+  final mouse-up coordinates/modifiers and overlay focus have regression coverage.
+  Marquee/cross-path selection and topology-changing animation remain open.
 - **Project save budget:** a bounded streaming JSON counter checks each final
   atomic edit candidate before it enters history. It accounts for escaped
   metadata and shared image/sequence references without constructing a second
@@ -63,24 +71,25 @@ does not establish a complete native editing workflow.
 
 ### Verification record for this checkpoint
 
-The final isolated checkpoint includes the gradient overshoot correction and
-atomic Desktop Open/Recover budget rejection. Formatting, type checking, all
-473 default tests, the explicit 30-test media suite and the optimized release
-build passed. Native UI evidence below was captured on the preceding release;
-the added edge-case fixes were then verified by the final regression suites.
+The combined editing checkpoint includes all prior restoration and I01 fixes,
+16 modal-transaction tests, 23 new Pen regressions and 3 shell-focus tests.
+Formatting, type checking, all 516 default tests, the explicit 30-test media suite
+and the optimized release build passed. Native checks are listed separately with
+their tested build and coverage; automated tests do not imply native acceptance.
 
 | Check | Result and boundary |
 | --- | --- |
 | Core tests | 197 passed, including the save-budget guard regressions. |
-| Desktop default tests on Linux | 276 passed, including Open/Recover, gradient and output-preflight regressions; 30 FFmpeg tests ignored by default. |
+| Desktop default tests on Linux | 319 passed, including modal transactions, Pen multi-selection/interruption, overlay focus, Open/Recover and output preflight; 30 FFmpeg tests ignored by default. |
 | Explicit FFmpeg integration suite | All 30 ignored media tests were explicitly run and passed. They are not included in the default pass count. |
-| Focused gradient tests, after review fix | 20 passed, including the overshoot regression, live-draft isolation, request coalescing and Contents endpoint transforms. These tests are included in the desktop tests; do not add them a second time. |
+| Focused editing regressions | 16 modal-transaction tests, 27 Pen tests (4 existing + 23 new), 3 shell-focus tests and the prior 20 gradient-draft/endpoint tests passed within the desktop suite; do not add these counts a second time. |
 | Release build | `cargo build -p libre-effects-desktop --release --locked` succeeded after the final review fixes. The earlier interrupted-build blocker is closed. |
 | Vendored grid | Debug and release each passed 215 unit tests and 43 doc tests with all features. |
 | Web/API Moon CI targets | `web:build`, `web:test` and `api:build` passed locally; web has 3 passing tests. API validation is a deployment dry run, not a deployment. |
 | Native Linux smoke check | Launched the app; created a composition, rectangle and Contents group; saved a 7,937-byte project through a real native Save dialog. The final release also replaced the earlier editor, leaving one work window. |
 | Native gradient acceptance, release checkpoint | Actual endpoint drags, single-Undo restoration, color-picker Cancel restoration, OK apply and one Undo passed. Save/reopen preserved the changed endpoint in a 12,346-byte native project; a 1364×1024 screenshot records the result. Mid-mouse-held frame observation and Escape during an active drag were not verified because the input tool executes drags atomically. These checks do not establish complete stop/midpoint or keyboard coverage. CLI output from the native saved file matched an independent linear-gradient calculation at 2,244 interior pixels with maximum RGB error below 0.50/255 and opaque alpha. |
 | Native I01 output preflight | Strict rejection preserved the existing destination; policy and diagnostic survived restart. Fallback produced H.264 320×180 at24fps with exactly two frames and an explicit substitution warning. A renamed output folder produced an actionable missing-parent diagnostic and no output. These UI checks used the initial I01 build; the subsequent v4 envelope guard and migrations passed the final fresh-target tests. |
+| Native modal editor, initial debug build | Added color/opacity stops, moved stops/midpoint, scrubbed RGB and opacity, then Cancel restored the original gradient. Saved content matched the fixture exactly except editor-view metadata. Field Escape, invalid input, one-Undo acceptance, persistence and final-release Pen/overlay checks are still being exercised; they are not yet recorded as passed. |
 | Windows CI and device behavior | Fresh remote CI has not run: the requested checkpoint is local commits only, with no push or PR. Historical Windows native/device results remain in the backlog; the Windows-only audio-device test was not run on Linux. |
 
 Linux native startup needs a working Vulkan driver, and Open/Save needs a running
@@ -161,9 +170,9 @@ Every original A01–L05 ID appears once below. The labels are deliberately boun
 | ID | Status | Current scope and remaining boundary |
 | --- | --- | --- |
 | E01 | Partial | Drag-created rectangle, rounded rectangle, ellipse, polygon and star; open lines can be drawn with Pen. Dedicated parametric line/tool-default controls and wider native regression remain. |
-| E02 | Partial | Open/closed Bezier Pen, insert/delete/convert points, handles and parametric-to-Bezier conversion through transforms. Multi-vertex selection, path direction/first vertex and topology-changing animation remain. |
+| E02 | Partial | Open/closed Bezier Pen, insert/delete/convert points, handles, parametric conversion and same-path multi-vertex moves/static deletion through transforms. Marquee/cross-path selection, numeric vertex editing, path direction/first vertex and topology-changing animation remain. |
 | E03 | Partial | Animated scalar/RGB/opacity paint, cap/join/miter/dash controls, fractional Points and Contents linear/radial Gradient Fill/Stroke. Remaining parametric details, topology editing and complete native coverage are not done. |
-| E04 | Partial | Nested Contents tree, paths/paints, animated group transforms/Skew, Composite ordering, 16 paint blend modes, live gradient ramp drafts and transformed canvas endpoints. Modal Gradient Editor, compound Colors animation, tree drag/multi-selection and selected-group Pen insertion remain. |
+| E04 | Partial | Nested Contents tree, paths/paints, animated group transforms/Skew, Composite ordering, 16 paint blend modes, live gradient ramp drafts, transformed canvas endpoints and transactional modal Gradient Editor. Compound Colors animation, tree drag/multi-selection and selected-group Pen insertion remain. |
 | E05 | Partial | Fixed-topology shape/mask path animation exists. Trim Paths, Repeater, Merge/Offset Paths and topology-changing interpolation are not implemented. |
 | E06 | Not implemented | SVG import with editable element conversion and unsupported-element reporting. Internal SVG rendering is not an SVG importer. |
 
@@ -181,7 +190,7 @@ Every original A01–L05 ID appears once below. The labels are deliberately boun
 
 | ID | Status | Current scope and remaining boundary |
 | --- | --- | --- |
-| G01 | Partial | Ordered vector masks, modes/invert and animated opacity/uniform feather/expansion/path. Variable feather, RotoBezier, multi-vertex and topology-changing editing remain. |
+| G01 | Partial | Ordered vector masks, modes/invert and animated opacity/uniform feather/expansion/path. Same-path multi-vertex moves/static deletion are implemented; variable feather, RotoBezier and topology-changing animation remain. |
 | G02 | Implemented | Alpha/Luma and inverted track mattes, independent reusable source references and reference validation/remapping. Null, Adjustment and Audio cannot be matte sources. |
 | G03 | Implemented | Normal/Multiply/Screen/Add/Overlay layer modes with alpha and Adjustment rules in the 8-bit sRGB compositor. The separate 16 Contents paint modes do not extend this layer list. |
 | G04 | Implemented | Ordered, named effect instances with add/delete/duplicate/reorder/bypass/reset, common animated parameters and legacy migration. |
@@ -233,7 +242,7 @@ Every original A01–L05 ID appears once below. The labels are deliberately boun
 
 | ID | Status | Current scope and remaining boundary |
 | --- | --- | --- |
-| L01 | Partial | Moon test/media/format tasks, dependency lockfiles, explicit non-deploying web/API CI and Windows desktop/media/release workflow. Earlier local checks pass; final review-fix aggregation is pending. Fresh remote Windows CI is unrun under the local-commit-only scope. |
+| L01 | Partial | Moon test/media/format tasks, dependency lockfiles, explicit non-deploying web/API CI and Windows desktop/media/release workflow. Final local model/media/check/release checkpoints pass as recorded above. Fresh remote Windows CI is unrun under the local-commit-only scope. |
 | L02 | Partial | Single-editor ownership/recovery, CLI tool discovery/overrides and startup prerequisites. Installer, updater, distribution and clean-machine end-to-end qualification remain. |
 | L03 | Partial | Reproducible examples, extensive model/render/media tests and recorded native sessions. Automated UI state-transition/DPI regression and maintained performance thresholds remain. |
 | L04 | Partial | User/developer guides, in-app shortcut help, examples and recorded format migrations. Korean UI localization, broader error/help polish and release packaging remain. |
@@ -241,14 +250,13 @@ Every original A01–L05 ID appears once below. The labels are deliberately boun
 
 ## Next milestones
 
-1. Finish aggregate validation after the review fixes, including Desktop
-   Open/Recover budget rejection. Extend native gradient coverage to stop/midpoint
-   and keyboard edits, mid-drag preview observation and Escape/focus cancellation;
-   endpoint/color-picker Undo and endpoint save/reopen already have native evidence.
-   Remote Windows CI remains unrun while delivery is local commits only.
-2. In the separate next milestone, finish the remaining E04 editing workflow: modal Gradient Editor and a
-   deliberately versioned compound Colors/topology model; then tree selection,
-   dragging and selected-group path insertion.
+1. Extend native editing acceptance and retained regression evidence, especially
+   animation, transformed/mask paths, focus/IME and DPI. Mid-drag preview observation
+   remains tool-limited. Remote Windows CI remains unrun while delivery is local
+   commits only.
+2. Continue E04 with selected-group Pen path creation, tree selection/dragging and
+   a deliberately versioned compound Colors/topology model. The current modal
+   editor does not require or imply that later animation model.
 3. Extend D02/D03 to multi-channel graphs and Speed Graph selection transforms;
    specify spatial path/time semantics before adding roving/spatial interpolation.
 4. Finish rich text and input quality: per-character F03 styling, text-property

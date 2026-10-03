@@ -26,11 +26,18 @@ pub(crate) struct TextField {
     blur: Option<Subscription>,
     commit: Commit,
     numeric: bool,
+    integer: bool,
     scrub: Option<(Pixels, f64)>,
     scrubbed: bool,
 }
 
 impl TextField {
+    pub fn has_focus(&self, window: &Window) -> bool {
+        self.focus.is_focused(window)
+    }
+    pub fn has_pending_edit(&self) -> bool {
+        self.content != self.original
+    }
     pub fn focus_input(&self, window: &mut Window) {
         window.focus(&self.focus);
     }
@@ -65,12 +72,18 @@ impl TextField {
             blur: None,
             commit: Rc::new(commit),
             numeric: false,
+            integer: false,
             scrub: None,
             scrubbed: false,
         }
     }
     pub fn numeric(mut self) -> Self {
         self.numeric = true;
+        self
+    }
+    pub fn integer(mut self) -> Self {
+        self.numeric = true;
+        self.integer = true;
         self
     }
     /// Keep keyboard editing in the owning panel after Enter or Escape.
@@ -112,7 +125,7 @@ impl TextField {
                 } else {
                     1.0
                 };
-                self.content = format!("{:.2}", value + delta * step);
+                self.content = scrub_text(value + delta * step, self.integer);
                 self.selection = 0..self.content.len();
             }
         }
@@ -500,5 +513,23 @@ impl Render for TextField {
                 )
                 .size_full(),
             )
+    }
+}
+
+fn scrub_text(value: f64, integer: bool) -> String {
+    if integer {
+        format!("{value:.0}")
+    } else {
+        format!("{value:.2}")
+    }
+}
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn gradient_integer_scrubs_round_fractional_pointer_and_alt_deltas() {
+        for (value, text) in [(12.0, "12"), (12.25, "12"), (12.75, "13"), (0.4, "0")] {
+            assert_eq!(super::scrub_text(value, true), text);
+        }
+        assert_eq!(super::scrub_text(12.25, false), "12.25");
     }
 }
