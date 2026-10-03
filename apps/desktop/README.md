@@ -1823,8 +1823,20 @@ group (the default); Above Previous places it in front of them. The choice chang
 paint compositing, preserving the tree order and which paths a paint consumes.
 Nested groups keep their own compositing scope. This static choice supports
 Undo/Redo and duplication; using Above Previous requires project version 46.
-Old files default to Below Previous. Paint blending modes, path operators and
-dragging Contents rows remain future work.
+Old files default to Below Previous. Composite and Blend Mode use keyboard
+accessible dropdowns: Up/Down, Home/End, Enter/Space to choose, Escape to cancel.
+They close on focus or window changes and reject stale document selections.
+
+Paint Blend Mode supports Normal, Darken, Multiply, Color Burn, Lighten, Screen,
+Color Dodge, Overlay, Soft Light, Hard Light, Difference, Exclusion, Hue,
+Saturation, Color and Luminosity. Solid and gradient Fill/Stroke blend with the
+paints behind them in their group after Composite ordering. Each group's colors
+are isolated before group opacity and the layer's masks/effects are applied.
+Non-Normal paint blending requires project version 47; old paints remain Normal.
+The modes follow sRGB/W3C compositing at the current 8-bit raster precision.
+AE pixel/color-space equivalence, Add/other AE modes, group Blend Mode and
+animated mode switching remain future work, alongside path operators and tree
+dragging. Layer blending remains the existing separate five-mode control.
 Fill and Stroke have a common color picker with HEX/RGB/HSV, opacity, recent
 colors and viewer sampling. Cancel leaves the document unchanged; accepting a
 draft updates only changed channels at the current frame as one Undo step.

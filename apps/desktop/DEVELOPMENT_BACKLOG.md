@@ -18,13 +18,23 @@
 - **후속 고급 기능:** 패널 도킹·소스 뷰어·최근 프로젝트, 타임라인 고급 시간 편집/검색/가상화, 공간 경로·프리셋·표현식, Shape 연산/SVG·Text Animator, 추가 효과·모션 블러, 고정밀 색/HDR·Proxy/GPU, 템플릿, 설치/업데이트·한글화와 UI 회귀 자동화.
 - **별도 대형 단계:** 3D/카메라/라이트·모델, 추적·로토/Puppet, 플러그인/교환 포맷 연구, 웹/API 제품 범위. AEP/MOGRT 호환은 구현되지 않았다.
 
+### 페인트 Blend Mode와 드롭다운 정리 — 2026-10-03
+
+- E04/B05: 단색/Gradient Fill·Stroke에 Normal·Darken·Multiply·Color Burn·Lighten·Screen·Color Dodge·Overlay·Soft Light·Hard Light·Difference·Exclusion·Hue·Saturation·Color·Luminosity를 연결했다. Composite가 정한 합성 순서에서 같은 그룹의 뒤쪽 페인트와 섞고, 그룹을 분리해 바깥 페인트가 내부 블렌딩에 유입되지 않게 한다. 그룹 불투명도와 레이어 마스크/효과는 이후 적용한다.
+- [W3C 블렌딩 수식](https://www.w3.org/TR/compositing-1/#blending)과 현재 벡터 렌더러의 sRGB 구현을 사용한다. Normal만 있는 그룹은 기존 SVG 경로를 유지한다. 비기본 모드를 사용한 문서만 v47이며, 이전 문서는 Normal로 읽고 기본 필드는 저장에서 생략한다. 명령은 잠금·잘못된 대상·구버전 위장을 거부하며 Undo/Redo·복제·JSON을 지원한다.
+- Properties의 Blend Mode와 Composite를 드롭다운으로 통일했다. Up/Down·Home/End·Enter/Space·Escape, 바깥 클릭·포커스/창 전환 닫기를 연결하고 문서/선택 변경 시 오래된 메뉴를 무효화한다. 기본 패널 배치와 글꼴/아이콘은 유지한다.
+- 자동 검증에서 16모드 × 4페인트 × 2합성 순서 × 3프레임의 Preview/출력이 독립 색상표·알파 합성과 일치했다(색 2.5/255, 알파 1/255 이내). 투명 영역, 그룹 분리와 그룹 불투명도 결합, 저장 왕복·버전·잠금·Undo/Redo를 검사했다. 코어 188개 + 데스크톱 244개(총 432개) 통과, 외부 미디어/장치 30개 제외. Cargo check/fmt/test/release 통과(Moon/proto 미설치, 기존 릴리스 경고 17개).
+- 실제 Windows에서 Fill의 Multiply 선택·Undo/Redo, End/Enter로 Luminosity 선택·Undo, Home/Escape 취소, 저장 후 재열기를 확인했다. 저장본 `target/qa/paint-blend-native.lfe.json`의 0/15/30/45/60프레임 출력 27,225개 샘플이 독립 Multiply/알파 계산과 2/255 이내로 일치했다(`verify_paint_blend_native.py`). 1920/1442px 창에서 메뉴 항목을 확인했으며, 버튼 아래에 빈 행이 생기던 팝업 기준점을 수정했다. 다른 페인트 종류·나머지 모드·중첩 그룹은 자동 검증 범위이며 네이티브 조작은 별도 미검증이다.
+- 최종 릴리스에서 저장본 재열기, 버튼 바로 아래의 메뉴 위치와 바깥 클릭 닫기를 확인했다. 실제 작업 창은 1개이며 사용자 보존 원본 SHA256은 유지됐다. git diff --check 통과.
+- 남음: Add 등 나머지 AE 모드, 그룹 Blend Mode·모드 애니메이션, AE 색 공간/픽셀 동등성, 경로 연산자·Gradient Editor/Composition 손잡이. 기존 레이어 블렌딩은 별도의 5모드이며 이번 변경으로 확장하지 않았다. E04 전체 완료로 표시하지 않는다.
+
 ### 페인트 Composite 앞/뒤 합성 — 2026-10-03
 
 - E04: 단색/Gradient Fill·Stroke의 Properties에 Composite의 Below Previous/Above Previous를 추가했다. 같은 그룹에서 앞서 처리한 결과의 뒤/앞에 현재 페인트를 합성하며, Contents 항목 순서·사용하는 경로·기존 속성 키는 그대로 유지한다. 중첩 그룹은 독립 합성 범위를 유지한다. [Adobe의 Composite 설명](https://helpx.adobe.com/after-effects/desktop/drawing-painting-and-paths/shapes-and-shape-attributes/shape-attributes-paint-operations-path.html)을 참고하고 실제 AE Fill의 기본값 Below Previous in Same Group 표시를 확인했다.
 - 기존 문서는 Below Previous로 읽고 기본 필드는 저장에서 생략한다. Above Previous 사용 문서만 v46을 요구한다. 잠금·사라진 항목·경로/그룹 대상으로 명령을 실행하면 원자적으로 거부하며, v45 이하로 위장한 새 합성 값도 거부한다. 한 Undo/Redo와 복제·저장 왕복으로 값을 유지한다.
 - 자동 검증: 코어 187개 + 데스크톱 243개(총 430개) 통과, 외부 미디어/장치 30개 제외. 네 종류 페인트의 0/30/60프레임 반투명 겹침을 독립 합성식과 비교하고 Preview/출력 일치·중첩 그룹 범위·경로/키 순서 유지·히스토리·잠금·버전·JSON을 검사했다. Cargo check/fmt/test/release 및 git diff --check 통과(Moon/proto 미설치, 기존 릴리스 경고 17개).
 - 실제 Windows에서 기존 Gradient 위의 Fill을 Above Previous로 전환·Undo/Redo하고 Fill Opacity 50%로 저장한 뒤 재열어 값과 미리보기 유지를 확인했다. 실제 저장본 `target/qa/composite-native.lfe.json`의 0/15/30/45/60프레임 출력 27,225개 샘플이 독립 source-over 계산과 2/255 이내로 일치했다(`verify_composite_native.py`). 1442/1920px 창 배치, 실제 작업 창 1개, 사용자 보존 원본 SHA256 불변을 확인했다. 다른 페인트 종류와 중첩 그룹은 자동 테스트 범위이며 네이티브 조작은 별도 미검증이다.
-- 이 옵션은 정적 합성 순서다. 페인트별 Blend Mode, 경로 연산자와 Gradient Editor/Composition 손잡이는 남아 있으며 E04 전체 완료로 표시하지 않는다.
+- 이 옵션은 정적 합성 순서다. 페인트별 Blend Mode는 위 후속 단계에서 16종을 구현했다. 경로 연산자와 Gradient Editor/Composition 손잡이는 남아 있으며 E04 전체 완료로 표시하지 않는다.
 
 ### Gradient Fill·Gradient Stroke와 독립 색/불투명도 스톱 — 2026-10-03
 
@@ -55,7 +65,7 @@
 - 후속 연결: Fill/Stroke 색 스와치에서 공통 HEX/RGB/HSV·불투명도·최근 색·뷰어 샘플링 대화상자를 연다. 취소는 문서를 변경하지 않고 승인은 현재 프레임에서 바뀐 채널만 한 Undo로 적용한다. Stroke의 Cap/Join 선택과 마지막 Dash/Gap 추가·삭제를 연결했다. 다른 트랙은 보존하고 Undo로 제거한 점선 키를 복원하며 행 변경 시 수치·스톱워치도 갱신한다.
 - 후속 검증: 코어 179개 + 데스크톱 237개(416개) 통과, 30개 제외. 색 초안/채널 격리·다른 페인트 보존·시간 보간·잠금·오래된 초안·Undo/Redo·JSON, 점선 한계/행 삭제/키 복원, 같은 Bezier 경로의 9가지 Cap/Join 조합에서 기존 Shape와 Contents의 전체 RGBA 및 Preview/출력 일치를 검사했다. Cargo check/fmt/test/release와 git diff --check 통과, 기존 경고 17개. 기본 다각형과 cubic 표현의 점선 경계 래스터 차이는 픽셀 동등성 범위에서 제외한다.
 - 실제 Windows에서 Fill 색 선택기 취소/HEX 변경/Undo/Redo, Projecting Cap·Bevel Join, Stroke Width 24·Dash 10·Gap 50, Gap 스톱워치 활성화·행 제거 후 Undo·저장 재열기와 작은 창 배치를 확인했다. `target/qa/contents-paint-native.lfe.json`의 0/30/45/60프레임 출력에서 내부/외부 15,951개 및 점선/간격 600개 RGBA 샘플이 독립 계산과 일치했다(`target/qa/verify_contents_paint_native.py`). 작업 창 1개와 보존 원본 SHA256 불변을 확인했다. 이번 네이티브 검사는 Fill HEX 중심이며 Stroke 색 입력·뷰어 샘플링은 별도 조작하지 않았다.
-- 그룹 Skew·Gradient 페인트·Composite는 위 후속 단계에서 구현했다. 남음: 페인트 Blend, 경로 연산자, 트리 드래그/다중 선택과 새 Pen 경로의 선택 그룹 삽입. AE의 그룹 좌표/페인트 합성 픽셀 동등성을 검증한 것은 아니며 E04 전체 완료로 표시하지 않는다.
+- 그룹 Skew·Gradient 페인트·Composite·16종 페인트 Blend는 위 후속 단계에서 구현했다. 남음: 경로 연산자, 트리 드래그/다중 선택과 새 Pen 경로의 선택 그룹 삽입. AE의 그룹 좌표/페인트 합성 픽셀 동등성을 검증한 것은 아니며 E04 전체 완료로 표시하지 않는다.
 
 ### 기본 도형 → Bezier 경로 전환 — 2026-10-03
 

@@ -257,6 +257,8 @@ pub struct ContentsNode {
     pub kind: ContentsKind,
     #[serde(default, skip_serializing_if = "PaintComposite::is_default")]
     pub composite: PaintComposite,
+    #[serde(default, skip_serializing_if = "PaintBlend::is_normal")]
+    pub blend: PaintBlend,
     pub parameters: BTreeMap<ContentsParam, AnimatedProperty>,
 }
 impl ContentsNode {
@@ -302,6 +304,7 @@ impl ContentsNode {
             name: format!("{} {id}", kind.label()),
             enabled: true,
             composite: PaintComposite::default(),
+            blend: PaintBlend::Normal,
             parameters: kind.defaults(),
             kind,
         }
@@ -441,7 +444,7 @@ impl ShapeContents {
         Ok(id)
     }
     pub fn validate(&self, duration: Frame) -> Result<(), String> {
-        self.validate_version(duration, 46)
+        self.validate_version(duration, 47)
     }
     pub(super) fn validate_version(&self, duration: Frame, version: u32) -> Result<(), String> {
         fn walk(
@@ -455,6 +458,9 @@ impl ShapeContents {
                 return Err("Contents nesting exceeds 8 groups".into());
             }
             for n in nodes {
+                if n.blend != PaintBlend::Normal && (version < 47 || !n.kind.is_paint()) {
+                    return Err("Paint blending requires a paint item and project v47".into());
+                }
                 if n.composite != PaintComposite::BelowPrevious
                     && (version < 46 || !n.kind.is_paint())
                 {
@@ -667,6 +673,7 @@ fn render(nodes: &[ContentsNode], f: Frame, scope: &str) -> (String, Vec<VectorP
                     v(FillOpacity) / 100.,
                     if *even_odd { "evenodd" } else { "nonzero" }
                 );
+                let paint = n.blend.wrap(paint);
                 if n.composite == PaintComposite::AbovePrevious {
                     paints.push_back(paint);
                 } else {
@@ -696,6 +703,7 @@ fn render(nodes: &[ContentsNode], f: Frame, scope: &str) -> (String, Vec<VectorP
                     v(StrokeWidth),
                     style.svg()
                 );
+                let paint = n.blend.wrap(paint);
                 if n.composite == PaintComposite::AbovePrevious {
                     paints.push_back(paint);
                 } else {
@@ -705,11 +713,26 @@ fn render(nodes: &[ContentsNode], f: Frame, scope: &str) -> (String, Vec<VectorP
             _ => {}
         }
     }
-    (paints.into_iter().collect(), paths)
+    let svg: String = paints.into_iter().collect();
+    // A group's paints blend together, never with a sibling group's pixels or
+    // the layer underneath. Isolate even at opacity 100%, which SVG may flatten.
+    let svg = if nodes
+        .iter()
+        .any(|n| n.enabled && n.blend != PaintBlend::Normal)
+    {
+        format!("<g style='isolation:isolate'>{svg}</g>")
+    } else {
+        svg
+    };
+    (svg, paths)
 }
 
 #[derive(Clone, Debug)]
 pub enum ContentsEdit {
+    Blend {
+        item: u64,
+        mode: PaintBlend,
+    },
     Composite {
         item: u64,
         mode: PaintComposite,
@@ -974,6 +997,15 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                     } => *value = *even_odd,
                     _ => return Err("Select a Fill".into()),
                 }
+            }
+            ContentsEdit::Blend { item, mode } => {
+                let n = contents
+                    .node_mut(*item)
+                    .ok_or("Contents paint no longer exists")?;
+                if !n.kind.is_paint() {
+                    return Err("Select a Fill or Stroke".into());
+                }
+                n.blend = *mode;
             }
             ContentsEdit::Composite { item, mode } => {
                 let n = contents

@@ -3,13 +3,34 @@ use crate::{
     editor::{Action, EditorState},
     ui,
 };
-use gpui::{Context, Entity, Window, div, prelude::*, px, rgb};
-use libre_effects_core::{
-    Command, Content, ContentsEdit, ContentsKind, ContentsParam, GradientParam, PaintComposite,
-    PathTarget, PropertyPath, ShapeGradient, ShapeKind, ShapeStroke, StrokeCap, StrokeJoin,
-    TrackEdit,
+use gpui::{
+    Bounds, Context, Entity, FocusHandle, Pixels, Window, anchored, canvas, deferred, div, point,
+    prelude::*, px, rgb,
 };
+use libre_effects_core::{
+    Command, Content, ContentsEdit, ContentsKind, ContentsParam, GradientParam, PaintBlend,
+    PaintComposite, PathTarget, PropertyPath, ShapeGradient, ShapeKind, ShapeStroke, StrokeCap,
+    StrokeJoin, TrackEdit,
+};
+use std::{cell::Cell, rc::Rc};
 
+struct PaintMenu {
+    layer: u64,
+    item: u64,
+    revision: u64,
+    picker: usize,
+    cursor: usize,
+}
+fn paint_options(picker: usize) -> Vec<&'static str> {
+    if picker == 0 {
+        PaintBlend::ALL.into_iter().map(PaintBlend::label).collect()
+    } else {
+        vec![
+            "Below Previous in Same Group",
+            "Above Previous in Same Group",
+        ]
+    }
+}
 pub(crate) struct ContentsControls {
     state: Entity<EditorState>,
     owner: Option<u64>,
@@ -19,10 +40,23 @@ pub(crate) struct ContentsControls {
     add_open: bool,
     collapsed: std::collections::BTreeSet<u64>,
     gradient_stop: Option<u64>,
+    paint_menu: Option<PaintMenu>,
+    paint_focus: [FocusHandle; 2],
+    paint_bounds: [Rc<Cell<Option<Bounds<Pixels>>>>; 2],
+    paint_watches: Option<Vec<gpui::Subscription>>,
 }
 impl ContentsControls {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
-        cx.observe(&state, |_, _, cx| cx.notify()).detach();
+        cx.observe(&state, |this, _, cx| {
+            let s = this.state.read(cx);
+            if this.paint_menu.as_ref().is_some_and(|m| {
+                m.revision != s.document_revision || s.editor.selected() != Some(m.layer)
+            }) {
+                this.paint_menu = None;
+            }
+            cx.notify();
+        })
+        .detach();
         Self {
             state,
             owner: None,
@@ -32,9 +66,14 @@ impl ContentsControls {
             add_open: false,
             collapsed: Default::default(),
             gradient_stop: None,
+            paint_menu: None,
+            paint_focus: [cx.focus_handle(), cx.focus_handle()],
+            paint_bounds: Default::default(),
+            paint_watches: None,
         }
     }
     fn select(&mut self, layer: u64, item: u64, cx: &mut Context<Self>) {
+        self.paint_menu = None;
         if self.owner != Some(layer) || self.selected != Some(item) {
             self.gradient_stop = None;
         }
@@ -113,8 +152,59 @@ impl ContentsControls {
         cx.notify();
     }
 }
+impl ContentsControls {
+    fn choose_paint(&mut self, index: usize, w: &mut Window, cx: &mut Context<Self>) {
+        let Some(m) = self.paint_menu.take() else {
+            return;
+        };
+        let s = self.state.read(cx);
+        if s.document_revision == m.revision
+            && s.editor.selected() == Some(m.layer)
+            && self.selected == Some(m.item)
+        {
+            let edit = if m.picker == 0 {
+                PaintBlend::ALL
+                    .get(index)
+                    .map(|&mode| ContentsEdit::Blend { item: m.item, mode })
+            } else {
+                [PaintComposite::BelowPrevious, PaintComposite::AbovePrevious]
+                    .get(index)
+                    .map(|&mode| ContentsEdit::Composite { item: m.item, mode })
+            };
+            if let Some(edit) = edit {
+                self.state.update(cx, |s, cx| {
+                    s.dispatch(
+                        &Action::Edit(Command::Contents { id: m.layer, edit }),
+                        w,
+                        cx,
+                    )
+                });
+            }
+        }
+        cx.notify();
+    }
+}
 impl Render for ContentsControls {
     fn render(&mut self, w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.paint_watches.is_none() {
+            let mut watches = self
+                .paint_focus
+                .iter()
+                .map(|f| {
+                    cx.on_blur(f, w, |this, _, cx| {
+                        this.paint_menu = None;
+                        cx.notify();
+                    })
+                })
+                .collect::<Vec<_>>();
+            watches.push(cx.observe_window_activation(w, |this, w, cx| {
+                if !w.is_window_active() {
+                    this.paint_menu = None;
+                    cx.notify();
+                }
+            }));
+            self.paint_watches = Some(watches);
+        }
         let mut root = div().flex().flex_col().gap_1();
         let Some(layer) = self.state.read(cx).editor.selected_layer().cloned() else {
             return root;
@@ -455,29 +545,120 @@ impl Render for ContentsControls {
         }
         root = root.child(parenting);
         if node.kind.is_paint() {
-            let mut options = div().flex().flex_wrap().gap_1();
-            for (index, mode, label) in [
-                (0usize, PaintComposite::BelowPrevious, "Below Previous"),
-                (1usize, PaintComposite::AbovePrevious, "Above Previous"),
-            ] {
-                let state = self.state.clone();
-                options = options.child(ui::text_button(("contents-composite", index), label)
-                    .when(node.composite == mode, |b| b.bg(rgb(0x164a7b)))
-                    .when(locked, |b| b.opacity(0.4))
-                    .tooltip(|_,cx| cx.new(|_|ui::Tip("Composite this paint below or above earlier items in the same group. Path order is unchanged.".into())).into())
-                    .when(!locked, |b| b.on_click(move |_,w,cx| {
-                        TextField::commit_active(w,cx);
-                        state.update(cx,|s,cx|s.dispatch(&Action::Edit(Command::Contents {id,edit:ContentsEdit::Composite {item,mode}}),w,cx));
-                    })));
+            for picker in 0..2 {
+                let current = if picker == 0 {
+                    PaintBlend::ALL
+                        .iter()
+                        .position(|m| *m == node.blend)
+                        .unwrap()
+                } else {
+                    usize::from(node.composite == PaintComposite::AbovePrevious)
+                };
+                let label = if picker == 0 {
+                    node.blend.label()
+                } else if current == 0 {
+                    "Below Previous"
+                } else {
+                    "Above Previous"
+                };
+                let bounds = self.paint_bounds[picker].clone();
+                root = root.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .h(px(27.))
+                        .child(div().w(px(70.)).child(if picker == 0 {
+                            "Blend Mode"
+                        } else {
+                            "Composite"
+                        }))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .relative()
+                                .child(
+                                    ui::text_button(
+                                        ("contents-paint-picker", picker),
+                                        format!("{label} ▾"),
+                                    )
+                                    .track_focus(&self.paint_focus[picker])
+                                    .w_full()
+                                    .justify_start()
+                                    .when(locked, |b| b.opacity(0.4))
+                                    .on_click(cx.listener(move |this, e, w, cx| {
+                                        if locked {
+                                            return;
+                                        }
+                                        TextField::commit_active(w, cx);
+                                        w.focus(&this.paint_focus[picker]);
+                                        if let Some(m) = &this.paint_menu {
+                                            if m.picker == picker {
+                                                if matches!(e, gpui::ClickEvent::Keyboard(_)) {
+                                                    this.choose_paint(m.cursor, w, cx);
+                                                } else {
+                                                    this.paint_menu = None;
+                                                }
+                                                cx.notify();
+                                                return;
+                                            }
+                                        }
+                                        this.paint_menu = Some(PaintMenu {
+                                            layer: id,
+                                            item,
+                                            revision: this.state.read(cx).document_revision,
+                                            picker,
+                                            cursor: current,
+                                        });
+                                        cx.notify();
+                                        cx.stop_propagation();
+                                    }))
+                                    .on_key_down(cx.listener(
+                                        move |this, e: &gpui::KeyDownEvent, _, cx| {
+                                            if locked || e.keystroke.modifiers.modified() {
+                                                return;
+                                            }
+                                            let key = e.keystroke.key.as_str();
+                                            if key == "escape" {
+                                                this.paint_menu = None;
+                                            } else if ["up", "down", "home", "end"].contains(&key) {
+                                                let m = this.paint_menu.get_or_insert_with(|| {
+                                                    PaintMenu {
+                                                        layer: id,
+                                                        item,
+                                                        revision: this
+                                                            .state
+                                                            .read(cx)
+                                                            .document_revision,
+                                                        picker,
+                                                        cursor: current,
+                                                    }
+                                                });
+                                                let count = paint_options(picker).len();
+                                                m.cursor = match key {
+                                                    "up" => (m.cursor + count - 1) % count,
+                                                    "down" => (m.cursor + 1) % count,
+                                                    "home" => 0,
+                                                    _ => count - 1,
+                                                };
+                                            } else {
+                                                return;
+                                            }
+                                            cx.stop_propagation();
+                                            cx.notify();
+                                        },
+                                    )),
+                                )
+                                .child(
+                                    canvas(move |b, _, _| bounds.set(Some(b)), |_, _, _, _| ())
+                                        .absolute()
+                                        .top_0()
+                                        .left_0()
+                                        .size_full(),
+                                ),
+                        ),
+                );
             }
-            root = root.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child("Composite")
-                    .child(options),
-            );
         }
         if matches!(node.kind, ContentsKind::Parametric(_)) {
             let state = self.state.clone();
@@ -902,6 +1083,50 @@ impl Render for ContentsControls {
                             .when(locked, |d| d.child(value)),
                     ),
             );
+        }
+        if let Some(m) = &self.paint_menu {
+            let position = self.paint_bounds[m.picker]
+                .get()
+                .map_or(point(px(0.), px(0.)), |b| point(b.left(), b.bottom()));
+            let mut menu = div()
+                .id("contents-paint-menu")
+                .w(px(230.))
+                .py_1()
+                .bg(rgb(ui::PANEL))
+                .border_1()
+                .border_color(rgb(ui::BLUE))
+                .occlude()
+                .on_mouse_down(gpui::MouseButton::Left, |_, w, cx| {
+                    w.prevent_default();
+                    cx.stop_propagation();
+                })
+                .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                    this.paint_menu = None;
+                    cx.notify();
+                }));
+            for (index, label) in paint_options(m.picker).into_iter().enumerate() {
+                menu = menu.child(
+                    div()
+                        .id(("contents-paint-option", index))
+                        .h(px(23.))
+                        .px_2()
+                        .flex()
+                        .items_center()
+                        .cursor_pointer()
+                        .child(label)
+                        .when(index == m.cursor, |b| b.bg(rgb(0x344455)))
+                        .on_click(cx.listener(move |this, _, w, cx| {
+                            this.choose_paint(index, w, cx);
+                            cx.stop_propagation();
+                        })),
+                );
+            }
+            root = root.child(deferred(
+                anchored()
+                    .position(position)
+                    .snap_to_window_with_margin(px(8.))
+                    .child(menu),
+            ));
         }
         root
     }

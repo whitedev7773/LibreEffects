@@ -42,6 +42,205 @@ fn scene(kind: ShapeKind) -> Editor {
 }
 
 #[test]
+fn paint_blend_modes_match_reference_colors_alpha_and_group_isolation() {
+    // W3C blending equations, independently evaluated for Cb=(51,102,204)/255,
+    // Cs=(230,77,26)/255. These are straight colors before alpha compositing.
+    let reference = [
+        [0.901960784314, 0.301960784314, 0.101960784314],
+        [0.2, 0.301960784314, 0.101960784314],
+        [0.180392156863, 0.120784313725, 0.081568627451],
+        [0.113043478261, 0., 0.],
+        [0.901960784314, 0.4, 0.8],
+        [0.921568627451, 0.581176470588, 0.820392156863],
+        [1., 0.573033707865, 0.890829694323],
+        [0.360784313725, 0.241568627451, 0.640784313725],
+        [0.399372549020, 0.304941176471, 0.672627450980],
+        [0.843137254902, 0.241568627451, 0.163137254902],
+        [0.701960784314, 0.098039215686, 0.698039215686],
+        [0.741176470588, 0.460392156863, 0.738823529412],
+        [0.7155, 0.2655, 0.1155],
+        [0.138666666667, 0.405333333333, 0.938666666667],
+        [0.826, 0.226, 0.026],
+        [0.275960784314, 0.475960784314, 0.875960784314],
+    ];
+    let renderer = crate::rendering::Renderer::new();
+    for (gradient, stroke) in [(false, false), (false, true), (true, false), (true, true)] {
+        let mut e = scene(ShapeKind::Rectangle);
+        edit(&mut e, ContentsEdit::Promote);
+        edit(&mut e, ContentsEdit::Remove(3));
+        use ContentsParam::Shape as S;
+        for (p, v) in [
+            (ShapeParam::FillRed, 51.),
+            (ShapeParam::FillGreen, 102.),
+            (ShapeParam::FillBlue, 204.),
+            (ShapeParam::FillOpacity, 60.),
+        ] {
+            value(&mut e, 4, S(p), v);
+        }
+        let kind = match (gradient, stroke) {
+            (false, false) => ContentsKind::Fill { even_odd: false },
+            (false, true) => ContentsKind::Stroke(ShapeStroke::default()),
+            (true, false) => ContentsKind::GradientFill {
+                even_odd: false,
+                gradient: ShapeGradient::default(),
+            },
+            (true, true) => ContentsKind::GradientStroke {
+                style: ShapeStroke::default(),
+                gradient: ShapeGradient::default(),
+            },
+        };
+        edit(&mut e, ContentsEdit::Add { parent: 1, kind });
+        if stroke {
+            value(&mut e, 5, S(ShapeParam::StrokeWidth), 20.);
+        }
+        if gradient {
+            for stop in [1, 2] {
+                for (p, v) in [
+                    (GradientParam::Red(stop), 230.),
+                    (GradientParam::Green(stop), 77.),
+                    (GradientParam::Blue(stop), 26.),
+                ] {
+                    value(&mut e, 5, ContentsParam::Gradient(p), v);
+                }
+            }
+        } else {
+            let channels = if stroke {
+                [
+                    ShapeParam::StrokeRed,
+                    ShapeParam::StrokeGreen,
+                    ShapeParam::StrokeBlue,
+                ]
+            } else {
+                [
+                    ShapeParam::FillRed,
+                    ShapeParam::FillGreen,
+                    ShapeParam::FillBlue,
+                ]
+            };
+            for (p, v) in channels.into_iter().zip([230., 77., 26.]) {
+                value(&mut e, 5, S(p), v);
+            }
+        }
+        let opacity = S(if stroke {
+            ShapeParam::StrokeOpacity
+        } else {
+            ShapeParam::FillOpacity
+        });
+        value(&mut e, 5, opacity, 80.);
+        edit(
+            &mut e,
+            ContentsEdit::Track {
+                item: 5,
+                parameter: opacity,
+                edit: TrackEdit::ToggleAnimation { frame: 0 },
+            },
+        );
+        edit(
+            &mut e,
+            ContentsEdit::Track {
+                item: 5,
+                parameter: opacity,
+                edit: TrackEdit::Value {
+                    frame: 60,
+                    value: 20.,
+                },
+            },
+        );
+        for composite in [PaintComposite::BelowPrevious, PaintComposite::AbovePrevious] {
+            if composite == PaintComposite::AbovePrevious {
+                edit(
+                    &mut e,
+                    ContentsEdit::Move {
+                        item: 5,
+                        parent: 1,
+                        index: 2,
+                    },
+                );
+                edit(
+                    &mut e,
+                    ContentsEdit::Composite {
+                        item: 5,
+                        mode: composite,
+                    },
+                );
+            }
+            for (mode, mixed) in PaintBlend::ALL.into_iter().zip(reference) {
+                edit(&mut e, ContentsEdit::Blend { item: 5, mode });
+                let saved = Project::from_json(&e.project().to_json().unwrap()).unwrap();
+                for frame in [0, 30, 60] {
+                    let image = renderer.render(&saved, frame, 400).unwrap();
+                    assert_eq!(
+                        image,
+                        renderer.render_output(&saved, frame, 400, 240).unwrap()
+                    );
+                    let actual = image.get_pixel(124, 120).0;
+                    let a = 0.8 - frame as f64 / 100.;
+                    let b = 0.6;
+                    let alpha = a + b * (1. - a);
+                    for i in 0..3 {
+                        let cs = [230., 77., 26.][i] / 255.;
+                        let cb = [51., 102., 204.][i] / 255.;
+                        let expected = 255.
+                            * (a * (1. - b) * cs + a * b * mixed[i] + (1. - a) * b * cb)
+                            / alpha;
+                        assert!(
+                            (actual[i] as f64 - expected).abs() <= 2.5,
+                            "{gradient} {stroke} {composite:?} {mode:?} {frame} {actual:?} channel {i} expected {expected}"
+                        );
+                    }
+                    assert!((actual[3] as f64 - alpha * 255.).abs() <= 1.);
+                    assert_eq!(image.get_pixel(100, 120).0, [0, 0, 0, 0]);
+                }
+            }
+        }
+        // A paint inside a group with no local backdrop keeps its own color;
+        // it must not multiply with the parent group's green fill.
+        edit(
+            &mut e,
+            ContentsEdit::Enabled {
+                item: 4,
+                enabled: false,
+            },
+        );
+        edit(
+            &mut e,
+            ContentsEdit::Blend {
+                item: 5,
+                mode: PaintBlend::Multiply,
+            },
+        );
+        value(&mut e, 1, ContentsParam::Transform(Property::Opacity), 50.);
+        edit(
+            &mut e,
+            ContentsEdit::Add {
+                parent: 0,
+                kind: ContentsKind::Fill { even_odd: false },
+            },
+        );
+        for (p, v) in [
+            (ShapeParam::FillRed, 17.),
+            (ShapeParam::FillGreen, 231.),
+            (ShapeParam::FillBlue, 42.),
+        ] {
+            value(&mut e, 6, S(p), v);
+        }
+        for frame in [0, 60] {
+            let image = renderer.render(e.project(), frame, 400).unwrap();
+            let actual = image.get_pixel(124, 120).0;
+            let a = (0.8 - frame as f64 / 100.) * 0.5;
+            for i in 0..3 {
+                let expected = [230., 77., 26.][i] * a + [17., 231., 42.][i] * (1. - a);
+                assert!(
+                    (actual[i] as f64 - expected).abs() <= 2.,
+                    "isolated {gradient} {stroke} {frame}: {actual:?} expected {expected}"
+                );
+            }
+            assert_eq!(actual[3], 255);
+        }
+    }
+}
+
+#[test]
 fn paint_composite_changes_overlap_without_changing_path_order_or_group_scope() {
     let renderer = crate::rendering::Renderer::new();
     // Exercise all four paint kinds against an earlier opaque blue fill.

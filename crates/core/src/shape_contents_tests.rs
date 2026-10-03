@@ -36,6 +36,65 @@ fn contents_value(e: &mut Editor, item: u64, parameter: ContentsParam, value: f6
 }
 
 #[test]
+fn paint_blend_modes_roundtrip_and_reject_stale_versions_or_invalid_targets() {
+    let mut e = scene();
+    edit(&mut e, ContentsEdit::Promote);
+    let old = e.project().clone();
+    assert!(!old.to_json().unwrap().contains("\"blend\""));
+    for mode in PaintBlend::ALL {
+        edit(&mut e, ContentsEdit::Blend { item: 4, mode });
+        assert_eq!(contents(&e).node(4).unwrap().blend, mode);
+        assert_eq!(
+            Project::from_json(&e.project().to_json().unwrap()).unwrap(),
+            *e.project()
+        );
+    }
+    assert_eq!(e.project().version, 47);
+    let saved = e.project().clone();
+    e.undo();
+    e.redo();
+    assert_eq!(e.project(), &saved);
+    edit(&mut e, ContentsEdit::Duplicate(4));
+    assert_eq!(contents(&e).node(5).unwrap().blend, PaintBlend::Luminosity);
+    e.undo();
+    for item in [1, 2, 999] {
+        assert!(
+            e.execute(Command::Contents {
+                id: 1,
+                edit: ContentsEdit::Blend {
+                    item,
+                    mode: PaintBlend::Multiply
+                }
+            })
+            .is_err()
+        );
+        assert_eq!(e.project(), &saved);
+    }
+    let mut invalid = saved.clone();
+    invalid.version = 46;
+    assert!(Project::from_json(&serde_json::to_string(&invalid).unwrap()).is_err());
+    invalid = saved.clone();
+    let Content::ShapeContents(c) = &mut invalid.composition.layers[0].content else {
+        panic!()
+    };
+    c.node_mut(2).unwrap().blend = PaintBlend::Screen;
+    assert!(invalid.validate().is_err());
+    e.current.project.composition.layers[0].locked = true;
+    let locked = e.project().clone();
+    assert!(
+        e.execute(Command::Contents {
+            id: 1,
+            edit: ContentsEdit::Blend {
+                item: 4,
+                mode: PaintBlend::Normal
+            }
+        })
+        .is_err()
+    );
+    assert_eq!(e.project(), &locked);
+}
+
+#[test]
 fn paint_composite_preserves_order_tracks_history_and_old_documents() {
     let mut e = scene();
     edit(&mut e, ContentsEdit::Promote);

@@ -3,13 +3,15 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-const PROJECT_VERSION: u32 = 46;
+const PROJECT_VERSION: u32 = 47;
 pub type Frame = u32;
 pub type LayerId = u64;
 pub type CompositionId = u64;
 
 mod blend;
 pub use blend::BlendMode;
+mod paint_blend;
+pub use paint_blend::PaintBlend;
 mod color_curves;
 pub use color_curves::{CurveChannel, sample_color_curve};
 mod compositions;
@@ -1566,7 +1568,9 @@ impl Editor {
                 })
                 .flat_map(ShapeContents::rows)
                 .map(|(_, _, n)| {
-                    if n.composite != PaintComposite::BelowPrevious {
+                    if n.blend != PaintBlend::Normal {
+                        47
+                    } else if n.composite != PaintComposite::BelowPrevious {
                         46
                     } else if n.kind.gradient().is_some() {
                         45
