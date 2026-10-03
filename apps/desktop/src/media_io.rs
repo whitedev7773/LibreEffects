@@ -47,6 +47,7 @@ fn directory(project_path: &Path) -> Result<PathBuf, String> {
 
 pub(crate) fn clean_absolute(path: &Path) -> Result<PathBuf, String> {
     let absolute = std::path::absolute(path).map_err(|e| e.to_string())?;
+    let absolute = PathBuf::from(path_string(&absolute)?);
     let mut clean = PathBuf::new();
     for part in absolute.components() {
         match part {
@@ -58,6 +59,32 @@ pub(crate) fn clean_absolute(path: &Path) -> Result<PathBuf, String> {
         }
     }
     Ok(clean)
+}
+
+/// Compare folders using their filesystem identity, without requiring media to
+/// be online or following a symlink at the media filename itself. Windows may
+/// spell the same temp/project directory with an 8.3 alias, different case, or
+/// a verbatim prefix; a lexical prefix check alone then saves an absolute path.
+fn resolved_media_parent(source: &Path) -> Result<PathBuf, String> {
+    let Some(name) = source.file_name() else {
+        return Ok(source.to_path_buf());
+    };
+    let mut suffix = vec![name.to_owned()];
+    let mut parent = source.parent();
+    while let Some(folder) = parent {
+        if let Ok(canonical) = std::fs::canonicalize(folder) {
+            let mut resolved = PathBuf::from(path_string(&canonical)?);
+            for component in suffix.iter().rev() {
+                resolved.push(component);
+            }
+            return Ok(resolved);
+        }
+        if let Some(name) = folder.file_name() {
+            suffix.push(name.to_owned());
+        }
+        parent = folder.parent();
+    }
+    Ok(source.to_path_buf())
 }
 
 pub(crate) fn resolve(project: &Project, path: &Path) -> Result<Project, String> {
@@ -78,7 +105,8 @@ pub(crate) fn portable(project: &Project, path: &Path) -> Result<Project, String
     let base = directory(path)?;
     project.with_video_paths(|source| {
         let source = clean_absolute(Path::new(source))?;
-        match source.strip_prefix(&base) {
+        let comparable = resolved_media_parent(&source)?;
+        match comparable.strip_prefix(&base) {
             Ok(relative) if !relative.as_os_str().is_empty() => {
                 Ok(path_string(relative)?.replace('\\', "/"))
             }
@@ -400,6 +428,13 @@ pub(crate) fn collect(
 mod tests {
     use super::*;
     use libre_effects_core::{Command, Editor};
+
+    fn canonical_paths(project: &Project) -> BTreeSet<PathBuf> {
+        video_paths(project)
+            .into_iter()
+            .map(|path| std::fs::canonicalize(path).unwrap())
+            .collect()
+    }
     fn scene(source: &Path) -> Project {
         let mut e = Editor::default();
         e.execute(Command::AddContent {
@@ -433,19 +468,22 @@ mod tests {
         assert!(json.contains("동영상.mp4"));
         assert!(!json.contains("원본"));
         let read = project_io::read_project(&file).unwrap();
-        assert_eq!(video_paths(&read), video_paths(&p));
+        assert_eq!(canonical_paths(&read), canonical_paths(&p));
         let other = root.path().join("another.lfe.json");
         save(&read, &Default::default(), &other).unwrap();
         assert_eq!(
-            video_paths(&project_io::read_project(&other).unwrap()),
-            video_paths(&p)
+            canonical_paths(&project_io::read_project(&other).unwrap()),
+            canonical_paths(&p)
         );
         let moved = root.path().join("이동");
         std::fs::rename(&original, &moved).unwrap();
         let read = project_io::read_project(&moved.join("project.lfe.json")).unwrap();
         assert_eq!(
             video_paths(&read),
-            BTreeSet::from([moved.join("동영상.mp4").to_str().unwrap().into()])
+            BTreeSet::from([path_string(
+                &std::fs::canonicalize(moved.join("동영상.mp4")).unwrap()
+            )
+            .unwrap()])
         );
         assert_eq!(
             std::fs::read(video_paths(&read).first().unwrap()).unwrap(),
@@ -458,6 +496,72 @@ mod tests {
         // An offline project still opens, without resolving against the process CWD.
         std::fs::remove_file(moved.join("동영상.mp4")).unwrap();
         assert!(project_io::read_project(&moved.join("project.lfe.json")).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn portable_save_handles_directory_aliases_and_offline_descendants() {
+        let root = tempfile::tempdir().unwrap();
+        let actual = root.path().join("원본");
+        let alias = root.path().join("project-alias");
+        std::fs::create_dir(&actual).unwrap();
+        std::os::unix::fs::symlink(&actual, &alias).unwrap();
+        let source = alias.join("동영상.mp4");
+        std::fs::write(&source, b"unchanged source").unwrap();
+        let project = scene(&source);
+        let destination = actual.join("project.lfe.json");
+        let copy = portable(&project, &destination).unwrap();
+        assert_eq!(video_paths(&copy), BTreeSet::from(["동영상.mp4".into()]));
+        assert_eq!(
+            video_paths(&project),
+            BTreeSet::from([source.to_str().unwrap().into()])
+        );
+        save(&project, &Default::default(), &destination).unwrap();
+        assert_eq!(
+            canonical_paths(&project_io::read_project(&destination).unwrap()),
+            canonical_paths(&project)
+        );
+
+        // Missing files and whole missing subfolders still remain portable.
+        let offline = scene(&alias.join("offline/nested/동영상.mp4"));
+        let copy = portable(&offline, &destination).unwrap();
+        assert_eq!(
+            video_paths(&copy),
+            BTreeSet::from(["offline/nested/동영상.mp4".into()])
+        );
+        save(&offline, &Default::default(), &destination).unwrap();
+        let moved = root.path().join("이동");
+        std::fs::rename(&actual, &moved).unwrap();
+        let restored = project_io::read_project(&moved.join("project.lfe.json")).unwrap();
+        assert_eq!(
+            video_paths(&restored),
+            BTreeSet::from([moved
+                .join("offline/nested/동영상.mp4")
+                .to_str()
+                .unwrap()
+                .into()])
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn portable_save_normalizes_verbatim_media_prefixes() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("동영상.mp4");
+        std::fs::write(&source, b"unchanged source").unwrap();
+        let canonical = std::fs::canonicalize(&source).unwrap();
+        let project = scene(&canonical);
+        let copy = portable(&project, &root.path().join("project.lfe.json")).unwrap();
+        assert_eq!(video_paths(&copy), BTreeSet::from(["동영상.mp4".into()]));
+        assert!(
+            !path_string(&clean_absolute(&canonical).unwrap())
+                .unwrap()
+                .starts_with("\\\\?\\")
+        );
+        assert_eq!(
+            video_paths(&project),
+            BTreeSet::from([canonical.to_str().unwrap().into()])
+        );
     }
     #[test]
     fn collection_deduplicates_shared_sources_and_rolls_back_failed_copies() {
