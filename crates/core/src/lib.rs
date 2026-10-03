@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-const PROJECT_VERSION: u32 = 39;
+const PROJECT_VERSION: u32 = 40;
 pub type Frame = u32;
 pub type LayerId = u64;
 pub type CompositionId = u64;
@@ -1494,6 +1494,13 @@ impl Editor {
         }
         if next.project.compositions().into_iter().any(|(_, c)| c.layers.iter().any(|l| matches!(&l.content, Content::Shape(s) if s.parameters.keys().any(|p| matches!(p, ShapeParam::DashLength(_)))))) {
             next.project.version = next.project.version.max(39);
+        }
+        if next.project.compositions().into_iter().any(|(_, c)| {
+            c.layers
+                .iter()
+                .any(|l| matches!(&l.content, Content::Shape(s) if s.has_paint_opacity()))
+        }) {
+            next.project.version = next.project.version.max(40);
         }
         next.project.validate()?;
         if next != self.current {

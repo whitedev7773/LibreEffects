@@ -87,6 +87,13 @@ tracks. Copying a dash key to another shape requires the corresponding row to
 exist. Cap/join, points, colors and grouped Contents are not animated by these
 controls yet.
 
+Shape Properties also provides independent **Fill opacity** and **Stroke opacity**
+from 0 to 100 percent, with the same stopwatch and Timeline/Graph controls.
+These paint opacities combine where fill and stroke overlap, before the layer's
+Transform Opacity is applied. Turning Fill off or setting Stroke Width to zero
+still hides that paint. Old shapes default to 100%; edited paint opacity values
+and tracks use project version 40. Disabling animation retains the current value.
+
 ## Color selection
 
 Click the color swatch next to Fill in Properties or Character, Stroke in shape

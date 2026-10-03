@@ -40,6 +40,10 @@ pub struct Shape {
     pub path: Option<crate::VectorPath>,
     pub kind: ShapeKind,
     pub fill: bool,
+    #[serde(skip_serializing_if = "opaque")]
+    pub fill_opacity: f64,
+    #[serde(skip_serializing_if = "opaque")]
+    pub stroke_opacity: f64,
     pub stroke_color: u32,
     pub stroke_width: f64,
     pub roundness: f64,
@@ -55,6 +59,8 @@ impl Default for Shape {
             path_animation: Default::default(),
             kind: ShapeKind::Rectangle,
             fill: true,
+            fill_opacity: 100.,
+            stroke_opacity: 100.,
             stroke_color: 0xffffff,
             stroke_width: 0.0,
             roundness: 20.0,
@@ -68,6 +74,9 @@ impl Shape {
         self.path.as_ref().is_none_or(crate::VectorPath::valid)
             && self.stroke_style.valid()
             && self.stroke_color <= 0xffffff
+            && [self.fill_opacity, self.stroke_opacity]
+                .iter()
+                .all(|v| v.is_finite() && (0.0..=100.0).contains(v))
             && self.stroke_width.is_finite()
             && (0.0..=1024.0).contains(&self.stroke_width)
             && self.roundness.is_finite()
@@ -92,9 +101,11 @@ impl Shape {
             "none".into()
         };
         let style = format!(
-            "fill='{fill}' stroke='#{:06x}' stroke-width='{}' {}",
+            "fill='{fill}' stroke='#{:06x}' stroke-width='{}' fill-opacity='{}' stroke-opacity='{}' {}",
             self.stroke_color,
             self.stroke_width,
+            self.fill_opacity / 100.,
+            self.stroke_opacity / 100.,
             self.stroke_style.svg()
         );
         if let Some(path) = path {
@@ -140,6 +151,10 @@ impl Shape {
             }
         }
     }
+}
+
+fn opaque(value: &f64) -> bool {
+    *value == 100.
 }
 
 #[cfg(test)]

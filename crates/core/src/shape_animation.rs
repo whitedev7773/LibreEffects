@@ -9,6 +9,8 @@ pub enum ShapeParam {
     MiterLimit,
     DashOffset,
     DashLength(u8),
+    FillOpacity,
+    StrokeOpacity,
 }
 impl From<ShapeParam> for String {
     fn from(p: ShapeParam) -> Self {
@@ -27,6 +29,8 @@ impl TryFrom<String> for ShapeParam {
             "InnerRadius" => Self::InnerRadius,
             "MiterLimit" => Self::MiterLimit,
             "DashOffset" => Self::DashOffset,
+            "FillOpacity" => Self::FillOpacity,
+            "StrokeOpacity" => Self::StrokeOpacity,
             _ => {
                 let index = value
                     .strip_prefix("DashLength")
@@ -48,6 +52,8 @@ impl ShapeParam {
             Self::InnerRadius => "Inner Radius %",
             Self::MiterLimit => "Miter Limit",
             Self::DashOffset => "Dash Offset",
+            Self::FillOpacity => "Fill Opacity",
+            Self::StrokeOpacity => "Stroke Opacity",
             Self::DashLength(index) => {
                 return format!(
                     "{} {}",
@@ -63,6 +69,7 @@ impl ShapeParam {
             Self::StrokeWidth => (0., 1024.),
             Self::Roundness => (0., 8192.),
             Self::InnerRadius => (0., 100.),
+            Self::FillOpacity | Self::StrokeOpacity => (0., 100.),
             Self::MiterLimit => (1., 1024.),
             Self::DashOffset => (-32768., 32768.),
             Self::DashLength(_) => (0., 8192.),
@@ -74,6 +81,8 @@ impl ShapeParam {
     fn base(self, shape: &Shape) -> f64 {
         match self {
             Self::StrokeWidth => shape.stroke_width,
+            Self::FillOpacity => shape.fill_opacity,
+            Self::StrokeOpacity => shape.stroke_opacity,
             Self::Roundness => shape.roundness,
             Self::InnerRadius => shape.inner_radius,
             Self::MiterLimit => shape.stroke_style.miter_limit,
@@ -88,6 +97,12 @@ impl ShapeParam {
     }
 }
 impl Shape {
+    pub(super) fn has_paint_opacity(&self) -> bool {
+        self.fill_opacity != 100.
+            || self.stroke_opacity != 100.
+            || self.parameters.contains_key(&ShapeParam::FillOpacity)
+            || self.parameters.contains_key(&ShapeParam::StrokeOpacity)
+    }
     pub fn has_parameter(&self, parameter: ShapeParam) -> bool {
         match parameter {
             ShapeParam::DashLength(index) => (index as usize) < self.stroke_style.dashes.len(),
@@ -113,6 +128,8 @@ impl Shape {
     pub(super) fn evaluated(&self, frame: Frame) -> Self {
         let mut shape = self.clone();
         shape.stroke_width = self.value_at(ShapeParam::StrokeWidth, frame);
+        shape.fill_opacity = self.value_at(ShapeParam::FillOpacity, frame);
+        shape.stroke_opacity = self.value_at(ShapeParam::StrokeOpacity, frame);
         shape.roundness = self.value_at(ShapeParam::Roundness, frame);
         shape.inner_radius = self.value_at(ShapeParam::InnerRadius, frame);
         shape.stroke_style.miter_limit = self.value_at(ShapeParam::MiterLimit, frame);
@@ -129,6 +146,9 @@ pub(super) fn validate(layer: &Layer, duration: Frame, version: u32) -> Result<(
     };
     if !shape.parameters.is_empty() && version < 38 {
         return Err("Shape property animation requires project version 38".into());
+    }
+    if version < 40 && shape.has_paint_opacity() {
+        return Err("Shape fill/stroke opacity requires project version 40".into());
     }
     for (&parameter, track) in &shape.parameters {
         if !shape.has_parameter(parameter)
@@ -193,6 +213,123 @@ mod tests {
         })
         .unwrap();
     }
+    #[test]
+    fn paint_opacity_is_independent_versioned_and_preserves_history() {
+        let mut e = scene();
+        let original = e.project().clone();
+        let old_json = original.to_json().unwrap();
+        assert!(!old_json.contains("fill_opacity"));
+        assert!(!old_json.contains("stroke_opacity"));
+        assert_eq!(Project::from_json(&old_json).unwrap(), original);
+        for (p, end) in [
+            (ShapeParam::FillOpacity, 0.),
+            (ShapeParam::StrokeOpacity, 40.),
+        ] {
+            edit(&mut e, p, TrackEdit::ToggleAnimation { frame: 0 });
+            let before = e.project().clone();
+            edit(
+                &mut e,
+                p,
+                TrackEdit::Value {
+                    frame: 40,
+                    value: end,
+                },
+            );
+            let after = e.project().clone();
+            assert_eq!(
+                e.selected_layer()
+                    .unwrap()
+                    .track_value(PropertyPath::Shape(p), 20),
+                Some((100. + end) / 2.)
+            );
+            e.undo();
+            assert_eq!(e.project(), &before);
+            e.redo();
+            assert_eq!(e.project(), &after);
+            let mut json: serde_json::Value =
+                serde_json::from_str(&after.to_json().unwrap()).unwrap();
+            assert_eq!(json["version"], 40);
+            assert_eq!(Project::from_json(&json.to_string()).unwrap(), after);
+            json["version"] = 39.into();
+            assert!(Project::from_json(&json.to_string()).is_err());
+        }
+        let Content::Shape(shape) = e.selected_layer().unwrap().content() else {
+            unreachable!()
+        };
+        assert_eq!(shape.evaluated(20).fill_opacity, 50.);
+        assert_eq!(shape.evaluated(20).stroke_opacity, 70.);
+        assert_eq!(shape.stroke_width, 12.);
+        assert_eq!(shape.fill_opacity, 100.);
+        for p in [ShapeParam::FillOpacity, ShapeParam::StrokeOpacity] {
+            let before = e.project().clone();
+            for value in [-1., 101., f64::NAN, f64::INFINITY] {
+                assert!(
+                    e.execute(Command::EditShape {
+                        id: 1,
+                        parameter: p,
+                        edit: TrackEdit::Value { frame: 20, value }
+                    })
+                    .is_err()
+                );
+                assert_eq!(e.project(), &before);
+            }
+            edit(&mut e, p, TrackEdit::ToggleAnimation { frame: 20 });
+            assert_eq!(
+                e.selected_layer()
+                    .unwrap()
+                    .track_value(PropertyPath::Shape(p), 99),
+                Some(if p == ShapeParam::FillOpacity {
+                    50.
+                } else {
+                    70.
+                })
+            );
+        }
+        e.execute(Command::ToggleLocked(1)).unwrap();
+        let before = e.project().clone();
+        assert!(
+            e.execute(Command::EditShape {
+                id: 1,
+                parameter: ShapeParam::FillOpacity,
+                edit: TrackEdit::ToggleAnimation { frame: 0 }
+            })
+            .is_err()
+        );
+        assert_eq!(e.project(), &before);
+    }
+
+    #[test]
+    fn static_paint_opacity_validates_versions_and_default_compatibility() {
+        let mut e = scene();
+        let Content::Shape(mut shape) = e.selected_layer().unwrap().content().clone() else {
+            unreachable!()
+        };
+        shape.fill_opacity = 25.;
+        shape.stroke_opacity = 0.;
+        e.execute(Command::SetContent {
+            id: 1,
+            content: Content::Shape(shape.clone()),
+        })
+        .unwrap();
+        let saved = e.project().clone();
+        let mut json: serde_json::Value = serde_json::from_str(&saved.to_json().unwrap()).unwrap();
+        assert_eq!(json["version"], 40);
+        assert_eq!(Project::from_json(&json.to_string()).unwrap(), saved);
+        json["version"] = 39.into();
+        assert!(Project::from_json(&json.to_string()).is_err());
+        for value in [-1., 101., f64::INFINITY] {
+            shape.stroke_opacity = value;
+            assert!(
+                e.execute(Command::SetContent {
+                    id: 1,
+                    content: Content::Shape(shape.clone())
+                })
+                .is_err()
+            );
+            assert_eq!(e.project(), &saved);
+        }
+    }
+
     #[test]
     fn shape_tracks_interpolate_preserve_geometry_and_roundtrip_history() {
         let mut e = scene();

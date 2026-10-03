@@ -18,7 +18,17 @@
 - **후속 고급 기능:** 패널 도킹·소스 뷰어·최근 프로젝트, 타임라인 고급 시간 편집/검색/가상화, 공간 경로·프리셋·표현식, Shape 연산/SVG·Text Animator, 추가 효과·모션 블러, 고정밀 색/HDR·Proxy/GPU, 템플릿, 설치/업데이트·한글화와 UI 회귀 자동화.
 - **별도 대형 단계:** 3D/카메라/라이트·모델, 추적·로토/Puppet, 플러그인/교환 포맷 연구, 웹/API 제품 범위. AEP/MOGRT 호환은 구현되지 않았다.
 
+### 도형 Fill·Stroke 불투명도 — 2026-10-03
+
+- E03: Properties에 Fill opacity와 Stroke opacity를 별도로 추가했다. 각각 0–100%와 스톱워치를 제공하고 기존 Contents · Shape/Timeline/Graph, 키 편집, Undo/Redo에 연결한다. [Adobe Shape paint 속성](https://helpx.adobe.com/in/after-effects/desktop/drawing-painting-and-paths/shapes-and-shape-attributes/shape-attributes-paint-operations-path.html)을 참고했다. Fill/Stroke는 겹치는 영역에서 합성한 뒤 레이어 Transform Opacity를 적용한다. Fill 비활성·Stroke Width 0은 기존처럼 해당 페인트를 숨긴다.
+- 이전 파일은 두 값 모두 100%이며 기본 필드는 생략한다. 비기본 정적 값 또는 새 트랙을 사용하면 프로젝트 v40으로 올린다. 구버전으로 위장한 새 데이터, 범위 밖/비유한 값, 잠긴 레이어의 편집은 거부한다. 애니메이션 해제는 현재 평가 값을 유지하며 기존 색상·경로·폭·다른 트랙은 보존한다.
+- 검증: 코어 166개 + 데스크톱 229개(총 395개) 통과, 외부 미디어/장치 30개 제외. 독립 보간·정적 값/트랙 버전 검증·이전 파일 기본값·입력 원자성·Undo/Redo·JSON·애니메이션 해제·Fill/Stroke 겹침과 레이어 Opacity 50% 결합·Preview/출력 픽셀을 검사했다. Cargo check/fmt/test/release build와 git diff --check 통과(Moon/proto 미설치), 기존 경고 17개.
+- 실제 Windows에서 0/60프레임 Fill 100→20%, Stroke 100→60% 키 입력, Stroke Undo/Redo, 30프레임 60%/80%, U 필터와 Fill Value Graph를 확인했다. 실제 저장본 `target/qa/paint-opacity-native.lfe.json`을 재열어 값/미리보기 유지를 확인했다. CLI PNG 0/15/30/45/60프레임에서 9,100개 채움·선·겹침·외부 샘플이 독립 계산과 알파 1단계 이내로 일치했다(`target/qa/verify_paint_opacity_native.py`). 1920/1442px 창의 Properties 배치, 실제 작업 창 1개를 확인했다. 열려 있는 AE 첫 화면은 읽기만 했고 기존 왼쪽 Project/중앙 Composition/하단 Timeline/오른쪽 패널 배치를 유지했다.
+- 남음: Fill/Stroke 색상·Points 애니메이션, 다중 Fill/Stroke·Contents 그룹, Gradient Fill/Stroke와 도형 연산자. 실제 AE와 페인트 합성의 수치/픽셀 동등성은 별도 검증 과제이며 E03 전체 완료로 표시하지 않는다.
+
 ### 점선 길이·간격 애니메이션 — 2026-10-03
+
+- 후속 네이티브 검증(2026-10-03): 창 입력이 복구된 뒤 v39에서 Dash 80→120, Gap 80→60, Width 32→64를 0/60프레임 키로 입력했다. Width Undo/Redo, 30프레임의 100/70/48과 Offset 100, U 필터의 Contents · Shape, Dash 1 Value Graph를 확인했다. 실제 저장본 `target/qa/dash-animation-native.lfe.json`을 재열어 값과 미리보기 유지를 확인했다. CLI 0/15/30/45/60프레임 PNG의 선 내부·외부·점선 간격 15,922개 샘플이 독립 계산과 일치했다(`target/qa/verify_dash_animation_native.py`). 1442px 창에서 조작했고 작업 창 1개 및 사용자 보존 원본 SHA256 불변을 확인했다. 아래의 입력 차단 기록은 당시 상황이며 현재는 해소됐다. Dash/Gap 제거·재추가의 네이티브 조작 및 1920px 애니메이션 배치 비교는 별도 미검증이다.
 
 - E03/D02: 최대 16개의 개별 Dash/Gap 행에 스톱워치를 연결했다. 행의 값은 현재 프레임의 트랙을 평가하며 공통 Timeline/Graph·키 편집·Undo/Redo를 사용한다. 마지막 행 제거는 그 행의 트랙/키도 같은 변경으로 제거한다. Undo는 모두 복원하고 다시 추가한 행은 10px·키 없음으로 시작한다. 앞선 행과 Cap/Join 편집의 기존 트랙은 유지한다.
 - 점선 트랙은 프로젝트 v39의 `DashLength0`…`DashLength15` 주소를 사용한다. 이전 v38의 스칼라 주소 직렬화는 유지하며 잘못된 주소, 존재하지 않는 행의 편집/붙여넣기, 행 없이 남은 트랙, v38 이하의 점선 트랙을 거부한다. 홀수 길이 목록 반복·전부 0인 실선·Round cap의 길이 0 점도 매 프레임 평가 결과에 적용된다.
@@ -27,6 +37,8 @@
 - 실제 UI 검증은 남아 있다. 기존 v38 QA 창의 화면 캡처는 복구됐으나 입력 활성화는 같은 `failed to activate captured window` 오류로 실패했다. 60프레임 Offset 180 입력이 아직 편집 필드에 남아 있으므로 입력 확정·Undo/Redo·저장/재열기를 먼저 마친 뒤 새 v39 빌드의 Dash/Gap 조작·Graph·좁은 창 배치를 확인해야 한다. 사용자 보존 원본 SHA256은 변하지 않았다. 색상·Points 애니메이션과 Contents 그룹/연산자 등 전체 E03 잔여 범위도 유지한다.
 
 ### 도형 스칼라 속성 애니메이션 — 2026-10-03
+
+- 후속 네이티브 검증(2026-10-03): Offset 180 입력 확정, Undo/Redo, 30프레임 값 100, Timeline/Graph 선택 및 60프레임 키 F9→Undo를 확인했다. 실제 저장 v38 `target/qa/shape-animation-native.lfe.json`을 v39에서 재열어 값/미리보기 유지와 하위 호환을 확인했다. CLI 5프레임의 Offset 20/60/100/140/180 점선 샘플 448개가 독립 계산과 일치했다(`target/qa/verify_shape_animation_native.py`). Width 실제 입력/저장/재열기/출력은 위 Dash/Gap 후속 기록에 포함된다. Roundness·Inner Radius·Miter Limit 각각의 네이티브 조작은 미검증이다. 아래 입력 차단 기록은 현재 해소됐다.
 
 - E03/D02: Stroke Width, Roundness, Inner Radius %, Miter Limit, Dash Offset에 Properties 스톱워치를 연결했다. 켠 뒤 재생 헤드를 이동해 값을 바꾸면 해당 프레임에 키를 만든다. 처음 편집한 속성은 Timeline → Contents · Shape에 나타나며 공통 키 복사/붙여넣기·이동·삭제·시간/값 배율·보간·Graph에 연결된다. 스톱워치를 끄면 현재 프레임의 평가 값을 유지한다. 렌더 시 범위를 벗어나는 보간 오버슈트는 속성 한계로 제한한다.
 - 선택적 `Shape.parameters`는 사용한 속성만 저장하고 기존 정적 값은 해당 트랙이 없는 경우의 기본값으로 유지한다. 프로젝트 v38을 사용하며 v37 이하의 기존 도형 모습은 그대로다. 레이어 이동/복사 등 공통 시간 작업에도 도형 트랙을 포함했다. 스타일의 Cap/Join 변경은 애니메이션 트랙을 보존한다.

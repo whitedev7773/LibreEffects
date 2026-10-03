@@ -11,6 +11,8 @@ fn parameter(index: usize) -> Option<ShapeParam> {
         1 => Some(ShapeParam::StrokeWidth),
         2 => Some(ShapeParam::Roundness),
         4 => Some(ShapeParam::InnerRadius),
+        5 => Some(ShapeParam::FillOpacity),
+        6 => Some(ShapeParam::StrokeOpacity),
         _ => None,
     }
 }
@@ -23,7 +25,7 @@ pub(crate) struct ShapeControls {
 impl ShapeControls {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
-        let fields = (0..5).map(|index| {
+        let fields = (0..7).map(|index| {
             let edit = state.clone();
             cx.new(|cx| TextField::new(cx, move |text, window, cx| {
                 edit.update(cx, |s, cx| {
@@ -150,18 +152,19 @@ impl Render for ShapeControls {
             shape.value_at(ShapeParam::Roundness, frame).to_string(),
             shape.points.to_string(),
             shape.value_at(ShapeParam::InnerRadius, frame).to_string(),
+            shape.value_at(ShapeParam::FillOpacity, frame).to_string(),
+            shape.value_at(ShapeParam::StrokeOpacity, frame).to_string(),
         ];
         for (index, label) in [
-            "Stroke color",
-            "Stroke width",
-            "Roundness",
-            "Points",
-            "Inner radius %",
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            if (shape.path.is_some() && index >= 2)
+            (5, "Fill opacity"),
+            (0, "Stroke color"),
+            (1, "Stroke width"),
+            (6, "Stroke opacity"),
+            (2, "Roundness"),
+            (3, "Points"),
+            (4, "Inner radius %"),
+        ] {
+            if (shape.path.is_some() && (2..=4).contains(&index))
                 || index == 2 && shape.kind != ShapeKind::RoundedRectangle
                 || index == 3 && !matches!(shape.kind, ShapeKind::Polygon | ShapeKind::Star)
                 || index == 4 && shape.kind != ShapeKind::Star
@@ -215,5 +218,91 @@ impl Render for ShapeControls {
             );
         }
         root.child(self.stroke.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use libre_effects_core::{Editor, Project, Property, Shape};
+
+    #[test]
+    fn independent_paint_alpha_composes_before_layer_opacity_and_matches_preview() {
+        let mut e = Editor::default();
+        e.execute(Command::ConfigureComposition {
+            name: "Paint alpha".into(),
+            width: 200,
+            height: 200,
+            fps: 30,
+            duration: 60,
+        })
+        .unwrap();
+        e.execute(Command::AddContent {
+            content: Content::Shape(Shape {
+                stroke_width: 20.,
+                stroke_color: 0xffffff,
+                ..Default::default()
+            }),
+            width: 100.,
+            height: 100.,
+            name: "Rectangle".into(),
+        })
+        .unwrap();
+        e.execute(Command::SetColor {
+            id: 1,
+            color: 0xffffff,
+        })
+        .unwrap();
+        for (p, a, b) in [
+            (ShapeParam::FillOpacity, 100., 0.),
+            (ShapeParam::StrokeOpacity, 0., 100.),
+        ] {
+            for edit in [
+                TrackEdit::Value { frame: 0, value: a },
+                TrackEdit::ToggleAnimation { frame: 0 },
+                TrackEdit::Value {
+                    frame: 40,
+                    value: b,
+                },
+            ] {
+                e.execute(Command::EditTrack {
+                    id: 1,
+                    property: PropertyPath::Shape(p),
+                    edit,
+                })
+                .unwrap();
+            }
+        }
+        let renderer = crate::rendering::Renderer::new();
+        for layer_opacity in [100., 50.] {
+            e.execute(Command::SetValue {
+                id: 1,
+                property: Property::Opacity,
+                frame: 0,
+                value: layer_opacity,
+            })
+            .unwrap();
+            let saved = Project::from_json(&e.project().to_json().unwrap()).unwrap();
+            for frame in [0, 10, 20, 30, 40] {
+                let im = renderer.render(&saved, frame, 200).unwrap();
+                assert_eq!(im, renderer.render_output(&saved, frame, 200, 200).unwrap());
+                let stroke = frame as f64 / 40.;
+                let fill = 1. - stroke;
+                // Center: fill only; outside edge: stroke only; inside edge: stroke over fill.
+                for ((x, y), alpha) in [
+                    ((100, 100), fill),
+                    ((45, 100), stroke),
+                    ((55, 100), stroke + fill * (1. - stroke)),
+                    ((30, 100), 0.),
+                ] {
+                    let expected = (alpha * layer_opacity / 100. * 255.).round() as i32;
+                    assert!(
+                        (i32::from(im.get_pixel(x, y)[3]) - expected).abs() <= 1,
+                        "frame {frame} at ({x},{y}): {:?}, expected {expected}",
+                        im.get_pixel(x, y)
+                    );
+                }
+            }
+        }
     }
 }
