@@ -4,6 +4,10 @@ A Windows-first motion graphics editor built with Rust and GPUI. Its workspace
 and basic editing workflow follow After Effects conventions. It is an early 2D
 editor, not a complete After Effects replacement or an AEP-compatible application.
 
+See [current implementation status](STATUS.md) for all backlog IDs, the latest
+verification results and remaining milestones. Dated test counts later in this
+guide and the backlog are historical checkpoints.
+
 Only one editor runs per user, including builds launched from different folders
 or executable names. Launching again requests that the previous editor stop its
 work, checkpoint unsaved edits to recovery, and close. The successor waits for
@@ -1414,12 +1418,14 @@ menu's quick exports retain their defaults; use Render Queue for configured outp
 
 ## Remaining limitations
 
-See [the development backlog](DEVELOPMENT_BACKLOG.md) for the current capability
-audit, priorities, dependencies and proposed acceptance criteria.
+See [current implementation status](STATUS.md) for the complete capability
+inventory and remaining milestones. The [development backlog](DEVELOPMENT_BACKLOG.md)
+retains the original audit, dated implementation evidence and proposed acceptance
+criteria.
 
 Still pending: frame blending/optical flow, extended audio-device support,
-freeform/animated masks, additional effects and reusable presets,
-rich text layout, 3D, JSX, ExtendScript and expressions. PNG sequences can be
+variable-feather/topology-changing masks, additional effects and general-property
+animation presets, per-character text styles, 3D, JSX, ExtendScript and expressions. PNG sequences can be
 assembled in an external video tool.
 There is no claim of AEP or Adobe script compatibility.
 
@@ -1446,7 +1452,8 @@ cargo test -p libre-effects-desktop -- --ignored --skip device_clock_minute
 
 The dedicated Windows desktop CI installs FFmpeg and runs checks, formatting,
 workspace tests, the explicit media suite and a release build. The Moon desktop
-`test` task joins normal CI; `test-media` is explicit because it needs FFmpeg.
+`test` task is available through Moon; `test-media` is explicit because it needs
+FFmpeg. Bun CI selects web/API validation explicitly and never deploys.
 
 Media tests are explicitly ignored in the default suite when FFmpeg/FFprobe
 are not declared test dependencies. They also check footage import, different
@@ -1466,14 +1473,48 @@ cargo check -p libre-effects-desktop
 cargo build -p libre-effects-desktop --release
 ~~~
 
-The executable is target/debug/libre-effects.exe (or target/release/ for release).
+The executable is `target/debug/libre-effects` on Linux/macOS and
+`target/debug/libre-effects.exe` on Windows (or `target/release/` for release).
 The first GPUI build can take a while.
 The Windows release executable opens the editor without an extra console window.
 
 Windows uses Win32/DirectWrite. macOS requires Xcode command line tools. Linux
-requires Vulkan, a C toolchain, cmake, libvulkan1, libwayland-dev, libx11-xcb-dev,
-libxkbcommon-x11-dev and libfontconfig-dev. WSLg uses XWayland when available due
-to the GPUI 0.2.2/xdg_wm_base version mismatch.
+requires a C toolchain, cmake, libvulkan1, libwayland-dev, libx11-xcb-dev,
+libxkbcommon-x11-dev and libfontconfig-dev, plus a working Vulkan ICD/driver.
+On Debian/Ubuntu, `mesa-vulkan-drivers` supplies Mesa drivers (including software
+rendering where available). WSLg uses XWayland when available due to the GPUI
+0.2.2/xdg_wm_base version mismatch.
+
+Native Open/Save dialogs on Linux also require a running user D-Bus session,
+`xdg-desktop-portal` and a compatible FileChooser backend. For a GTK-based desktop,
+install the distro's `xdg-desktop-portal-gtk` package; use the backend appropriate
+to other desktop environments. Start the editor in that desktop session. A
+minimal/headless container with only X11 and Vulkan can show the editor while
+Open/Save silently returns as canceled because no file-chooser portal is running.
+Check that the portal and its backend are active before treating this as an
+application save failure. The current Linux native smoke check used Mesa and the
+GTK backend; it does not establish support for every Linux desktop/backend.
+
+The generated Contents gradient example can be rebuilt and rendered from the
+repository root:
+
+~~~sh
+cargo run -p libre-effects-core --example make_gradient_study -- examples/gradient-study.lfe.json
+cargo run -p libre-effects-desktop --release --locked -- --render examples/gradient-study.lfe.json --output gradient-study.png --size 640x360
+~~~
+
+The fixture is a generated 1280×720 document; the command above renders at
+640×360. It is not evidence of native pointer QA.
+See [STATUS.md](STATUS.md) for the separate native save and gradient checks.
+
+The initial resumed release passed native endpoint dragging, one-step Undo,
+color-picker Cancel/OK/Undo and endpoint persistence through Save/reopen.
+Observing a frame while the mouse remains held and pressing Escape during an
+active drag are not yet native-verified. After the review fixes, the isolated
+checkpoint passed 197 core + 258 desktop tests, all 29 explicit media tests,
+formatting/type checks and a fresh release build. Consult STATUS for the exact
+native-versus-automated coverage. This checkpoint is local commits
+only, so no push/PR or fresh remote Windows CI run is part of its result.
 
 On Windows, GPUI also needs the Windows SDK shader compiler. If a clean build
 reports `Failed to find fxc.exe`, set `GPUI_FXC_PATH` to the installed SDK's x64
@@ -1860,18 +1901,24 @@ power curve in sRGB. Radial highlights are limited to ±99.9% of the radius.
 Rendering merges separate color and opacity stops into an adaptively sampled
 gradient; Preview and output share the same 8-bit rasterizer. The Properties ramp
 shows opacity over a checkerboard, opacity stops above it and color stops below
-it. Drag a stop or a diamond midpoint; the ramp previews the draft and release
-applies one Undo step at the current frame. Escape, focus/window changes or a
-changed document/frame/selection cancel the draft. The Composition updates on
-release. Click empty space in either stop row to add at that location. Up/Down
+it. Drag a stop or a diamond midpoint; both the ramp and Composition preview the
+draft while release applies one Undo step at the current frame. Drafts never
+change autosave, export or document history. Continuous motion coalesces render
+requests and retains the last valid frame. Escape, focus/window changes, playback,
+tool changes or a changed document/frame/selection cancel the draft and reject
+late frames. Click empty space in either stop row to add at that location. Up/Down
 selects handles, Left/Right adjusts by 1% (Shift: 10%), Home/End goes to the allowed
 limits, and Delete removes a stop while retaining at least two of each kind.
 Existing numeric fields and color swatches remain available. Coincident stops
 retain their IDs; zero-length intervals have no draggable midpoint.
 Stop topology changes are static, and adding a stop can change other animation
-frames. AE's modal Gradient Editor/compound Colors animation, Composition
-handles and color-space or pixel equivalence remain separate work. Native ramp
-gesture verification is pending; see DEVELOPMENT_BACKLOG.md.
+frames. **Edit gradient in Composition** exposes Start/End handles for the selected
+Gradient Fill/Stroke through nested group and layer transforms. Shift constrains
+a drag to a local axis; Alt translates both endpoints. Tab switches endpoints,
+arrows move 1 unit (Shift: 10), and Escape cancels a drag or exits the tool.
+Linear and radial gradients share these controls. AE's modal Gradient Editor,
+compound Colors/topology animation, and color-space or pixel equivalence remain
+separate work. See STATUS.md for current automated and native validation.
 
 Group Skew ranges from −89° to 89° to avoid singular transforms. Skew Axis
 rotates the shear direction. The group applies Anchor, Scale, oriented Skew,
@@ -1906,8 +1953,8 @@ retiming and serialization. Turning animation off bakes the evaluated shape.
 Corresponding vertices and tangents interpolate; animated topology must retain
 the same vertex count and closed state. Turn off Path animation before inserting
 or deleting vertices. Path geometry is edited on the canvas, not as numeric values
-in the graph. Grouped Contents, shape operators, variable feather, roto tools and
-multiple-vertex selection remain future work.
+in the graph. Grouped Contents is implemented; shape operators, variable feather,
+roto tools and multiple-vertex selection remain future work.
 
 Version 29 masks migrate to stable IDs; scalar mask tracks use version 30 and
 path animation uses version 31. Compact image and sequence decoding now accepts

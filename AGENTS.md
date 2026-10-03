@@ -2,12 +2,12 @@
 
 ## Project Structure
 
-This repository contains the OpenCut rewrite, managed with Moon and proto.
+This repository contains Libre Effects, a motion graphics editor derived from the OpenCut rewrite, managed with Moon and proto.
 
 - `apps/web/`: React and TanStack Start frontend, with Tailwind CSS and Cloudflare deployment. File-based routes live in `src/routes/`, reusable UI primitives in `src/components/ui/`, hooks in `src/hooks/`, and static assets in `public/`.
 - `apps/api/`: Elysia API running as a Cloudflare Worker. Its entry point is `src/index.ts`; preserve the Cloudflare adapter and required `.compile()` call.
 - `apps/desktop/`: Rust/GPUI application. Shared UI components live in `src/components/`, editor panels in `src/panels/`, and shell/theme code in `src/shell.rs` and `src/theme.rs`.
-- `crates/`: shared core work and media setup tooling. Currently only `apps/desktop` is registered in the root Cargo workspace; add new Rust crates to its members explicitly.
+- `crates/`: shared core work and media setup tooling. `apps/desktop` and `crates/core` are registered in the root Cargo workspace; add new Rust crates to its members explicitly.
 - `brand/marks/`: SVG brand assets. `changelog/`: release notes. `.moon/`: workspace and toolchain configuration.
 
 Do not manually edit `apps/web/src/routeTree.gen.ts`; TanStack Router generates it.
@@ -38,7 +38,7 @@ Use `rustfmt` for Rust, with `snake_case` modules/functions and `PascalCase` typ
 
 ## Validation
 
-- Before frontend submissions, run `moon run web:test` and, for build-affecting changes, `moon run web:build`. Vitest and Testing Library are installed, but no tests are currently committed. Add behavior/regression tests beside source as `*.test.ts` or `*.test.tsx`; configure a DOM environment when needed. Report an empty test suite accurately rather than claiming tests passed.
+- Before frontend submissions, run `moon run web:test` and, for build-affecting changes, `moon run web:build`. Vitest and Testing Library are installed; focused utility regressions use `vitest.config.ts`. Add behavior/regression tests beside source as `*.test.ts` or `*.test.tsx`; configure a DOM environment when needed. Report an empty test suite accurately rather than claiming tests passed.
 - For API changes, run `moon run api:build`.
 - For Rust changes, run `moon run desktop:check`, `cargo fmt --all --check`, and `cargo test --workspace`. Add unit tests in `#[cfg(test)]` modules or integration tests under `apps/desktop/tests/` as appropriate.
 - Documentation-only changes need review and `git diff --check`, not application builds.
@@ -47,4 +47,4 @@ Use `rustfmt` for Rust, with `snake_case` modules/functions and `PascalCase` typ
 
 Use short, imperative, scoped subjects such as `web: add timeline zoom controls`. Keep commits focused. PR descriptions should explain behavior changes and validation, link relevant issues, include screenshots for visible UI changes, and note configuration or deployment impacts.
 
-Before submitting upstream, review `.github/pull_request_template.md`: contributions are currently restricted to critical bug fixes with an issue and maintainer approval. Discuss features in an issue first.
+The inherited `.github/pull_request_template.md` describes contributions to upstream OpenCut. Work in this fork follows the owner's requested scope; do not publish to upstream, merge or deploy without authorization.

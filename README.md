@@ -8,16 +8,22 @@ layer workflow familiar to After Effects users, with extensive scripting support
 
 ## Status
 
-**Early desktop foundation.** Rectangle layers, transform properties, keyframes,
-interpolation, preview/playback, undo/redo, and JSON project persistence are implemented.
-The shared Rust editing model lives in `crates/core`.
+**Early 2D desktop editor.** The Rust/GPUI application supports multiple
+compositions, layers and precompositions, shared media import, text and vector
+Contents, masks, effects, scalar Value/Speed Graph editing, project recovery,
+render queues, and PNG/H.264/ProRes output. Preview and export share the compositor.
+The shared editing model lives in `crates/core`.
 
-JSX/ExtendScript compatibility, expressions, advanced motion graphics tools, media
-import, and export remain future work. Web and API apps are inherited from the
-OpenCut rewrite and do not expose the desktop editor yet.
+This is not a complete After Effects replacement. JSX/ExtendScript, expressions,
+3D, tracking, Adobe project compatibility and the web editor remain separate
+future work. Audio-device preview currently targets Windows; file rendering and
+other editor workflows are also validated on Linux.
 
-See [the desktop guide](apps/desktop/README.md) for the animation walkthrough and
-current limitations. Original OpenCut copyright and MIT license notices are retained.
+See [the desktop guide](apps/desktop/README.md) for current behavior,
+[the current implementation status](apps/desktop/STATUS.md) for verified work and
+remaining milestones, and [the development backlog](apps/desktop/DEVELOPMENT_BACKLOG.md)
+for the dated design and validation history. Original OpenCut copyright and MIT
+license notices are retained.
 
 ## Development
 
