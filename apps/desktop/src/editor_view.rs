@@ -59,6 +59,7 @@ impl EditorState {
         views
     }
     pub(super) fn load_views(&mut self, mut views: ProjectViews) {
+        self.gradient_controls = None;
         self.project_item = None;
         views.normalize(self.editor.project());
         self.composition_views = views.compositions;

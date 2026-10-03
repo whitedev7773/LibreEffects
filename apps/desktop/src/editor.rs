@@ -242,6 +242,7 @@ pub(crate) struct EditorState {
     pub graph_open: bool,
     pub graph_view: crate::view_state::GraphView,
     pub effect_controls_open: bool,
+    pub gradient_controls: Option<(CompositionId, LayerId, libre_effects_core::EffectId)>,
     pub graph_property: PropertyPath,
     pub graph_key: Option<(LayerId, Frame)>,
     playback_origin: Option<(Instant, Frame)>,
@@ -326,6 +327,7 @@ impl Default for EditorState {
             graph_open: false,
             graph_view: Default::default(),
             effect_controls_open: false,
+            gradient_controls: None,
             graph_property: Property::PositionX.into(),
             graph_key: None,
             playback_origin: None,
@@ -504,6 +506,7 @@ impl EditorState {
     }
 
     fn composition_changed(&mut self) {
+        self.gradient_controls = None;
         self.stop();
         self.restore_composition_view();
         self.selected_layers.clear();

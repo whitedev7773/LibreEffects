@@ -752,8 +752,21 @@ coincident endpoints produce the end color. The preceding effect stage's alpha
 limits the gradient, including blur or shadow extents. Reset initializes endpoints
 from the current source dimensions; resizing a source keeps existing endpoints.
 Curve/gradient projects use version 19. Open `examples/tonal-color-study.lfe.json`
-for animated contrast and a moving radial center. Gradient scatter/dithering and
-on-canvas endpoint handles remain in the backlog.
+for animated contrast and a moving radial center. Gradient scatter/dithering remains
+in the backlog.
+
+In Effect Controls, **Edit gradient in Composition** enables the selected gradient's
+start/end handles with the Selection tool. The start has a cross; the end is a square.
+Drag either in Composition, Shift-drag to constrain a layer-space axis, or Alt-drag
+to translate both. Parent transforms, rotation, reflection and viewer zoom/pan are
+included. Tab selects the other endpoint; arrows nudge it by one layer pixel,
+Shift+arrows by ten, and Alt+arrows move both. These keys require Composition focus.
+Each gesture is one Undo. Only changed coordinates update existing animation tracks
+or static values. Escape cancels a drag; another Escape closes the controls. Focus
+loss, document/time/tool/selection/view changes or window deactivation cancel a drag.
+Locked, bypassed, inactive and singularly transformed layers have no editable handles.
+Points remain within the existing ±32768 range; out-of-range moves are rejected.
+Controls are transient and excluded from saved projects and rendered output.
 
 File → Export current frame (PNG, alpha) writes a full-resolution RGBA PNG. Render work area
 writes a PNG sequence to a new subfolder of the chosen directory, with frame rate,

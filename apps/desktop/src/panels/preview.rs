@@ -20,6 +20,8 @@ mod preview_render;
 mod shape_gesture;
 use preview_render::Request;
 use shape_gesture::ShapeGesture;
+#[path = "gradient_gesture.rs"]
+mod gradient_gesture;
 #[path = "text_box.rs"]
 mod text_box;
 #[path = "text_input.rs"]
@@ -79,6 +81,14 @@ fn move_command(g: &MoveGesture) -> Command {
     )
 }
 pub(crate) struct Preview {
+    gradient_drag: Option<gradient_gesture::Gesture>,
+    gradient_point: usize,
+    gradient_focus_target: Option<(
+        libre_effects_core::CompositionId,
+        LayerId,
+        libre_effects_core::EffectId,
+    )>,
+    gradient_focus_watch: Option<[gpui::Subscription; 2]>,
     state: Entity<EditorState>,
     text_dragging: bool,
     text_was_active: bool,
@@ -179,6 +189,10 @@ impl Preview {
         let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         Self::watch_media(cx);
         Self {
+            gradient_drag: None,
+            gradient_point: 0,
+            gradient_focus_target: None,
+            gradient_focus_watch: None,
             state,
             text_dragging: false,
             text_was_active: false,
@@ -467,6 +481,17 @@ impl Preview {
             cx.stop_propagation();
             return;
         }
+        if let Some(overlay) = gradient_gesture::Overlay::current(state, state.editor.project())
+            && let Some(index) = overlay.hit(p, zoom, self.gradient_point)
+        {
+            self.gradient_point = index;
+            self.gradient_drag = Some(gradient_gesture::Gesture::new(
+                overlay, index, p, bounds, state,
+            ));
+            cx.stop_propagation();
+            cx.notify();
+            return;
+        }
         if state.tool == Tool::Text || (state.tool == Tool::Select && event.click_count == 2) {
             let id = comp
                 .layers()
@@ -739,6 +764,15 @@ impl Preview {
         cx.notify();
     }
     fn moving(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if self.gradient_drag.is_some() {
+            self.update_gradient(
+                event.position,
+                event.modifiers.shift,
+                event.modifiers.alt,
+                cx,
+            );
+            return;
+        }
         if self.text_resizing {
             self.resize_text(event.position, cx);
             return;
@@ -807,6 +841,22 @@ impl Preview {
         }
     }
     fn up(&mut self, event: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.gradient_drag.is_some() {
+            self.update_gradient(
+                event.position,
+                event.modifiers.shift,
+                event.modifiers.alt,
+                cx,
+            );
+            if let Some(drag) = self.gradient_drag.take()
+                && let Some(command) = drag.command(self.state.read(cx))
+            {
+                self.state
+                    .update(cx, |s, cx| s.dispatch(&Action::Edit(command), window, cx));
+            }
+            cx.notify();
+            return;
+        }
         if self.text_resizing {
             self.resize_text(event.position, cx);
             self.text_resizing = false;
@@ -910,6 +960,41 @@ impl Preview {
 }
 impl Render for Preview {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.gradient_focus_watch.is_none() {
+            self.gradient_focus_watch = Some([
+                cx.on_blur(&self.focus.clone(), window, |this, _, cx| {
+                    this.gradient_drag = None;
+                    cx.notify();
+                }),
+                cx.observe_window_activation(window, |this, window, cx| {
+                    if !window.is_window_active() {
+                        this.gradient_drag = None;
+                        cx.notify();
+                    }
+                }),
+            ]);
+        }
+        if self
+            .gradient_drag
+            .as_ref()
+            .is_some_and(|g| !g.valid(self.state.read(cx)) || self.bounds.get() != Some(g.bounds))
+        {
+            self.gradient_drag = None;
+        }
+        let gradient_active = gradient_gesture::Overlay::current(
+            self.state.read(cx),
+            self.state.read(cx).editor.project(),
+        )
+        .is_some();
+        let gradient_target = if gradient_active {
+            self.state.read(cx).gradient_controls
+        } else {
+            None
+        };
+        if gradient_active && self.gradient_focus_target != gradient_target {
+            window.focus(&self.focus);
+        }
+        self.gradient_focus_target = gradient_target;
         if self
             .text_box_drag
             .as_ref()
@@ -1058,6 +1143,16 @@ impl Render for Preview {
             }
         }
         let pen_overlay = self.pen.overlay(state);
+        if let Some(command) = self.gradient_drag.as_ref().and_then(|g| g.command(state)) {
+            let mut temporary = libre_effects_core::Editor::default();
+            if temporary.replace_project(render_project.clone()).is_ok()
+                && temporary.execute(command).is_ok()
+            {
+                render_project = temporary.project().clone();
+            }
+        }
+        let gradient_overlay = gradient_gesture::Overlay::current(state, &render_project);
+        let gradient_point = self.gradient_point;
         let pen_active = state.tool == Tool::Pen;
         let comp = render_project.composition().clone();
         self.update_render(
@@ -1150,7 +1245,7 @@ impl Render for Preview {
                     .child(format!(
                         "{}  ›  Active Camera{}",
                         comp.name(),
-                        if text_session.is_some() { "  ·  Text: Ctrl+Enter finish · Esc cancel" } else if self.state.read(cx).colors.picking() { "  ·  Pick composition color · click to sample · Esc to return" } else if pen_active { "  ·  Pen: click / drag · Enter finish · Esc cancel · Delete vertex" } else if self.pending.is_some() {
+                        if text_session.is_some() { "  ·  Text: Ctrl+Enter finish · Esc cancel" } else if self.state.read(cx).colors.picking() { "  ·  Pick composition color · click to sample · Esc to return" } else if gradient_active { if gradient_point == 0 { "  ·  Gradient Start: drag · Tab switch · arrows move · Alt both · Esc close" } else { "  ·  Gradient End: drag · Tab switch · arrows move · Alt both · Esc close" } } else if pen_active { "  ·  Pen: click / drag · Enter finish · Esc cancel · Delete vertex" } else if self.pending.is_some() {
                             "  ·  Rendering…"
                         } else {
                             ""
@@ -1162,6 +1257,7 @@ impl Render for Preview {
                     .id("composition-canvas")
                     .track_focus(&self.focus)
                     .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+                        if this.gradient_key(event, window, cx) { cx.stop_propagation(); return; }
                         if event.keystroke.key=="escape" && this.text_box_drag.take().is_some() {cx.stop_propagation();cx.notify();return;}
                         if this.text_key(event,window,cx) {return;}
                         if this.state.read(cx).colors.session.is_some() { return; }
@@ -1370,6 +1466,7 @@ impl Render for Preview {
                                         },
                                     );
                                     super::pen::paint(&pen_overlay, origin, zoom, window);
+                                    if let Some(overlay) = &gradient_overlay { gradient_gesture::paint(overlay, gradient_point, origin, zoom, window); }
                                     if let Some(r)=text_box_rect {
                                         let b=Bounds::new(origin+point(px(r[0] as f32*zoom),px(r[1] as f32*zoom)),size(px(r[2] as f32*zoom),px(r[3] as f32*zoom)));
                                         window.paint_quad(gpui::outline(b,rgb(ui::BLUE),gpui::BorderStyle::Solid));

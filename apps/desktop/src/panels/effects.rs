@@ -32,6 +32,8 @@ impl Render for EffectControls {
         let state = self.state.read(cx);
         let layer = state.editor.selected_layer().cloned();
         let frame = state.frame;
+        let composition = state.editor.project().active_composition_id();
+        let gradient_controls = state.gradient_controls;
         let mut body = div()
             .id("effect-controls-scroll")
             .size_full()
@@ -240,6 +242,42 @@ impl Render for EffectControls {
                 &self.state,
                 PresetAction::Save(Some(effect_id)),
             ));
+            if matches!(
+                effect.kind(),
+                EffectKind::LinearGradient | EffectKind::RadialGradient
+            ) {
+                let target = (composition, id, effect_id);
+                let active = gradient_controls == Some(target);
+                let state = self.state.clone();
+                section = section.child(
+                    ui::text_button(
+                        SharedString::from(format!("{prefix}-points")),
+                        "Edit gradient in Composition",
+                    )
+                    .when(active, |b| b.bg(rgb(0x164a7b)))
+                    .when(locked || effect.bypassed(), |b| b.opacity(0.4))
+                    .on_click(move |_, window, cx| {
+                        TextField::commit_active(window, cx);
+                        state.update(cx, |s, cx| {
+                            if s.editor.project().composition().layer(id).is_some_and(|l| {
+                                !l.locked()
+                                    && l.effect_stack()
+                                        .iter()
+                                        .any(|e| e.id() == effect_id && !e.bypassed())
+                            }) {
+                                s.dispatch(&Action::Seek(s.frame), window, cx);
+                                s.tool = crate::editor::Tool::Select;
+                                s.gradient_controls = if s.gradient_controls == Some(target) {
+                                    None
+                                } else {
+                                    Some(target)
+                                };
+                                cx.notify();
+                            }
+                        });
+                    }),
+                );
+            }
             let mut shown_curve = None;
             if effect.kind() == EffectKind::Curves {
                 if !self.curves.contains_key(&key) {
