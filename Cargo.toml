@@ -12,3 +12,8 @@ license = "MIT"
 
 [workspace.dependencies]
 gpui = "0.2.2"
+
+[patch.crates-io]
+# GPUI pins Taffy 0.9, which still requires grid 0.18. Keep its API while
+# backporting the upstream overflow fix; see vendor/grid/README.libreeffects.md.
+grid = { path = "vendor/grid" }

@@ -2,9 +2,9 @@ name: Desktop validation
 
 on:
   push:
-    paths: ['apps/desktop/**', 'crates/core/**', 'examples/**', 'Cargo.*', '.prototools', '.github/workflows/desktop-ci.yml']
+    paths: ['apps/desktop/**', 'crates/core/**', 'examples/**', 'vendor/grid/**', 'Cargo.*', '.prototools', '.github/workflows/desktop-ci.yml']
   pull_request:
-    paths: ['apps/desktop/**', 'crates/core/**', 'examples/**', 'Cargo.*', '.prototools', '.github/workflows/desktop-ci.yml']
+    paths: ['apps/desktop/**', 'crates/core/**', 'examples/**', 'vendor/grid/**', 'Cargo.*', '.prototools', '.github/workflows/desktop-ci.yml']
   workflow_dispatch:
 
 permissions:
@@ -30,6 +30,12 @@ jobs:
           "GPUI_FXC_PATH=$($compiler.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Check formatting
         run: cargo fmt --all --check
+      - name: Test grid security backport
+        run: cargo test --manifest-path vendor/grid/Cargo.toml --locked --all-features
+      - name: Test grid security backport in release mode
+        run: cargo test --manifest-path vendor/grid/Cargo.toml --locked --all-features --release
+      - name: Check grid no-std compatibility
+        run: cargo check --manifest-path vendor/grid/Cargo.toml --locked --no-default-features
       - name: Type check
         run: cargo check -p libre-effects-desktop --locked
       - name: Unit and regression tests

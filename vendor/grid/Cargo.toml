@@ -1,0 +1,25 @@
+# Vendored grid 0.18 API with the upstream dimension-overflow safety fix.
+[package]
+name = "grid"
+version = "0.18.0+libreeffects.1"
+edition = "2018"
+rust-version = "1.59"
+authors = ["Armin Becher <armin.becher@gmai.com>"]
+description = "Dynamic generic 2D data structure (LibreEffects security backport)."
+license = "MIT"
+repository = "https://github.com/becheran/grid"
+publish = false
+
+[features]
+default = ["std"]
+serde = ["std", "dep:serde"]
+std = []
+
+[dependencies]
+serde = { version = "1.0.219", features = ["derive"], optional = true }
+
+[dev-dependencies]
+serde_json = "1.0.140"
+
+# Keep vendored tests and dependency resolution separate from application tasks.
+[workspace]

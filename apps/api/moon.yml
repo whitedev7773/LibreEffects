@@ -15,6 +15,7 @@ tasks:
       - 'src/**/*'
       - 'wrangler.jsonc'
       - 'package.json'
+      - 'bun.lock'
     outputs:
       - 'dist'
 
@@ -22,3 +23,6 @@ tasks:
     command: 'bun run deploy'
     deps:
       - '~:build'
+    options:
+      runInCI: false
+      cache: false

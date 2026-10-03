@@ -19,6 +19,8 @@ tasks:
       - '/Cargo.lock'
       - '/crates/core/src/**/*'
       - '/crates/core/Cargo.toml'
+      - '/vendor/grid/Cargo.toml'
+      - '/vendor/grid/src/**/*'
 
   test:
     command: 'cargo test -p libre-effects-desktop'
@@ -30,6 +32,8 @@ tasks:
       - '/Cargo.lock'
       - '/crates/core/src/**/*'
       - '/examples/**/*'
+      - '/vendor/grid/Cargo.toml'
+      - '/vendor/grid/src/**/*'
 
   test-media:
     command: 'cargo test -p libre-effects-desktop -- --ignored --skip device_clock_minute'
@@ -60,5 +64,7 @@ tasks:
       - '/Cargo.lock'
       - '/crates/core/src/**/*'
       - '/crates/core/Cargo.toml'
+      - '/vendor/grid/Cargo.toml'
+      - '/vendor/grid/src/**/*'
     outputs:
       - '/target/release/libre-effects{,.exe}'
