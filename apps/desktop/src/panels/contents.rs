@@ -5,8 +5,8 @@ use crate::{
 };
 use gpui::{Context, Entity, Window, div, prelude::*, px, rgb};
 use libre_effects_core::{
-    Command, Content, ContentsEdit, ContentsKind, ContentsParam, PathTarget, PropertyPath,
-    ShapeKind, ShapeStroke, StrokeCap, StrokeJoin, TrackEdit,
+    Command, Content, ContentsEdit, ContentsKind, ContentsParam, GradientParam, PathTarget,
+    PropertyPath, ShapeGradient, ShapeKind, ShapeStroke, StrokeCap, StrokeJoin, TrackEdit,
 };
 
 pub(crate) struct ContentsControls {
@@ -17,6 +17,7 @@ pub(crate) struct ContentsControls {
     name: Option<Entity<TextField>>,
     add_open: bool,
     collapsed: std::collections::BTreeSet<u64>,
+    gradient_stop: Option<u64>,
 }
 impl ContentsControls {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
@@ -29,9 +30,13 @@ impl ContentsControls {
             name: None,
             add_open: false,
             collapsed: Default::default(),
+            gradient_stop: None,
         }
     }
     fn select(&mut self, layer: u64, item: u64, cx: &mut Context<Self>) {
+        if self.owner != Some(layer) || self.selected != Some(item) {
+            self.gradient_stop = None;
+        }
         self.owner = Some(layer);
         self.selected = Some(item);
         self.add_open = false;
@@ -165,6 +170,14 @@ impl Render for ContentsControls {
                 ContentsKind::Parametric(ShapeKind::Star),
                 ContentsKind::Fill { even_odd: false },
                 ContentsKind::Stroke(Default::default()),
+                ContentsKind::GradientFill {
+                    even_odd: false,
+                    gradient: ShapeGradient::default(),
+                },
+                ContentsKind::GradientStroke {
+                    style: ShapeStroke::default(),
+                    gradient: ShapeGradient::default(),
+                },
             ]
             .into_iter()
             .enumerate()
@@ -470,7 +483,9 @@ impl Render for ContentsControls {
                 frame,
             ));
         }
-        if let ContentsKind::Fill { even_odd } = node.kind {
+        if let ContentsKind::Fill { even_odd } | ContentsKind::GradientFill { even_odd, .. } =
+            node.kind
+        {
             let state = self.state.clone();
             root = root.child(
                 ui::text_button(
@@ -516,7 +531,188 @@ impl Render for ContentsControls {
                     )),
             );
         }
-        if let ContentsKind::Stroke(style) = &node.kind {
+        if let Some(gradient) = node.kind.gradient() {
+            let samples = gradient.preview(node, frame, 256);
+            root = root.child(
+                gpui::canvas(
+                    |_, _, _| (),
+                    move |bounds, _, window, _| {
+                        let width = f32::from(bounds.size.width).ceil().max(1.) as usize;
+                        for x in 0..width {
+                            let c = samples[x * 255 / (width - 1).max(1)];
+                            for row in 0..2 {
+                                let background = if (x / 8 + row) % 2 == 0 { 85. } else { 153. };
+                                let rgb_value = c[..3].iter().fold(0u32, |rgb, value| {
+                                    (rgb << 8)
+                                        | (value * 255. * c[3] + background * (1. - c[3])).round()
+                                            as u32
+                                });
+                                window.paint_quad(gpui::fill(
+                                    gpui::Bounds::new(
+                                        gpui::point(
+                                            bounds.left() + px(x as f32),
+                                            bounds.top() + bounds.size.height * (row as f32 / 2.),
+                                        ),
+                                        gpui::size(px(1.5), bounds.size.height / 2. + px(0.5)),
+                                    ),
+                                    rgb(rgb_value),
+                                ));
+                            }
+                        }
+                    },
+                )
+                .w_full()
+                .h(px(20.)),
+            );
+            let mut types = div().flex().gap_1().child("Type");
+            for (index, radial) in [false, true].into_iter().enumerate() {
+                let state = self.state.clone();
+                types = types.child(
+                    ui::text_button(
+                        ("gradient-type", index),
+                        if radial { "Radial" } else { "Linear" },
+                    )
+                    .when(gradient.radial == radial, |b| b.bg(rgb(0x164a7b)))
+                    .when(!locked, |b| {
+                        b.on_click(move |_, w, cx| {
+                            TextField::commit_active(w, cx);
+                            state.update(cx, |s, cx| {
+                                s.dispatch(
+                                    &Action::Edit(Command::Contents {
+                                        id,
+                                        edit: ContentsEdit::GradientType { item, radial },
+                                    }),
+                                    w,
+                                    cx,
+                                )
+                            });
+                        })
+                    }),
+                );
+            }
+            root = root.child(types);
+            let ids = gradient
+                .colors
+                .iter()
+                .chain(&gradient.opacities)
+                .copied()
+                .collect::<Vec<_>>();
+            if self.gradient_stop.is_none_or(|id| !ids.contains(&id)) {
+                self.gradient_stop = ids.first().copied();
+            }
+            for (opacity, stops) in [(false, &gradient.colors), (true, &gradient.opacities)] {
+                let mut row = div().flex().flex_wrap().gap_1();
+                for &stop in stops {
+                    row = row.child(
+                        ui::text_button(
+                            gpui::SharedString::from(format!("gradient-stop-{stop}")),
+                            stop.to_string(),
+                        )
+                        .when(self.gradient_stop == Some(stop), |b| b.bg(rgb(0x164a7b)))
+                        .on_click(cx.listener(move |this, _, w, cx| {
+                            TextField::commit_active(w, cx);
+                            this.gradient_stop = Some(stop);
+                            cx.notify();
+                        })),
+                    );
+                }
+                let state = self.state.clone();
+                row = row.child(
+                    ui::text_button(
+                        if opacity {
+                            "gradient-add-opacity"
+                        } else {
+                            "gradient-add-color"
+                        },
+                        "+",
+                    )
+                    .when(
+                        !locked && stops.len() < ShapeGradient::MAX_STOPS,
+                        |b| {
+                            b.on_click(cx.listener(move |this, _, w, cx| {
+                                TextField::commit_active(w, cx);
+                                state.update(cx, |s, cx| {
+                                    s.dispatch(
+                                        &Action::Edit(Command::Contents {
+                                            id,
+                                            edit: ContentsEdit::AddGradientStop {
+                                                item,
+                                                opacity,
+                                                position: 50.,
+                                                frame: s.frame,
+                                            },
+                                        }),
+                                        w,
+                                        cx,
+                                    )
+                                });
+                                let layer = state.read(cx).editor.selected_layer();
+                                if let Some(Content::ShapeContents(c)) = layer.map(|l| l.content())
+                                {
+                                    if let Some(g) = c.node(item).and_then(|n| n.kind.gradient()) {
+                                        this.gradient_stop = if opacity {
+                                            g.opacities.last().copied()
+                                        } else {
+                                            g.colors.last().copied()
+                                        };
+                                    }
+                                }
+                                cx.notify();
+                            }))
+                        },
+                    ),
+                );
+                root = root.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(if opacity {
+                            "Opacity stops"
+                        } else {
+                            "Color stops"
+                        })
+                        .child(row),
+                );
+            }
+            if let Some(stop) = self.gradient_stop {
+                if let Some(color) = gradient.color_at(node, stop, frame) {
+                    root = root.child(super::color_picker::swatch(
+                        "gradient-stop-color",
+                        color,
+                        crate::color_edit::Target::GradientStop(id, item, stop),
+                        locked,
+                        &self.state,
+                    ));
+                }
+                let state = self.state.clone();
+                let can_remove = if gradient.colors.contains(&stop) {
+                    gradient.colors.len() > 2
+                } else {
+                    gradient.opacities.len() > 2
+                };
+                root = root.child(
+                    ui::text_button("gradient-remove-stop", "Remove selected stop")
+                        .when(locked || !can_remove, |b| b.opacity(0.4))
+                        .when(!locked && can_remove, |b| {
+                            b.on_click(move |_, w, cx| {
+                                TextField::commit_active(w, cx);
+                                state.update(cx, |s, cx| {
+                                    s.dispatch(
+                                        &Action::Edit(Command::Contents {
+                                            id,
+                                            edit: ContentsEdit::RemoveGradientStop { item, stop },
+                                        }),
+                                        w,
+                                        cx,
+                                    )
+                                });
+                            })
+                        }),
+                );
+            }
+        }
+        if let Some(style) = node.kind.stroke() {
             for (cap_row, label) in [(true, "Line Cap"), (false, "Line Join")] {
                 let mut options = div().flex().gap_1();
                 for index in 0..3 {
@@ -609,6 +805,21 @@ impl Render for ContentsControls {
             root = root.child(dashes);
         }
         for (p, field) in &self.fields {
+            if let ContentsParam::Gradient(param) = p {
+                if param
+                    .stop()
+                    .is_some_and(|stop| self.gradient_stop != Some(stop))
+                {
+                    continue;
+                }
+                if matches!(
+                    param,
+                    GradientParam::HighlightLength | GradientParam::HighlightAngle
+                ) && node.kind.gradient().is_some_and(|g| !g.radial)
+                {
+                    continue;
+                }
+            }
             let Some(track) = node.parameters.get(p) else {
                 continue;
             };

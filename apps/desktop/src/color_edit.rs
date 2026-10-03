@@ -1,7 +1,7 @@
 //! Color-dialog drafts never mutate the document until accepted.
 use libre_effects_core::{
-    Command, Content, ContentsEdit, ContentsParam, Frame, LayerId, Project, Property, ShapePaint,
-    TrackEdit,
+    Command, Content, ContentsEdit, ContentsParam, Frame, GradientParam, LayerId, Project,
+    Property, ShapePaint, TrackEdit,
 };
 use serde::{Deserialize, Serialize};
 
@@ -28,6 +28,7 @@ pub(crate) enum Target {
     Stroke(LayerId),
     Shape(LayerId, ShapePaint),
     Contents(LayerId, u64),
+    GradientStop(LayerId, u64, u64),
     BackgroundDraft(u32),
 }
 impl Target {
@@ -44,6 +45,7 @@ impl Target {
             Self::Shape(_, ShapePaint::Fill) => "Shape fill color",
             Self::Shape(_, ShapePaint::Stroke) => "Shape stroke color",
             Self::Contents(_, _) => "Contents paint color",
+            Self::GradientStop(..) => "Gradient stop color",
             Self::BackgroundDraft(_) => "Composition background",
         }
     }
@@ -68,6 +70,26 @@ impl Session {
         frame: Frame,
     ) -> Result<Self, String> {
         let color = match target {
+            Target::GradientStop(id, item, stop) => {
+                let layer = project
+                    .composition()
+                    .layer(id)
+                    .ok_or("Layer no longer exists")?;
+                if layer.locked() {
+                    return Err("Unlock the layer before changing its color".into());
+                }
+                let Content::ShapeContents(c) = layer.content() else {
+                    return Err("Select a Contents shape layer".into());
+                };
+                let node = c.node(item).ok_or("Gradient paint no longer exists")?;
+                let gradient = node.kind.gradient().ok_or("Select a gradient paint")?;
+                Color {
+                    rgb: gradient
+                        .color_at(node, stop, frame)
+                        .ok_or("Color stop no longer exists")?,
+                    opacity: 100.,
+                }
+            }
             Target::Contents(id, item) => {
                 let layer = project
                     .composition()
@@ -226,6 +248,32 @@ impl Session {
     pub fn command(&self) -> Option<Command> {
         let mut commands = Vec::new();
         match self.target {
+            Target::GradientStop(id, item, stop) => {
+                for (index, p) in [
+                    GradientParam::Red(stop),
+                    GradientParam::Green(stop),
+                    GradientParam::Blue(stop),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    let shift = (2 - index) * 8;
+                    let value = (self.color.rgb >> shift) & 255;
+                    if value != (self.original.rgb >> shift) & 255 {
+                        commands.push(Command::Contents {
+                            id,
+                            edit: ContentsEdit::Track {
+                                item,
+                                parameter: ContentsParam::Gradient(p),
+                                edit: TrackEdit::Value {
+                                    frame: self.frame,
+                                    value: value as f64,
+                                },
+                            },
+                        });
+                    }
+                }
+            }
             Target::Contents(id, item) => {
                 let Content::ShapeContents(c) = self.origin.composition().layer(id)?.content()
                 else {
@@ -406,6 +454,77 @@ impl Workflow {
 mod tests {
     use super::*;
     use libre_effects_core::Editor;
+    #[test]
+    fn gradient_stop_color_draft_keeps_other_stops_and_opacity_tracks() {
+        use libre_effects_core::{ContentsKind, Shape, ShapeGradient};
+        let mut e = Editor::default();
+        e.execute(Command::AddContent {
+            content: Content::Shape(Shape::default()),
+            width: 100.,
+            height: 100.,
+            name: "Gradient".into(),
+        })
+        .unwrap();
+        e.execute(Command::Contents {
+            id: 1,
+            edit: ContentsEdit::Promote,
+        })
+        .unwrap();
+        e.execute(Command::Contents {
+            id: 1,
+            edit: ContentsEdit::Add {
+                parent: 1,
+                kind: ContentsKind::GradientFill {
+                    even_odd: false,
+                    gradient: ShapeGradient::default(),
+                },
+            },
+        })
+        .unwrap();
+        let p = ContentsParam::Gradient(GradientParam::Red(1));
+        e.execute(Command::Contents {
+            id: 1,
+            edit: ContentsEdit::Track {
+                item: 5,
+                parameter: p,
+                edit: TrackEdit::ToggleAnimation { frame: 0 },
+            },
+        })
+        .unwrap();
+        let before = e.project().clone();
+        let mut draft = Session::new(Target::GradientStop(1, 5, 1), e.project(), 1, 30).unwrap();
+        assert!(!draft.target.alpha());
+        assert!(draft.command().is_none());
+        assert!(draft.input(4, "20").is_err());
+        draft.input(0, "FF0000").unwrap();
+        assert_eq!(e.project(), &before);
+        e.execute(draft.command().unwrap()).unwrap();
+        let Content::ShapeContents(c) = e.selected_layer().unwrap().content() else {
+            panic!()
+        };
+        let Content::ShapeContents(old) = before.composition().layer(1).unwrap().content() else {
+            panic!()
+        };
+        for (key, track) in &old.node(5).unwrap().parameters {
+            if *key != p {
+                assert_eq!(&c.node(5).unwrap().parameters[key], track);
+            }
+        }
+        assert_eq!(c.node(5).unwrap().value_at(p, 15), 127.5);
+        assert!(draft.validate(e.project(), 2, 30).is_err());
+        let saved = e.project().clone();
+        assert_eq!(
+            Project::from_json(&saved.to_json().unwrap()).unwrap(),
+            saved
+        );
+        e.undo();
+        assert_eq!(e.project(), &before);
+        e.redo();
+        assert_eq!(e.project(), &saved);
+        assert!(Session::new(Target::GradientStop(1, 5, 3), e.project(), 1, 30).is_err());
+        e.execute(Command::ToggleLocked(1)).unwrap();
+        assert!(Session::new(Target::GradientStop(1, 5, 1), e.project(), 1, 30).is_err());
+    }
 
     #[test]
     fn hex_rgba_and_rgb_inputs_are_atomic_and_preserve_unedited_opacity() {

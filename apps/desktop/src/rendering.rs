@@ -373,7 +373,9 @@ impl Renderer {
             Content::Shape(shape) => {
                 svg.push_str(&shape.svg_at(l.width(), l.height(), l.color(), frame))
             }
-            Content::ShapeContents(contents) => svg.push_str(&contents.svg_at(frame)),
+            Content::ShapeContents(contents) => {
+                svg.push_str(&contents.svg_at_with_prefix(frame, &id))
+            }
             Content::Text { text, font_size } => {
                 svg.push_str(&layer_text_svg(
                     text,

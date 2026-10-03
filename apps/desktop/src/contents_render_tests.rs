@@ -40,6 +40,193 @@ fn scene(kind: ShapeKind) -> Editor {
     .unwrap();
     e
 }
+fn gradient_scene(stroke: bool) -> Editor {
+    let mut e = scene(ShapeKind::Rectangle);
+    edit(&mut e, ContentsEdit::Promote);
+    edit(&mut e, ContentsEdit::Remove(3));
+    edit(&mut e, ContentsEdit::Remove(4));
+    edit(
+        &mut e,
+        ContentsEdit::Add {
+            parent: 1,
+            kind: if stroke {
+                ContentsKind::GradientStroke {
+                    style: ShapeStroke::default(),
+                    gradient: ShapeGradient::default(),
+                }
+            } else {
+                ContentsKind::GradientFill {
+                    even_odd: false,
+                    gradient: ShapeGradient::default(),
+                }
+            },
+        },
+    );
+    value(
+        &mut e,
+        5,
+        ContentsParam::Gradient(GradientParam::EndX),
+        160.,
+    );
+    e
+}
+#[test]
+fn gradient_fill_midpoints_and_independent_alpha_animate_in_preview_and_output() {
+    use GradientParam::*;
+    let mut e = gradient_scene(false);
+    let renderer = crate::rendering::Renderer::new();
+    for (p, v) in [
+        (Red(1), 255.),
+        (Red(2), 0.),
+        (Green(2), 0.),
+        (ColorMidpoint(1), 25.),
+        (Opacity(3), 0.),
+    ] {
+        value(&mut e, 5, ContentsParam::Gradient(p), v);
+    }
+    for change in [
+        TrackEdit::ToggleAnimation { frame: 0 },
+        TrackEdit::Value {
+            frame: 60,
+            value: 240.,
+        },
+    ] {
+        edit(
+            &mut e,
+            ContentsEdit::Track {
+                item: 5,
+                parameter: ContentsParam::Gradient(EndX),
+                edit: change,
+            },
+        );
+    }
+    let saved = Project::from_json(&e.project().to_json().unwrap()).unwrap();
+    for frame in [0, 30, 60] {
+        let im = renderer.render(&saved, frame, 400).unwrap();
+        assert_eq!(im, renderer.render_output(&saved, frame, 400, 240).unwrap());
+        for x in 122..278 {
+            let t = (x as f64 + 0.5 - 120.) / (160. + frame as f64 * 80. / 60.);
+            let blue = t.sqrt(); // 25% color midpoint maps to 50%; opacity remains linear.
+            let pixel = im.get_pixel(x, 120).0;
+            assert!(
+                (pixel[3] as f64 - 255. * t).abs() <= 1.1,
+                "{frame}/{x}: {pixel:?}"
+            );
+            for (i, c) in [1. - blue, 0., blue].into_iter().enumerate() {
+                let premult = pixel[i] as f64 * pixel[3] as f64 / 255.;
+                assert!(
+                    (premult - c * t * 255.).abs() <= 2.,
+                    "{frame}/{x}: {pixel:?}"
+                );
+            }
+        }
+        assert_eq!(im.get_pixel(119, 120).0, [0; 4]);
+    }
+}
+#[test]
+fn gradient_definitions_are_scoped_per_layer_and_strokes_keep_dash_style() {
+    use GradientParam::*;
+    let mut e = gradient_scene(true);
+    let renderer = crate::rendering::Renderer::new();
+    value(
+        &mut e,
+        5,
+        ContentsParam::Shape(ShapeParam::StrokeWidth),
+        12.,
+    );
+    edit(&mut e, ContentsEdit::AddDash(5));
+    edit(&mut e, ContentsEdit::AddDash(5));
+    edit(
+        &mut e,
+        ContentsEdit::StrokeCap {
+            item: 5,
+            cap: StrokeCap::Butt,
+        },
+    );
+    for (p, v) in [(Red(1), 255.), (Green(2), 0.), (Blue(2), 0.)] {
+        value(&mut e, 5, ContentsParam::Gradient(p), v);
+    }
+    let original = e.project().clone();
+    let single = renderer.render(&original, 0, 400).unwrap();
+    assert_eq!(single.get_pixel(125, 67).0, [255, 0, 0, 255]);
+    assert_eq!(single.get_pixel(135, 67).0, [0; 4]);
+    assert_eq!(single.get_pixel(200, 120).0, [0; 4]);
+    e.execute(Command::DuplicateLayer(1)).unwrap();
+    for (p, v) in [(Property::PositionX, 60.), (Property::PositionY, 40.)] {
+        e.execute(Command::SetValue {
+            id: 2,
+            property: p,
+            frame: 0,
+            value: v,
+        })
+        .unwrap();
+    }
+    for (p, v) in [(Red(1), 0.), (Red(2), 0.), (Blue(1), 255.), (Blue(2), 255.)] {
+        e.execute(Command::Contents {
+            id: 2,
+            edit: ContentsEdit::Track {
+                item: 5,
+                parameter: ContentsParam::Gradient(p),
+                edit: TrackEdit::Value { frame: 0, value: v },
+            },
+        })
+        .unwrap();
+    }
+    let saved = Project::from_json(&e.project().to_json().unwrap()).unwrap();
+    let both = renderer.render(&saved, 0, 400).unwrap();
+    assert_eq!(both, renderer.render_output(&saved, 0, 400, 240).unwrap());
+    assert_eq!(both.get_pixel(125, 67), single.get_pixel(125, 67));
+    assert_eq!(both.get_pixel(15, 87).0, [0, 0, 255, 255]);
+}
+#[test]
+fn radial_gradient_highlight_and_collapsed_endpoints_render_deterministically() {
+    use GradientParam::*;
+    let mut e = gradient_scene(false);
+    let renderer = crate::rendering::Renderer::new();
+    edit(
+        &mut e,
+        ContentsEdit::GradientType {
+            item: 5,
+            radial: true,
+        },
+    );
+    for (p, v) in [
+        (StartX, 80.),
+        (StartY, 50.),
+        (EndX, 120.),
+        (EndY, 50.),
+        (HighlightLength, 50.),
+        (HighlightAngle, 90.),
+    ] {
+        value(&mut e, 5, ContentsParam::Gradient(p), v);
+    }
+    let im = renderer.render(e.project(), 0, 400).unwrap();
+    // Center (200,120), focus (200,140). Distance along the vertical ray
+    // to the near circumference is 20, to the far circumference is 60.
+    for y in [90, 100, 110, 120, 130, 145, 150] {
+        let px = 0.5f64;
+        let py = y as f64 + 0.5 - 140.;
+        let a = px * px + py * py;
+        let b = 40. * py;
+        let c = -1200.;
+        let distance = (-b + (b * b - 4. * a * c).sqrt()) / (2. * a);
+        let expected = (255. / distance).clamp(0., 255.);
+        for channel in &im.get_pixel(200, y).0[..3] {
+            assert!((*channel as f64 - expected).abs() <= 1.5);
+        }
+    }
+    for radial in [false, true] {
+        edit(&mut e, ContentsEdit::GradientType { item: 5, radial });
+        value(&mut e, 5, ContentsParam::Gradient(EndX), 80.);
+        let im = renderer.render(e.project(), 0, 400).unwrap();
+        assert_eq!(
+            im.get_pixel(200, 120).0,
+            [255; 4],
+            "collapsed radial {radial}"
+        );
+        assert_eq!(im.get_pixel(130, 80).0, [255; 4]);
+    }
+}
 #[test]
 fn animated_group_skew_matches_independent_inverse_geometry_and_output() {
     let renderer = crate::rendering::Renderer::new();

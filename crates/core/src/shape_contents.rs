@@ -11,6 +11,7 @@ pub enum ContentsParam {
     Skew,
     SkewAxis,
     Shape(ShapeParam),
+    Gradient(GradientParam),
 }
 impl From<ContentsParam> for String {
     fn from(p: ContentsParam) -> String {
@@ -21,6 +22,7 @@ impl From<ContentsParam> for String {
             ContentsParam::Skew => "Skew".into(),
             ContentsParam::SkewAxis => "SkewAxis".into(),
             ContentsParam::Shape(p) => format!("Shape.{}", String::from(p)),
+            ContentsParam::Gradient(p) => format!("Gradient.{}", p.name()),
         }
     }
 }
@@ -42,6 +44,11 @@ impl TryFrom<String> for ContentsParam {
         if let Some(p) = s.strip_prefix("Shape.") {
             return Ok(Self::Shape(ShapeParam::try_from(p.to_string())?));
         }
+        if let Some(p) = s.strip_prefix("Gradient.") {
+            return GradientParam::parse(p)
+                .map(Self::Gradient)
+                .ok_or_else(|| "Unknown gradient property".into());
+        }
         Property::ALL
             .into_iter()
             .find(|p| s == format!("Transform.{p:?}"))
@@ -58,6 +65,7 @@ impl ContentsParam {
             Self::Skew => "Skew".into(),
             Self::SkewAxis => "Skew Axis".into(),
             Self::Shape(p) => p.label(),
+            Self::Gradient(p) => p.label(),
         }
     }
     pub fn bounds(self) -> (f64, f64) {
@@ -66,6 +74,7 @@ impl ContentsParam {
             Self::Skew => (-89., 89.),
             Self::SkewAxis => (-1000000., 1000000.),
             Self::Shape(p) => p.bounds(),
+            Self::Gradient(p) => p.bounds(),
             Self::Transform(Property::Opacity) => (0., 100.),
             Self::Transform(Property::ScaleX | Property::ScaleY) => (-10000., 10000.),
             Self::Transform(_) => (-1000000., 1000000.),
@@ -88,6 +97,14 @@ pub enum ContentsKind {
         even_odd: bool,
     },
     Stroke(ShapeStroke),
+    GradientFill {
+        even_odd: bool,
+        gradient: ShapeGradient,
+    },
+    GradientStroke {
+        style: ShapeStroke,
+        gradient: ShapeGradient,
+    },
 }
 impl ContentsKind {
     pub fn label(&self) -> &'static str {
@@ -97,7 +114,40 @@ impl ContentsKind {
             Self::Path { .. } => "Path",
             Self::Fill { .. } => "Fill",
             Self::Stroke(_) => "Stroke",
+            Self::GradientFill { .. } => "Gradient Fill",
+            Self::GradientStroke { .. } => "Gradient Stroke",
         }
+    }
+    pub fn gradient(&self) -> Option<&ShapeGradient> {
+        match self {
+            Self::GradientFill { gradient, .. } | Self::GradientStroke { gradient, .. } => {
+                Some(gradient)
+            }
+            _ => None,
+        }
+    }
+    pub(crate) fn gradient_mut(&mut self) -> Option<&mut ShapeGradient> {
+        match self {
+            Self::GradientFill { gradient, .. } | Self::GradientStroke { gradient, .. } => {
+                Some(gradient)
+            }
+            _ => None,
+        }
+    }
+    pub fn stroke(&self) -> Option<&ShapeStroke> {
+        match self {
+            Self::Stroke(s) | Self::GradientStroke { style: s, .. } => Some(s),
+            _ => None,
+        }
+    }
+    fn is_paint(&self) -> bool {
+        matches!(
+            self,
+            Self::Fill { .. }
+                | Self::Stroke(_)
+                | Self::GradientFill { .. }
+                | Self::GradientStroke { .. }
+        )
     }
     fn defaults(&self) -> BTreeMap<ContentsParam, AnimatedProperty> {
         use ContentsParam::{Height, Shape as S, Transform as T, Width};
@@ -158,6 +208,26 @@ impl ContentsKind {
                         .enumerate()
                         .map(|(i, v)| (S(DashLength(i as u8)), *v)),
                 );
+                v
+            }
+            Self::GradientFill { gradient, .. } => {
+                let mut v = gradient.defaults();
+                v.push((S(FillOpacity), 100.));
+                v
+            }
+            Self::GradientStroke { style, gradient } => {
+                let mut v = Self::Stroke(style.clone())
+                    .defaults()
+                    .into_iter()
+                    .filter(|(p, _)| {
+                        !matches!(
+                            p,
+                            ContentsParam::Shape(StrokeRed | StrokeGreen | StrokeBlue)
+                        )
+                    })
+                    .map(|(p, t)| (p, t.value))
+                    .collect::<Vec<_>>();
+                v.extend(gradient.defaults());
                 v
             }
         };
@@ -356,7 +426,7 @@ impl ShapeContents {
         Ok(id)
     }
     pub fn validate(&self, duration: Frame) -> Result<(), String> {
-        self.validate_version(duration, 44)
+        self.validate_version(duration, 45)
     }
     pub(super) fn validate_version(&self, duration: Frame, version: u32) -> Result<(), String> {
         fn walk(
@@ -370,6 +440,11 @@ impl ShapeContents {
                 return Err("Contents nesting exceeds 8 groups".into());
             }
             for n in nodes {
+                if let Some(g) = n.kind.gradient() {
+                    if version < 45 || !g.valid() {
+                        return Err("Invalid gradient or project version (requires v45)".into());
+                    }
+                }
                 if n.id == 0
                     || !ids.insert(n.id)
                     || ids.len() > 256
@@ -409,7 +484,9 @@ impl ShapeContents {
                         }
                         animation.validate(path, duration, 43)?;
                     }
-                    ContentsKind::Stroke(s) if !s.valid() => {
+                    ContentsKind::Stroke(s) | ContentsKind::GradientStroke { style: s, .. }
+                        if !s.valid() =>
+                    {
                         return Err("Invalid Contents stroke".into());
                     }
                     _ => {}
@@ -459,7 +536,15 @@ impl ShapeContents {
         out
     }
     pub fn svg_at(&self, f: Frame) -> String {
-        render(&self.items, f).0
+        self.svg_at_with_prefix(f, "contents")
+    }
+    pub fn svg_at_with_prefix(&self, f: Frame, prefix: &str) -> String {
+        let scope = prefix
+            .as_bytes()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+        render(&self.items, f, &scope).0
     }
 }
 fn find(nodes: &[ContentsNode], id: u64) -> Option<&ContentsNode> {
@@ -509,7 +594,7 @@ fn transformed(mut path: VectorPath, t: Affine) -> VectorPath {
     }
     path
 }
-fn render(nodes: &[ContentsNode], f: Frame) -> (String, Vec<VectorPath>) {
+fn render(nodes: &[ContentsNode], f: Frame, scope: &str) -> (String, Vec<VectorPath>) {
     let mut paths = Vec::<VectorPath>::new();
     let mut paints = vec![];
     for n in nodes.iter().filter(|n| n.enabled) {
@@ -527,9 +612,16 @@ fn render(nodes: &[ContentsNode], f: Frame) -> (String, Vec<VectorPath>) {
             )
         };
         use ShapeParam::*;
+        let gradient = n.kind.gradient().map(|g| {
+            let id = format!("g{scope}-{}", n.id);
+            (
+                format!("<defs>{}</defs>", g.svg(n, f, &id)),
+                format!("url(#{id})"),
+            )
+        });
         match &n.kind {
             ContentsKind::Group(children) => {
-                let (svg, child_paths) = render(children, f);
+                let (svg, child_paths) = render(children, f, scope);
                 let t = n.transform(f);
                 let [a, b, c, d, x, y] = t.0;
                 paints.push(format!(
@@ -538,25 +630,29 @@ fn render(nodes: &[ContentsNode], f: Frame) -> (String, Vec<VectorPath>) {
                 ));
                 paths.extend(child_paths.into_iter().map(|p| transformed(p, t)));
             }
-            ContentsKind::Fill { even_odd } => paints.push(format!(
-                "<path d='{}' fill='{}' fill-opacity='{}' fill-rule='{}'/>",
-                paths
-                    .iter()
-                    .map(VectorPath::svg_data)
-                    .collect::<Vec<_>>()
-                    .join(" "),
-                color(FillRed, FillGreen, FillBlue),
-                v(FillOpacity) / 100.,
-                if *even_odd { "evenodd" } else { "nonzero" }
-            )),
-            ContentsKind::Stroke(style) => {
+            ContentsKind::Fill { even_odd } | ContentsKind::GradientFill { even_odd, .. } => paints
+                .push(format!(
+                    "{}<path d='{}' fill='{}' fill-opacity='{}' fill-rule='{}'/>",
+                    gradient.as_ref().map_or("", |g| g.0.as_str()),
+                    paths
+                        .iter()
+                        .map(VectorPath::svg_data)
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                    gradient
+                        .as_ref()
+                        .map_or_else(|| color(FillRed, FillGreen, FillBlue), |g| g.1.clone()),
+                    v(FillOpacity) / 100.,
+                    if *even_odd { "evenodd" } else { "nonzero" }
+                )),
+            ContentsKind::Stroke(style) | ContentsKind::GradientStroke { style, .. } => {
                 let mut style = style.clone();
                 style.miter_limit = v(MiterLimit);
                 style.dash_offset = v(DashOffset);
                 for (i, x) in style.dashes.iter_mut().enumerate() {
                     *x = v(DashLength(i as u8));
                 }
-                paints.push(format!("<path d='{}' fill='none' stroke='{}' stroke-opacity='{}' stroke-width='{}' {}/>",paths.iter().map(VectorPath::svg_data).collect::<Vec<_>>().join(" "),color(StrokeRed,StrokeGreen,StrokeBlue),v(StrokeOpacity)/100.,v(StrokeWidth),style.svg()));
+                paints.push(format!("{}<path d='{}' fill='none' stroke='{}' stroke-opacity='{}' stroke-width='{}' {}/>",gradient.as_ref().map_or("",|g|g.0.as_str()),paths.iter().map(VectorPath::svg_data).collect::<Vec<_>>().join(" "),gradient.as_ref().map_or_else(||color(StrokeRed,StrokeGreen,StrokeBlue),|g|g.1.clone()),v(StrokeOpacity)/100.,v(StrokeWidth),style.svg()));
             }
             _ => {}
         }
@@ -566,6 +662,20 @@ fn render(nodes: &[ContentsNode], f: Frame) -> (String, Vec<VectorPath>) {
 
 #[derive(Clone, Debug)]
 pub enum ContentsEdit {
+    GradientType {
+        item: u64,
+        radial: bool,
+    },
+    AddGradientStop {
+        item: u64,
+        opacity: bool,
+        position: f64,
+        frame: Frame,
+    },
+    RemoveGradientStop {
+        item: u64,
+        stop: u64,
+    },
     Promote,
     Add {
         parent: u64,
@@ -702,12 +812,10 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                 let id = contents.allocate()?;
                 let n = ContentsNode::new(id, kind.clone());
                 let group = contents.group_mut(*parent)?;
-                let index = if matches!(kind, ContentsKind::Fill { .. } | ContentsKind::Stroke(_)) {
+                let index = if kind.is_paint() {
                     group
                         .iter()
-                        .position(|n| {
-                            matches!(n.kind, ContentsKind::Fill { .. } | ContentsKind::Stroke(_))
-                        })
+                        .position(|n| n.kind.is_paint())
                         .unwrap_or(group.len())
                 } else {
                     0
@@ -807,12 +915,48 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                 let n = contents
                     .node_mut(*item)
                     .ok_or("Contents fill no longer exists")?;
-                if !matches!(n.kind, ContentsKind::Fill { .. }) {
-                    return Err("Select a Fill".into());
+                match &mut n.kind {
+                    ContentsKind::Fill { even_odd: value }
+                    | ContentsKind::GradientFill {
+                        even_odd: value, ..
+                    } => *value = *even_odd,
+                    _ => return Err("Select a Fill".into()),
                 }
-                n.kind = ContentsKind::Fill {
-                    even_odd: *even_odd,
-                };
+            }
+            ContentsEdit::GradientType { item, radial } => {
+                let n = contents
+                    .node_mut(*item)
+                    .ok_or("Contents paint no longer exists")?;
+                n.kind
+                    .gradient_mut()
+                    .ok_or("Select a gradient paint")?
+                    .radial = *radial;
+            }
+            ContentsEdit::AddGradientStop {
+                item,
+                opacity,
+                position,
+                frame,
+            } => {
+                if *frame >= duration {
+                    return Err("Frame outside composition".into());
+                }
+                ShapeGradient::add_stop(
+                    contents
+                        .node_mut(*item)
+                        .ok_or("Contents paint no longer exists")?,
+                    *opacity,
+                    *position,
+                    *frame,
+                )?;
+            }
+            ContentsEdit::RemoveGradientStop { item, stop } => {
+                ShapeGradient::remove_stop(
+                    contents
+                        .node_mut(*item)
+                        .ok_or("Contents paint no longer exists")?,
+                    *stop,
+                )?;
             }
             ContentsEdit::StrokeCap { item, .. }
             | ContentsEdit::StrokeJoin { item, .. }
@@ -821,7 +965,9 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                 let n = contents
                     .node_mut(*item)
                     .ok_or("Contents stroke no longer exists")?;
-                let ContentsKind::Stroke(style) = &mut n.kind else {
+                let (ContentsKind::Stroke(style) | ContentsKind::GradientStroke { style, .. }) =
+                    &mut n.kind
+                else {
                     return Err("Select a Stroke".into());
                 };
                 match edit {

@@ -310,6 +310,8 @@ impl Render for ColorPicker {
                 crate::color_edit::Target::Shape(_, _) | crate::color_edit::Target::Contents(_, _)
             ) {
                 "Opacity changes this fill or stroke at the current frame. HEX accepts RRGGBBAA."
+            } else if matches!(target, crate::color_edit::Target::GradientStop(..)) {
+                "This changes the selected color stop. Transparency uses separate opacity stops."
             } else if target.alpha() {
                 "Opacity changes the entire layer at the current frame. HEX accepts RRGGBBAA."
             } else {

@@ -1818,7 +1818,7 @@ from child groups. Earlier paints/groups composite in front of later ones.
 A Fill treats its paths as one compound shape, with Non-Zero or Even-Odd fill
 rules; overlapping paths do not multiply a single paint's opacity. Group opacity
 is applied to its combined paints. Paint blend/composite options,
-gradient paints, path operators and dragging Contents rows remain future work.
+path operators and dragging Contents rows remain future work.
 Fill and Stroke have a common color picker with HEX/RGB/HSV, opacity, recent
 colors and viewer sampling. Cancel leaves the document unchanged; accepting a
 draft updates only changed channels at the current frame as one Undo step.
@@ -1826,6 +1826,24 @@ Stroke items expose Line Cap/Line Join choices and add/remove-last dash controls
 Existing dash/gap and offset animation survives these edits; Undo restores a
 removed dash's keys. Numeric controls and watches refresh when dash rows change.
 Curved parametric paths use cubic approximations, as in Bezier conversion.
+
+Contents → Add → **Gradient Fill / Gradient Stroke** adds linear or radial paint.
+Select a color or opacity stop to edit its location and midpoint; color stops use
+the common color picker. Each kind has 2–32 independent stops with stable IDs.
+The + button inserts a stop at 50%, sampled from the current frame; removing it
+and Undo restores its animation. Start/End coordinates, radial Highlight Length
+and Angle, stop locations, RGB, opacity and midpoints have individual watches
+and Timeline/Graph tracks. Gradient Stroke retains cap, join and dash controls.
+Gradient projects use version 45; other Contents projects remain version 44.
+
+Midpoints control interpolation toward the next stop in spatial order, using a
+power curve in sRGB. Radial highlights are limited to ±99.9% of the radius.
+Rendering merges separate color and opacity stops into an adaptively sampled
+gradient; Preview and output share the same 8-bit rasterizer. The ramp preview
+shows opacity over a checkerboard. Stop topology changes are static, and adding
+a stop can change other animation frames. AE's compound Colors animation,
+draggable Gradient Editor stops/midpoints, Composition handles and color-space
+or pixel equivalence remain separate work.
 
 Group Skew ranges from −89° to 89° to avoid singular transforms. Skew Axis
 rotates the shear direction. The group applies Anchor, Scale, oriented Skew,

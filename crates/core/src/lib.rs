@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-const PROJECT_VERSION: u32 = 44;
+const PROJECT_VERSION: u32 = 45;
 pub type Frame = u32;
 pub type LayerId = u64;
 pub type CompositionId = u64;
@@ -60,6 +60,8 @@ mod shape_color;
 pub use shape_color::ShapePaint;
 mod polystar;
 mod shape_contents;
+mod shape_gradient;
+pub use shape_gradient::{GradientParam, ShapeGradient};
 mod shape_conversion;
 pub use shape_contents::{ContentsEdit, ContentsKind, ContentsNode, ContentsParam, ShapeContents};
 #[cfg(test)]
@@ -1548,7 +1550,10 @@ impl Editor {
                 .iter()
                 .any(|l| matches!(l.content, Content::ShapeContents(_)))
         }) {
-            next.project.version = next.project.version.max(44);
+            let gradient = next.project.compositions().into_iter().any(|(_,c)| c.layers.iter().any(|l| {
+                matches!(&l.content, Content::ShapeContents(contents) if contents.rows().iter().any(|(_,_,n)|n.kind.gradient().is_some()))
+            }));
+            next.project.version = next.project.version.max(if gradient { 45 } else { 44 });
         }
         next.project.validate()?;
         if next != self.current {
