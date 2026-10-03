@@ -13,6 +13,7 @@ impl EditorState {
             checkerboard: self.checkerboard,
             viewer: self.viewer.clone(),
             graph_open: self.graph_open,
+            graph_view: self.graph_view.clone(),
             expanded: self.expanded,
         }
     }
@@ -44,6 +45,7 @@ impl EditorState {
         self.viewer = view.viewer;
         self.pixel_info = None;
         self.graph_open = view.graph_open;
+        self.graph_view = view.graph_view;
         self.expanded = view.expanded;
     }
     pub(super) fn capture_views(&mut self) -> ProjectViews {
@@ -85,6 +87,10 @@ mod tests {
         s.timeline_start = 60;
         s.preview_pan = [25.0, -30.0];
         s.preview_zoom = Some(2.0);
+        s.graph_view = crate::view_state::GraphView {
+            speed: true,
+            height: Some([-500.0, 750.0]),
+        };
         s.remember_view();
         s.editor.activate_composition(1).unwrap();
         s.composition_changed();
@@ -98,6 +104,8 @@ mod tests {
         s.composition_changed();
         assert_eq!((s.frame, s.timeline_zoom, s.timeline_start), (80, 8.0, 60));
         assert_eq!((s.preview_zoom, s.preview_pan), (Some(2.0), [25.0, -30.0]));
+        assert!(s.graph_view.speed);
+        assert_eq!(s.graph_view.height, Some([-500.0, 750.0]));
         assert!(!s.dirty());
         let views = s.capture_views();
         let json = views.write(s.editor.project()).unwrap();
@@ -107,6 +115,7 @@ mod tests {
             .replace_project(libre_effects_core::Project::from_json(&json).unwrap())
             .unwrap();
         loaded.load_views(ProjectViews::read(&json, loaded.editor.project()));
+        assert_eq!(loaded.graph_view, s.graph_view);
         assert_eq!(
             (loaded.frame, loaded.timeline_start, loaded.preview_zoom),
             (80, 60, Some(2.0))
@@ -132,6 +141,7 @@ mod tests {
         s.normalize();
         assert_eq!(s.frame, 9);
         s.load_views(Default::default());
+        assert_eq!(s.graph_view, Default::default());
         assert_eq!(
             (s.frame, s.timeline_zoom, s.preview_pan),
             (0, 1.0, [0.0; 2])

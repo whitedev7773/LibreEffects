@@ -2,6 +2,7 @@ mod selection;
 mod snapping;
 mod speed;
 mod tangent;
+mod viewport;
 use crate::{
     components::TextField,
     editor::{Action, EditorState},
@@ -75,7 +76,7 @@ fn view(track: &AnimatedProperty, start: u32, span: u32, speed_mode: bool, fps: 
     let padding = ((high - low) * 0.18).max(1.0);
     View {
         start: start as f64,
-        span: span as f64,
+        span: span.max(1) as f64,
         low: low - padding,
         high: high + padding,
     }
@@ -188,7 +189,6 @@ pub(crate) struct Graph {
     drag_revision: u64,
     fields: Vec<Entity<TextField>>,
     details: bool,
-    speed_mode: bool,
 }
 fn selected(state: &EditorState) -> Option<(LayerId, u32, PropertyPath)> {
     let (id, frame) = state
@@ -417,8 +417,64 @@ impl Graph {
             drag_revision: 0,
             fields,
             details: false,
-            speed_mode: false,
         }
+    }
+    fn fit(&mut self, selected_only: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.drag = None;
+        window.focus(&self.focus);
+        self.state.update(cx, |s, cx| {
+            viewport::fit(s, selected_only);
+            cx.notify();
+        });
+    }
+    fn scroll(&mut self, event: &gpui::ScrollWheelEvent, _: &mut Window, cx: &mut Context<Self>) {
+        cx.stop_propagation();
+        if self.drag.is_some() {
+            return;
+        }
+        let Some(bounds) = self.plot.get() else {
+            return;
+        };
+        let state = self.state.read(cx);
+        let Some(track) = state
+            .editor
+            .selected_layer()
+            .and_then(|l| l.track(state.graph_property))
+        else {
+            return;
+        };
+        let view = viewport::current(state, track);
+        let delta = event.delta.pixel_delta(px(20.0));
+        let dx = f32::from(delta.x) as f64;
+        let dy = f32::from(delta.y) as f64;
+        let width = f32::from(bounds.size.width).max(1.0) as f64;
+        let height = f32::from(bounds.size.height).max(1.0) as f64;
+        let x = f32::from(event.position.x - bounds.left()) as f64 / width;
+        let y = f32::from(bounds.bottom() - event.position.y) as f64 / height;
+        self.state.update(cx, |s, cx| {
+            if event.modifiers.alt {
+                viewport::horizontal(s, dy, x, true);
+            } else if event.modifiers.shift || dx.abs() > dy.abs() {
+                viewport::horizontal(
+                    s,
+                    if dx.abs() > dy.abs() { dx } else { dy } / width,
+                    x,
+                    false,
+                );
+            } else if s.graph_view.height.is_some() {
+                s.graph_view.height = Some(viewport::vertical(
+                    view,
+                    if event.modifiers.control {
+                        dy
+                    } else {
+                        -dy / height
+                    },
+                    y,
+                    event.modifiers.control,
+                ));
+            }
+            cx.notify();
+        });
     }
     fn preset(&self, interpolation: Interpolation, window: &mut Window, cx: &mut Context<Self>) {
         self.state.update(cx, |state, cx| {
@@ -470,18 +526,12 @@ impl Graph {
             return;
         };
         let fps = state.editor.project().composition().fps().as_f64();
-        let view = view(
-            track,
-            state.timeline_start,
-            state.visible_frames(),
-            self.speed_mode,
-            fps,
-        );
+        let view = viewport::current(state, track);
+        let speed_mode = state.graph_view.speed;
         let tangents = tangent::for_selection(
             track,
             &selection::active(state).iter().map(|k| k.frame).collect(),
         );
-        let view = tangent::fit_view(view, &tangents, self.speed_mode, fps);
         let hit = track
             .keys()
             .iter()
@@ -495,7 +545,7 @@ impl Graph {
                         && (f32::from(p.x - event.position.x) + offset).abs() < 7.0
                         && f32::from(p.y - event.position.y).abs() < 9.0
                 };
-                if self.speed_mode {
+                if speed_mode {
                     speed::ends(track, f, fps)
                         .into_iter()
                         .find(|(incoming, v)| near(*v, if *incoming { -5.0 } else { 5.0 }))
@@ -523,7 +573,7 @@ impl Graph {
             if let Some(tangent) = tangents
                 .iter()
                 .find(|t| {
-                    let (_, p) = t.points(view, bounds, self.speed_mode, fps);
+                    let (_, p) = t.points(view, bounds, speed_mode, fps);
                     bounds.contains(&p)
                         && f32::from(p.x - event.position.x).abs() < 8.0
                         && f32::from(p.y - event.position.y).abs() < 8.0
@@ -541,7 +591,7 @@ impl Graph {
                     view,
                     bounds,
                     fps,
-                    speed: self.speed_mode,
+                    speed: speed_mode,
                 });
                 self.state.update(cx, |s, cx| {
                     s.graph_key = Some((id, tangent.frame));
@@ -551,7 +601,7 @@ impl Graph {
                 return;
             }
         }
-        if hit.is_none() && tangents.is_empty() && !layer.locked() && !self.speed_mode {
+        if hit.is_none() && tangents.is_empty() && !layer.locked() && !speed_mode {
             if let Some((_, frame, _)) = selected(state)
                 && let Some(curve) = curve_at(state)
                 && let Some(space) = HandleSpace::segment(view, bounds, track, frame)
@@ -885,7 +935,7 @@ impl Graph {
                     if moved && let Some(track) = track {
                         let fps = state.editor.project().composition().fps().as_f64();
                         for (&frame, k) in track.keys() {
-                            let points = if self.speed_mode {
+                            let points = if state.graph_view.speed {
                                 speed::ends(track, frame, fps)
                                     .into_iter()
                                     .map(|(side, v)| {
@@ -1039,6 +1089,15 @@ impl Render for Graph {
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::up))
             .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
                 let key = event.keystroke.key.as_str();
+                if key == "f"
+                    && !event.keystroke.modifiers.control
+                    && !event.keystroke.modifiers.alt
+                    && this.focus.is_focused(window)
+                {
+                    this.fit(event.keystroke.modifiers.shift, window, cx);
+                    cx.stop_propagation();
+                    return;
+                }
                 if key == "z"
                     && event.keystroke.modifiers.control
                     && !event.keystroke.modifiers.alt
@@ -1109,17 +1168,24 @@ impl Render for Graph {
             .items_center()
             .gap_1()
             .px_2();
-        for (label, speed_mode) in [("Value Graph", false), ("Speed Graph", true)] {
+        for (label, speed_mode) in [("Value", false), ("Speed", true)] {
             toolbar = toolbar.child(
                 ui::text_button(
                     SharedString::from(format!("graph-type-{speed_mode}")),
                     label,
                 )
-                .when(self.speed_mode == speed_mode, |s| s.bg(rgb(0x34495c)))
+                .when(state.graph_view.speed == speed_mode, |s| {
+                    s.bg(rgb(0x34495c))
+                })
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.speed_mode = speed_mode;
                     this.drag = None;
-                    cx.notify();
+                    this.state.update(cx, |s, cx| {
+                        if s.graph_view.speed != speed_mode {
+                            s.graph_view.speed = speed_mode;
+                            s.graph_view.height = None;
+                        }
+                        cx.notify();
+                    });
                 })),
             );
         }
@@ -1152,7 +1218,7 @@ impl Render for Graph {
             );
         }
         for (label, incoming, outgoing) in [
-            ("Ease (F9)", true, true),
+            ("Ease", true, true),
             ("Ease In", true, false),
             ("Ease Out", false, true),
         ] {
@@ -1184,6 +1250,46 @@ impl Render for Graph {
                     });
                 })),
         );
+        toolbar = toolbar
+            .child(
+                ui::tool(
+                    "graph-auto-height",
+                    "chart-line",
+                    "Auto Zoom Height · disable to pan/zoom vertically",
+                    state.graph_view.height.is_none(),
+                )
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.drag = None;
+                    window.focus(&this.focus);
+                    this.state.update(cx, |s, cx| {
+                        if s.graph_view.height.is_some() {
+                            s.graph_view.height = None;
+                        } else if let Some(track) = s
+                            .editor
+                            .selected_layer()
+                            .and_then(|l| l.track(s.graph_property))
+                        {
+                            let v = viewport::current(s, track);
+                            s.graph_view.height = Some([v.low, v.high]);
+                        }
+                        cx.notify();
+                    });
+                })),
+            )
+            .child(
+                ui::tool(
+                    "graph-fit-selection",
+                    "target",
+                    "Fit Selection · Shift+F",
+                    false,
+                )
+                .when(selected_count == 0, |s| s.opacity(0.4))
+                .on_click(cx.listener(|this, _, window, cx| this.fit(true, window, cx))),
+            )
+            .child(
+                ui::tool("graph-fit-all", "square-dashed", "Fit All · F", false)
+                    .on_click(cx.listener(|this, _, window, cx| this.fit(false, window, cx))),
+            );
         toolbar = toolbar.child(div().flex_1()).child(
             ui::text_button("keyframe-details", "Keyframe...").on_click(cx.listener(
                 |this, _, window, cx| {
@@ -1203,13 +1309,8 @@ impl Render for Graph {
         let Some(track) = layer.track(property).cloned() else {
             return root.child(div().p_4().child("Select a property in the timeline."));
         };
-        let speed_mode = self.speed_mode;
-        let mut graph_view = tangent::fit_view(
-            view(&track, start, span, speed_mode, fps),
-            &tangent::for_selection(&track, &selected_frames),
-            speed_mode,
-            fps,
-        );
+        let speed_mode = state.graph_view.speed;
+        let mut graph_view = viewport::current(state, &track);
         if let Some(
             Drag::Key { view, .. } | Drag::Marquee { view, .. } | Drag::Tangent { view, .. },
         ) = &self.drag
@@ -1265,6 +1366,7 @@ impl Render for Graph {
                 .bg(rgb(0x262626))
                 .cursor_crosshair()
                 .on_mouse_down(MouseButton::Left, cx.listener(Self::down))
+                .on_scroll_wheel(cx.listener(Self::scroll))
                 .child(
                     canvas(
                         move |bounds, _, _| measured.set(Some(bounds)),

@@ -3,6 +3,27 @@ use libre_effects_core::{CompositionId, Project};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub(crate) struct GraphView {
+    pub speed: bool,
+    /// None continuously fits the visible graph height; Some freezes the value range.
+    pub height: Option<[f64; 2]>,
+}
+impl GraphView {
+    pub fn normalize(&mut self) {
+        if self.height.is_some_and(|[low, high]| {
+            !low.is_finite()
+                || !high.is_finite()
+                || low.abs() > 1e15
+                || high.abs() > 1e15
+                || high - low < 1e-6
+        }) {
+            self.height = None;
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct CompositionView {
@@ -15,6 +36,7 @@ pub(crate) struct CompositionView {
     pub checkerboard: bool,
     pub viewer: crate::viewer_tools::ViewerOptions,
     pub graph_open: bool,
+    pub graph_view: GraphView,
     pub expanded: bool,
 }
 impl Default for CompositionView {
@@ -29,6 +51,7 @@ impl Default for CompositionView {
             checkerboard: false,
             viewer: Default::default(),
             graph_open: false,
+            graph_view: Default::default(),
             expanded: true,
         }
     }
@@ -44,6 +67,7 @@ impl CompositionView {
     pub fn normalize(&mut self, duration: u32) {
         self.frame = self.frame.min(duration - 1);
         self.viewer.normalize();
+        self.graph_view.normalize();
         self.timeline_zoom = finite(self.timeline_zoom, 1.0, 1.0, 64.0);
         let visible = ((duration as f32 / self.timeline_zoom).ceil() as u32).max(2);
         self.timeline_start = self.timeline_start.min(duration.saturating_sub(visible));
@@ -156,6 +180,30 @@ impl ProjectViews {
 mod tests {
     use super::*;
     #[test]
+    fn invalid_graph_ranges_restore_auto_height_without_changing_graph_type() {
+        for height in [
+            [2.0, 1.0],
+            [0.0, 0.0],
+            [f64::NAN, 10.0],
+            [0.0, f64::INFINITY],
+            [-1e16, 1e16],
+        ] {
+            let mut graph = GraphView {
+                speed: true,
+                height: Some(height),
+            };
+            graph.normalize();
+            assert!(graph.speed);
+            assert!(graph.height.is_none());
+        }
+        let mut graph = GraphView {
+            speed: false,
+            height: Some([-40.0, 80.0]),
+        };
+        graph.normalize();
+        assert_eq!(graph.height, Some([-40.0, 80.0]));
+    }
+    #[test]
     fn optional_views_roundtrip_without_changing_the_render_document() {
         let p = Project::default();
         let mut views = ProjectViews::default();
@@ -176,6 +224,10 @@ mod tests {
                     ..Default::default()
                 },
                 graph_open: true,
+                graph_view: GraphView {
+                    speed: true,
+                    height: Some([-200.0, 300.0]),
+                },
                 expanded: false,
             },
         );

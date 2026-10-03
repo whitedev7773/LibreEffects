@@ -448,6 +448,22 @@ Click the graph icon in the timeline, use Animation → Toggle Graph Editor, or 
 Shift+F3. Click a property label or its X/Y channel in the persistent layer list. The value graph shares timeline
 zoom and pan; its vertical range fits the visible curve.
 
+The bottom toolbar includes **Auto Zoom Height**, **Fit Selection** (target icon),
+and **Fit All** (dashed square). With the graph focused, F fits all keys in the
+displayed channel; Shift+F fits its selected keys. Fitting adjusts time and value
+scales and freezes the height, including selected direction handles. Fit All on
+an unanimated channel shows the composition range. The shared timeline limits
+horizontal zoom to 64×; fitting one key never creates a zero-width view.
+
+Turn off Auto Zoom Height to pan vertically with the wheel or zoom vertically
+about the pointer with Ctrl+wheel. Shift+wheel pans time; Alt+wheel zooms time
+about the pointer. Auto Zoom Height prevents vertical wheel navigation. These
+gestures are ignored during key/handle drags. Graph type and height, like the
+timeline view, are saved per composition as optional desktop metadata; they do
+not change the rendered document or add Undo entries. Switching graph type
+restores automatic height for the new units. Manual height remains fixed when
+switching channels; use Fit All or Auto Zoom Height to frame the new values.
+
 - Click a key to select it; Shift/Ctrl-click toggles membership. Drag empty graph
   space to box-select keys; Shift/Ctrl adds to the selection. Ctrl+A selects all
   keys in the displayed channel, including keys outside the visible time range.
