@@ -110,7 +110,7 @@ their tested build and coverage; automated tests do not imply native acceptance.
 | Native modal editor | Initial debug build passed stop/midpoint/RGB/opacity drafts, Cancel, HEX validation, field Escape, multi-change OK and exact one-Undo/Redo. Edit-away-and-back was a no-op preserving prior history. Final release reopened the saved result; its CLI output matched independent color/opacity midpoint math at 2,244 interior pixels with maximum RGB error 1.47/255. No actual AE comparison was performed. |
 | Native Pen and overlay focus, final release | Same-path pair drag passed for legacy Shape, rotated/skewed nested Contents and vector mask; saved JSON confirmed identical local deltas, unchanged unselected positions and all tangent offsets. Selection-only was clean. Static six-to-four deletion, closed-path minimum-size rejection, animated topology rejection with both keys preserved, exact one-Undo/Redo and static save/reopen passed. Ctrl+K/Ctrl+N moved focus off the canvas, preventing Delete behind Settings; field input focus and field/dialog Escape passed. File actions such as Save intentionally blur and clear transient Pen selection. Atomic drag input still prevents intermediate mouse-held observation. |
 | Native selected-group Pen / Speed time box | Optimized release passed nested closed/open curves, repeated group creation, Cancel, one-Undo/Redo, save/reopen and Ctrl-mask/standalone controls. Existing path/paint JSON remained exact; independent group-transform reconstruction matched actual click coordinates within 0.223 pixels per axis. Speed showed only two side handles; vertical-only and return-to-start drags were no-ops, horizontal scaling preserved values/influences with common nominal slope compensation, and one-Undo/Redo/reopen matched saved data. The inset frame-zero handle was visible and draggable without hiding the key glyph. 26 post-hoc assertions and 15 native screenshots record these flows. Alt-centered/differential snap, held-drag interruption, tiny plots and full layout/DPI coverage remain unverified natively. Extremely short plots may omit a handle if no glyph-clear position fits. |
-| Native whole-track path order | Corrected optimized release is pinned; its native acceptance session is pending. Automated whole-track timing/selection/render guarantees above do not imply that native shortcuts, first-point marker or Properties Reverse have passed yet. |
+| Native whole-track path order | Corrected release passed First/Reverse geometry and tangent permutations, independent first-point marker, index-zero no-op history, exact Undo/Redo, remapped pair drag, whole animated base/pose/timing preservation, Properties Reverse, save/reopen at frame 60, and nested/mask routes. Multiple-selection First and unfinished-draft shortcuts were safely rejected. 25 post-hoc assertions and 16 original screenshots record the tested flows; four original fixture hashes were unchanged. Native open-path, locked/stale/modifier/IME and held-input combinations remain unverified after the requested format-priority change. |
 | Windows CI and device behavior | Fresh remote CI has not run: the requested checkpoint is local commits only, with no push or PR. Historical Windows native/device results remain in the backlog; the Windows-only audio-device test was not run on Linux. |
 
 Linux native startup needs a working Vulkan driver, and Open/Save needs a running
@@ -270,6 +270,12 @@ Every original A01–L05 ID appears once below. The labels are deliberately boun
 | L05 | Separate advanced scope | Web editor/API product definition and desktop model-sharing plan. Web `/editor` remains a placeholder; build/test success does not make it a motion editor. |
 
 ## Next milestones
+
+**User priority, 2026-10-03:** implement the dedicated `.lep` (Libre Effects
+Project) container end-to-end before any further editing features. Keep legacy
+`.lfe.json` import and source originals intact. Codec, bounded integrity checks,
+Save/Open/Save As, CLI, recovery and Collect Files acceptance are in progress.
+The unfinished marquee/Ctrl+A slice is paused until this format is validated.
 
 1. Extend native editing acceptance and retained regression evidence, especially
    animation, transformed/mask paths, focus/IME and DPI. Mid-drag preview observation
