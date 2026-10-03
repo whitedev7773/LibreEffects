@@ -200,6 +200,8 @@ pub(crate) struct Graph {
     drag_revision: u64,
     fields: Vec<Entity<TextField>>,
     details: bool,
+    hand: viewport::TemporaryHand,
+    focus_watch: Option<[gpui::Subscription; 2]>,
 }
 fn selected(state: &EditorState) -> Option<(LayerId, u32, PropertyPath)> {
     let (id, frame) = state
@@ -303,6 +305,7 @@ impl Graph {
                     || s.document_revision != this.drag_revision
             }) {
                 this.drag = None;
+                this.hand.cancel();
             }
             cx.notify();
         })
@@ -430,7 +433,24 @@ impl Graph {
             drag_revision: 0,
             fields,
             details: false,
+            hand: Default::default(),
+            focus_watch: None,
         }
+    }
+    fn cancel_navigation(&mut self, cx: &mut Context<Self>) {
+        self.hand.cancel();
+        match self.drag.take() {
+            Some(Drag::Pan { pan, .. }) => self.state.update(cx, |s, cx| {
+                pan.restore(s);
+                cx.notify();
+            }),
+            Some(Drag::Zoom { zoom, .. }) => self.state.update(cx, |s, cx| {
+                zoom.restore(s);
+                cx.notify();
+            }),
+            _ => {}
+        }
+        cx.notify();
     }
     fn fit(&mut self, selected_only: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.drag = None;
@@ -543,7 +563,8 @@ impl Graph {
         };
         let fps = state.editor.project().composition().fps().as_f64();
         let view = viewport::current(state, track);
-        if event.button == MouseButton::Middle || state.tool == Tool::Hand {
+        if event.button == MouseButton::Middle || state.tool == Tool::Hand || self.hand.held {
+            self.hand.consume();
             self.drag = Some(Drag::Pan {
                 id,
                 property,
@@ -1129,6 +1150,18 @@ fn dot(window: &mut Window, p: Point<Pixels>, color: u32) {
 }
 impl Render for Graph {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.focus_watch.is_none() {
+            self.focus_watch = Some([
+                cx.on_blur(&self.focus.clone(), window, |this, _, cx| {
+                    this.cancel_navigation(cx)
+                }),
+                cx.observe_window_activation(window, |this, window, cx| {
+                    if !window.is_window_active() {
+                        this.cancel_navigation(cx);
+                    }
+                }),
+            ]);
+        }
         let state = self.state.read(cx);
         let property = state.graph_property;
         if matches!(property, PropertyPath::Path(_)) {
@@ -1164,6 +1197,20 @@ impl Render for Graph {
             .on_mouse_up_out(MouseButton::Middle, cx.listener(Self::up))
             .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
                 let key = event.keystroke.key.as_str();
+                let m = event.keystroke.modifiers;
+                if key == "space"
+                    && this.focus.is_focused(window)
+                    && !m.control
+                    && !m.alt
+                    && !m.platform
+                    && !m.shift
+                {
+                    this.hand.press(event.is_held, this.drag.is_some());
+                    cx.stop_propagation();
+                    cx.notify();
+                    return;
+                }
+                this.hand.consume();
                 if key == "f"
                     && !event.keystroke.modifiers.control
                     && !event.keystroke.modifiers.alt
@@ -1195,17 +1242,7 @@ impl Render for Graph {
                     return;
                 }
                 if key == "escape" {
-                    match this.drag.take() {
-                        Some(Drag::Pan { pan, .. }) => this.state.update(cx, |s, cx| {
-                            pan.restore(s);
-                            cx.notify();
-                        }),
-                        Some(Drag::Zoom { zoom, .. }) => this.state.update(cx, |s, cx| {
-                            zoom.restore(s);
-                            cx.notify();
-                        }),
-                        _ => {}
-                    }
+                    this.cancel_navigation(cx);
                     this.details = false;
                     cx.stop_propagation();
                     cx.notify();
@@ -1244,6 +1281,16 @@ impl Render for Graph {
                         }
                     });
                     cx.stop_propagation();
+                }
+            }))
+            .on_key_up(cx.listener(|this, event: &gpui::KeyUpEvent, window, cx| {
+                if event.keystroke.key == "space" && this.hand.held {
+                    if this.hand.release() && this.focus.is_focused(window) {
+                        this.state
+                            .update(cx, |s, cx| s.dispatch(&Action::Play, window, cx));
+                    }
+                    cx.stop_propagation();
+                    cx.notify();
                 }
             }));
         let mut toolbar = div()
@@ -1451,7 +1498,9 @@ impl Render for Graph {
                 .bg(rgb(0x262626))
                 .cursor_crosshair()
                 .when(
-                    state.tool == Tool::Hand || matches!(self.drag, Some(Drag::Pan { .. })),
+                    state.tool == Tool::Hand
+                        || self.hand.held
+                        || matches!(self.drag, Some(Drag::Pan { .. })),
                     |s| s.cursor_grab(),
                 )
                 .on_mouse_down(MouseButton::Left, cx.listener(Self::down))

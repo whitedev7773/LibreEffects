@@ -471,6 +471,13 @@ works over keys and on locked layers without changing selection or keyframes.
 Release the initiating button to finish, including outside the plot; Escape
 restores the view from before the drag. Return to key editing with **V**.
 
+When the graph itself has keyboard focus, hold **Space** and drag to use Hand
+temporarily while retaining your selected toolbar tool. Releasing Space after a
+drag does not start playback; a Space press without a drag toggles preview on
+key release. Escape, moving focus away, or deactivating the window clears the
+temporary tool and cancels unfinished navigation. Numeric text fields retain
+their own keyboard input. This temporary Space behavior is currently graph-only.
+
 Use **Z** (Zoom tool) in the graph: click to zoom in, Alt-click to zoom out,
 or drag a rectangle to enlarge that time/value region. A nearly horizontal or
 vertical rectangle changes only that axis. Alt-drag right/left to zoom time

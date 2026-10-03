@@ -2,6 +2,34 @@
 use super::*;
 use std::collections::BTreeSet;
 
+/// Distinguish a Space tap (preview) from a Space+drag (temporary Hand).
+#[derive(Default)]
+pub(super) struct TemporaryHand {
+    pub held: bool,
+    used: bool,
+}
+impl TemporaryHand {
+    pub fn press(&mut self, repeated: bool, busy: bool) {
+        if !self.held {
+            self.held = true;
+            self.used = repeated || busy;
+        }
+    }
+    pub fn consume(&mut self) {
+        if self.held {
+            self.used = true;
+        }
+    }
+    pub fn release(&mut self) -> bool {
+        let tap = self.held && !self.used;
+        *self = Self::default();
+        tap
+    }
+    pub fn cancel(&mut self) {
+        *self = Self::default();
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(super) struct Pan {
     view: View,
@@ -260,6 +288,31 @@ pub(super) fn horizontal(state: &mut EditorState, delta: f64, anchor: f64, zoom:
 mod tests {
     use super::*;
     use libre_effects_core::{KeyRef, Property};
+    #[test]
+    fn temporary_hand_distinguishes_taps_drags_repeats_and_focus_loss() {
+        let mut hand = TemporaryHand::default();
+        hand.press(false, false);
+        hand.press(true, false);
+        assert!(hand.held);
+        assert!(hand.release());
+        assert!(!hand.release());
+        hand.press(false, false);
+        hand.consume();
+        hand.press(true, false);
+        assert!(!hand.release());
+        for (repeat, busy) in [(true, false), (false, true)] {
+            hand.press(repeat, busy);
+            assert!(!hand.release());
+        }
+        hand.press(false, false);
+        hand.cancel();
+        assert!(!hand.held && !hand.release());
+        // A repeat arriving after focus recovery must not start playback on release.
+        hand.press(true, false);
+        assert!(!hand.release());
+        hand.press(false, false);
+        assert!(hand.release());
+    }
     fn scene() -> EditorState {
         let mut s = EditorState::default();
         s.editor.execute(Command::AddRectangle).unwrap();
