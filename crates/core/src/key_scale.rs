@@ -43,42 +43,72 @@ pub(super) fn apply(state: &mut Snapshot, keys: &[KeyRef], scale: KeyScale) -> R
         return Err("Select keyframes to scale".into());
     }
     let duration = state.project.composition.duration;
-    let mut moved = Vec::new();
-    for key in keys.iter().copied().collect::<BTreeSet<_>>() {
+    let mut tracks = BTreeMap::<_, Vec<_>>::new();
+    for key in keys {
         if matches!(key.property, PropertyPath::Path(_)) {
             return Err("Geometry path keys do not support scalar key scaling".into());
         }
-        let to = scale.frame(key.frame, duration)?;
-        let track = editing::editable(state, key.id)?.track_mut(key.property)?;
-        let mut data = track
-            .keys
-            .remove(&key.frame)
-            .ok_or("Selected key no longer exists")?;
-        if scale.value_scale != 1.0 {
-            data.value = scale.value_origin + (data.value - scale.value_origin) * scale.value_scale;
-        }
-        // Influence is relative to segment duration. Scale signed slopes to keep
-        // the same affine curve when neighboring selected times are exact frames.
-        for handle in [&mut data.temporal.incoming, &mut data.temporal.outgoing]
-            .into_iter()
-            .flatten()
-        {
-            handle.slope *= scale.value_scale / scale.time_scale;
-            if !handle.valid() {
-                return Err("Scaled key velocity is outside the supported range".into());
-            }
-        }
-        moved.push((key, to, data));
+        tracks
+            .entry((key.id, key.property))
+            .or_default()
+            .push(key.frame);
     }
-    for (key, to, data) in moved {
-        let track = editing::editable(state, key.id)?.track_mut(key.property)?;
-        if track.keys.contains_key(&to) {
-            return Err("Scaled keyframes would collide with another key".into());
-        }
-        track.keys.insert(to, data);
+    for ((id, property), frames) in tracks {
+        let track = editing::editable(state, id)?.track_mut(property)?;
+        *track = track.preview_key_scale(&frames, scale, duration)?;
     }
     // Editor::execute validates property-specific value bounds before committing.
     Ok(())
+}
+impl AnimatedProperty {
+    /// Detached scalar preview shared with ScaleKeys. Property-specific bounds and
+    /// layer locks are checked by the document command when committing the edit.
+    pub fn preview_key_scale(
+        &self,
+        frames: &[Frame],
+        scale: KeyScale,
+        duration: Frame,
+    ) -> Result<Self, String> {
+        scale.validate()?;
+        if frames.is_empty() {
+            return Err("Select keyframes to scale".into());
+        }
+        let mut track = self.clone();
+        let mut moved = Vec::new();
+        for frame in frames.iter().copied().collect::<BTreeSet<_>>() {
+            let to = scale.frame(frame, duration)?;
+            let mut data = track
+                .keys
+                .remove(&frame)
+                .ok_or("Selected key no longer exists")?;
+            if scale.value_scale != 1.0 {
+                data.value =
+                    scale.value_origin + (data.value - scale.value_origin) * scale.value_scale;
+            }
+            if !data.value.is_finite() {
+                return Err("Scaled key value must be finite".into());
+            }
+            // Influence is relative to segment duration. Scale signed slopes to keep
+            // the same affine curve when neighboring selected times are exact frames.
+            for handle in [&mut data.temporal.incoming, &mut data.temporal.outgoing]
+                .into_iter()
+                .flatten()
+            {
+                handle.slope *= scale.value_scale / scale.time_scale;
+                if !handle.valid() {
+                    return Err("Scaled key velocity is outside the supported range".into());
+                }
+            }
+            moved.push((to, data));
+        }
+        for (to, data) in moved {
+            if track.keys.contains_key(&to) {
+                return Err("Scaled keyframes would collide with another key".into());
+            }
+            track.keys.insert(to, data);
+        }
+        Ok(track)
+    }
 }
 
 #[cfg(test)]

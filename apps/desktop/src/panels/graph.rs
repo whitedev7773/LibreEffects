@@ -2,6 +2,7 @@ mod selection;
 mod snapping;
 mod speed;
 mod tangent;
+mod transform;
 mod viewport;
 use crate::{
     components::TextField,
@@ -130,6 +131,11 @@ impl HandleSpace {
 }
 #[derive(Clone)]
 enum Drag {
+    Transform {
+        id: LayerId,
+        property: PropertyPath,
+        transform: transform::Transform,
+    },
     Zoom {
         id: LayerId,
         property: PropertyPath,
@@ -200,6 +206,7 @@ pub(crate) struct Graph {
     drag_revision: u64,
     fields: Vec<Entity<TextField>>,
     details: bool,
+    transform_box: bool,
     hand: viewport::TemporaryHand,
     focus_watch: Option<[gpui::Subscription; 2]>,
 }
@@ -293,6 +300,7 @@ impl Graph {
             if this.drag.as_ref().is_some_and(|drag| {
                 let (id, p) = match drag {
                     Drag::Zoom { id, property, .. }
+                    | Drag::Transform { id, property, .. }
                     | Drag::Pan { id, property, .. }
                     | Drag::Key { id, property, .. }
                     | Drag::Handle { id, property, .. }
@@ -452,6 +460,7 @@ impl Graph {
             drag_revision: 0,
             fields,
             details: false,
+            transform_box: false,
             hand: Default::default(),
             focus_watch: None,
         }
@@ -605,10 +614,26 @@ impl Graph {
             return;
         }
         let speed_mode = state.graph_view.speed;
-        let tangents = tangent::for_selection(
-            track,
-            &selection::active(state).iter().map(|k| k.frame).collect(),
-        );
+        if self.transform_box
+            && let Some(transform) = transform::Transform::new(state, view, bounds, event.position)
+        {
+            self.drag = Some(Drag::Transform {
+                id,
+                property,
+                transform,
+            });
+            cx.stop_propagation();
+            cx.notify();
+            return;
+        }
+        let tangents = if self.transform_box && !speed_mode && selection::active(state).len() > 1 {
+            vec![]
+        } else {
+            tangent::for_selection(
+                track,
+                &selection::active(state).iter().map(|k| k.frame).collect(),
+            )
+        };
         let hit = track
             .keys()
             .iter()
@@ -831,6 +856,10 @@ impl Graph {
             return;
         }
         match &mut self.drag {
+            Some(Drag::Transform { transform, .. }) => {
+                transform.moving(event.position, event.modifiers.alt);
+                cx.stop_propagation();
+            }
             Some(Drag::Zoom { zoom, end, .. }) => {
                 *end = event.position;
                 self.state.update(cx, |s, cx| {
@@ -995,6 +1024,32 @@ impl Graph {
                 return;
             }
             self.state.update(cx, |state, cx| match drag {
+                Drag::Transform { mut transform, .. } => {
+                    // Include the release position when it is outside the canvas.
+                    transform.moving(event.position, event.modifiers.alt);
+                    if transform.moved {
+                        match transform.command() {
+                            Ok((command, moved)) => {
+                                let active = selected(state)
+                                    .and_then(|(id, frame, _)| {
+                                        transform
+                                            .keys
+                                            .iter()
+                                            .position(|k| k.id == id && k.frame == frame)
+                                    })
+                                    .unwrap_or(0);
+                                state.dispatch(&Action::Edit(command), window, cx);
+                                if state.status.starts_with("Edited") {
+                                    state.graph_key = Some((moved[active].id, moved[active].frame));
+                                    state.frame = moved[active].frame;
+                                    state.selected_keys = moved.into_iter().collect();
+                                }
+                            }
+                            Err(error) => state.status = error,
+                        }
+                        cx.notify();
+                    }
+                }
                 Drag::Zoom { zoom, .. } => {
                     zoom.finish(state, event.position);
                     cx.notify();
@@ -1322,8 +1377,8 @@ impl Render for Graph {
             .flex_none()
             .flex()
             .items_center()
-            .gap_1()
-            .px_2();
+            .gap(px(2.0))
+            .px_1();
         for (label, speed_mode) in [("Value", false), ("Speed", true)] {
             toolbar = toolbar.child(
                 ui::text_button(
@@ -1409,6 +1464,24 @@ impl Render for Graph {
         toolbar = toolbar
             .child(
                 ui::tool(
+                    "graph-transform-box",
+                    "square",
+                    "Transform selected Value Graph keys · Alt: scale about center",
+                    self.transform_box,
+                )
+                .when(
+                    state.graph_view.speed || selected_count < 2 || locked,
+                    |s| s.opacity(0.4),
+                )
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.drag = None;
+                    this.transform_box = !this.transform_box;
+                    window.focus(&this.focus);
+                    cx.notify();
+                })),
+            )
+            .child(
+                ui::tool(
                     "graph-auto-height",
                     "chart-line",
                     "Auto Zoom Height · disable to pan/zoom vertically",
@@ -1478,9 +1551,18 @@ impl Render for Graph {
         {
             graph_view = space.view;
         }
+        if let Some(Drag::Transform { transform, .. }) = &self.drag {
+            graph_view = transform.view;
+        }
         let measured = self.plot.clone();
         let drag = self.drag.clone();
-        let plot_track = if let Some(Drag::Tangent {
+        let plot_track = if let Some(Drag::Transform { transform, .. }) = &self.drag {
+            transform
+                .preview
+                .as_ref()
+                .map(|(_, track)| track.clone())
+                .unwrap_or_else(|_| track.clone())
+        } else if let Some(Drag::Tangent {
             tangent,
             handle,
             split,
@@ -1494,7 +1576,19 @@ impl Render for Graph {
         } else {
             track.clone()
         };
-        let tangents = tangent::for_selection(&plot_track, &selected_frames);
+        let paint_frames = if let Some(Drag::Transform { transform, .. }) = &self.drag {
+            transform.frames()
+        } else {
+            selected_frames.clone()
+        };
+        let transform_box = (self.transform_box && !speed_mode && !locked)
+            .then(|| transform::SelectionBox::new(&plot_track, &paint_frames))
+            .flatten();
+        let tangents = if transform_box.is_some() {
+            vec![]
+        } else {
+            tangent::for_selection(&plot_track, &paint_frames)
+        };
         let selection_mode = [
             TemporalMode::Independent,
             TemporalMode::Continuous,
@@ -1643,7 +1737,7 @@ impl Render for Graph {
                                             dot(
                                                 window,
                                                 p,
-                                                if selected_frames.contains(&f) {
+                                                if paint_frames.contains(&f) {
                                                     ui::BLUE
                                                 } else {
                                                     0xffc66d
@@ -1655,7 +1749,7 @@ impl Render for Graph {
                                     dot(
                                         window,
                                         graph_view.point(bounds, f as f64, k.value),
-                                        if selected_frames.contains(&f) {
+                                        if paint_frames.contains(&f) {
                                             ui::BLUE
                                         } else {
                                             0xffc66d
@@ -1693,6 +1787,10 @@ impl Render for Graph {
                                             );
                                         }
                                     }
+                                }
+                                if let Some(transform_box) = transform_box {
+                                    let invalid = matches!(&drag, Some(Drag::Transform { transform, .. }) if transform.preview.is_err());
+                                    transform_box.paint(graph_view,bounds,window,invalid);
                                 }
                                 let area = match &drag {
                                     Some(Drag::Zoom { zoom, end, .. }) => zoom.area(*end),
@@ -2081,6 +2179,8 @@ impl Render for Graph {
                     layer.track_label(property).unwrap_or_default(),
                     if speed_mode {
                         " · units/s · diamonds: velocity/influence · Alt: split · Shift: keep velocity"
+                    } else if self.transform_box {
+                        " · transform handles: time/value scale · Alt: center · Esc: cancel"
                     } else {
                         " · box select · diamonds: tangents · Alt: split · Shift: keep velocity"
                     }

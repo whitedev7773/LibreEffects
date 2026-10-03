@@ -510,12 +510,24 @@ timeline still limits time zoom to 1–64× and integer viewport start frames.
     Times round to whole frames, and collisions or property bounds reject the
     entire operation. Manual tangent slopes scale by value/time while influence
     and tangent mode are preserved. In Speed Graph, Value % still scales the
-    underlying property values. A pointer transform box, custom pivots, and
-    reversed time scaling remain pending.
+    underlying property values. Custom pivots and reversed time scaling remain pending.
   Fields edit the active key; interpolation/mode/Ease buttons act on all selected
   keys in the displayed channel. Mixed modes have no highlighted mode button.
   Escape or Close dismisses it. Delete removes the selected graph keys in one Undo.
   The diamond adds/removes a key at the playhead.
+- The square icon enables a transform box for two or more selected Value Graph
+  keys. Left/right handles scale timing, top/bottom handles scale values, and
+  corners scale both about the opposite edge. Alt scales about the selection
+  center. The frozen viewport and initial pointer offset prevent jumps; Fit
+  Selection can expose handles outside the visible graph. Flat value selections
+  only have time handles. Existing key dragging still translates the selection.
+  The graph previews the resulting curve; release commits one Undo. Escape,
+  loss of focus, document/channel changes cancel without changing the document.
+  Time reversal, rounding collisions and out-of-composition times are rejected;
+  invalid time previews show a red box. Property bounds are validated on commit.
+  Value reflection is supported. Speed Graph transformation, transform snapping,
+  custom anchor points and skew remain pending. This overlay does not alter the
+  panel layout or saved document format.
 - Linear and Hold replace the selected key's outgoing segment, clearing its outgoing
   handle and the next key's incoming handle. Other segments remain unchanged.
 - Ease (F9) sets zero velocity and one-third influence on both sides of the selected
