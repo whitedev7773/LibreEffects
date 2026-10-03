@@ -43,6 +43,105 @@ impl Pan {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct Zoom {
+    origin: Pan,
+    pub scrub: bool,
+}
+impl Zoom {
+    pub fn new(
+        state: &EditorState,
+        view: View,
+        bounds: Bounds<Pixels>,
+        event: &MouseDownEvent,
+    ) -> Self {
+        Self {
+            origin: Pan::new(state, view, bounds, event),
+            scrub: event.modifiers.alt,
+        }
+    }
+    pub fn restore(self, state: &mut EditorState) {
+        self.origin.restore(state);
+    }
+    fn delta(self, end: Point<Pixels>) -> (f64, f64) {
+        let delta = end - self.origin.start;
+        (f32::from(delta.x) as f64, f32::from(delta.y) as f64)
+    }
+    fn scale(self, state: &mut EditorState, x: f64, y: f64) {
+        self.restore(state);
+        let p = self.origin.start;
+        let b = self.origin.bounds;
+        let fx = f32::from(p.x - b.left()) as f64 / f32::from(b.size.width).max(1.0) as f64;
+        let fy = f32::from(b.bottom() - p.y) as f64 / f32::from(b.size.height).max(1.0) as f64;
+        horizontal(state, x, fx, true);
+        if self.origin.height.is_some() {
+            state.graph_view.height = Some(vertical(self.origin.view, y, fy, true));
+        }
+    }
+    pub fn moving(self, state: &mut EditorState, end: Point<Pixels>) {
+        if self.scrub {
+            let (dx, dy) = self.delta(end);
+            if dx.abs().max(dy.abs()) >= 3.0 {
+                self.scale(state, dx * 2.0, -dy * 2.0);
+            } else {
+                self.restore(state);
+            }
+        }
+    }
+    pub fn area(self, end: Point<Pixels>) -> Option<Bounds<Pixels>> {
+        let (dx, dy) = self.delta(end);
+        if self.scrub || dx.abs().max(dy.abs()) < 3.0 {
+            return None;
+        }
+        let b = self.origin.bounds;
+        let a = self.origin.start;
+        let left = a.x.min(end.x).max(b.left()).min(b.right());
+        let right = a.x.max(end.x).max(b.left()).min(b.right());
+        let top = a.y.min(end.y).max(b.top()).min(b.bottom());
+        let bottom = a.y.max(end.y).max(b.top()).min(b.bottom());
+        Some(Bounds::new(
+            point(left, top),
+            size(right - left, bottom - top),
+        ))
+    }
+    pub fn finish(self, state: &mut EditorState, end: Point<Pixels>) {
+        let (dx, dy) = self.delta(end);
+        if dx.abs().max(dy.abs()) < 3.0 {
+            let step = 2.0_f64.ln() / 0.005 * if self.scrub { -1.0 } else { 1.0 };
+            self.scale(state, step, step);
+        } else if self.scrub {
+            self.moving(state, end);
+        } else if let Some(area) = self.area(end) {
+            self.restore(state);
+            let view = self.origin.view;
+            let (from, high) = view.value(self.origin.bounds, area.origin);
+            let (to, low) = view.value(self.origin.bounds, area.bottom_right());
+            if area.size.width >= px(3.0) {
+                let duration = state.editor.project().composition().duration();
+                state.timeline_zoom =
+                    (duration as f64 / (to - from).max(2.0)).clamp(1.0, 64.0) as f32;
+                let span = state.visible_frames();
+                state.timeline_start = ((from + to - span as f64) / 2.0)
+                    .round()
+                    .clamp(0.0, duration.saturating_sub(span) as f64)
+                    as u32;
+            }
+            if self.origin.height.is_some() && area.size.height >= px(3.0) {
+                // Use the same finite range limits as wheel navigation.
+                let factor = ((view.high - view.low) / (high - low).max(1e-6)).ln() / 0.005;
+                let center = (low + high) / 2.0;
+                let half_span = (view.high - view.low) / 2.0;
+                let centered = View {
+                    low: center - half_span,
+                    high: center + half_span,
+                    ..view
+                };
+                state.graph_view.height = Some(vertical(centered, factor, 0.5, true));
+            }
+        }
+    }
+}
+
 pub(super) fn current(state: &EditorState, track: &AnimatedProperty) -> View {
     let fps = state.editor.project().composition().fps().as_f64();
     let mut result = view(
@@ -183,6 +282,147 @@ mod tests {
         }
         s.graph_property = Property::PositionX.into();
         s
+    }
+    fn zoom_scene(automatic: bool, alt: bool) -> (EditorState, Zoom) {
+        let mut s = scene();
+        s.timeline_zoom = 3.0;
+        s.timeline_start = 20;
+        s.graph_view.height = (!automatic).then_some([-100.0, 300.0]);
+        let v = View {
+            start: 20.0,
+            span: 50.0,
+            low: -100.0,
+            high: 300.0,
+        };
+        let bounds = Bounds::new(point(px(100.0), px(200.0)), size(px(1000.0), px(200.0)));
+        let event = MouseDownEvent {
+            position: point(px(350.0), px(350.0)),
+            modifiers: gpui::Modifiers {
+                alt,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let zoom = Zoom::new(&s, v, bounds, &event);
+        (s, zoom)
+    }
+    #[test]
+    fn zoom_click_and_alt_click_keep_pointer_time_and_value() {
+        for automatic in [false, true] {
+            for alt in [false, true] {
+                let (mut s, zoom) = zoom_scene(automatic, alt);
+                zoom.finish(&mut s, zoom.origin.start);
+                let factor = if alt { 0.5 } else { 2.0 };
+                assert_eq!(s.timeline_zoom, 3.0 * factor);
+                // The frame under the pointer remains within the integer viewport precision.
+                assert!(
+                    (s.timeline_start as f64 + s.visible_frames() as f64 * 0.25 - 32.5).abs()
+                        <= 0.5
+                );
+                if automatic {
+                    assert_eq!(s.graph_view.height, None);
+                } else {
+                    let [low, high] = s.graph_view.height.unwrap();
+                    assert!((low + (high - low) * 0.25).abs() < 1e-9);
+                    assert!((high - low - 400.0 / factor as f64).abs() < 1e-9);
+                }
+            }
+        }
+    }
+    #[test]
+    fn zoom_marquee_handles_reverse_drag_single_axis_and_plot_edges() {
+        for automatic in [false, true] {
+            let (mut s, mut zoom) = zoom_scene(automatic, false);
+            let a = point(px(350.0), px(250.0));
+            let b = point(px(850.0), px(350.0));
+            zoom.origin.start = a;
+            zoom.finish(&mut s, b);
+            assert_eq!((s.timeline_start, s.visible_frames()), (33, 25));
+            if let Some([low, high]) = s.graph_view.height {
+                assert!(low.abs() < 1e-9 && (high - 200.0).abs() < 1e-9);
+            } else {
+                assert!(automatic);
+            }
+            let expected = (s.timeline_start, s.timeline_zoom, s.graph_view.height);
+            zoom.origin.start = b;
+            zoom.finish(&mut s, a);
+            assert_eq!(
+                (s.timeline_start, s.timeline_zoom, s.graph_view.height),
+                expected
+            );
+            // Nearly vertical marquee only changes height.
+            zoom.finish(&mut s, point(b.x + px(1.0), a.y));
+            assert_eq!((s.timeline_start, s.timeline_zoom), (20, 3.0));
+            // Release beyond the plot clamps the target rectangle to visible content.
+            let outside = point(px(2000.0), px(-500.0));
+            let area = zoom.area(outside).unwrap();
+            assert_eq!(area.right(), zoom.origin.bounds.right());
+            assert_eq!(area.top(), zoom.origin.bounds.top());
+            zoom.finish(&mut s, outside);
+            assert!(s.timeline_start + s.visible_frames() <= 150);
+            assert_eq!(s.graph_view.height.is_none(), automatic);
+        }
+    }
+    #[test]
+    fn zoom_scrub_is_absolute_cancelable_and_never_edits_the_document() {
+        for automatic in [false, true] {
+            let (mut s, zoom) = zoom_scene(automatic, true);
+            s.editor.execute(Command::ToggleLocked(1)).unwrap();
+            let key = KeyRef {
+                id: 1,
+                property: Property::PositionX.into(),
+                frame: 30,
+            };
+            s.selected_keys.insert(key);
+            s.graph_key = Some((1, 30));
+            s.frame = 30;
+            let before = s.editor.project().clone();
+            let destination = zoom.origin.start + point(px(100.0), px(-50.0));
+            zoom.moving(&mut s, destination);
+            let expected = (s.timeline_start, s.timeline_zoom, s.graph_view.height);
+            zoom.moving(&mut s, destination);
+            zoom.finish(&mut s, destination);
+            assert_eq!(
+                (s.timeline_start, s.timeline_zoom, s.graph_view.height),
+                expected
+            );
+            assert!(s.timeline_zoom > 3.0);
+            if let Some([low, high]) = s.graph_view.height {
+                assert!(high - low < 400.0);
+            }
+            zoom.restore(&mut s);
+            assert_eq!((s.timeline_start, s.timeline_zoom), (20, 3.0));
+            assert_eq!(s.graph_view.height, (!automatic).then_some([-100.0, 300.0]));
+            zoom.finish(&mut s, point(px(1e8), px(-1e8)));
+            assert_eq!(s.timeline_zoom, 64.0);
+            assert_eq!(s.selected_keys, [key].into());
+            assert_eq!((s.graph_key, s.frame), (Some((1, 30)), 30));
+            assert_eq!(s.editor.project(), &before);
+            s.editor.undo();
+            assert!(!s.editor.selected_layer().unwrap().locked());
+            s.editor.redo();
+            let mut views = crate::view_state::ProjectViews::default();
+            views.compositions.insert(
+                1,
+                crate::view_state::CompositionView {
+                    graph_view: s.graph_view.clone(),
+                    timeline_start: s.timeline_start,
+                    timeline_zoom: s.timeline_zoom,
+                    ..Default::default()
+                },
+            );
+            let json = views.write(s.editor.project()).unwrap();
+            let loaded = libre_effects_core::Project::from_json(&json).unwrap();
+            assert_eq!(loaded, before);
+            assert_eq!(crate::view_state::ProjectViews::read(&json, &loaded), views);
+            let renderer = crate::rendering::Renderer::new();
+            for frame in [10, 20, 30, 60] {
+                assert_eq!(
+                    renderer.render(&before, frame, 384).unwrap(),
+                    renderer.render_output(&loaded, frame, 384, 216).unwrap()
+                );
+            }
+        }
     }
     #[test]
     fn fitting_selected_keys_excludes_distant_extremes_and_never_edits_history() {

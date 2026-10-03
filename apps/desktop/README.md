@@ -471,6 +471,15 @@ works over keys and on locked layers without changing selection or keyframes.
 Release the initiating button to finish, including outside the plot; Escape
 restores the view from before the drag. Return to key editing with **V**.
 
+Use **Z** (Zoom tool) in the graph: click to zoom in, Alt-click to zoom out,
+or drag a rectangle to enlarge that time/value region. A nearly horizontal or
+vertical rectangle changes only that axis. Alt-drag right/left to zoom time
+in/out and up/down to zoom values in/out around the initial pointer location.
+Auto Zoom Height keeps vertical framing automatic for every zoom gesture.
+Escape cancels the gesture; release outside the plot also finishes it. Zoom
+preserves keys, selection and Undo history, including on locked layers. The
+timeline still limits time zoom to 1–64× and integer viewport start frames.
+
 - Click a key to select it; Shift/Ctrl-click toggles membership. Drag empty graph
   space to box-select keys; Shift/Ctrl adds to the selection. Ctrl+A selects all
   keys in the displayed channel, including keys outside the visible time range.

@@ -130,6 +130,12 @@ impl HandleSpace {
 }
 #[derive(Clone)]
 enum Drag {
+    Zoom {
+        id: LayerId,
+        property: PropertyPath,
+        zoom: viewport::Zoom,
+        end: Point<Pixels>,
+    },
     Pan {
         id: LayerId,
         property: PropertyPath,
@@ -284,7 +290,8 @@ impl Graph {
         cx.observe(&state, |this, _, cx| {
             if this.drag.as_ref().is_some_and(|drag| {
                 let (id, p) = match drag {
-                    Drag::Pan { id, property, .. }
+                    Drag::Zoom { id, property, .. }
+                    | Drag::Pan { id, property, .. }
                     | Drag::Key { id, property, .. }
                     | Drag::Handle { id, property, .. }
                     | Drag::Marquee { id, property, .. }
@@ -546,6 +553,17 @@ impl Graph {
             cx.notify();
             return;
         }
+        if state.tool == Tool::Zoom {
+            self.drag = Some(Drag::Zoom {
+                id,
+                property,
+                zoom: viewport::Zoom::new(state, view, bounds, event),
+                end: event.position,
+            });
+            cx.stop_propagation();
+            cx.notify();
+            return;
+        }
         let speed_mode = state.graph_view.speed;
         let tangents = tangent::for_selection(
             track,
@@ -773,6 +791,14 @@ impl Graph {
             return;
         }
         match &mut self.drag {
+            Some(Drag::Zoom { zoom, end, .. }) => {
+                *end = event.position;
+                self.state.update(cx, |s, cx| {
+                    zoom.moving(s, event.position);
+                    cx.notify();
+                });
+                cx.stop_propagation();
+            }
             Some(Drag::Pan { pan, .. }) => {
                 self.state.update(cx, |s, cx| {
                     pan.apply(s, event.position);
@@ -929,6 +955,10 @@ impl Graph {
                 return;
             }
             self.state.update(cx, |state, cx| match drag {
+                Drag::Zoom { zoom, .. } => {
+                    zoom.finish(state, event.position);
+                    cx.notify();
+                }
                 Drag::Pan { pan, .. } => {
                     // The last move can fall outside this panel's hit area.
                     // Commit the release position even when no move reached us.
@@ -1165,11 +1195,16 @@ impl Render for Graph {
                     return;
                 }
                 if key == "escape" {
-                    if let Some(Drag::Pan { pan, .. }) = this.drag.take() {
-                        this.state.update(cx, |s, cx| {
+                    match this.drag.take() {
+                        Some(Drag::Pan { pan, .. }) => this.state.update(cx, |s, cx| {
                             pan.restore(s);
                             cx.notify();
-                        });
+                        }),
+                        Some(Drag::Zoom { zoom, .. }) => this.state.update(cx, |s, cx| {
+                            zoom.restore(s);
+                            cx.notify();
+                        }),
+                        _ => {}
                     }
                     this.details = false;
                     cx.stop_propagation();
@@ -1586,11 +1621,17 @@ impl Render for Graph {
                                         }
                                     }
                                 }
-                                if let Some(Drag::Marquee { start, end, .. }) = &drag {
-                                    let area = Bounds::from_corners(
-                                        point(start.x.min(end.x), start.y.min(end.y)),
-                                        point(start.x.max(end.x), start.y.max(end.y)),
-                                    );
+                                let area = match &drag {
+                                    Some(Drag::Zoom { zoom, end, .. }) => zoom.area(*end),
+                                    Some(Drag::Marquee { start, end, .. }) => {
+                                        Some(Bounds::from_corners(
+                                            point(start.x.min(end.x), start.y.min(end.y)),
+                                            point(start.x.max(end.x), start.y.max(end.y)),
+                                        ))
+                                    }
+                                    _ => None,
+                                };
+                                if let Some(area) = area {
                                     window.paint_quad(fill(area, gpui::rgba(0x4ba6ff22)));
                                     stroke(
                                         window,
