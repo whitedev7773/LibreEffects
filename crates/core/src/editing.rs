@@ -309,6 +309,7 @@ pub(super) fn apply_extended(
             | Command::SetColor { .. }
             | Command::ShiftLayer { .. }
             | Command::MoveKeys { .. }
+            | Command::ScaleKeys { .. }
             | Command::DeleteKeys(_)
             | Command::PasteKeys { .. }
     ) {
@@ -784,6 +785,7 @@ pub(super) fn apply_extended(
                     track.keys.insert(to, data);
                 }
             }
+            Command::ScaleKeys { keys, scale } => key_scale::apply(state, keys, *scale)?,
             Command::DeleteKeys(keys) => {
                 for key in keys.iter().copied().collect::<BTreeSet<_>>() {
                     let track = editable(state, key.id)?.track_mut(key.property)?;

@@ -310,7 +310,7 @@ impl Graph {
             cx.notify();
         })
         .detach();
-        let fields = (0..10)
+        let fields = (0..12)
             .map(|index| {
                 let edit = state.clone();
                 cx.new(|cx| {
@@ -329,7 +329,26 @@ impl Graph {
                                 cx.notify();
                                 return;
                             }
-                            if index < 2 {
+                            if index >= 10 {
+                                match selection::scale(state, index == 10, value / 100.0) {
+                                    Ok((command, moved)) => {
+                                        let old = selection::active(state);
+                                        let active =
+                                            old.iter().position(|k| k.frame == frame).unwrap_or(0);
+                                        state.dispatch(&Action::Edit(command), window, cx);
+                                        if state.status.starts_with("Edited") {
+                                            state.graph_key = Some((id, moved[active].frame));
+                                            state.frame = moved[active].frame;
+                                            state.selected_keys = moved.into_iter().collect();
+                                            cx.notify();
+                                        }
+                                    }
+                                    Err(error) => {
+                                        state.status = error;
+                                        cx.notify();
+                                    }
+                                }
+                            } else if index < 2 {
                                 if index == 0
                                     && (value < 0.0
                                         || value.fract() != 0.0
@@ -1179,6 +1198,11 @@ impl Render for Graph {
             .map(|k| k.frame)
             .collect::<std::collections::BTreeSet<_>>();
         let selected_count = selected_frames.len();
+        let scale_identity = format!(
+            "scale-{:?}-{property:?}-{selected_frames:?}-{}",
+            state.editor.selected(),
+            state.document_revision
+        );
         let curve = curve_at(state);
         let locked = layer.as_ref().is_none_or(|l| l.locked());
         let root = div()
@@ -1757,13 +1781,39 @@ impl Render for Graph {
                     div()
                         .text_size(px(10.0))
                         .text_color(rgb(ui::MUTED))
-                        .child(format!(
-                            "{selected_count} keys selected · fields edit the active key"
-                        )),
+                        .child(format!("{selected_count} keys selected")),
                 )
             });
         if let Some((id, frame, _)) = selection {
             let key = &track.keys()[&frame];
+            if selected_count > 1 {
+                easing = easing
+                    .child(div().mt_2().child("Scale selected keys"))
+                    .child(
+                        div()
+                            .text_size(px(10.0))
+                            .text_color(rgb(ui::MUTED))
+                            .child("Time: first key · Value: lowest value"),
+                    );
+                for (index, label) in [(10, "Time %"), (11, "Value %")] {
+                    self.fields[index].update(cx, |field, _| {
+                        field.sync(scale_identity.clone(), "100".into(), window)
+                    });
+                    easing = easing.child(
+                        div()
+                            .h(px(25.0))
+                            .flex()
+                            .items_center()
+                            .child(div().w(px(65.0)).child(label))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .when(!locked, |s| s.child(self.fields[index].clone()))
+                                    .when(locked, |s| s.child("Locked")),
+                            ),
+                    );
+                }
+            }
             for (index, (label, value)) in [
                 ("Frame", frame.to_string()),
                 (

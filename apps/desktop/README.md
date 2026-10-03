@@ -503,6 +503,15 @@ timeline still limits time zoom to 1–64× and integer viewport start frames.
   Ctrl temporarily inverts snapping and Alt bypasses it. An unmoved or Shift-locked
   axis does not snap. Direction-handle drags retain their separate controls.
 - Keyframe... opens a compact popup with Frame and Value fields for precise edits.
+    With two or more keys selected, Time % scales their timing around the first
+    selected key, and Value % scales property values around the lowest selected
+    value. Each committed field is one Undo and resets to 100% for the next
+    operation. Time must be positive; negative value percentages reflect values.
+    Times round to whole frames, and collisions or property bounds reject the
+    entire operation. Manual tangent slopes scale by value/time while influence
+    and tangent mode are preserved. In Speed Graph, Value % still scales the
+    underlying property values. A pointer transform box, custom pivots, and
+    reversed time scaling remain pending.
   Fields edit the active key; interpolation/mode/Ease buttons act on all selected
   keys in the displayed channel. Mixed modes have no highlighted mode button.
   Escape or Close dismisses it. Delete removes the selected graph keys in one Undo.

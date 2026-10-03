@@ -120,6 +120,41 @@ pub(super) fn inside(a: Point<Pixels>, b: Point<Pixels>, p: Point<Pixels>) -> bo
         && p.y >= a.y.min(b.y) - px(4.0)
         && p.y <= a.y.max(b.y) + px(4.0)
 }
+pub(super) fn scale(
+    state: &EditorState,
+    time: bool,
+    factor: f64,
+) -> Result<(Command, Vec<KeyRef>), String> {
+    let keys = active(state);
+    if keys.len() < 2 {
+        return Err("Select at least two keys to scale".into());
+    }
+    let track = state
+        .editor
+        .selected_layer()
+        .and_then(|l| l.track(state.graph_property))
+        .ok_or("Select a scalar graph channel")?;
+    let scale = libre_effects_core::KeyScale {
+        time_origin: keys.iter().map(|k| k.frame).min().unwrap() as f64,
+        time_scale: if time { factor } else { 1.0 },
+        value_origin: keys
+            .iter()
+            .map(|k| track.keys()[&k.frame].value)
+            .fold(f64::INFINITY, f64::min),
+        value_scale: if time { 1.0 } else { factor },
+    };
+    let duration = state.editor.project().composition().duration();
+    let moved = keys
+        .iter()
+        .map(|key| {
+            Ok(KeyRef {
+                frame: scale.frame(key.frame, duration)?,
+                ..*key
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok((Command::ScaleKeys { keys, scale }, moved))
+}
 pub(super) fn ease(
     track: &AnimatedProperty,
     keys: &[KeyRef],
@@ -204,6 +239,52 @@ mod tests {
             keys,
             side,
         )
+    }
+    #[test]
+    fn selection_scale_keeps_relative_timing_and_matches_saved_output() {
+        let (editor, keys) = scene(Property::PositionX);
+        let mut s = EditorState::default();
+        s.editor = editor;
+        s.graph_property = Property::PositionX.into();
+        s.selected_keys = keys.into_iter().collect();
+        let before = s.editor.project().clone();
+        let (command, moved) = scale(&s, true, 1.5).unwrap();
+        s.editor.execute(command).unwrap();
+        assert_eq!(
+            moved.iter().map(|k| k.frame).collect::<Vec<_>>(),
+            vec![0, 30, 60]
+        );
+        s.selected_keys = moved.into_iter().collect();
+        let (command, moved) = scale(&s, false, 2.0).unwrap();
+        s.editor.execute(command).unwrap();
+        assert_eq!(moved.into_iter().collect::<BTreeSet<_>>(), s.selected_keys);
+        let track = s
+            .editor
+            .selected_layer()
+            .unwrap()
+            .track(s.graph_property)
+            .unwrap();
+        assert_eq!(
+            track.keys().values().map(|k| k.value).collect::<Vec<_>>(),
+            vec![30.0, 90.0, 50.0]
+        );
+        let after = s.editor.project().clone();
+        s.editor.undo();
+        s.editor.undo();
+        assert_eq!(s.editor.project(), &before);
+        s.editor.redo();
+        s.editor.redo();
+        assert_eq!(s.editor.project(), &after);
+        let loaded = Project::from_json(&after.to_json().unwrap()).unwrap();
+        let renderer = crate::rendering::Renderer::new();
+        for frame in [0, 15, 30, 45, 60] {
+            assert_eq!(
+                renderer.render(&after, frame, 384).unwrap(),
+                renderer.render_output(&loaded, frame, 384, 216).unwrap()
+            );
+        }
+        s.selected_keys.clear();
+        assert!(scale(&s, true, 2.0).is_err());
     }
     #[test]
     fn speed_retime_without_vertical_change_preserves_auto_mode() {

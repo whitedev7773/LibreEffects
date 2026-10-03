@@ -15,6 +15,8 @@ pub use color_curves::{CurveChannel, sample_color_curve};
 mod compositions;
 mod document;
 mod editing;
+mod key_scale;
+pub use key_scale::KeyScale;
 mod effects;
 pub use effects::{
     EffectColorSpace, EffectEdit, EffectId, EffectInstance, EffectKind, EffectParam, EffectPreset,
@@ -1033,6 +1035,10 @@ pub enum Command {
     MoveKeys {
         keys: Vec<KeyRef>,
         delta: i64,
+    },
+    ScaleKeys {
+        keys: Vec<KeyRef>,
+        scale: KeyScale,
     },
     DeleteKeys(Vec<KeyRef>),
     PasteKeys {
