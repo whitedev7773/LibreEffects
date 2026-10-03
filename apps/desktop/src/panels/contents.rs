@@ -6,7 +6,7 @@ use crate::{
 use gpui::{Context, Entity, Window, div, prelude::*, px, rgb};
 use libre_effects_core::{
     Command, Content, ContentsEdit, ContentsKind, ContentsParam, PathTarget, PropertyPath,
-    ShapeKind, TrackEdit,
+    ShapeKind, ShapeStroke, StrokeCap, StrokeJoin, TrackEdit,
 };
 
 pub(crate) struct ContentsControls {
@@ -283,6 +283,14 @@ impl Render for ContentsControls {
         let Some(node) = contents.node(item) else {
             return root;
         };
+        if !self
+            .fields
+            .iter()
+            .map(|(p, _)| p)
+            .eq(node.parameters.keys())
+        {
+            self.select(id, item, cx);
+        }
         if let Some(name) = &self.name {
             name.update(cx, |f, _| {
                 f.sync(format!("contents-name-{id}-{item}"), node.name.clone(), w)
@@ -493,6 +501,114 @@ impl Render for ContentsControls {
                     })
                 }),
             );
+        }
+        if let Some(color) = node.paint_color_at(frame) {
+            root = root.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child("Color")
+                    .child(super::color_picker::swatch(
+                        "contents-paint-color",
+                        color,
+                        crate::color_edit::Target::Contents(id, item),
+                        locked,
+                        &self.state,
+                    )),
+            );
+        }
+        if let ContentsKind::Stroke(style) = &node.kind {
+            for (cap_row, label) in [(true, "Line Cap"), (false, "Line Join")] {
+                let mut options = div().flex().gap_1();
+                for index in 0..3 {
+                    let (name, active, edit) = if cap_row {
+                        let cap = StrokeCap::ALL[index];
+                        (
+                            cap.label(),
+                            style.cap == cap,
+                            ContentsEdit::StrokeCap { item, cap },
+                        )
+                    } else {
+                        let join = StrokeJoin::ALL[index];
+                        (
+                            join.label(),
+                            style.join == join,
+                            ContentsEdit::StrokeJoin { item, join },
+                        )
+                    };
+                    let state = self.state.clone();
+                    options = options.child(
+                        ui::text_button(
+                            (
+                                if cap_row {
+                                    "contents-cap"
+                                } else {
+                                    "contents-join"
+                                },
+                                index,
+                            ),
+                            name,
+                        )
+                        .when(active, |b| b.bg(rgb(0x164a7b)))
+                        .when(!locked, |b| {
+                            b.on_click(move |_, w, cx| {
+                                TextField::commit_active(w, cx);
+                                state.update(cx, |s, cx| {
+                                    s.dispatch(
+                                        &Action::Edit(Command::Contents {
+                                            id,
+                                            edit: edit.clone(),
+                                        }),
+                                        w,
+                                        cx,
+                                    )
+                                });
+                            })
+                        }),
+                    );
+                }
+                root = root.child(div().flex().flex_col().gap_1().child(label).child(options));
+            }
+            let mut dashes = div().flex().items_center().gap_1().child("Dashes");
+            for (key, icon, label, edit, enabled) in [
+                (
+                    0usize,
+                    "plus",
+                    "Add dash or gap",
+                    ContentsEdit::AddDash(item),
+                    style.dashes.len() < ShapeStroke::MAX_DASHES,
+                ),
+                (
+                    1,
+                    "minus",
+                    "Remove last dash or gap",
+                    ContentsEdit::RemoveDash(item),
+                    !style.dashes.is_empty(),
+                ),
+            ] {
+                let state = self.state.clone();
+                dashes = dashes.child(
+                    ui::tool(("contents-dashes", key), icon, label, false)
+                        .when(locked || !enabled, |b| b.opacity(0.4))
+                        .when(!locked && enabled, |b| {
+                            b.on_click(move |_, w, cx| {
+                                TextField::commit_active(w, cx);
+                                state.update(cx, |s, cx| {
+                                    s.dispatch(
+                                        &Action::Edit(Command::Contents {
+                                            id,
+                                            edit: edit.clone(),
+                                        }),
+                                        w,
+                                        cx,
+                                    )
+                                });
+                            })
+                        }),
+                );
+            }
+            root = root.child(dashes);
         }
         for (p, field) in &self.fields {
             let Some(track) = node.parameters.get(p) else {

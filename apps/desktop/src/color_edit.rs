@@ -1,6 +1,7 @@
 //! Color-dialog drafts never mutate the document until accepted.
 use libre_effects_core::{
-    Command, Content, Frame, LayerId, Project, Property, ShapePaint, TrackEdit,
+    Command, Content, ContentsEdit, ContentsParam, Frame, LayerId, Project, Property, ShapePaint,
+    TrackEdit,
 };
 use serde::{Deserialize, Serialize};
 
@@ -26,11 +27,15 @@ pub(crate) enum Target {
     Fill(LayerId),
     Stroke(LayerId),
     Shape(LayerId, ShapePaint),
+    Contents(LayerId, u64),
     BackgroundDraft(u32),
 }
 impl Target {
     pub fn alpha(self) -> bool {
-        matches!(self, Self::Fill(_) | Self::Shape(_, _))
+        matches!(
+            self,
+            Self::Fill(_) | Self::Shape(_, _) | Self::Contents(_, _)
+        )
     }
     pub fn title(self) -> &'static str {
         match self {
@@ -38,6 +43,7 @@ impl Target {
             Self::Stroke(_) => "Stroke color",
             Self::Shape(_, ShapePaint::Fill) => "Shape fill color",
             Self::Shape(_, ShapePaint::Stroke) => "Shape stroke color",
+            Self::Contents(_, _) => "Contents paint color",
             Self::BackgroundDraft(_) => "Composition background",
         }
     }
@@ -62,6 +68,24 @@ impl Session {
         frame: Frame,
     ) -> Result<Self, String> {
         let color = match target {
+            Target::Contents(id, item) => {
+                let layer = project
+                    .composition()
+                    .layer(id)
+                    .ok_or("Layer no longer exists")?;
+                if layer.locked() {
+                    return Err("Unlock the layer before changing its color".into());
+                }
+                let Content::ShapeContents(c) = layer.content() else {
+                    return Err("Select a Contents shape layer".into());
+                };
+                let node = c.node(item).ok_or("Contents paint no longer exists")?;
+                let paint = node.paint().ok_or("Select a Fill or Stroke")?;
+                Color {
+                    rgb: node.paint_color_at(frame).unwrap(),
+                    opacity: node.value_at(ContentsParam::Shape(paint.opacity()), frame),
+                }
+            }
             Target::Shape(id, paint) => {
                 let layer = project
                     .composition()
@@ -202,6 +226,43 @@ impl Session {
     pub fn command(&self) -> Option<Command> {
         let mut commands = Vec::new();
         match self.target {
+            Target::Contents(id, item) => {
+                let Content::ShapeContents(c) = self.origin.composition().layer(id)?.content()
+                else {
+                    return None;
+                };
+                let paint = c.node(item)?.paint()?;
+                for (index, p) in paint.channels().into_iter().enumerate() {
+                    let shift = (2 - index) * 8;
+                    let value = (self.color.rgb >> shift) & 255;
+                    if value != (self.original.rgb >> shift) & 255 {
+                        commands.push(Command::Contents {
+                            id,
+                            edit: ContentsEdit::Track {
+                                item,
+                                parameter: ContentsParam::Shape(p),
+                                edit: TrackEdit::Value {
+                                    frame: self.frame,
+                                    value: value as f64,
+                                },
+                            },
+                        });
+                    }
+                }
+                if self.color.opacity != self.original.opacity {
+                    commands.push(Command::Contents {
+                        id,
+                        edit: ContentsEdit::Track {
+                            item,
+                            parameter: ContentsParam::Shape(paint.opacity()),
+                            edit: TrackEdit::Value {
+                                frame: self.frame,
+                                value: self.color.opacity,
+                            },
+                        },
+                    });
+                }
+            }
             Target::Shape(id, paint) => {
                 if let Some(layer) = self.origin.composition().layer(id) {
                     if self.color.rgb != self.original.rgb {
@@ -667,5 +728,80 @@ mod tests {
                 opacity: 50.0
             }]
         );
+    }
+
+    #[test]
+    fn contents_color_draft_targets_one_paint_and_only_changes_edited_channels() {
+        use libre_effects_core::Shape;
+        let mut e = Editor::default();
+        e.execute(Command::AddContent {
+            content: Content::Shape(Shape::default()),
+            width: 100.,
+            height: 100.,
+            name: "Paint".into(),
+        })
+        .unwrap();
+        e.execute(Command::Contents {
+            id: 1,
+            edit: ContentsEdit::Promote,
+        })
+        .unwrap();
+        for (item, paint) in [(4, ShapePaint::Fill), (3, ShapePaint::Stroke)] {
+            for p in [paint.channels()[0], paint.opacity()] {
+                e.execute(Command::Contents {
+                    id: 1,
+                    edit: ContentsEdit::Track {
+                        item,
+                        parameter: ContentsParam::Shape(p),
+                        edit: TrackEdit::ToggleAnimation { frame: 0 },
+                    },
+                })
+                .unwrap();
+            }
+            let before = e.project().clone();
+            let mut draft = Session::new(Target::Contents(1, item), e.project(), 1, 30).unwrap();
+            assert!(draft.command().is_none());
+            let original = draft.color;
+            draft
+                .input(1, if original.rgb >> 16 == 17 { "18" } else { "17" })
+                .unwrap();
+            draft.input(4, "50").unwrap();
+            assert_eq!(e.project(), &before);
+            e.execute(draft.command().unwrap()).unwrap();
+            let Content::ShapeContents(c) = e.selected_layer().unwrap().content() else {
+                panic!()
+            };
+            let n = c.node(item).unwrap();
+            let other = if item == 4 { 3 } else { 4 };
+            let Content::ShapeContents(old) = before.composition().layer(1).unwrap().content()
+            else {
+                panic!()
+            };
+            assert_eq!(c.node(other), old.node(other));
+            assert_eq!(
+                n.value_at(ContentsParam::Shape(paint.opacity()), 15),
+                (original.opacity + 50.) / 2.
+            );
+            for p in &paint.channels()[1..] {
+                assert_eq!(
+                    n.parameters[&ContentsParam::Shape(*p)],
+                    old.node(item).unwrap().parameters[&ContentsParam::Shape(*p)]
+                );
+            }
+            assert!(draft.validate(e.project(), 2, 30).is_err());
+            let saved = e.project().clone();
+            assert_eq!(
+                Project::from_json(&saved.to_json().unwrap()).unwrap(),
+                saved
+            );
+            e.undo();
+            assert_eq!(e.project(), &before);
+            e.redo();
+            assert_eq!(e.project(), &saved);
+        }
+        assert!(Session::new(Target::Contents(1, 2), e.project(), 0, 0).is_err());
+        assert!(Session::new(Target::Contents(1, 999), e.project(), 0, 0).is_err());
+        e.execute(Command::ToggleLocked(1)).unwrap();
+        assert!(Session::new(Target::Contents(1, 4), e.project(), 0, 0).is_err());
     }
 }

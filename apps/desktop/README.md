@@ -1819,8 +1819,12 @@ A Fill treats its paths as one compound shape, with Non-Zero or Even-Odd fill
 rules; overlapping paths do not multiply a single paint's opacity. Group opacity
 is applied to its combined paints. Group Skew, paint blend/composite options,
 gradient paints, path operators and dragging Contents rows remain future work.
-Colors currently use numeric RGB controls in Contents; the common color picker
-and stroke cap/join/dash structural controls still need connection to these items.
+Fill and Stroke have a common color picker with HEX/RGB/HSV, opacity, recent
+colors and viewer sampling. Cancel leaves the document unchanged; accepting a
+draft updates only changed channels at the current frame as one Undo step.
+Stroke items expose Line Cap/Line Join choices and add/remove-last dash controls.
+Existing dash/gap and offset animation survives these edits; Undo restores a
+removed dash's keys. Numeric controls and watches refresh when dash rows change.
 Curved parametric paths use cubic approximations, as in Bezier conversion.
 
 Properties → **Convert To Bezier Path** converts Rectangle, Rounded Rectangle,

@@ -26,7 +26,10 @@
 - 자동 검증: 코어 178개 + 데스크톱 235개(총 413개) 통과, 외부 미디어/장치 30개 제외. 전환/재정렬/부모 이동/복제/삭제의 원자성·잠금·버전·Undo/Redo·JSON·키 이동, 기존 5종 도형의 애니메이션 렌더 보존, 페인트 순서·복합 알파·Even-Odd·중첩 그룹 변형/불투명도·Preview/출력 일치를 검사했다. Cargo check/fmt/test와 git diff --check 통과(Moon/proto 미설치).
 - 실제 Windows에서 기존 Star의 Contents 전환 Undo/Redo, Fill 복제·색/불투명도 편집·페인트 순서 Undo/Redo, 그룹 Position X의 30/60프레임 0→200 키와 45프레임 100 보간, U 필터·Value Graph·저장 재열기를 확인했다. 1920/1442px 창 배치, 실제 작업 창 1개와 보존 원본 SHA256 불변을 확인했다. Release build도 통과했다(기존 경고 17개).
 - 실제 저장본 `target/qa/contents-native.lfe.json`과 순서 비교본의 0/15/30/45/60프레임 출력에서 독립 기하·페인트 합성 계산의 RGBA 45,567개 샘플이 일치했다(`target/qa/verify_contents_native.py`). 중첩 그룹/복합 경로는 자동 검사 범위이며 네이티브 조작을 별도 검증하지 않았다.
-- 남음: 공통 색 선택기와 Cap/Join/Dash 추가·삭제 UI의 Contents 연결, 그룹 Skew, 페인트 Blend/Composite, Gradient·경로 연산자, 트리 드래그/다중 선택과 새 Pen 경로의 선택 그룹 삽입. AE의 그룹 좌표/페인트 합성 픽셀 동등성을 검증한 것은 아니며 E04 전체 완료로 표시하지 않는다.
+- 후속 연결: Fill/Stroke 색 스와치에서 공통 HEX/RGB/HSV·불투명도·최근 색·뷰어 샘플링 대화상자를 연다. 취소는 문서를 변경하지 않고 승인은 현재 프레임에서 바뀐 채널만 한 Undo로 적용한다. Stroke의 Cap/Join 선택과 마지막 Dash/Gap 추가·삭제를 연결했다. 다른 트랙은 보존하고 Undo로 제거한 점선 키를 복원하며 행 변경 시 수치·스톱워치도 갱신한다.
+- 후속 검증: 코어 179개 + 데스크톱 237개(416개) 통과, 30개 제외. 색 초안/채널 격리·다른 페인트 보존·시간 보간·잠금·오래된 초안·Undo/Redo·JSON, 점선 한계/행 삭제/키 복원, 같은 Bezier 경로의 9가지 Cap/Join 조합에서 기존 Shape와 Contents의 전체 RGBA 및 Preview/출력 일치를 검사했다. Cargo check/fmt/test/release와 git diff --check 통과, 기존 경고 17개. 기본 다각형과 cubic 표현의 점선 경계 래스터 차이는 픽셀 동등성 범위에서 제외한다.
+- 실제 Windows에서 Fill 색 선택기 취소/HEX 변경/Undo/Redo, Projecting Cap·Bevel Join, Stroke Width 24·Dash 10·Gap 50, Gap 스톱워치 활성화·행 제거 후 Undo·저장 재열기와 작은 창 배치를 확인했다. `target/qa/contents-paint-native.lfe.json`의 0/30/45/60프레임 출력에서 내부/외부 15,951개 및 점선/간격 600개 RGBA 샘플이 독립 계산과 일치했다(`target/qa/verify_contents_paint_native.py`). 작업 창 1개와 보존 원본 SHA256 불변을 확인했다. 이번 네이티브 검사는 Fill HEX 중심이며 Stroke 색 입력·뷰어 샘플링은 별도 조작하지 않았다.
+- 남음: 그룹 Skew, 페인트 Blend/Composite, Gradient·경로 연산자, 트리 드래그/다중 선택과 새 Pen 경로의 선택 그룹 삽입. AE의 그룹 좌표/페인트 합성 픽셀 동등성을 검증한 것은 아니며 E04 전체 완료로 표시하지 않는다.
 
 ### 기본 도형 → Bezier 경로 전환 — 2026-10-03
 

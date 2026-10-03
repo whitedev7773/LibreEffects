@@ -41,6 +41,67 @@ fn scene(kind: ShapeKind) -> Editor {
     e
 }
 #[test]
+fn contents_stroke_cap_join_and_dash_edits_match_legacy_stroke_output() {
+    let renderer = crate::rendering::Renderer::new();
+    for cap in StrokeCap::ALL {
+        for join in StrokeJoin::ALL {
+            let mut e = scene(ShapeKind::Star);
+            let shape = Shape {
+                kind: ShapeKind::Star,
+                fill: false,
+                stroke_width: 12.,
+                stroke_style: ShapeStroke {
+                    cap,
+                    join,
+                    dashes: vec![10., 20.],
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            e.execute(Command::SetContent {
+                id: 1,
+                content: Content::Shape(shape),
+            })
+            .unwrap();
+            // Hold path representation fixed so this checks paint edits rather
+            // than polygon-versus-cubic dash rasterization differences.
+            e.execute(Command::ConvertShapeToPath { id: 1, frame: 0 })
+                .unwrap();
+            let legacy = e.project().clone();
+            edit(&mut e, ContentsEdit::Promote);
+            edit(
+                &mut e,
+                ContentsEdit::StrokeCap {
+                    item: 3,
+                    cap: StrokeCap::Butt,
+                },
+            );
+            edit(
+                &mut e,
+                ContentsEdit::StrokeJoin {
+                    item: 3,
+                    join: StrokeJoin::Round,
+                },
+            );
+            edit(&mut e, ContentsEdit::RemoveDash(3));
+            edit(&mut e, ContentsEdit::AddDash(3));
+            value(
+                &mut e,
+                3,
+                ContentsParam::Shape(ShapeParam::DashLength(1)),
+                20.,
+            );
+            edit(&mut e, ContentsEdit::StrokeCap { item: 3, cap });
+            edit(&mut e, ContentsEdit::StrokeJoin { item: 3, join });
+            let saved = Project::from_json(&e.project().to_json().unwrap()).unwrap();
+            let old = renderer.render(&legacy, 0, 400).unwrap();
+            let actual = renderer.render(&saved, 0, 400).unwrap();
+            assert_eq!(actual, renderer.render_output(&saved, 0, 400, 240).unwrap());
+            assert_eq!(actual, old, "{cap:?} {join:?}");
+        }
+    }
+}
+#[test]
 fn contents_compound_paths_paint_order_group_opacity_and_animation_render() {
     use ContentsParam::{Shape as S, Transform as T};
     use ShapeParam::*;

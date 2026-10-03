@@ -161,6 +161,18 @@ pub struct ContentsNode {
     pub parameters: BTreeMap<ContentsParam, AnimatedProperty>,
 }
 impl ContentsNode {
+    pub fn paint(&self) -> Option<ShapePaint> {
+        match self.kind {
+            ContentsKind::Fill { .. } => Some(ShapePaint::Fill),
+            ContentsKind::Stroke(_) => Some(ShapePaint::Stroke),
+            _ => None,
+        }
+    }
+    pub fn paint_color_at(&self, frame: Frame) -> Option<u32> {
+        Some(self.paint()?.channels().into_iter().fold(0, |rgb, p| {
+            (rgb << 8) | self.value_at(ContentsParam::Shape(p), frame).round() as u32
+        }))
+    }
     fn new(id: u64, kind: ContentsKind) -> Self {
         Self {
             id,
@@ -518,6 +530,16 @@ pub enum ContentsEdit {
         item: u64,
         even_odd: bool,
     },
+    StrokeCap {
+        item: u64,
+        cap: StrokeCap,
+    },
+    StrokeJoin {
+        item: u64,
+        join: StrokeJoin,
+    },
+    AddDash(u64),
+    RemoveDash(u64),
 }
 fn promote(shape: &Shape, width: f64, height: f64, color: u32) -> ShapeContents {
     let kind = shape
@@ -696,6 +718,35 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                 n.kind = ContentsKind::Fill {
                     even_odd: *even_odd,
                 };
+            }
+            ContentsEdit::StrokeCap { item, .. }
+            | ContentsEdit::StrokeJoin { item, .. }
+            | ContentsEdit::AddDash(item)
+            | ContentsEdit::RemoveDash(item) => {
+                let n = contents
+                    .node_mut(*item)
+                    .ok_or("Contents stroke no longer exists")?;
+                let ContentsKind::Stroke(style) = &mut n.kind else {
+                    return Err("Select a Stroke".into());
+                };
+                match edit {
+                    ContentsEdit::StrokeCap { cap, .. } => style.cap = *cap,
+                    ContentsEdit::StrokeJoin { join, .. } => style.join = *join,
+                    ContentsEdit::AddDash(_) if style.dashes.len() < ShapeStroke::MAX_DASHES => {
+                        let p =
+                            ContentsParam::Shape(ShapeParam::DashLength(style.dashes.len() as u8));
+                        style.dashes.push(10.);
+                        n.parameters.insert(p, AnimatedProperty::new(10.));
+                    }
+                    ContentsEdit::RemoveDash(_) if !style.dashes.is_empty() => {
+                        style.dashes.pop();
+                        n.parameters
+                            .remove(&ContentsParam::Shape(ShapeParam::DashLength(
+                                style.dashes.len() as u8,
+                            )));
+                    }
+                    _ => return Err("Stroke supports up to 16 dash/gap lengths".into()),
+                }
             }
             ContentsEdit::Promote => unreachable!(),
         }

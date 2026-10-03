@@ -24,6 +24,105 @@ fn contents(e: &Editor) -> &ShapeContents {
     c
 }
 #[test]
+fn contents_stroke_structure_preserves_other_tracks_and_restores_removed_dash_keys() {
+    let mut e = scene();
+    edit(&mut e, ContentsEdit::Promote);
+    edit(&mut e, ContentsEdit::AddDash(3));
+    edit(&mut e, ContentsEdit::AddDash(3));
+    for p in [
+        ShapeParam::DashLength(0),
+        ShapeParam::DashLength(1),
+        ShapeParam::StrokeWidth,
+    ] {
+        for change in [
+            TrackEdit::ToggleAnimation { frame: 0 },
+            TrackEdit::Value {
+                frame: 60,
+                value: 40.,
+            },
+        ] {
+            edit(
+                &mut e,
+                ContentsEdit::Track {
+                    item: 3,
+                    parameter: ContentsParam::Shape(p),
+                    edit: change,
+                },
+            );
+        }
+    }
+    let before = e.project().clone();
+    let tracks = contents(&e).node(3).unwrap().parameters.clone();
+    edit(
+        &mut e,
+        ContentsEdit::StrokeCap {
+            item: 3,
+            cap: StrokeCap::Square,
+        },
+    );
+    edit(
+        &mut e,
+        ContentsEdit::StrokeJoin {
+            item: 3,
+            join: StrokeJoin::Bevel,
+        },
+    );
+    assert_eq!(contents(&e).node(3).unwrap().parameters, tracks);
+    let styled = e.project().clone();
+    edit(&mut e, ContentsEdit::RemoveDash(3));
+    let n = contents(&e).node(3).unwrap();
+    assert!(
+        !n.parameters
+            .contains_key(&ContentsParam::Shape(ShapeParam::DashLength(1)))
+    );
+    assert_eq!(
+        n.parameters[&ContentsParam::Shape(ShapeParam::DashLength(0))],
+        tracks[&ContentsParam::Shape(ShapeParam::DashLength(0))]
+    );
+    e.undo();
+    assert_eq!(e.project(), &styled);
+    e.redo();
+    e.undo();
+    e.undo();
+    e.undo();
+    assert_eq!(e.project(), &before);
+    for _ in 2..ShapeStroke::MAX_DASHES {
+        edit(&mut e, ContentsEdit::AddDash(3));
+    }
+    let full = e.project().clone();
+    for bad in [
+        ContentsEdit::AddDash(3),
+        ContentsEdit::RemoveDash(4),
+        ContentsEdit::StrokeCap {
+            item: 2,
+            cap: StrokeCap::Round,
+        },
+        ContentsEdit::StrokeJoin {
+            item: 999,
+            join: StrokeJoin::Miter,
+        },
+    ] {
+        assert!(e.execute(Command::Contents { id: 1, edit: bad }).is_err());
+        assert_eq!(e.project(), &full);
+    }
+    for _ in 0..ShapeStroke::MAX_DASHES {
+        edit(&mut e, ContentsEdit::RemoveDash(3));
+    }
+    let empty = e.project().clone();
+    assert!(
+        e.execute(Command::Contents {
+            id: 1,
+            edit: ContentsEdit::RemoveDash(3)
+        })
+        .is_err()
+    );
+    assert_eq!(e.project(), &empty);
+    assert_eq!(
+        Project::from_json(&empty.to_json().unwrap()).unwrap(),
+        empty
+    );
+}
+#[test]
 fn contents_migration_preserves_tracks_identity_history_and_retiming() {
     let mut e = scene();
     e.execute(Command::SetLayerRange {
