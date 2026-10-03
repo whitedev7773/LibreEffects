@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-const PROJECT_VERSION: u32 = 41;
+const PROJECT_VERSION: u32 = 42;
 pub type Frame = u32;
 pub type LayerId = u64;
 pub type CompositionId = u64;
@@ -58,6 +58,7 @@ mod shape_stroke;
 pub use shape_animation::ShapeParam;
 mod shape_color;
 pub use shape_color::ShapePaint;
+mod polystar;
 mod shapes;
 pub use shape_stroke::{ShapeStroke, StrokeCap, StrokeJoin};
 mod text_style;
@@ -1510,6 +1511,11 @@ impl Editor {
                 .any(|l| matches!(&l.content, Content::Shape(s) if s.has_paint_color_tracks()))
         }) {
             next.project.version = next.project.version.max(41);
+        }
+        if next.project.compositions().into_iter().any(|(_, c)| {
+            c.layers.iter().any(|l| matches!(&l.content, Content::Shape(s) if s.parameters.contains_key(&ShapeParam::Points)))
+        }) {
+            next.project.version = next.project.version.max(42);
         }
         next.project.validate()?;
         if next != self.current {

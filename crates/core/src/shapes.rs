@@ -94,6 +94,7 @@ impl Shape {
         height: f64,
         color: u32,
         path: Option<&crate::VectorPath>,
+        points: f64,
     ) -> String {
         let fill = if self.fill {
             format!("#{color:06x}")
@@ -128,25 +129,12 @@ impl Shape {
                 height / 2.0
             ),
             ShapeKind::Polygon | ShapeKind::Star => {
-                let star = self.kind == ShapeKind::Star;
-                let count = self.points * if star { 2 } else { 1 };
-                let points = (0..count)
-                    .map(|i| {
-                        let angle = std::f64::consts::TAU * i as f64 / count as f64
-                            - std::f64::consts::FRAC_PI_2;
-                        let radius = if star && i % 2 == 1 {
-                            self.inner_radius / 100.0
-                        } else {
-                            1.0
-                        };
-                        format!(
-                            "{},{}",
-                            width / 2.0 + angle.cos() * width / 2.0 * radius,
-                            height / 2.0 + angle.sin() * height / 2.0 * radius
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" ");
+                let points =
+                    crate::polystar::vertices(self.kind, points, self.inner_radius, width, height)
+                        .into_iter()
+                        .map(|[x, y]| format!("{x},{y}"))
+                        .collect::<Vec<_>>()
+                        .join(" ");
                 format!("<polygon points='{points}' {style}/>")
             }
         }

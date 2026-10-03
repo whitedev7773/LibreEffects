@@ -84,8 +84,23 @@ Each individual Dash/Gap row also has a stopwatch and uses project version 39
 when edited. Removing the final row removes its track and keys in the same Undo;
 adding that row again starts at 10 px with no old keys. Existing rows keep their
 tracks. Copying a dash key to another shape requires the corresponding row to
-exist. Cap/join, points and grouped Contents are not animated by these
+exist. Cap/join and grouped Contents are not animated by these
 controls yet.
+
+Polygon and Star **Points** accepts 3–128, including decimals, and has a
+stopwatch connected to Contents · Shape, Timeline and Graph. Fractional stars
+grow a partial outer tip between adjacent integer outlines. Polygons use the
+floor of the evaluated count for their sides. Linear, Hold and Bezier key
+interpolation, copying/retiming, Undo/Redo and animation disabling use the common
+track model. A Points track (including a static decimal edit) requires project
+version 42; the old integer `points` field remains the default when no track
+exists. Points keys cannot be pasted onto rectangles, ellipses or Bezier paths.
+Existing integer outlines and paint/stroke settings are preserved. This is a
+parametric path control; vertex animation and nested Contents are separate.
+Fractional star/polygon behavior was cross-checked against
+[Lottie's polystar implementation](https://github.com/airbnb/lottie-android/blob/master/lottie/src/main/java/com/airbnb/lottie/animation/content/PolystarContent.java);
+AE pixel equivalence, inner/outer roundness and separate path rotation/radius
+controls remain unverified or unimplemented.
 
 Shape Properties also provides independent **Fill opacity** and **Stroke opacity**
 from 0 to 100 percent, with the same stopwatch and Timeline/Graph controls.

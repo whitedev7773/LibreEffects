@@ -12,6 +12,7 @@ fn parameter(index: usize) -> Option<ShapeParam> {
     match index {
         1 => Some(ShapeParam::StrokeWidth),
         2 => Some(ShapeParam::Roundness),
+        3 => Some(ShapeParam::Points),
         4 => Some(ShapeParam::InnerRadius),
         5 => Some(ShapeParam::FillOpacity),
         6 => Some(ShapeParam::StrokeOpacity),
@@ -27,49 +28,67 @@ pub(crate) struct ShapeControls {
 impl ShapeControls {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
-        let fields = (0..7).map(|index| {
-            let edit = state.clone();
-            cx.new(|cx| TextField::new(cx, move |text, window, cx| {
-                edit.update(cx, |s, cx| {
-                    let Some(layer) = s.editor.selected_layer() else {return;};
-                    if layer.locked() {return;}
-                    let Content::Shape(mut shape) = layer.content().clone() else {return;};
-                    let id = layer.id();
-                    if index == 0 {
-                        let command = ui::parse_hex_color(text).map_err(str::to_owned).and_then(|color| layer.shape_color_command(ShapePaint::Stroke, color, s.frame));
-                        match command {
-                            Ok(command) => s.dispatch(&Action::Edit(command), window, cx),
-                            Err(error) => {s.status = error; cx.notify();}
-                        }
-                        return;
-                    }
-                    if let Some(parameter) = parameter(index) {
-                        match text.trim().parse::<f64>() {
-                            Ok(value) => s.dispatch(&Action::Edit(Command::EditTrack {
-                                id, property: PropertyPath::Shape(parameter), edit: TrackEdit::Value { frame: s.frame, value },
-                            }), window, cx),
-                            Err(_) => { s.status = "Enter a finite shape value".into(); cx.notify(); }
-                        }
-                        return;
-                    }
-                    let valid = match index {
-                        0 => ui::parse_hex_color(text).map(|v| shape.stroke_color = v).is_ok(),
-                        3 => text.trim().parse::<u32>().map(|v| shape.points = v).is_ok(),
-                        _ => text.trim().parse::<f64>().map(|v| match index {
-                            1 => shape.stroke_width = v,
-                            2 => shape.roundness = v,
-                            _ => shape.inner_radius = v,
-                        }).is_ok(),
-                    };
-                    if valid && shape.valid() {
-                        s.dispatch(&Action::Edit(Command::SetContent {id, content: Content::Shape(shape)}), window, cx);
-                    } else {
-                        s.status = "Invalid shape value: stroke 0–1024, roundness 0–8192, points 3–128, inner radius 0–100%.".into();
-                        cx.notify();
-                    }
-                });
-            }))
-        }).collect();
+        let fields = (0..7)
+            .map(|index| {
+                let edit = state.clone();
+                cx.new(|cx| {
+                    TextField::new(cx, move |text, window, cx| {
+                        edit.update(cx, |s, cx| {
+                            let Some(layer) = s.editor.selected_layer() else {
+                                return;
+                            };
+                            if layer.locked() {
+                                return;
+                            }
+                            if !matches!(layer.content(), Content::Shape(_)) {
+                                return;
+                            }
+                            let id = layer.id();
+                            if index == 0 {
+                                let command = ui::parse_hex_color(text)
+                                    .map_err(str::to_owned)
+                                    .and_then(|color| {
+                                        layer.shape_color_command(
+                                            ShapePaint::Stroke,
+                                            color,
+                                            s.frame,
+                                        )
+                                    });
+                                match command {
+                                    Ok(command) => s.dispatch(&Action::Edit(command), window, cx),
+                                    Err(error) => {
+                                        s.status = error;
+                                        cx.notify();
+                                    }
+                                }
+                                return;
+                            }
+                            if let Some(parameter) = parameter(index) {
+                                match text.trim().parse::<f64>() {
+                                    Ok(value) => s.dispatch(
+                                        &Action::Edit(Command::EditTrack {
+                                            id,
+                                            property: PropertyPath::Shape(parameter),
+                                            edit: TrackEdit::Value {
+                                                frame: s.frame,
+                                                value,
+                                            },
+                                        }),
+                                        window,
+                                        cx,
+                                    ),
+                                    Err(_) => {
+                                        s.status = "Enter a finite shape value".into();
+                                        cx.notify();
+                                    }
+                                }
+                                return;
+                            }
+                        });
+                    })
+                })
+            })
+            .collect();
         Self {
             stroke: cx.new(|cx| super::shape_stroke::StrokeControls::new(state.clone(), cx)),
             state,
@@ -168,7 +187,9 @@ impl Render for ShapeControls {
             shape
                 .value_at(ShapeParam::Roundness, frame, fill_color)
                 .to_string(),
-            shape.points.to_string(),
+            shape
+                .value_at(ShapeParam::Points, frame, fill_color)
+                .to_string(),
             shape
                 .value_at(ShapeParam::InnerRadius, frame, fill_color)
                 .to_string(),
@@ -258,6 +279,90 @@ impl Render for ShapeControls {
 mod tests {
     use super::*;
     use libre_effects_core::{Editor, Project, Property, Shape};
+
+    #[test]
+    fn points_animation_matches_closed_form_area_and_preview_output() {
+        use std::f64::consts::{PI, TAU};
+        let renderer = crate::rendering::Renderer::new();
+        for kind in [ShapeKind::Polygon, ShapeKind::Star] {
+            let mut e = Editor::default();
+            e.execute(Command::ConfigureComposition {
+                name: "Polystar".into(),
+                width: 200,
+                height: 200,
+                fps: 30,
+                duration: 90,
+            })
+            .unwrap();
+            e.execute(Command::AddContent {
+                content: Content::Shape(Shape {
+                    kind,
+                    points: 3,
+                    ..Default::default()
+                }),
+                width: 160.,
+                height: 120.,
+                name: "Shape".into(),
+            })
+            .unwrap();
+            e.execute(Command::SetColor {
+                id: 1,
+                color: 0x204080,
+            })
+            .unwrap();
+            for edit in [
+                TrackEdit::ToggleAnimation { frame: 0 },
+                TrackEdit::Value {
+                    frame: 60,
+                    value: 4.,
+                },
+            ] {
+                e.execute(Command::EditShape {
+                    id: 1,
+                    parameter: ShapeParam::Points,
+                    edit,
+                })
+                .unwrap();
+            }
+            let saved = Project::from_json(&e.project().to_json().unwrap()).unwrap();
+            for frame in [0, 15, 30, 45, 60] {
+                let im = renderer.render(&saved, frame, 200).unwrap();
+                assert_eq!(im, renderer.render_output(&saved, frame, 200, 200).unwrap());
+                let points = 3. + frame as f64 / 60.;
+                let expected = if kind == ShapeKind::Polygon {
+                    let n = points.floor();
+                    n / 2. * 80. * 60. * (TAU / n).sin()
+                } else if points.fract() == 0. {
+                    points * 80. * 60. * 0.5 * (PI / points).sin()
+                } else {
+                    let f = points.fract();
+                    let inner = 0.5;
+                    let tip = inner + f * (1. - inner);
+                    80. * 60. / 2.
+                        * ((2. * points.ceil() - 2.) * inner * (PI / points).sin()
+                            + 2. * inner * tip * (f * PI / points).sin())
+                };
+                let area = im.pixels().map(|p| p[3] as f64 / 255.).sum::<f64>();
+                assert!(
+                    (area - expected).abs() < 12.,
+                    "{kind:?} {frame}: area {area}, expected {expected}"
+                );
+                assert_eq!(im.get_pixel(100, 100).0, [32, 64, 128, 255]);
+                assert_eq!(im.get_pixel(10, 10).0, [0, 0, 0, 0]);
+            }
+            e.execute(Command::EditShape {
+                id: 1,
+                parameter: ShapeParam::Points,
+                edit: TrackEdit::ToggleAnimation { frame: 30 },
+            })
+            .unwrap();
+            let frozen = renderer.render(e.project(), 30, 200).unwrap();
+            assert_eq!(frozen, renderer.render(&saved, 30, 200).unwrap());
+            assert_eq!(frozen, renderer.render(e.project(), 60, 200).unwrap());
+            e.undo();
+            assert_eq!(e.project(), &saved);
+        }
+    }
 
     #[test]
     fn independent_paint_alpha_composes_before_layer_opacity_and_matches_preview() {

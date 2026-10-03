@@ -6,6 +6,7 @@ pub enum ShapeParam {
     StrokeWidth,
     Roundness,
     InnerRadius,
+    Points,
     MiterLimit,
     DashOffset,
     DashLength(u8),
@@ -33,6 +34,7 @@ impl TryFrom<String> for ShapeParam {
             "StrokeWidth" => Self::StrokeWidth,
             "Roundness" => Self::Roundness,
             "InnerRadius" => Self::InnerRadius,
+            "Points" => Self::Points,
             "MiterLimit" => Self::MiterLimit,
             "DashOffset" => Self::DashOffset,
             "FillOpacity" => Self::FillOpacity,
@@ -62,6 +64,7 @@ impl ShapeParam {
             Self::StrokeWidth => "Stroke Width",
             Self::Roundness => "Roundness",
             Self::InnerRadius => "Inner Radius %",
+            Self::Points => "Points",
             Self::MiterLimit => "Miter Limit",
             Self::DashOffset => "Dash Offset",
             Self::FillOpacity => "Fill Opacity",
@@ -87,6 +90,7 @@ impl ShapeParam {
             Self::StrokeWidth => (0., 1024.),
             Self::Roundness => (0., 8192.),
             Self::InnerRadius => (0., 100.),
+            Self::Points => (3., 128.),
             Self::FillOpacity | Self::StrokeOpacity => (0., 100.),
             Self::MiterLimit => (1., 1024.),
             Self::DashOffset => (-32768., 32768.),
@@ -115,6 +119,7 @@ impl ShapeParam {
             Self::StrokeBlue => (shape.stroke_color & 255) as f64,
             Self::Roundness => shape.roundness,
             Self::InnerRadius => shape.inner_radius,
+            Self::Points => shape.points as f64,
             Self::MiterLimit => shape.stroke_style.miter_limit,
             Self::DashOffset => shape.stroke_style.dash_offset,
             Self::DashLength(index) => shape
@@ -135,6 +140,9 @@ impl Shape {
     }
     pub fn has_parameter(&self, parameter: ShapeParam) -> bool {
         match parameter {
+            ShapeParam::Points => {
+                self.path.is_none() && matches!(self.kind, ShapeKind::Polygon | ShapeKind::Star)
+            }
             ShapeParam::DashLength(index) => (index as usize) < self.stroke_style.dashes.len(),
             _ => true,
         }
@@ -188,6 +196,9 @@ pub(super) fn validate(layer: &Layer, duration: Frame, version: u32) -> Result<(
     if version < 41 && shape.has_paint_color_tracks() {
         return Err("Shape color animation requires project version 41".into());
     }
+    if version < 42 && shape.parameters.contains_key(&ShapeParam::Points) {
+        return Err("Animated/fractional points require project version 42".into());
+    }
     for (&parameter, track) in &shape.parameters {
         if !shape.has_parameter(parameter)
             || (version < 39 && matches!(parameter, ShapeParam::DashLength(_)))
@@ -219,7 +230,7 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
             return Err("Select a shape layer".into());
         };
         if !shape.has_parameter(*parameter) {
-            return Err("Dash or gap no longer exists".into());
+            return Err("Shape parameter is not available on this path".into());
         }
         let track = shape.shape_track_mut(*parameter, fill_color);
         time_remap::edit_track(track, duration, edit, |v| parameter.accepts(v))?;

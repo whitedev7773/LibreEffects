@@ -121,6 +121,7 @@ impl Shape {
             height,
             self.paint_color_at(ShapePaint::Fill, color, frame),
             self.path_at(frame).as_ref(),
+            self.value_at(ShapeParam::Points, frame, color),
         )
     }
 }
