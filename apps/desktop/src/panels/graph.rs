@@ -5,7 +5,7 @@ mod tangent;
 mod viewport;
 use crate::{
     components::TextField,
-    editor::{Action, EditorState},
+    editor::{Action, EditorState, Tool},
     ui,
 };
 use gpui::{
@@ -130,6 +130,11 @@ impl HandleSpace {
 }
 #[derive(Clone)]
 enum Drag {
+    Pan {
+        id: LayerId,
+        property: PropertyPath,
+        pan: viewport::Pan,
+    },
     Tangent {
         id: LayerId,
         property: PropertyPath,
@@ -279,7 +284,8 @@ impl Graph {
         cx.observe(&state, |this, _, cx| {
             if this.drag.as_ref().is_some_and(|drag| {
                 let (id, p) = match drag {
-                    Drag::Key { id, property, .. }
+                    Drag::Pan { id, property, .. }
+                    | Drag::Key { id, property, .. }
                     | Drag::Handle { id, property, .. }
                     | Drag::Marquee { id, property, .. }
                     | Drag::Tangent { id, property, .. } => (*id, *property),
@@ -511,6 +517,9 @@ impl Graph {
         });
     }
     fn down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.drag.is_some() {
+            return;
+        }
         window.focus(&self.focus);
         let Some(bounds) = self.plot.get() else {
             return;
@@ -527,6 +536,16 @@ impl Graph {
         };
         let fps = state.editor.project().composition().fps().as_f64();
         let view = viewport::current(state, track);
+        if event.button == MouseButton::Middle || state.tool == Tool::Hand {
+            self.drag = Some(Drag::Pan {
+                id,
+                property,
+                pan: viewport::Pan::new(state, view, bounds, event),
+            });
+            cx.stop_propagation();
+            cx.notify();
+            return;
+        }
         let speed_mode = state.graph_view.speed;
         let tangents = tangent::for_selection(
             track,
@@ -746,10 +765,21 @@ impl Graph {
         cx.notify();
     }
     fn moving(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
-        if event.pressed_button != Some(MouseButton::Left) {
+        let button = match &self.drag {
+            Some(Drag::Pan { pan, .. }) => pan.button,
+            _ => MouseButton::Left,
+        };
+        if event.pressed_button != Some(button) {
             return;
         }
         match &mut self.drag {
+            Some(Drag::Pan { pan, .. }) => {
+                self.state.update(cx, |s, cx| {
+                    pan.apply(s, event.position);
+                    cx.notify();
+                });
+                cx.stop_propagation();
+            }
             Some(Drag::Tangent {
                 tangent,
                 handle,
@@ -861,7 +891,14 @@ impl Graph {
         }
         cx.notify();
     }
-    fn up(&mut self, _: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn up(&mut self, event: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let button = match &self.drag {
+            Some(Drag::Pan { pan, .. }) => pan.button,
+            _ => MouseButton::Left,
+        };
+        if event.button != button {
+            return;
+        }
         if let Some(drag) = self.drag.take() {
             if let Drag::Key {
                 id,
@@ -892,6 +929,12 @@ impl Graph {
                 return;
             }
             self.state.update(cx, |state, cx| match drag {
+                Drag::Pan { pan, .. } => {
+                    // The last move can fall outside this panel's hit area.
+                    // Commit the release position even when no move reached us.
+                    pan.apply(state, event.position);
+                    cx.notify();
+                }
                 Drag::Tangent {
                     id,
                     property,
@@ -1087,6 +1130,8 @@ impl Render for Graph {
             .on_mouse_move(cx.listener(Self::moving))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::up))
+            .on_mouse_up(MouseButton::Middle, cx.listener(Self::up))
+            .on_mouse_up_out(MouseButton::Middle, cx.listener(Self::up))
             .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
                 let key = event.keystroke.key.as_str();
                 if key == "f"
@@ -1120,7 +1165,12 @@ impl Render for Graph {
                     return;
                 }
                 if key == "escape" {
-                    this.drag = None;
+                    if let Some(Drag::Pan { pan, .. }) = this.drag.take() {
+                        this.state.update(cx, |s, cx| {
+                            pan.restore(s);
+                            cx.notify();
+                        });
+                    }
                     this.details = false;
                     cx.stop_propagation();
                     cx.notify();
@@ -1365,7 +1415,12 @@ impl Render for Graph {
                 .overflow_hidden()
                 .bg(rgb(0x262626))
                 .cursor_crosshair()
+                .when(
+                    state.tool == Tool::Hand || matches!(self.drag, Some(Drag::Pan { .. })),
+                    |s| s.cursor_grab(),
+                )
                 .on_mouse_down(MouseButton::Left, cx.listener(Self::down))
+                .on_mouse_down(MouseButton::Middle, cx.listener(Self::down))
                 .on_scroll_wheel(cx.listener(Self::scroll))
                 .child(
                     canvas(

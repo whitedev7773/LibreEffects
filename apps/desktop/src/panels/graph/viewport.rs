@@ -2,6 +2,47 @@
 use super::*;
 use std::collections::BTreeSet;
 
+#[derive(Clone, Copy)]
+pub(super) struct Pan {
+    view: View,
+    time: (u32, f32),
+    height: Option<[f64; 2]>,
+    bounds: Bounds<Pixels>,
+    start: Point<Pixels>,
+    pub button: MouseButton,
+}
+impl Pan {
+    pub fn new(
+        state: &EditorState,
+        view: View,
+        bounds: Bounds<Pixels>,
+        event: &MouseDownEvent,
+    ) -> Self {
+        Self {
+            view,
+            time: (state.timeline_start, state.timeline_zoom),
+            height: state.graph_view.height,
+            bounds,
+            start: event.position,
+            button: event.button,
+        }
+    }
+    pub fn apply(self, state: &mut EditorState, position: Point<Pixels>) {
+        let delta = position - self.start;
+        let dx = f32::from(delta.x) as f64 / f32::from(self.bounds.size.width).max(1.0) as f64;
+        let dy = f32::from(delta.y) as f64 / f32::from(self.bounds.size.height).max(1.0) as f64;
+        self.restore(state);
+        horizontal(state, dx, 0.0, false);
+        if self.height.is_some() {
+            state.graph_view.height = Some(vertical(self.view, dy, 0.0, false));
+        }
+    }
+    pub fn restore(self, state: &mut EditorState) {
+        (state.timeline_start, state.timeline_zoom) = self.time;
+        state.graph_view.height = self.height;
+    }
+}
+
 pub(super) fn current(state: &EditorState, track: &AnimatedProperty) -> View {
     let fps = state.editor.project().composition().fps().as_f64();
     let mut result = view(
@@ -220,5 +261,96 @@ mod tests {
         assert!(b - a < 400.0);
         assert_eq!(vertical(v, 0.25, 0.0, false), [0.0, 400.0]);
         assert_eq!(vertical(v, f64::NAN, 0.5, true), [-100.0, 300.0]);
+    }
+    #[test]
+    fn pointer_pan_is_absolute_cancelable_and_preserves_selection_and_document() {
+        for button in [MouseButton::Left, MouseButton::Middle] {
+            for automatic in [false, true] {
+                let mut s = scene();
+                s.timeline_zoom = 2.5;
+                s.timeline_start = 45;
+                s.frame = 30;
+                s.graph_view.height = (!automatic).then_some([-100.0, 300.0]);
+                let key = KeyRef {
+                    id: 1,
+                    property: s.graph_property,
+                    frame: 30,
+                };
+                s.selected_keys.insert(key);
+                s.graph_key = Some((1, 30));
+                s.editor.execute(Command::ToggleLocked(1)).unwrap();
+                let before = s.editor.project().clone();
+                let bounds = Bounds::new(point(px(100.0), px(100.0)), size(px(1000.0), px(200.0)));
+                let event = MouseDownEvent {
+                    button,
+                    position: point(px(500.0), px(150.0)),
+                    ..Default::default()
+                };
+                let v = current(
+                    &s,
+                    s.editor
+                        .selected_layer()
+                        .unwrap()
+                        .track(s.graph_property)
+                        .unwrap(),
+                );
+                let pan = Pan::new(&s, v, bounds, &event);
+                let destination = event.position + point(px(100.0), px(50.0));
+                pan.apply(&mut s, destination);
+                pan.apply(&mut s, destination); // Repeated mouse events must not accumulate drift.
+                assert_eq!((s.timeline_start, s.timeline_zoom, s.frame), (39, 2.5, 30));
+                assert_eq!(s.graph_view.height, (!automatic).then_some([0.0, 400.0]));
+                assert_eq!(s.selected_keys, [key].into());
+                assert_eq!(s.graph_key, Some((1, 30)));
+                assert_eq!(s.editor.project(), &before);
+                pan.restore(&mut s);
+                assert_eq!(s.timeline_start, 45);
+                assert_eq!(s.graph_view.height, (!automatic).then_some([-100.0, 300.0]));
+                s.editor.undo();
+                assert!(!s.editor.selected_layer().unwrap().locked());
+                s.editor.redo();
+                assert_eq!(s.editor.project(), &before);
+            }
+        }
+    }
+    #[test]
+    fn pointer_pan_clamps_time_and_saved_view_never_changes_output() {
+        let mut s = scene();
+        s.timeline_zoom = 3.0;
+        s.timeline_start = 20;
+        s.graph_view.height = Some([400.0, 2200.0]);
+        let track = s
+            .editor
+            .selected_layer()
+            .unwrap()
+            .track(s.graph_property)
+            .unwrap();
+        let bounds = Bounds::new(point(px(0.0), px(0.0)), size(px(500.0), px(200.0)));
+        let pan = Pan::new(&s, current(&s, track), bounds, &MouseDownEvent::default());
+        pan.apply(&mut s, point(px(-5000.0), px(40.0)));
+        assert_eq!(s.timeline_start, 100);
+        pan.apply(&mut s, point(px(5000.0), px(40.0)));
+        assert_eq!(s.timeline_start, 0);
+        let mut views = crate::view_state::ProjectViews::default();
+        views.compositions.insert(
+            1,
+            crate::view_state::CompositionView {
+                graph_view: s.graph_view.clone(),
+                timeline_start: s.timeline_start,
+                timeline_zoom: s.timeline_zoom,
+                ..Default::default()
+            },
+        );
+        let json = views.write(s.editor.project()).unwrap();
+        let loaded = libre_effects_core::Project::from_json(&json).unwrap();
+        assert_eq!(&loaded, s.editor.project());
+        assert_eq!(crate::view_state::ProjectViews::read(&json, &loaded), views);
+        let renderer = crate::rendering::Renderer::new();
+        for frame in [10, 20, 30, 60] {
+            assert_eq!(
+                renderer.render(s.editor.project(), frame, 384).unwrap(),
+                renderer.render_output(&loaded, frame, 384, 216).unwrap()
+            );
+        }
     }
 }

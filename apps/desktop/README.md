@@ -464,6 +464,13 @@ not change the rendered document or add Undo entries. Switching graph type
 restores automatic height for the new units. Manual height remains fixed when
 switching channels; use Fit All or Auto Zoom Height to frame the new values.
 
+Use **H** (Hand tool) and drag inside the graph to move the view, or drag with
+the middle mouse button while using any tool. Manual height allows both axes;
+Auto Zoom Height keeps vertical framing automatic and moves time only. Panning
+works over keys and on locked layers without changing selection or keyframes.
+Release the initiating button to finish, including outside the plot; Escape
+restores the view from before the drag. Return to key editing with **V**.
+
 - Click a key to select it; Shift/Ctrl-click toggles membership. Drag empty graph
   space to box-select keys; Shift/Ctrl adds to the selection. Ctrl+A selects all
   keys in the displayed channel, including keys outside the visible time range.
