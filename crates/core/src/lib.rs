@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-const PROJECT_VERSION: u32 = 38;
+const PROJECT_VERSION: u32 = 39;
 pub type Frame = u32;
 pub type LayerId = u64;
 pub type CompositionId = u64;
@@ -1491,6 +1491,9 @@ impl Editor {
                 .any(|l| matches!(&l.content, Content::Shape(s) if !s.parameters.is_empty()))
         }) {
             next.project.version = next.project.version.max(38);
+        }
+        if next.project.compositions().into_iter().any(|(_, c)| c.layers.iter().any(|l| matches!(&l.content, Content::Shape(s) if s.parameters.keys().any(|p| matches!(p, ShapeParam::DashLength(_)))))) {
+            next.project.version = next.project.version.max(39);
         }
         next.project.validate()?;
         if next != self.current {

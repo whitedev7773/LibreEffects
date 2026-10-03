@@ -21,6 +21,14 @@ enum Edit {
     Add,
     Remove,
 }
+fn number_parameter(index: usize) -> Option<ShapeParam> {
+    match index {
+        0 => Some(ShapeParam::MiterLimit),
+        1 => Some(ShapeParam::DashOffset),
+        2..=17 => Some(ShapeParam::DashLength((index - 2) as u8)),
+        _ => None,
+    }
+}
 fn command_at(project: &Project, id: LayerId, edit: Edit, frame: Frame) -> Result<Command, String> {
     let l = project
         .composition()
@@ -32,14 +40,12 @@ fn command_at(project: &Project, id: LayerId, edit: Edit, frame: Frame) -> Resul
     let Content::Shape(mut shape) = l.content().clone() else {
         return Err("Select a shape layer".into());
     };
-    if let Edit::Number(index @ 0..=1, value) = edit {
-        let parameter = if index == 0 {
-            ShapeParam::MiterLimit
-        } else {
-            ShapeParam::DashOffset
-        };
+    if let Edit::Number(index, value) = edit {
+        let parameter = number_parameter(index)
+            .filter(|p| shape.has_parameter(*p))
+            .ok_or("Dash no longer exists")?;
         if !value.is_finite() || !(parameter.bounds().0..=parameter.bounds().1).contains(&value) {
-            return Err("Miter: 1–1024; offset: ±32768 px.".into());
+            return Err("Miter: 1–1024; dash/gap: 0–8192 px; offset: ±32768 px.".into());
         }
         return Ok(Command::EditTrack {
             id,
@@ -51,17 +57,12 @@ fn command_at(project: &Project, id: LayerId, edit: Edit, frame: Frame) -> Resul
     match edit {
         Edit::Cap(v) => style.cap = v,
         Edit::Join(v) => style.join = v,
-        Edit::Number(0, v) => style.miter_limit = v,
-        Edit::Number(1, v) => style.dash_offset = v,
-        Edit::Number(index, v) => {
-            *style
-                .dashes
-                .get_mut(index - 2)
-                .ok_or("Dash no longer exists")? = v
-        }
         Edit::Add if style.dashes.len() < ShapeStroke::MAX_DASHES => style.dashes.push(10.0),
         Edit::Remove if !style.dashes.is_empty() => {
             style.dashes.pop();
+            shape
+                .parameters
+                .remove(&ShapeParam::DashLength(style.dashes.len() as u8));
         }
         _ => return Err("Stroke supports up to 16 dash/gap lengths".into()),
     }
@@ -322,7 +323,7 @@ impl Render for StrokeControls {
                         if index % 2 == 0 { "Dash" } else { "Gap" },
                         (index - 2) / 2 + 1
                     ),
-                    style.dashes[index - 2],
+                    shape.value_at(number_parameter(index).unwrap(), frame),
                 ),
             };
             self.fields[index].update(cx, |f, _| {
@@ -338,19 +339,13 @@ impl Render for StrokeControls {
                             .w(px(105.0))
                             .flex()
                             .items_center()
-                            .when(index < 2, |d| {
-                                d.child(super::shape_values::watch(
-                                    &self.state,
-                                    &shape,
-                                    id,
-                                    if index == 0 {
-                                        ShapeParam::MiterLimit
-                                    } else {
-                                        ShapeParam::DashOffset
-                                    },
-                                    frame,
-                                ))
-                            })
+                            .child(super::shape_values::watch(
+                                &self.state,
+                                &shape,
+                                id,
+                                number_parameter(index).unwrap(),
+                                frame,
+                            ))
                             .child(div().min_w_0().text_size(px(11.0)).child(label)),
                     )
                     .child(
@@ -695,6 +690,124 @@ mod tests {
                     assert_eq!(im.get_pixel(x, y)[3], expected, "frame {frame}, ({x},{y})");
                 }
             }
+        }
+    }
+
+    #[test]
+    fn removing_animated_gap_is_one_undo_and_readding_does_not_revive_keys() {
+        let mut e = line();
+        change(&mut e, Edit::Add);
+        change(&mut e, Edit::Add);
+        let dash = ShapeParam::DashLength(0);
+        let gap = ShapeParam::DashLength(1);
+        for p in [dash, gap] {
+            e.execute(Command::EditShape {
+                id: 1,
+                parameter: p,
+                edit: TrackEdit::ToggleAnimation { frame: 0 },
+            })
+            .unwrap();
+            e.execute(Command::EditShape {
+                id: 1,
+                parameter: p,
+                edit: TrackEdit::Value {
+                    frame: 20,
+                    value: 50.,
+                },
+            })
+            .unwrap();
+        }
+        let before = e.project().clone();
+        change(&mut e, Edit::Remove);
+        assert!(
+            e.selected_layer()
+                .unwrap()
+                .track(PropertyPath::Shape(gap))
+                .is_none()
+        );
+        assert!(
+            e.selected_layer()
+                .unwrap()
+                .track(PropertyPath::Shape(dash))
+                .is_some()
+        );
+        e.undo();
+        assert_eq!(e.project(), &before);
+        e.redo();
+        change(&mut e, Edit::Add);
+        assert!(
+            e.selected_layer()
+                .unwrap()
+                .track(PropertyPath::Shape(gap))
+                .is_none()
+        );
+        assert_eq!(
+            e.selected_layer()
+                .unwrap()
+                .track_value(PropertyPath::Shape(gap), 20),
+            Some(10.)
+        );
+        let saved = Project::from_json(&e.project().to_json().unwrap()).unwrap();
+        assert_eq!(saved, *e.project());
+        assert!(command_at(&saved, 1, Edit::Number(usize::MAX, 5.), 0).is_err());
+        change(&mut e, Edit::Cap(StrokeCap::Round));
+        assert_eq!(
+            e.selected_layer()
+                .unwrap()
+                .track(PropertyPath::Shape(dash))
+                .unwrap()
+                .keys()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn animated_dash_and_gap_lengths_follow_independent_pattern_calculation() {
+        let mut e = line();
+        change(&mut e, Edit::Add);
+        change(&mut e, Edit::Add);
+        for (p, end) in [
+            (ShapeParam::DashLength(0), 40.),
+            (ShapeParam::DashLength(1), 30.),
+        ] {
+            e.execute(Command::EditShape {
+                id: 1,
+                parameter: p,
+                edit: TrackEdit::ToggleAnimation { frame: 0 },
+            })
+            .unwrap();
+            e.execute(Command::EditShape {
+                id: 1,
+                parameter: p,
+                edit: TrackEdit::Value {
+                    frame: 40,
+                    value: end,
+                },
+            })
+            .unwrap();
+        }
+        let saved = Project::from_json(&e.project().to_json().unwrap()).unwrap();
+        let r = crate::rendering::Renderer::new();
+        for frame in [0, 10, 20, 30, 40] {
+            let im = r.render(&saved, frame, 200).unwrap();
+            assert_eq!(im, r.render_output(&saved, frame, 200, 200).unwrap());
+            let dash = 10. + 30. * frame as f64 / 40.;
+            let gap = 10. + 20. * frame as f64 / 40.;
+            let mut count = 0;
+            for x in 42..158 {
+                let phase = (x as f64 + 0.5 - 40.) % (dash + gap);
+                if phase < 2. || (phase - dash).abs() < 2. || phase > dash + gap - 2. {
+                    continue;
+                }
+                assert_eq!(
+                    im.get_pixel(x, 100)[3],
+                    if phase < dash { 255 } else { 0 },
+                    "frame {frame} at x={x}"
+                );
+                count += 1;
+            }
+            assert!(count > 55);
         }
     }
 }

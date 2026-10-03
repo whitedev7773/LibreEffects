@@ -77,7 +77,7 @@ impl Layer {
     pub fn track(&self, path: PropertyPath) -> Option<&AnimatedProperty> {
         match path {
             PropertyPath::Shape(p) => match &self.content {
-                Content::Shape(s) => s.parameters.get(&p),
+                Content::Shape(s) if s.has_parameter(p) => s.parameters.get(&p),
                 _ => None,
             },
             PropertyPath::Path(target) => self.path_animation(target).map(|(_, a)| &a.timing),
@@ -102,7 +102,7 @@ impl Layer {
     pub fn track_value(&self, path: PropertyPath, frame: Frame) -> Option<f64> {
         Some(match path {
             PropertyPath::Shape(p) => match &self.content {
-                Content::Shape(s) => s.value_at(p, frame),
+                Content::Shape(s) if s.has_parameter(p) => s.value_at(p, frame),
                 _ => return None,
             },
             PropertyPath::Path(_) => return None,
@@ -207,7 +207,7 @@ impl Layer {
     ) -> Result<&mut AnimatedProperty, String> {
         match path {
             PropertyPath::Shape(p) => match &mut self.content {
-                Content::Shape(s) => Some(s.shape_track_mut(p)),
+                Content::Shape(s) if s.has_parameter(p) => Some(s.shape_track_mut(p)),
                 _ => None,
             },
             PropertyPath::Path(target) => {

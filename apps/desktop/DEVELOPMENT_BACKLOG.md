@@ -18,6 +18,14 @@
 - **후속 고급 기능:** 패널 도킹·소스 뷰어·최근 프로젝트, 타임라인 고급 시간 편집/검색/가상화, 공간 경로·프리셋·표현식, Shape 연산/SVG·Text Animator, 추가 효과·모션 블러, 고정밀 색/HDR·Proxy/GPU, 템플릿, 설치/업데이트·한글화와 UI 회귀 자동화.
 - **별도 대형 단계:** 3D/카메라/라이트·모델, 추적·로토/Puppet, 플러그인/교환 포맷 연구, 웹/API 제품 범위. AEP/MOGRT 호환은 구현되지 않았다.
 
+### 점선 길이·간격 애니메이션 — 2026-10-03
+
+- E03/D02: 최대 16개의 개별 Dash/Gap 행에 스톱워치를 연결했다. 행의 값은 현재 프레임의 트랙을 평가하며 공통 Timeline/Graph·키 편집·Undo/Redo를 사용한다. 마지막 행 제거는 그 행의 트랙/키도 같은 변경으로 제거한다. Undo는 모두 복원하고 다시 추가한 행은 10px·키 없음으로 시작한다. 앞선 행과 Cap/Join 편집의 기존 트랙은 유지한다.
+- 점선 트랙은 프로젝트 v39의 `DashLength0`…`DashLength15` 주소를 사용한다. 이전 v38의 스칼라 주소 직렬화는 유지하며 잘못된 주소, 존재하지 않는 행의 편집/붙여넣기, 행 없이 남은 트랙, v38 이하의 점선 트랙을 거부한다. 홀수 길이 목록 반복·전부 0인 실선·Round cap의 길이 0 점도 매 프레임 평가 결과에 적용된다.
+- 검증: 코어 164개 + 데스크톱 228개(총 392개) 통과, 외부 미디어/장치 30개 제외. 주소 왕복/구버전 호환, 보간, 항목 제거/Undo/Redo/재추가, 기존 트랙 보존, 잘못된 값/주소/붙여넣기의 원자적 거부, Preview/출력 픽셀을 검사했다. Cargo check/fmt/test와 릴리스 컴파일 및 git diff --check 통과(Moon/proto 미설치). 실행 중인 이전 바이너리를 덮어쓰지 않도록 `cargo rustc --release -p libre-effects-desktop --bin libre-effects -- -o …/target/qa/libre-effects-dash-animation.exe`로 빌드했다. 코드의 기존 경고 17개 외 출력 경로 옵션 안내 2개가 있다.
+- 생성한 모델 QA의 0/15/30/45/60프레임 CLI PNG에서 Dash 40→100, Gap 100→60의 445개 점선/투명 간격 샘플이 독립 계산과 일치했다(`target/qa/verify_dash_animation_model.py`). UI로 저장한 파일이 아니며 네이티브 조작 검증을 대신하지 않는다. 기본 `target/release/libre-effects.exe`도 새 바이너리와 같은 SHA256으로 갱신했다. 이전 실행 이미지는 `libre-effects-v38-running.exe`에 보존했고 기존 QA 창 PID 43264의 응답과 미저장 프로젝트가 유지됨을 확인했다. 다음 실행부터 v39가 적용된다.
+- 실제 UI 검증은 남아 있다. 기존 v38 QA 창의 화면 캡처는 복구됐으나 입력 활성화는 같은 `failed to activate captured window` 오류로 실패했다. 60프레임 Offset 180 입력이 아직 편집 필드에 남아 있으므로 입력 확정·Undo/Redo·저장/재열기를 먼저 마친 뒤 새 v39 빌드의 Dash/Gap 조작·Graph·좁은 창 배치를 확인해야 한다. 사용자 보존 원본 SHA256은 변하지 않았다. 색상·Points 애니메이션과 Contents 그룹/연산자 등 전체 E03 잔여 범위도 유지한다.
+
 ### 도형 스칼라 속성 애니메이션 — 2026-10-03
 
 - E03/D02: Stroke Width, Roundness, Inner Radius %, Miter Limit, Dash Offset에 Properties 스톱워치를 연결했다. 켠 뒤 재생 헤드를 이동해 값을 바꾸면 해당 프레임에 키를 만든다. 처음 편집한 속성은 Timeline → Contents · Shape에 나타나며 공통 키 복사/붙여넣기·이동·삭제·시간/값 배율·보간·Graph에 연결된다. 스톱워치를 끄면 현재 프레임의 평가 값을 유지한다. 렌더 시 범위를 벗어나는 보간 오버슈트는 속성 한계로 제한한다.

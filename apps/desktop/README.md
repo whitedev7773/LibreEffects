@@ -80,8 +80,12 @@ The created track appears under **Contents · Shape** in Timeline and supports
 the existing keyframe/graph controls, copy, retiming and Undo/Redo. Disabling the
 stopwatch keeps the evaluated value at the current frame. Edited scalar tracks
 use project version 38 and leave older static values intact when no track exists.
-Cap/join, individual dash/gap lengths, points, colors and grouped Contents are
-not animated by these controls yet.
+Each individual Dash/Gap row also has a stopwatch and uses project version 39
+when edited. Removing the final row removes its track and keys in the same Undo;
+adding that row again starts at 10 px with no old keys. Existing rows keep their
+tracks. Copying a dash key to another shape requires the corresponding row to
+exist. Cap/join, points, colors and grouped Contents are not animated by these
+controls yet.
 
 ## Color selection
 
