@@ -162,7 +162,7 @@ fn vertex_overlay(
                 session.path().clone(),
                 request.world,
                 matches!(request.target, libre_effects_core::PathTarget::Mask(_)),
-                [request.index].into(),
+                request.indices.clone(),
             )]
         })
         .unwrap_or_default()
@@ -1314,6 +1314,7 @@ impl Render for Preview {
         let pen_active = state.tool == Tool::Pen;
         let pen_order_help = self.pen.order_help(state);
         let vertex_available = self.pen.numeric_vertex_available(state);
+        let (vertex_caption, vertex_help) = self.pen.numeric_vertex_control_text(state);
         let comp = render_project.composition().clone();
         // Numeric and gradient drafts share the globally unique transient-render
         // generation. Cancel/OK clears the displayed draft before source renders.
@@ -1453,16 +1454,16 @@ impl Render for Preview {
                         .text_color(rgb(ui::MUTED))
                         .tooltip(|_, cx| cx.new(|_| ui::Tip("Reorders the base and all animation poses. Curve geometry and key timing stay unchanged. Reverse may change Non-Zero compound fill holes; either action may change stroke dash placement.".into())).into())
                         .child(div().flex_1().min_w_0().overflow_hidden().child(pen_order_help))
-                        .child(ui::text_button("pen-edit-vertex", "Edit Vertex…  Shift+V")
+                        .child(ui::text_button("pen-edit-vertex", vertex_caption)
                             .h(px(20.0))
                             .flex_none()
                             .when(!vertex_available, |button| button.opacity(0.35))
-                            .tooltip(|_, cx| cx.new(|_| ui::Tip("Select exactly one existing Pen vertex. Edit its local anchor and relative tangents; one Undo step on OK.".into())).into())
+                            .tooltip(move |_, cx| cx.new(|_| ui::Tip(vertex_help.into())).into())
                             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
                                 // Prevent the button's default focus before capturing
                                 // the live Pen selection; canvas blur still cancels it.
                                 window.prevent_default();
-                                let request = this.pen.single_vertex_request(this.state.read(cx));
+                                let request = this.pen.numeric_vertex_request(this.state.read(cx));
                                 if let Some(request) = request {
                                     this.state.update(cx, |s, cx| s.dispatch(&Action::OpenVertex(request), window, cx));
                                 }

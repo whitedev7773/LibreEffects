@@ -126,8 +126,30 @@ Ordinary OK/Cancel returns only the explicitly validated vertex selection to the
 canvas, so repeated edits do not require guessing a path. Changed source/frame/
 selection/tool/transport, document replacement, pending save-and-close or window
 deactivation invalidates the session and prevents stale selection restoration.
-Document/menu/undo actions cannot edit the source behind the dialog. Multi-vertex
-numeric transforms, linked tangent controls and cross-path editing remain future
+Document/menu/undo actions cannot edit the source behind the dialog.
+
+With **two or more anchors selected on the same explicit path**, the toolbar and
+Shift+V open **Transform Vertices** instead. Seven full-precision fields provide
+Delta X/Y, Rotation (degrees), Scale X/Y (%) and Pivot X/Y. The initial pivot is
+the selected anchors' path-local bounding-box center, excluding tangent extents;
+it stays fixed until edited. Geometry is recomputed from the opening pose after
+each valid field: scale along local axes, rotate about the pivot, then translate.
+Positive rotation is clockwise in a normal downward-Y canvas; reflected parent
+transforms can change its apparent screen direction. Tangent offsets receive the
+same linear transform, without pivot or translation. Unselected vertices,
+vertex order/count, closed state, paint and target IDs remain unchanged.
+
+Negative scale reflects; zero scale collapses selected geometry and is allowed.
+Inputs must be finite and the resulting anchor/tangent coordinates must stay
+within ±1,000,000. Translation/scale/pivot inputs do not themselves use the
+single-vertex coordinate cap. Invalid results retain the last valid parameters
+and preview and block OK. **Reset** restores identity controls, the opening pivot
+and exact source, clearing errors and invalidating old field callbacks. It acts
+on a completed click; dragging out cancels it. Reset, pivot-only changes, complete
+turns and any exact effective no-op preserve keys, legacy data and Redo. Ordinary
+OK/Cancel restores the complete validated vertex selection. This transforms the
+current evaluated pose, not every stored animation pose. Linked tangent controls,
+cross-path selection, topology changes and on-canvas affine handles remain future
 work.
 
 ### Path order

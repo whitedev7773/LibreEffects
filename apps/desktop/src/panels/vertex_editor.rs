@@ -1,4 +1,4 @@
-//! One explicit Pen vertex, edited on an isolated, frozen source transaction.
+//! Explicit Pen vertices, edited on an isolated, frozen source transaction.
 use crate::editor::{EditorState, Tool};
 use libre_effects_core::{
     Affine, Command, CompositionId, Content, Editor, Frame, LayerId, PathTarget, Project,
@@ -11,7 +11,7 @@ mod view;
 pub(crate) use view::VertexEditor;
 
 /// A Pen-owned selection handoff, or a one-shot return to that exact selection.
-/// The Pen additionally verifies that its private selection is idle and singular.
+/// The Pen additionally verifies that its private selection is idle and explicit.
 #[derive(Clone)]
 pub(crate) struct Request {
     origin: Arc<Project>,
@@ -25,6 +25,7 @@ pub(crate) struct Request {
     pub layer: LayerId,
     pub target: PathTarget,
     pub index: usize,
+    pub indices: BTreeSet<usize>,
     pub frame: Frame,
     pub path: VectorPath,
     pub world: Affine,
@@ -38,11 +39,21 @@ impl Request {
         path: VectorPath,
         world: Affine,
     ) -> Result<Self, String> {
+        Self::for_selection(s, layer, target, [index].into(), path, world)
+    }
+    pub fn for_selection(
+        s: &EditorState,
+        layer: LayerId,
+        target: PathTarget,
+        indices: BTreeSet<usize>,
+        path: VectorPath,
+        world: Affine,
+    ) -> Result<Self, String> {
         if s.vertex_editor.is_some() {
             return Err("Finish the current vertex edit first".into());
         }
-        if !Self::available(s, layer, target, index, &path, world) {
-            return Err("Select one editable Pen vertex while playback is stopped".into());
+        if !Self::available_selection(s, layer, target, &indices, &path, world) {
+            return Err("Select editable Pen vertices while playback is stopped".into());
         }
         Ok(Self {
             origin: Arc::new(s.editor.project().clone()),
@@ -55,7 +66,8 @@ impl Request {
             contents_selection: s.contents_selection,
             layer,
             target,
-            index,
+            index: *indices.first().expect("validated nonempty selection"),
+            indices,
             frame: s.frame,
             path,
             world,
@@ -70,10 +82,21 @@ impl Request {
         path: &VectorPath,
         world: Affine,
     ) -> bool {
+        Self::available_selection(s, layer, target, &[index].into(), path, world)
+    }
+    pub fn available_selection(
+        s: &EditorState,
+        layer: LayerId,
+        target: PathTarget,
+        indices: &BTreeSet<usize>,
+        path: &VectorPath,
+        world: Affine,
+    ) -> bool {
         s.vertex_editor.is_none()
             && Self::ready(s)
             && s.editor.selected() == Some(layer)
-            && index < path.vertices.len()
+            && !indices.is_empty()
+            && indices.iter().all(|&index| index < path.vertices.len())
             && path.valid()
             && evaluated(s, layer, target)
                 .is_some_and(|(actual, transform)| actual == *path && transform == world)
@@ -107,7 +130,11 @@ impl Request {
             && self.selected_layers == s.selected_layers
             && self.contents_selection == s.contents_selection
             && Self::ready(s)
-            && self.index < self.path.vertices.len()
+            && self.indices.first() == Some(&self.index)
+            && self
+                .indices
+                .iter()
+                .all(|&index| index < self.path.vertices.len())
             && self.path.valid()
             && evaluated(s, self.layer, self.target)
                 .is_some_and(|(path, world)| path == self.path && world == self.world)
@@ -149,14 +176,15 @@ pub(crate) struct Session {
     request: Request,
     path: VectorPath,
     project: Project,
-    errors: [Option<String>; 6],
+    transform: Option<[f64; 7]>,
+    errors: [Option<String>; 7],
     pub error: String,
     pub input_error: Option<usize>,
 }
 impl Session {
     pub fn new(s: &EditorState, request: Request) -> Result<Self, String> {
         if s.vertex_editor.is_some() || !request.current(s) {
-            return Err("The selected vertex changed before the editor opened".into());
+            return Err("The selected vertices changed before the editor opened".into());
         }
         Ok(Self {
             id: crate::color_edit::next_gradient_gesture(),
@@ -166,6 +194,7 @@ impl Session {
             index: request.index,
             path: request.path.clone(),
             project: request.origin.as_ref().clone(),
+            transform: (request.indices.len() >= 2).then(|| transform_defaults(&request)),
             request,
             errors: Default::default(),
             error: String::new(),
@@ -184,7 +213,16 @@ impl Session {
     pub fn project(&self) -> &Project {
         &self.project
     }
+    pub fn is_transform(&self) -> bool {
+        self.transform.is_some()
+    }
+    pub fn field_count(&self) -> usize {
+        if self.is_transform() { 7 } else { 6 }
+    }
     pub fn value(&self, index: usize) -> Option<f64> {
+        if let Some(values) = &self.transform {
+            return values.get(index).copied();
+        }
         let vertex = self.path.vertices.get(self.index)?;
         match index {
             0..=1 => Some(vertex.position[index]),
@@ -195,6 +233,9 @@ impl Session {
     }
     pub fn field_value(&self, index: usize) -> Option<String> {
         self.value(index).map(|value| value.to_string())
+    }
+    pub fn field_error(&self, index: usize) -> Option<&str> {
+        self.errors.get(index).and_then(Option::as_deref)
     }
     pub fn has_input_error(&self, index: usize) -> bool {
         self.errors.get(index).is_some_and(Option::is_some)
@@ -221,36 +262,64 @@ impl Session {
         Ok((self.path != self.request.path).then(|| self.edit_command(self.path.clone())))
     }
     fn set_value(&mut self, index: usize, value: f64) -> Result<(), String> {
-        if !value.is_finite() || value.abs() > 1_000_000.0 {
-            return Err("Enter a finite value from -1000000 to 1000000".into());
-        }
-        let mut path = self.path.clone();
-        let vertex = &mut path.vertices[self.index];
-        match index {
-            0..=1 => vertex.position[index] = value,
-            2..=3 => vertex.incoming[index - 2] = value,
-            4..=5 => vertex.outgoing[index - 4] = value,
-            _ => return Err("This vertex field no longer exists".into()),
-        }
-        if path == self.path {
-            return Ok(());
-        }
+        let mut transform = self.transform;
+        let path = if let Some(values) = &mut transform {
+            if !value.is_finite() {
+                return Err("Enter a finite numeric value".into());
+            }
+            values[index] = value;
+            transform_path(&self.request.path, &self.request.indices, values)?
+        } else {
+            if !value.is_finite() || value.abs() > 1_000_000.0 {
+                return Err("Enter a finite value from -1000000 to 1000000".into());
+            }
+            let mut path = self.path.clone();
+            let vertex = &mut path.vertices[self.index];
+            match index {
+                0..=1 => vertex.position[index] = value,
+                2..=3 => vertex.incoming[index - 2] = value,
+                4..=5 => vertex.outgoing[index - 4] = value,
+                _ => return Err("This vertex field no longer exists".into()),
+            }
+            path
+        };
         // Rebuild from the opening source, never the previous preview. Thus exactly
         // one EditPath reaches the draft and no historical pose slots accumulate.
+        // Do not execute even a nominal EditPath for exact no-ops: it can create a
+        // middle key or upgrade a legacy project despite unchanged evaluated geometry.
         let project = if path == self.request.path {
             self.request.origin.as_ref().clone()
+        } else if path == self.path {
+            self.project.clone()
         } else {
             let mut draft = Editor::default();
             draft.replace_project(self.request.origin.as_ref().clone())?;
             draft.execute(self.edit_command(path.clone()))?;
             draft.project().clone()
         };
-        self.path = path;
+        self.path = if path == self.request.path {
+            self.request.path.clone()
+        } else {
+            path
+        };
         self.project = project;
+        // Accept the field only after geometry and the complete draft are valid.
+        self.transform = transform;
         Ok(())
     }
+    fn reset(&mut self) {
+        // Replace the serial before view focus changes can deliver old blur text.
+        self.id = crate::color_edit::next_gradient_gesture();
+        self.path = self.request.path.clone();
+        self.project = self.request.origin.as_ref().clone();
+        self.transform = self
+            .is_transform()
+            .then(|| transform_defaults(&self.request));
+        self.errors = Default::default();
+        self.update_error();
+    }
     pub fn input(&mut self, index: usize, text: &str) -> Result<(), String> {
-        if index >= self.errors.len() {
+        if index >= self.field_count() {
             return Err("This vertex field no longer exists".into());
         }
         let result = text
@@ -264,7 +333,151 @@ impl Session {
     }
     fn return_request(&self, s: &EditorState) -> Option<Request> {
         let (path, world) = evaluated(s, self.layer, self.target)?;
-        Request::new(s, self.layer, self.target, self.index, path, world).ok()
+        Request::for_selection(
+            s,
+            self.layer,
+            self.target,
+            self.request.indices.clone(),
+            path,
+            world,
+        )
+        .ok()
+    }
+}
+
+/// Defaults use opening anchor bounds in path-local coordinates. Tangent extents
+/// and parent/Contents transforms do not affect this fixed, editable pivot.
+fn transform_defaults(request: &Request) -> [f64; 7] {
+    let first = request.path.vertices[request.index].position;
+    let mut min = first;
+    let mut max = first;
+    for &index in &request.indices {
+        let position = request.path.vertices[index].position;
+        for axis in 0..2 {
+            min[axis] = min[axis].min(position[axis]);
+            max[axis] = max[axis].max(position[axis]);
+        }
+    }
+    [
+        0.,
+        0.,
+        0.,
+        100.,
+        100.,
+        (min[0] + max[0]) / 2.,
+        (min[1] + max[1]) / 2.,
+    ]
+}
+
+/// Scale local axes, then rotate clockwise in the normal downward-Y canvas,
+/// then translate anchors. Requested geometry need not itself be invertible.
+fn transform_path(
+    source: &VectorPath,
+    indices: &BTreeSet<usize>,
+    values: &[f64; 7],
+) -> Result<VectorPath, String> {
+    if values.iter().any(|value| !value.is_finite()) {
+        return Err("Enter finite numeric values".into());
+    }
+    let [dx, dy, rotation, sx, sy, px, py] = *values;
+    // Signed remainder preserves tiny negative turns that adding 360 would round
+    // away. Exact cardinal coefficients avoid trigonometric no-op drift.
+    let angle = rotation % 360.;
+    let (sin, cos) = match angle {
+        0. => (0., 1.),
+        90. | -270. => (1., 0.),
+        180. | -180. => (0., -1.),
+        270. | -90. => (-1., 0.),
+        _ => angle.to_radians().sin_cos(),
+    };
+    let matrix = [
+        [cos * (sx / 100.), -sin * (sy / 100.)],
+        [sin * (sx / 100.), cos * (sy / 100.)],
+    ];
+    if matrix == [[1., 0.], [0., 1.]] && dx == 0. && dy == 0. {
+        return Ok(source.clone());
+    }
+    let mut path = source.clone();
+    for &index in indices {
+        let original = source.vertices[index];
+        let vertex = &mut path.vertices[index];
+        for axis in 0..2 {
+            let row = matrix[axis];
+            let position =
+                transform_anchor_component(row, axis, original.position, [px, py], [dx, dy][axis]);
+            if position != original.position[axis] {
+                vertex.position[axis] = position;
+            }
+            for (before, after) in [
+                (original.incoming, &mut vertex.incoming),
+                (original.outgoing, &mut vertex.outgoing),
+            ] {
+                let value = linear_component(row, before);
+                if value != before[axis] {
+                    after[axis] = value;
+                }
+            }
+        }
+    }
+    if !path.valid() {
+        return Err("Resulting anchor and tangent coordinates must be finite and within -1000000 to 1000000".into());
+    }
+    Ok(path)
+}
+
+fn transform_anchor_component(
+    row: [f64; 2],
+    axis: usize,
+    source: [f64; 2],
+    pivot: [f64; 2],
+    translation: f64,
+) -> f64 {
+    if row == [0., 0.] {
+        // Exact collapse must not leave cancellation residue per vertex.
+        return pivot[axis] + translation;
+    }
+    let signed_axis = match row {
+        [1., 0.] => Some((0, 1.)),
+        [-1., 0.] => Some((0, -1.)),
+        [0., 1.] => Some((1, 1.)),
+        [0., -1.] => Some((1, -1.)),
+        _ => None,
+    };
+    if let Some((component, sign)) = signed_axis {
+        if source[component] == pivot[component] {
+            // At this row's exact fixed component, avoid subtracting large pivot
+            // terms that could erase the other, much smaller pivot component.
+            return pivot[axis] + translation;
+        }
+        // Identity rows and cardinal swaps retain tiny source components even
+        // with equal, enormous pivots. No source component is canceled back out.
+        return sign * source[component] + (pivot[axis] - sign * pivot[component]) + translation;
+    }
+    let relative = [source[0] - pivot[0], source[1] - pivot[1]];
+    let correction = [
+        row[0] - if axis == 0 { 1. } else { 0. },
+        row[1] - if axis == 1 { 1. } else { 0. },
+    ];
+    if correction.iter().all(|value| value.abs() <= 0.5) {
+        // Near identity, a correction retains small motion about a large pivot.
+        // This condition only chooses arithmetic: no coefficient or result is
+        // treated as zero. Away from identity, subtraction of the original
+        // component could erase a genuine tiny scale or swapped coordinate.
+        source[axis] + (linear_component(correction, relative) + translation)
+    } else {
+        pivot[axis] + linear_component(row, relative) + translation
+    }
+}
+
+fn linear_component(row: [f64; 2], point: [f64; 2]) -> f64 {
+    // Zero coefficients also avoid unnecessary 0 × overflow intermediates.
+    match row {
+        [0., 0.] => 0.,
+        [1., 0.] => point[0],
+        [0., 1.] => point[1],
+        [a, 0.] => a * point[0],
+        [0., b] => b * point[1],
+        [a, b] => a * point[0] + b * point[1],
     }
 }
 
@@ -277,6 +490,14 @@ impl EditorState {
         {
             let _ = session.input(index, text);
         }
+    }
+    pub(crate) fn reset_vertex_editor(&mut self, serial: u64) -> bool {
+        self.invalidate_vertex_editor();
+        let Some(session) = self.vertex_editor.as_mut().filter(|s| s.id == serial) else {
+            return false;
+        };
+        session.reset();
+        true
     }
     pub(crate) fn revert_vertex_field(&mut self, serial: u64, index: usize) -> Option<String> {
         self.invalidate_vertex_editor();
@@ -347,7 +568,7 @@ mod tests {
         Property, PropertyPath, Shape, TrackEdit,
     };
 
-    fn geometry(closed: bool, shift: f64) -> VectorPath {
+    pub(super) fn geometry(closed: bool, shift: f64) -> VectorPath {
         VectorPath {
             closed,
             vertices: (0..4)
@@ -362,7 +583,7 @@ mod tests {
                 .collect(),
         }
     }
-    fn scene(target: PathTarget, animated: bool, frame: Frame) -> EditorState {
+    pub(super) fn scene(target: PathTarget, animated: bool, frame: Frame) -> EditorState {
         let mut s = EditorState::default();
         s.tool = Tool::Pen;
         s.composition_started = true;
@@ -488,7 +709,7 @@ mod tests {
         s.vertex_editor = Some(session);
         id
     }
-    fn animation(project: &Project, target: PathTarget) -> serde_json::Value {
+    pub(super) fn animation(project: &Project, target: PathTarget) -> serde_json::Value {
         serde_json::to_value(
             project
                 .composition()
@@ -500,7 +721,7 @@ mod tests {
         )
         .unwrap()
     }
-    const TARGETS: [PathTarget; 3] = [
+    pub(super) const TARGETS: [PathTarget; 3] = [
         PathTarget::Shape,
         PathTarget::Contents(2),
         PathTarget::Mask(1),
@@ -1189,3 +1410,7 @@ mod tests {
         assert!(!s.editor.can_undo());
     }
 }
+
+#[cfg(test)]
+#[path = "vertex_transform_tests.rs"]
+mod transform_tests;

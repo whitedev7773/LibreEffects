@@ -329,22 +329,51 @@ impl Target {
     }
 }
 impl Pen {
-    /// Capture only a committed, single selected vertex on its exact evaluated
-    /// path. Call at pointer-down/key-down, before opening the modal blurs canvas.
+    /// Retain a singleton-only entry point for legacy single-vertex callers.
+    #[cfg(test)]
     pub fn single_vertex_request(&self, s: &EditorState) -> Option<super::vertex_editor::Request> {
-        let (layer, target, index, path, world) = self.single_vertex_candidate(s)?;
-        super::vertex_editor::Request::new(s, layer, target, index, path, world).ok()
+        let (layer, target, indices, path, world) = self.numeric_vertex_candidate(s)?;
+        if indices.len() != 1 {
+            return None;
+        }
+        super::vertex_editor::Request::new(s, layer, target, *indices.first()?, path, world).ok()
+    }
+    /// Capture only explicit committed indices on their exact evaluated path.
+    /// Call at pointer-down/key-down before opening the modal blurs the canvas.
+    pub fn numeric_vertex_request(&self, s: &EditorState) -> Option<super::vertex_editor::Request> {
+        let (layer, target, indices, path, world) = self.numeric_vertex_candidate(s)?;
+        super::vertex_editor::Request::for_selection(s, layer, target, indices, path, world).ok()
     }
     pub fn numeric_vertex_available(&self, s: &EditorState) -> bool {
-        self.single_vertex_candidate(s)
-            .is_some_and(|(layer, target, index, path, world)| {
-                super::vertex_editor::Request::available(s, layer, target, index, &path, world)
+        self.numeric_vertex_candidate(s)
+            .is_some_and(|(layer, target, indices, path, world)| {
+                super::vertex_editor::Request::available_selection(
+                    s, layer, target, &indices, &path, world,
+                )
             })
     }
-    fn single_vertex_candidate(
+    pub fn numeric_vertex_control_text(&self, s: &EditorState) -> (&'static str, &'static str) {
+        if self
+            .selected
+            .as_ref()
+            .filter(|_| self.selected_context.as_ref().is_some_and(|c| c.valid(s)))
+            .is_some_and(|selection| selection.vertices.len() > 1)
+        {
+            (
+                "Transform Vertices…  Shift+V",
+                "Transform selected Pen anchors and tangents in path-local coordinates. Scale, then rotate around the pivot, then translate; one Undo step on OK.",
+            )
+        } else {
+            (
+                "Edit Vertex…  Shift+V",
+                "Select one existing Pen vertex to edit its local anchor and relative tangents, or select multiple vertices on one path to transform. One Undo step on OK.",
+            )
+        }
+    }
+    fn numeric_vertex_candidate(
         &self,
         s: &EditorState,
-    ) -> Option<(LayerId, PathTarget, usize, VectorPath, Affine)> {
+    ) -> Option<(LayerId, PathTarget, BTreeSet<usize>, VectorPath, Affine)> {
         if self.held
             || self.pointer_view.is_some()
             || self.drag.is_some()
@@ -359,13 +388,12 @@ impl Pen {
         let selection = self
             .selected
             .as_ref()
-            .filter(|selection| selection.vertices.len() == 1)?;
-        let index = *selection.vertices.first()?;
+            .filter(|selection| !selection.vertices.is_empty())?;
         let (_, path, world) = paths(s)
             .into_iter()
             .find(|(target, _, _)| *target == selection.target)?;
         let (layer, target) = selection.target.stable(s)?;
-        Some((layer, target, index, path, world))
+        Some((layer, target, selection.vertices.clone(), path, world))
     }
     /// Only the one-shot token supplied by ordinary modal OK/Cancel may recreate
     /// selection. Both the frozen context and re-evaluated target must still match.
@@ -381,14 +409,18 @@ impl Pen {
             target.stable(s) == Some((request.layer, request.target))
                 && path == &request.path
                 && world == &request.world
-                && request.index < path.vertices.len()
+                && !request.indices.is_empty()
+                && request
+                    .indices
+                    .iter()
+                    .all(|index| *index < path.vertices.len())
         }) else {
             return false;
         };
         self.cancel();
         self.selected = Some(Selection {
             target,
-            vertices: [request.index].into(),
+            vertices: request.indices.clone(),
         });
         self.selected_context = Some(Context::capture(s));
         true
@@ -422,7 +454,7 @@ impl Pen {
         (
             true,
             (!event.is_held)
-                .then(|| self.single_vertex_request(s))
+                .then(|| self.numeric_vertex_request(s))
                 .flatten(),
         )
     }

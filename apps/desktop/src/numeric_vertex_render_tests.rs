@@ -397,3 +397,215 @@ fn numeric_vertex_return_to_opening_pose_is_exact_source_and_pixels_without_a_mi
             .contains_key(&30)
     );
 }
+
+// These references deliberately do not call the production transform helper.
+// A quarter turn gives a simple independent, exactly representable matrix:
+// x' = px - .75*(y-py) + dx; y' = py - 1.5*(x-px) + dy.
+fn quarter_turn_reference(path: &VectorPath, selected: &[usize]) -> VectorPath {
+    let mut expected = path.clone();
+    for &i in selected {
+        let original = path.vertices[i];
+        expected.vertices[i] = PathVertex {
+            position: [
+                41.25 - 0.75 * (original.position[1] - 72.125) + 7.125,
+                72.125 - 1.5 * (original.position[0] - 41.25) - 3.5,
+            ],
+            incoming: [-0.75 * original.incoming[1], -1.5 * original.incoming[0]],
+            outgoing: [-0.75 * original.outgoing[1], -1.5 * original.outgoing[0]],
+        };
+    }
+    expected
+}
+
+fn transformed_preview_case(
+    mut state: EditorState,
+    target: PathTarget,
+    frame: u32,
+    collapse: bool,
+) {
+    state.frame = frame;
+    let source = state.editor.project().clone();
+    let source_native = crate::project_io::encode_native_project(&source, None).unwrap();
+    let (path, world) = evaluated(&state, target);
+    let selected = [0, 2];
+    let request =
+        Request::for_selection(&state, 1, target, selected.into(), path.clone(), world).unwrap();
+    let mut session = Session::new(&state, request).unwrap();
+    assert!(session.is_transform());
+    assert_eq!(session.field_count(), 7);
+    let mut expected_path = quarter_turn_reference(&path, &selected);
+    let values = if collapse {
+        // Independent collapse at a fractional pivot: selected tangents become
+        // exact zero vectors, while the two other curved vertices remain exact.
+        for &i in &selected {
+            expected_path.vertices[i] = PathVertex::corner([48.125, 53.5]);
+        }
+        [-2., 3., 0., 0., 0., 50.125, 50.5]
+    } else {
+        [7.125, -3.5, 90., -150., 75., 41.25, 72.125]
+    };
+    for index in [5, 6, 3, 4, 2, 0, 1] {
+        session.input(index, &values[index].to_string()).unwrap();
+    }
+    assert_eq!(session.path(), &expected_path);
+    for i in [1, 3] {
+        assert_eq!(session.path().vertices[i], path.vertices[i]);
+    }
+    let mut expected = Editor::default();
+    expected.replace_project(source.clone()).unwrap();
+    expected
+        .execute(Command::EditPath {
+            id: 1,
+            target,
+            frame,
+            path: expected_path,
+        })
+        .unwrap();
+    assert_eq!(session.project(), expected.project());
+    assert_eq!(state.editor.project(), &source);
+    assert_eq!(
+        crate::project_io::encode_native_project(state.editor.project(), None).unwrap(),
+        source_native
+    );
+    assert!(!state.editor.can_undo());
+    let renderer = Renderer::new();
+    let baseline = pixels(&renderer, &source, frame);
+    let draft = pixels(&renderer, session.project(), frame);
+    assert_ne!(
+        draft, baseline,
+        "the fixture must exercise rendered geometry"
+    );
+    assert_eq!(draft, pixels(&renderer, expected.project(), frame));
+    state.vertex_editor = Some(session);
+    state.accept_vertex_editor();
+    let committed = state.editor.project().clone();
+    assert_eq!(&committed, expected.project());
+    assert_eq!(
+        state.vertex_return.as_ref().unwrap().indices,
+        selected.into()
+    );
+    let encoded = crate::project_io::encode_native_project(&committed, None).unwrap();
+    let reopened = crate::project_io::decode_project(&encoded).unwrap().project;
+    assert_eq!(reopened, committed);
+    for sample in [0, 15, 30, 45, 60] {
+        assert_eq!(
+            pixels(&renderer, &reopened, sample),
+            pixels(&renderer, expected.project(), sample)
+        );
+    }
+    state.editor.undo();
+    assert_eq!(state.editor.project(), &source);
+    assert!(!state.editor.can_undo());
+    state.editor.redo();
+    assert_eq!(state.editor.project(), &committed);
+}
+
+#[test]
+fn multi_vertex_parented_and_nested_transformed_pixels_match_independent_matrix() {
+    for contents in [false, true] {
+        let (state, target) = shape_scene(contents);
+        transformed_preview_case(state, target, 0, false);
+    }
+}
+
+#[test]
+fn multi_vertex_add_and_subtract_mask_pixels_match_independent_matrix() {
+    for mode in [PathMaskMode::Add, PathMaskMode::Subtract] {
+        let (state, target) = mask_scene(mode);
+        transformed_preview_case(state, target, 0, false);
+    }
+}
+
+#[test]
+fn multi_vertex_between_and_existing_eased_keys_render_exactly_after_native_roundtrip() {
+    for case in 0..3 {
+        for frame in [30, 60] {
+            let (mut state, target) = match case {
+                0 => shape_scene(false),
+                1 => shape_scene(true),
+                _ => mask_scene(PathMaskMode::Subtract),
+            };
+            animate(&mut state, target);
+            transformed_preview_case(state, target, frame, false);
+        }
+    }
+}
+
+#[test]
+fn multi_vertex_zero_scale_is_valid_and_renders_exact_selected_point_collapse() {
+    for case in 0..3 {
+        let (state, target) = match case {
+            0 => shape_scene(false),
+            1 => shape_scene(true),
+            _ => mask_scene(PathMaskMode::Subtract),
+        };
+        transformed_preview_case(state, target, 0, true);
+    }
+}
+
+#[test]
+fn multi_vertex_identity_and_reset_preserve_native_bytes_pixels_and_redo() {
+    for scenario in 0..4 {
+        let (mut state, target) = shape_scene(true);
+        animate(&mut state, target);
+        state.frame = 30;
+        let source = state.editor.project().clone();
+        let bytes = crate::project_io::encode_native_project(&source, None).unwrap();
+        state
+            .editor
+            .execute(Command::RenameLayer {
+                id: 1,
+                name: "Redo sentinel".into(),
+            })
+            .unwrap();
+        state.editor.undo();
+        assert_eq!(state.editor.project(), &source);
+        assert!(state.editor.can_redo());
+        let (path, world) = evaluated(&state, target);
+        let request =
+            Request::for_selection(&state, 1, target, [0, 2].into(), path, world).unwrap();
+        let mut session = Session::new(&state, request).unwrap();
+        session.input(5, "41.123456789012345").unwrap();
+        session.input(6, "72.0625").unwrap();
+        match scenario {
+            0 => {} // Pivot alone never changes source or introduces a middle key.
+            1 => {
+                session.input(2, "360").unwrap();
+            }
+            2 => {
+                session.input(3, "-100").unwrap();
+                session.input(4, "-100").unwrap();
+                session.input(2, "180").unwrap();
+            }
+            3 => {
+                session.input(0, "12.125").unwrap();
+                session.input(2, "37.5").unwrap();
+            }
+            _ => unreachable!(),
+        }
+        let old_serial = session.id;
+        state.vertex_editor = Some(session);
+        if scenario == 3 {
+            assert!(state.reset_vertex_editor(old_serial));
+            assert_ne!(state.vertex_editor.as_ref().unwrap().id, old_serial);
+            // A blur queued before Reset cannot write the old pending transform.
+            state.vertex_input(old_serial, 0, "55");
+        }
+        let session = state.vertex_editor.as_ref().unwrap();
+        assert!(session.command().unwrap().is_none());
+        assert_eq!(session.project(), &source);
+        assert_eq!(
+            crate::project_io::encode_native_project(session.project(), None).unwrap(),
+            bytes
+        );
+        assert_eq!(
+            pixels(&Renderer::new(), session.project(), 30),
+            pixels(&Renderer::new(), &source, 30)
+        );
+        state.accept_vertex_editor();
+        assert_eq!(state.editor.project(), &source);
+        assert!(!state.editor.can_undo());
+        assert!(state.editor.can_redo());
+        assert_eq!(state.vertex_return.as_ref().unwrap().indices, [0, 2].into());
+    }
+}
