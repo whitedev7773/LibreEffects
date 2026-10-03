@@ -16,6 +16,8 @@ mod blend_render;
 mod cli;
 mod color_edit;
 mod components;
+#[cfg(test)]
+mod contents_render_tests;
 mod editor;
 mod effect_presets;
 mod effect_render;

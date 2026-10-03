@@ -3,6 +3,10 @@ use super::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PropertyPath {
+    Contents {
+        item: u64,
+        parameter: ContentsParam,
+    },
     Shape(ShapeParam),
     Path(PathTarget),
     Mask {
@@ -47,8 +51,18 @@ pub enum TrackEdit {
 impl Layer {
     pub fn track_label(&self, path: PropertyPath) -> Option<String> {
         Some(match path {
+            PropertyPath::Contents { item, parameter } => match &self.content {
+                Content::ShapeContents(c) => {
+                    format!("{} · {}", c.node(item)?.name, parameter.label())
+                }
+                _ => return None,
+            },
             PropertyPath::Shape(p) => p.label().into(),
             PropertyPath::Path(target) => match target {
+                PathTarget::Contents(item) => match &self.content {
+                    Content::ShapeContents(c) => format!("{} · Path", c.node(item)?.name),
+                    _ => return None,
+                },
                 PathTarget::Shape => "Shape Path".into(),
                 PathTarget::Mask(id) => format!(
                     "Mask {} · Path",
@@ -76,6 +90,10 @@ impl Layer {
     }
     pub fn track(&self, path: PropertyPath) -> Option<&AnimatedProperty> {
         match path {
+            PropertyPath::Contents { item, parameter } => match &self.content {
+                Content::ShapeContents(c) => c.node(item)?.parameters.get(&parameter),
+                _ => None,
+            },
             PropertyPath::Shape(p) => match &self.content {
                 Content::Shape(s) if s.has_parameter(p) => s.parameters.get(&p),
                 _ => None,
@@ -101,6 +119,10 @@ impl Layer {
     }
     pub fn track_value(&self, path: PropertyPath, frame: Frame) -> Option<f64> {
         Some(match path {
+            PropertyPath::Contents { item, parameter } => match &self.content {
+                Content::ShapeContents(c) => c.node(item)?.value_at(parameter, frame),
+                _ => return None,
+            },
             PropertyPath::Shape(p) => match &self.content {
                 Content::Shape(s) if s.has_parameter(p) => s.value_at(p, frame, self.color),
                 _ => return None,
@@ -139,6 +161,25 @@ impl Layer {
                 .flatten(),
             )
             .chain(self.time_remap.as_ref().map(|_| PropertyPath::TimeRemap))
+            .chain(match &self.content {
+                Content::ShapeContents(c) => c
+                    .rows()
+                    .into_iter()
+                    .flat_map(|(_, _, n)| {
+                        n.parameters
+                            .keys()
+                            .map(|&parameter| PropertyPath::Contents {
+                                item: n.id,
+                                parameter,
+                            })
+                            .chain(
+                                matches!(n.kind, ContentsKind::Path { .. })
+                                    .then_some(PropertyPath::Path(PathTarget::Contents(n.id))),
+                            )
+                    })
+                    .collect::<Vec<_>>(),
+                _ => vec![],
+            })
             .chain(
                 AudioParam::ALL
                     .into_iter()
@@ -176,6 +217,7 @@ impl Layer {
     pub fn copy_key(&self, property: PropertyPath, frame: Frame) -> Option<KeyCopy> {
         let data = self.track(property)?.keys().get(&frame)?.clone();
         let effect_kind = match property {
+            PropertyPath::Contents { .. } => None,
             PropertyPath::Shape(_)
             | PropertyPath::Path(_)
             | PropertyPath::Mask { .. }
@@ -206,6 +248,12 @@ impl Layer {
         path: PropertyPath,
     ) -> Result<&mut AnimatedProperty, String> {
         match path {
+            PropertyPath::Contents { item, parameter } => match &mut self.content {
+                Content::ShapeContents(c) => c
+                    .node_mut(item)
+                    .and_then(|n| n.parameters.get_mut(&parameter)),
+                _ => None,
+            },
             PropertyPath::Shape(p) => match &mut self.content {
                 Content::Shape(s) if s.has_parameter(p) => Some(s.shape_track_mut(p, self.color)),
                 _ => None,
@@ -489,6 +537,14 @@ mod tests {
 
 pub(super) fn command(id: LayerId, property: PropertyPath, edit: TrackEdit) -> Command {
     match property {
+        PropertyPath::Contents { item, parameter } => Command::Contents {
+            id,
+            edit: ContentsEdit::Track {
+                item,
+                parameter,
+                edit,
+            },
+        },
         PropertyPath::Shape(parameter) => Command::EditShape {
             id,
             parameter,

@@ -3,6 +3,7 @@ use super::*;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PathTarget {
     Shape,
+    Contents(u64),
     Mask(u64),
 }
 
@@ -85,7 +86,12 @@ impl PathAnimation {
         self.poses.push(path.clone());
         Ok((self.poses.len() - 1) as f64)
     }
-    fn validate(&self, base: &VectorPath, duration: Frame, version: u32) -> Result<(), String> {
+    pub(super) fn validate(
+        &self,
+        base: &VectorPath,
+        duration: Frame,
+        version: u32,
+    ) -> Result<(), String> {
         if self.is_default() {
             return Ok(());
         }
@@ -133,6 +139,13 @@ impl PathMask {
 impl Layer {
     pub fn path_animation(&self, target: PathTarget) -> Option<(&VectorPath, &PathAnimation)> {
         match target {
+            PathTarget::Contents(id) => match &self.content {
+                Content::ShapeContents(c) => match &c.node(id)?.kind {
+                    ContentsKind::Path { path, animation } => Some((path, animation)),
+                    _ => None,
+                },
+                _ => None,
+            },
             PathTarget::Shape => match &self.content {
                 Content::Shape(s) => Some((s.path.as_ref()?, &s.path_animation)),
                 _ => None,
@@ -149,6 +162,13 @@ impl Layer {
         target: PathTarget,
     ) -> Option<(&mut VectorPath, &mut PathAnimation)> {
         match target {
+            PathTarget::Contents(id) => match &mut self.content {
+                Content::ShapeContents(c) => match &mut c.node_mut(id)?.kind {
+                    ContentsKind::Path { path, animation } => Some((path, animation)),
+                    _ => None,
+                },
+                _ => None,
+            },
             PathTarget::Shape => match &mut self.content {
                 Content::Shape(s) => Some((s.path.as_mut()?, &mut s.path_animation)),
                 _ => None,

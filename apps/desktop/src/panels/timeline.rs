@@ -999,6 +999,19 @@ impl Render for Timeline {
                 if layer.track(shape_path).is_some() {
                     groups.push(("Shape Path".into(), vec![shape_path]));
                 }
+                for path in layer.track_paths().into_iter().filter(|p| {
+                    matches!(
+                        p,
+                        PropertyPath::Contents { .. }
+                            | PropertyPath::Path(libre_effects_core::PathTarget::Contents(_))
+                    )
+                }) {
+                    let label = match path {
+                        PropertyPath::Contents { parameter, .. } => parameter.label(),
+                        _ => "Path".into(),
+                    };
+                    groups.push((label, vec![path]));
+                }
                 for mask in layer.path_masks() {
                     let path = PropertyPath::Path(libre_effects_core::PathTarget::Mask(mask.id));
                     groups.push((layer.track_label(path).unwrap(), vec![path]));
@@ -1032,7 +1045,8 @@ impl Render for Timeline {
                                 | PropertyPath::Mask { .. }
                                 | PropertyPath::Audio(_)
                                 | PropertyPath::Effect { .. }
-                                | PropertyPath::TimeRemap => f == PropertyFilter::Animated,
+                                | PropertyPath::TimeRemap
+                                | PropertyPath::Contents { .. } => f == PropertyFilter::Animated,
                             }) && (f != PropertyFilter::Animated
                                 || !layer.track(*p).expect("visible property").keys().is_empty())
                         })
@@ -1040,6 +1054,16 @@ impl Render for Timeline {
                         continue;
                     }
                     let section = match properties[0] {
+                        PropertyPath::Contents { item, .. }
+                        | PropertyPath::Path(libre_effects_core::PathTarget::Contents(item)) => {
+                            let name = match layer.content() {
+                                libre_effects_core::Content::ShapeContents(c) => {
+                                    c.node(item).map(|n| n.name.clone()).unwrap_or_default()
+                                }
+                                _ => String::new(),
+                            };
+                            Some(((3, item), format!("Contents · {name}")))
+                        }
                         PropertyPath::Shape(_) => Some(((0, 1), "Contents · Shape".to_string())),
                         PropertyPath::Path(libre_effects_core::PathTarget::Shape) => {
                             Some(((0, 0), "Contents · Path".to_string()))

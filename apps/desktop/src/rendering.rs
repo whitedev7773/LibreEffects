@@ -277,8 +277,10 @@ impl Renderer {
         let mut svg = String::new();
         let e = l.effects();
         let mut effect_bounds = [0.0, 0.0, l.width(), l.height()];
-        if let Content::Text { text, font_size } = l.content()
-            && l.effect_stack().iter().any(|e| !e.bypassed())
+        if matches!(
+            l.content(),
+            Content::Text { .. } | Content::ShapeContents(_)
+        ) && l.effect_stack().iter().any(|e| !e.bypassed())
         {
             // Point text can extend outside the layer's nominal size. Measure the
             // same shaped glyph paths used by the compositor before filtering.
@@ -286,14 +288,18 @@ impl Renderer {
                 "<svg xmlns='http://www.w3.org/2000/svg' width='{}' height='{}'>{}</svg>",
                 l.width(),
                 l.height(),
-                layer_text_svg(
-                    text,
-                    *font_size,
-                    "white",
-                    l.width(),
-                    l.height(),
-                    l.text_style()
-                )
+                match l.content() {
+                    Content::ShapeContents(c) => c.svg_at(frame),
+                    Content::Text { text, font_size } => layer_text_svg(
+                        text,
+                        *font_size,
+                        "white",
+                        l.width(),
+                        l.height(),
+                        l.text_style()
+                    ),
+                    _ => unreachable!(),
+                }
             );
             let measured =
                 resvg::usvg::Tree::from_str(&source, &self.options).map_err(|e| e.to_string())?;
@@ -367,6 +373,7 @@ impl Renderer {
             Content::Shape(shape) => {
                 svg.push_str(&shape.svg_at(l.width(), l.height(), l.color(), frame))
             }
+            Content::ShapeContents(contents) => svg.push_str(&contents.svg_at(frame)),
             Content::Text { text, font_size } => {
                 svg.push_str(&layer_text_svg(
                     text,

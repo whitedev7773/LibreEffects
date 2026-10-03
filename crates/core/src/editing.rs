@@ -27,6 +27,7 @@ pub enum Content {
     /// An independent, fixed-size color source, unaffected by composition resizing.
     Solid,
     Shape(Shape),
+    ShapeContents(ShapeContents),
     /// Filters the composite below this layer; contributes no source pixels.
     Adjustment,
     Null,
@@ -165,6 +166,7 @@ pub(super) fn validate_content(
     let valid = match content {
         Content::Rectangle | Content::Solid | Content::Adjustment | Content::Null => true,
         Content::Shape(shape) => shape.valid(),
+        Content::ShapeContents(contents) => contents.validate(u32::MAX).is_ok(),
         Content::Composition {
             composition,
             start_frame,

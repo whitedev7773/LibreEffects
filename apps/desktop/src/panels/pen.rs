@@ -12,6 +12,7 @@ use libre_effects_core::{
 enum Target {
     NewShape,
     Shape(LayerId),
+    Contents(LayerId, u64),
     Mask(LayerId, usize),
 }
 #[derive(Clone)]
@@ -51,6 +52,12 @@ impl Session {
             Target::Shape(id) => Some(Command::EditPath {
                 id,
                 target: PathTarget::Shape,
+                frame: self.frame,
+                path: self.path.clone(),
+            }),
+            Target::Contents(id, item) => Some(Command::EditPath {
+                id,
+                target: PathTarget::Contents(item),
                 frame: self.frame,
                 path: self.path.clone(),
             }),
@@ -132,6 +139,18 @@ fn paths(s: &EditorState) -> Vec<(Target, VectorPath, Affine)> {
         return Vec::new();
     };
     let mut paths = Vec::new();
+    if let Content::ShapeContents(contents) = l.content() {
+        paths.extend(
+            contents
+                .editable_paths(s.frame)
+                .into_iter()
+                .filter_map(|(item, path, t)| {
+                    let t = world.compose(t);
+                    t.inverse()
+                        .map(|_| (Target::Contents(l.id(), item), path, t))
+                }),
+        );
+    }
     if let Content::Shape(shape) = l.content()
         && let Some(path) = shape.path_at(s.frame)
     {
@@ -273,7 +292,7 @@ impl Pen {
             if l.locked() || matches!(l.content(), Content::Audio { .. } | Content::Null) {
                 return None;
             }
-            if force_mask || !matches!(l.content(), Content::Shape(_)) {
+            if force_mask || !matches!(l.content(), Content::Shape(_) | Content::ShapeContents(_)) {
                 if l.path_masks().len() >= 64 {
                     return None;
                 }

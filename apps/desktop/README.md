@@ -1799,6 +1799,30 @@ visual playback. These preview switches left the document clean.
 
 ## Mask and path animation
 
+**Create Contents Group** organizes an existing shape into a Group containing
+separate Path, Stroke and Fill items. It retains existing geometry, path, color,
+opacity and stroke animation; one Undo restores the original. Contents uses
+project version 43 and stable item IDs. Existing files keep their original model
+until this command is used.
+
+The Contents tree supports nested groups, add, rename, duplicate, visibility,
+delete, ordering and moving into the group above or out to its parent. Select an
+item to edit its numeric properties; stopwatches and property labels connect to
+the Timeline/Graph. Group Position, Anchor, Scale, Rotation and Opacity animate
+independently of layer transforms. Parametric paths have independent size and
+position and can be converted to editable Bezier paths. Pen edits existing
+Contents paths through the accumulated group/layer transform.
+
+Paints consume paths above them in the same group, including transformed paths
+from child groups. Earlier paints/groups composite in front of later ones.
+A Fill treats its paths as one compound shape, with Non-Zero or Even-Odd fill
+rules; overlapping paths do not multiply a single paint's opacity. Group opacity
+is applied to its combined paints. Group Skew, paint blend/composite options,
+gradient paints, path operators and dragging Contents rows remain future work.
+Colors currently use numeric RGB controls in Contents; the common color picker
+and stroke cap/join/dash structural controls still need connection to these items.
+Curved parametric paths use cubic approximations, as in Bezier conversion.
+
 Properties → **Convert To Bezier Path** converts Rectangle, Rounded Rectangle,
 Ellipse, Polygon or Star into an editable closed path at the current frame.
 Points, Inner Radius and Roundness tracks are replaced by that static geometry;

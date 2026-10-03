@@ -18,6 +18,16 @@
 - **후속 고급 기능:** 패널 도킹·소스 뷰어·최근 프로젝트, 타임라인 고급 시간 편집/검색/가상화, 공간 경로·프리셋·표현식, Shape 연산/SVG·Text Animator, 추가 효과·모션 블러, 고정밀 색/HDR·Proxy/GPU, 템플릿, 설치/업데이트·한글화와 UI 회귀 자동화.
 - **별도 대형 단계:** 3D/카메라/라이트·모델, 추적·로토/Puppet, 플러그인/교환 포맷 연구, 웹/API 제품 범위. AEP/MOGRT 호환은 구현되지 않았다.
 
+### Contents 트리·다중 경로/페인트·그룹 변형 — 2026-10-03
+
+- E04/D01: 기존 Shape의 `Create Contents Group`이 경로·Stroke·Fill을 별도 항목으로 분리한다. 기하·경로·색·불투명도·점선 키를 유지하고 한 Undo로 원래 모델을 복원한다. 새 모델은 프로젝트 v43이며 기존 파일은 명시적으로 전환할 때까지 유지한다. 레이어별 안정된 항목 ID를 사용하고 복제 시 하위 항목까지 새 ID를 부여한다. 최대 256항목/8단계 중첩을 검증한다.
+- Properties에 그룹 접기, 항목 추가/이름/가시성/복제/삭제/순서 변경, 그룹 안팎 이동, 선택 항목의 수치와 스톱워치를 연결했다. 그룹 Position/Anchor/Scale/Rotation/Opacity, 경로 Width/Height/Position·기하, Fill/Stroke 수치 트랙이 공통 Timeline/Graph·키 복사·시간 이동을 사용한다. 기존 Contents Bezier 경로는 누적 그룹/레이어 좌표 변환으로 Pen 편집한다.
+- [Adobe의 페인트 순서](https://helpx.adobe.com/after-effects/desktop/drawing-painting-and-paths/shapes-and-shape-attributes/shape-attributes-paint-operations-path.html)를 참고했다. 각 페인트는 같은 그룹에서 자신보다 위에 있는 경로·하위 그룹 경로를 사용하며, 먼저 나오는 페인트/그룹을 앞에 합성한다. Fill은 여러 경로를 하나의 복합 경로로 채우므로 겹친 부분의 페인트 알파를 중복 적용하지 않는다. Non-Zero/Even-Odd 규칙과 그룹 합성 후 불투명도를 지원한다. 곡선 기본 도형은 cubic 근사이다.
+- 자동 검증: 코어 178개 + 데스크톱 235개(총 413개) 통과, 외부 미디어/장치 30개 제외. 전환/재정렬/부모 이동/복제/삭제의 원자성·잠금·버전·Undo/Redo·JSON·키 이동, 기존 5종 도형의 애니메이션 렌더 보존, 페인트 순서·복합 알파·Even-Odd·중첩 그룹 변형/불투명도·Preview/출력 일치를 검사했다. Cargo check/fmt/test와 git diff --check 통과(Moon/proto 미설치).
+- 실제 Windows에서 기존 Star의 Contents 전환 Undo/Redo, Fill 복제·색/불투명도 편집·페인트 순서 Undo/Redo, 그룹 Position X의 30/60프레임 0→200 키와 45프레임 100 보간, U 필터·Value Graph·저장 재열기를 확인했다. 1920/1442px 창 배치, 실제 작업 창 1개와 보존 원본 SHA256 불변을 확인했다. Release build도 통과했다(기존 경고 17개).
+- 실제 저장본 `target/qa/contents-native.lfe.json`과 순서 비교본의 0/15/30/45/60프레임 출력에서 독립 기하·페인트 합성 계산의 RGBA 45,567개 샘플이 일치했다(`target/qa/verify_contents_native.py`). 중첩 그룹/복합 경로는 자동 검사 범위이며 네이티브 조작을 별도 검증하지 않았다.
+- 남음: 공통 색 선택기와 Cap/Join/Dash 추가·삭제 UI의 Contents 연결, 그룹 Skew, 페인트 Blend/Composite, Gradient·경로 연산자, 트리 드래그/다중 선택과 새 Pen 경로의 선택 그룹 삽입. AE의 그룹 좌표/페인트 합성 픽셀 동등성을 검증한 것은 아니며 E04 전체 완료로 표시하지 않는다.
+
 ### 기본 도형 → Bezier 경로 전환 — 2026-10-03
 
 - E02/E03: Properties의 `Convert To Bezier Path`로 Rectangle·Rounded Rectangle·Ellipse·Polygon·Star를 현재 프레임의 닫힌 경로로 전환한다. Points·Inner Radius·Roundness 트랙은 평가된 정적 기하로 대체하고 페인트 트랙·레이어 변형·마스크·효과는 유지한다. 툴팁에서 이 동작을 설명한다. 한 Undo로 원래 도형과 키를 복원하며, 전환 후 기존 Path 스톱워치와 Pen 편집으로 경로 애니메이션을 만들 수 있다. 잠금·없는 레이어·비도형·이미 전환된 경로·잘못된 시간은 원자적으로 거부한다.

@@ -4,6 +4,7 @@ mod blend;
 mod browser;
 mod character;
 mod color_curve;
+mod contents;
 mod effects;
 mod footage_interpretation;
 mod graph;

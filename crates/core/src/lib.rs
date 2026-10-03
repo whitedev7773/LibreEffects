@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-const PROJECT_VERSION: u32 = 42;
+const PROJECT_VERSION: u32 = 43;
 pub type Frame = u32;
 pub type LayerId = u64;
 pub type CompositionId = u64;
@@ -59,7 +59,11 @@ pub use shape_animation::ShapeParam;
 mod shape_color;
 pub use shape_color::ShapePaint;
 mod polystar;
+mod shape_contents;
 mod shape_conversion;
+pub use shape_contents::{ContentsEdit, ContentsKind, ContentsNode, ContentsParam, ShapeContents};
+#[cfg(test)]
+mod shape_contents_tests;
 mod shapes;
 pub use shape_stroke::{ShapeStroke, StrokeCap, StrokeJoin};
 mod text_style;
@@ -650,6 +654,12 @@ impl Project {
                     }
                 }
                 let has_path = matches!(&layer.content, Content::Shape(s) if s.path.is_some());
+                if let Content::ShapeContents(contents) = &layer.content {
+                    if self.version < 43 {
+                        return Err("Shape Contents requires project version 43".into());
+                    }
+                    contents.validate(comp.duration)?;
+                }
                 if self.version < 37
                     && matches!(&layer.content, Content::Shape(s) if !s.stroke_style.is_default())
                 {
@@ -997,6 +1007,10 @@ pub enum Command {
     ConvertShapeToPath {
         id: LayerId,
         frame: Frame,
+    },
+    Contents {
+        id: LayerId,
+        edit: ContentsEdit,
     },
     /// Changes footage sampling only; keeps the layer range and transform keys.
     SetVideoSpeed {
@@ -1523,6 +1537,13 @@ impl Editor {
         }) {
             next.project.version = next.project.version.max(42);
         }
+        if next.project.compositions().into_iter().any(|(_, c)| {
+            c.layers
+                .iter()
+                .any(|l| matches!(l.content, Content::ShapeContents(_)))
+        }) {
+            next.project.version = next.project.version.max(43);
+        }
         next.project.validate()?;
         if next != self.current {
             let previous = std::mem::replace(&mut self.current, next);
@@ -1533,6 +1554,9 @@ impl Editor {
 }
 
 fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
+    if let Some(result) = shape_contents::apply(state, &command) {
+        return result;
+    }
     if let Some(result) = shape_conversion::apply(state, &command) {
         return result;
     }

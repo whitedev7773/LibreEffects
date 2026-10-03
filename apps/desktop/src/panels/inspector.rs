@@ -23,6 +23,7 @@ pub(crate) struct Inspector {
     playback: Vec<Entity<TextField>>,
     audio_controls: Entity<super::audio_controls::AudioControls>,
     shape_controls: Entity<super::shape_controls::ShapeControls>,
+    contents_controls: Entity<super::contents::ContentsControls>,
     mask_values: Entity<super::mask_values::MaskValues>,
 }
 impl Inspector {
@@ -244,6 +245,8 @@ impl Inspector {
         let mask_values = cx.new(|cx| super::mask_values::MaskValues::new(state.clone(), cx));
         let shape_controls =
             cx.new(|cx| super::shape_controls::ShapeControls::new(state.clone(), cx));
+        let contents_controls =
+            cx.new(|cx| super::contents::ContentsControls::new(state.clone(), cx));
         Self {
             blend: None,
             matte: None,
@@ -257,6 +260,7 @@ impl Inspector {
             playback,
             audio_controls,
             shape_controls,
+            contents_controls,
             mask_values,
         }
     }
@@ -442,6 +446,7 @@ impl Render for Inspector {
                 | Content::ImageSequence { .. }
                 | Content::Composition { .. }
                 | Content::Adjustment
+                | Content::ShapeContents(_)
         ) {
             entries.retain(|(index, _, _)| *index != 2);
         }
@@ -468,6 +473,7 @@ impl Render for Inspector {
                     "Content"
                 }),
         );
+        contents = contents.child(self.contents_controls.clone());
         if matches!(layer.content(), Content::Shape(_)) {
             contents = contents.child(self.shape_controls.clone());
         }

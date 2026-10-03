@@ -3,7 +3,7 @@ use super::*;
 // Cubic approximation of a quarter circle. Tangents use layer coordinates.
 const KAPPA: f64 = 0.5522847498307936;
 
-fn geometry(shape: &Shape, width: f64, height: f64, frame: Frame) -> VectorPath {
+pub(super) fn geometry(shape: &Shape, width: f64, height: f64, frame: Frame) -> VectorPath {
     let corner = PathVertex::corner;
     let vertices = match shape.kind {
         ShapeKind::Polygon | ShapeKind::Star => polystar::vertices(

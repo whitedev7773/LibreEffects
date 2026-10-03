@@ -346,14 +346,13 @@ impl Layer {
             .values_mut()
             .chain(
                 match &mut self.content {
-                    Content::Shape(s) => Some(
-                        std::iter::once(&mut s.path_animation.timing)
-                            .chain(s.parameters.values_mut()),
-                    ),
-                    _ => None,
+                    Content::Shape(s) => std::iter::once(&mut s.path_animation.timing)
+                        .chain(s.parameters.values_mut())
+                        .collect::<Vec<_>>(),
+                    Content::ShapeContents(c) => c.tracks_mut(),
+                    _ => vec![],
                 }
-                .into_iter()
-                .flatten(),
+                .into_iter(),
             )
             .chain(self.time_remap.iter_mut())
             .chain(self.audio_controls.parameters.values_mut())
