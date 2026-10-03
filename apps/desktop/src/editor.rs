@@ -572,25 +572,7 @@ impl EditorState {
         ) {
             self.pixel_info = None;
         }
-        if matches!(
-            action,
-            Action::Open
-                | Action::Save
-                | Action::SaveAs
-                | Action::CollectFiles
-                | Action::RelinkSource(_)
-                | Action::RelinkMissing
-                | Action::ImportImageSequence
-                | Action::RelinkSequence(_)
-                | Action::ImportImage
-                | Action::ImportVideo
-                | Action::RelinkVideo
-                | Action::ExportFrame
-                | Action::ExportFrameBackground
-                | Action::ExportSequence
-                | Action::ExportSequenceBackground
-                | Action::ExportVideo(_)
-        ) {
+        if self.should_blur_for_file_action(action) {
             // GPUI activates focused buttons on Enter key-up. A native file dialog
             // may close on key-down, sending its key-up back to the editor button.
             window.blur();

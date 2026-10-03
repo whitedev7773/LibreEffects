@@ -783,6 +783,12 @@ pub enum ContentsEdit {
         parent: u64,
         index: usize,
     },
+    /// Reorder complete immediate children without reparenting or changing payloads.
+    /// A parent of zero selects the root; `order` must be a complete permutation.
+    Reorder {
+        parent: u64,
+        order: Vec<u64>,
+    },
     Rename {
         item: u64,
         name: String,
@@ -958,6 +964,29 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                     return Err("Contents order is outside the group".into());
                 }
                 dest.insert(*index, n);
+            }
+            ContentsEdit::Reorder { parent, order } => {
+                let children = contents.group_mut(*parent)?;
+                let invalid_order = "Contents order must include each immediate child exactly once";
+                if order.len() != children.len() {
+                    return Err(invalid_order.into());
+                }
+                let positions = order
+                    .iter()
+                    .enumerate()
+                    .map(|(index, id)| (*id, index))
+                    .collect::<BTreeMap<_, _>>();
+                if positions.len() != order.len()
+                    || children
+                        .iter()
+                        .any(|node| !positions.contains_key(&node.id))
+                {
+                    return Err(invalid_order.into());
+                }
+                children.sort_by_key(|node| positions[&node.id]);
+                // The editor validates the complete candidate against its existing
+                // schema. A pure permutation must not require newer properties.
+                return Ok(());
             }
             ContentsEdit::Rename { item, name } => {
                 contents

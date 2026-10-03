@@ -1,4 +1,6 @@
 use super::*;
+#[path = "contents_reorder_tests.rs"]
+mod reorder;
 fn scene() -> Editor {
     let mut e = Editor::default();
     e.execute(Command::AddContent {

@@ -337,6 +337,76 @@ fn save_test_project(state: &mut EditorState, path: &Path) -> Result<(), String>
 }
 
 #[test]
+fn file_action_blur_uses_actual_save_routing() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut state = EditorState::default();
+    assert!(state.should_blur_for_file_action(&Action::Save));
+    assert!(state.should_blur_for_file_action(&Action::SaveAs));
+    for (name, format, blur) in [
+        ("native.lep", ProjectFormat::Lep, false),
+        ("native.LEP", ProjectFormat::Lep, false),
+        ("native.png", ProjectFormat::Lep, true),
+        ("legacy.json", ProjectFormat::LegacyJson, true),
+        ("legacy.lep", ProjectFormat::LegacyJson, true),
+    ] {
+        let source = directory.path().join(name);
+        let project = Project::default();
+        if format == ProjectFormat::Lep {
+            crate::project_io::write_native_project(&source, &project, None).unwrap();
+        } else {
+            std::fs::write(&source, project.to_json().unwrap()).unwrap();
+        }
+        open_test_project(&mut state, &source).unwrap();
+        assert_eq!(
+            state.should_blur_for_file_action(&Action::Save),
+            blur,
+            "{name}"
+        );
+        assert!(state.should_blur_for_file_action(&Action::SaveAs), "{name}");
+    }
+}
+
+#[test]
+fn file_action_blur_skips_in_progress_save_noops() {
+    let mut state = EditorState::default();
+    state.saving = true;
+    assert!(!state.should_blur_for_file_action(&Action::Save));
+    assert!(!state.should_blur_for_file_action(&Action::SaveAs));
+    state.path = Some(PathBuf::from("native.lep"));
+    state.source_format = Some(ProjectFormat::Lep);
+    assert!(!state.should_blur_for_file_action(&Action::Save));
+    assert!(!state.should_blur_for_file_action(&Action::SaveAs));
+    // Saving does not suppress the other file-dialog safeguards.
+    assert!(state.should_blur_for_file_action(&Action::Open));
+}
+
+#[test]
+fn file_action_blur_preserves_other_chooser_guards() {
+    let state = EditorState::default();
+    for action in [
+        Action::Open,
+        Action::CollectFiles,
+        Action::RelinkSource("source.png".into()),
+        Action::RelinkMissing,
+        Action::ImportImageSequence,
+        Action::RelinkSequence(1),
+        Action::ImportImage,
+        Action::ImportVideo,
+        Action::RelinkVideo,
+        Action::ExportFrame,
+        Action::ExportFrameBackground,
+        Action::ExportSequence,
+        Action::ExportSequenceBackground,
+        Action::ExportVideo(crate::video_export::VideoPreset::H264),
+    ] {
+        assert!(state.should_blur_for_file_action(&action));
+    }
+    for action in [Action::Undo, Action::Redo, Action::DeleteSelection] {
+        assert!(!state.should_blur_for_file_action(&action));
+    }
+}
+
+#[test]
 fn native_save_chooser_names_and_normalization_never_imply_an_unconfirmed_overwrite() {
     let directory = tempfile::tempdir().unwrap();
     let mut state = EditorState::default();
@@ -400,6 +470,8 @@ fn imported_original_survives_native_save_copy_and_repeated_save_without_changin
     assert_eq!(state.path, Some(copy.clone()));
     assert_eq!(state.save_path(false), Some(copy.clone()));
     assert_eq!(state.save_path(true), None);
+    assert!(!state.should_blur_for_file_action(&Action::Save));
+    assert!(state.should_blur_for_file_action(&Action::SaveAs));
     assert_eq!(state.source_format, Some(ProjectFormat::Lep));
     assert_eq!(state.imported_original, Some(source.clone()));
     assert!(state.editor.can_undo());

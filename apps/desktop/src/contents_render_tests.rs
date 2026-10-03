@@ -1,4 +1,6 @@
 use libre_effects_core::*;
+#[path = "contents_reorder_render_tests.rs"]
+mod reorder;
 fn edit(e: &mut Editor, edit: ContentsEdit) {
     e.execute(Command::Contents { id: 1, edit }).unwrap();
 }

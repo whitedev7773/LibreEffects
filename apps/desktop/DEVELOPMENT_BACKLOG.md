@@ -12,7 +12,7 @@
 
 ### 현재 단계와 다음 개발
 
-**2026-10-03 사용자 우선순위:** 고유 `.lep` (Libre Effects Project) 파일 형식을 먼저 구현·실행 검증하고, 그 뒤 보류한 편집 기능과 나머지 백로그를 재개한다. `.lep`의 서명/컨테이너 버전/체크섬/제한된 청크와 Save/Open/CLI/복구/수집 연결을 구현했고 코어·데스크톱 기본 626개와 FFmpeg 30개, 릴리스 빌드가 통과했다. 기존 `.lfe.json`은 호환 입력으로 유지하며 Save는 `.lep` 사본을 만든다. 네이티브 복구·이동 수집까지 아래 범위의 end-to-end 검증을 마쳤다. 고유 형식의 기본 단계와 이어 재개한 같은 경로 박스 선택/Ctrl+A의 검증을 마쳤다. 다음은 E04 Contents의 형제 항목 다중 선택·같은 부모 안의 묶음 순서 편집이다.
+**2026-10-03 사용자 우선순위:** 고유 `.lep` (Libre Effects Project) 파일 형식을 먼저 구현·실행 검증하고, 그 뒤 보류한 편집 기능과 나머지 백로그를 재개한다. `.lep`의 서명/컨테이너 버전/체크섬/제한된 청크와 Save/Open/CLI/복구/수집 연결을 구현했고 코어·데스크톱 기본 626개와 FFmpeg 30개, 릴리스 빌드가 통과했다. 기존 `.lfe.json`은 호환 입력으로 유지하며 Save는 `.lep` 사본을 만든다. 네이티브 복구·이동 수집까지 아래 범위의 end-to-end 검증을 마쳤다. 고유 형식의 기본 단계와 이어 재개한 같은 경로 박스 선택/Ctrl+A의 검증을 마쳤다. E04 Contents의 형제 항목 다중 선택·같은 부모 안의 묶음 순서 편집과 저장 포커스 회귀까지 검증을 마쳤다. 다음 제안 단계는 F03/D01의 레이어 전체 Text Fill/Stroke RGB와 Stroke Width 애니메이션이며, 문자별 스타일/타이포그래피 애니메이션은 별도 범위다.
 
 현재는 **2D 모션 편집·합성 기반을 구현한 단계**다. AE 동등 수준이나 전체 백로그 완료 상태는 아니다. 기능군마다 규모가 달라 단순 항목 수를 완성률로 표시하지 않는다.
 
@@ -21,6 +21,16 @@
 - **정교한 편집에 남은 기능:** D02/D03 다중 채널·공간 보간·Speed Graph 선택 변형, E02/E03 경로 토폴로지·marquee/교차 경로 선택, E04 트리 편집·복합 Colors 애니메이션, G01 가변 Feather·로토베지어, F01–F03 실제 IME 검증·문자별 스타일·텍스트 속성 애니메이션, B01/B05/B07 배치 회귀·단축키/접근성. 스칼라 양방향 시간 보간·Speed Graph, Contents·도형 속성 애니메이션, 직접 텍스트 편집과 B06 공통 색 선택기는 아래 이력의 범위로 이미 구현됐다.
 - **후속 고급 기능:** 패널 도킹·소스 뷰어·최근 프로젝트, 타임라인 고급 시간 편집/검색/가상화, 공간 경로·프리셋·표현식, Shape 연산/SVG·Text Animator, 추가 효과·모션 블러, 고정밀 색/HDR·Proxy/GPU, 템플릿, 설치/업데이트·한글화와 UI 회귀 자동화.
 - **별도 대형 단계:** 3D/카메라/라이트·모델, 추적·로토/Puppet, 플러그인/교환 포맷 연구, 웹/API 제품 범위. AEP/MOGRT 호환은 구현되지 않았다.
+
+### E04 Contents 형제 선택·묶음 순서와 키보드 경계 — 2026-10-03
+
+- label의 plain/Ctrl/Shift 및 Ctrl+Shift 선택은 하나의 부모 안에서 동작한다. Group은 subtree 전체를 한 항목으로 선택하며 다른 부모의 자식을 누르면 새 선택을 시작한다. Ctrl+A는 active sibling 목록, 일반 위/아래는 보이는 행, Shift+위/아래는 형제 범위, 좌/우는 단일 Group 접기/펼치기다. eye/disclosure와 이름 입력은 별도 포커스다. 다중 선택에서는 Add·복제/삭제·들여쓰기/내어쓰기·숫자/paint 필드를 비활성화하고 Pen/gradient에 임의의 singleton 대상을 전달하지 않는다.
+- 선택한 label 드래그는 원래 순서를 유지하는 형제 block을 같은 부모의 before/after gap으로 옮긴다. Group 뒤 marker는 subtree 뒤에 표시한다. Core의 완전 순열 명령은 누락/중복/외부/descendant ID, 잘못된 부모·콘텐츠·잠금을 원자적으로 거부한다. 전체 node payload, ID/next_id, transform, key/pose/reference, gradient/dash 설정을 그대로 옮기고 기존 schema/assets를 재작성하지 않는다. 단일/중첩 비어 있지 않은 reorder-only Batch만 좁게 보존 경로를 사용한다. 페인트가 받는 geometry와 overlap은 순서에 따라 의도적으로 바뀔 수 있다.
+- hover/선택/collapse와 원래 gap/no-op/취소는 source·Undo/Redo를 바꾸지 않는다. 실제 release 좌표로 다시 계획하며 Project 자체와 revision/comp/layer/frame/선택/잠금/가시 행을 검사해 오래된 드래그를 거부한다. 일반 편집은 document_revision을 바꾸지 않으므로 revision만 검사하지 않는다.
+- 리뷰에서 재생 중 키가 레이어로 새는 문제와 지원하지 않는 Contents clipboard/precompose/trim/time-remap 키의 전파를 수정했다. 트리 소유 editing/navigation 키는 blocked 상태에서도 소비하며 실제 modal Escape와 Undo/Redo, 전역 project/tool/view/time 동작은 구분한다. 필드/IME 포커스의 입력을 가로채지 않는다. 이 단계는 Contents clipboard나 cross-parent block reparent를 구현하지 않는다.
+- 실제 UI에서 일반 native Ctrl+S가 tree focus를 잃은 뒤 Undo/Delete가 전체 레이어를 지우는 회귀도 발견해 수정했다. 동일한 save_path 판정을 공유해 기존 native 파일로의 저장과 진행 중 저장 no-op은 포커스를 유지하고, 진짜 chooser 경로는 기존 Enter key-up 방지 blur를 유지한다. TextField 자체 submit/blur는 바꾸지 않는다. retained 선택은 활성 blue/비활성 gray와 focused/inactive 문구로 구분하며 Pen의 singleton Group 대상은 보존한다.
+- 최종 자동 검증: 코어 238개 + 데스크톱 452개(기본 690개), 명시적 FFmpeg 30개, fmt/check/diff/릴리스 통과. 신규 29개는 Core 11, 트리 13, 렌더 2, 저장 포커스 3이며 기본 집계에 포함한다. 렌더 검사는 0/30/60프레임의 의도된 scope/overlap 변화, preview/output 및 native LEP 왕복을 검사한다. 두 독립 영역 리뷰와 수정 재리뷰에 차단 문제가 없다.
+- 네이티브 v2는 루트/중첩의 noncontiguous block, 숫자 ID와 반대인 visual order, expanded/collapsed subtree, cross-parent/outside/no-op 거부, 한 Undo/Redo, 이름 필드·clipboard/trim 키, 단일/다중 Pen 대상과 Save/reopen을 확인했다. 17개 기록 사례에는 당시 발견한 save-focus 문제도 포함하므로 전부 성공 사례로 합산하지 않는다. 26개 사후 파일 assertion과 36개 원본 CUA 화면을 별도 보존했다. 최종 v3는 row→duplicate→직접 Save→Undo→Delete가 Group만 지우고 레이어 하나를 유지함을 확인했고, Save As의 inactive 표시·명시적 재포커스, 실제 재생 중 Delete/방향키/Ctrl+D 차단과 진행하는 프레임을 검증했다. 정지 후 source와 저장/재열기 PROJ 및 frame2466이 정확히 유지됐다. 빌드별 검사 범위를 구분하며 held 중간 화면, 실제 IME, Windows/DPI와 더 넓은 interruption/gradient 조합은 미검증으로 남긴다.
 
 ### 고유 LEP 프로젝트 컨테이너 — 2026-10-03
 

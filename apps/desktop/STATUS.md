@@ -1,8 +1,8 @@
 # Current desktop implementation status
 
 Updated 2026-10-03 for the resumed-work, I01 output-preflight and
-E04/E02 editing, D03 time-box, animated path-order, native LEP and Pen marquee
-checkpoints.
+E04/E02 editing, D03 time-box, animated path-order, native LEP, Pen marquee and
+Contents sibling-tree checkpoints.
 This is the current checkpoint inventory;
 [DEVELOPMENT_BACKLOG.md](DEVELOPMENT_BACKLOG.md) retains the original audit and
 its dated implementation/test history. Older “remaining” lists and test counts
@@ -62,6 +62,17 @@ does not establish a complete native editing workflow.
   groups. Existing applicable paints are inherited without paint additions; the
   Group remains selected for repeated drawing. Invalid targets/limits reject
   atomically. Existing hit precedence, Ctrl-mask and standalone fallback remain.
+- **Contents sibling tree:** plain/Ctrl/Shift selection, sibling Ctrl+A/range
+  navigation and same-parent block dragging preserve selected/unselected relative
+  order. Groups move as whole subtrees; no hover edit or implicit reparent occurs.
+  Complete permutations preserve IDs, parameters, keys, poses, references and
+  historical schema/assets. Stale Project/context, hidden rows and invalid drops
+  cancel safely; unchanged gaps preserve history. Singleton controls and Pen/
+  gradient targets remain separate from multi-selection. Tree-owned and
+  unsupported selection-edit shortcuts cannot fall through to layers, including
+  during playback. Direct native Save retains focus; genuine focus loss has a
+  muted retained-selection cue. Paint scope/overlap can intentionally change with
+  order. Cross-parent block moves, bulk fields and compound Colors remain open.
 - **Speed Graph time box:** two horizontal handles scale selected key times while
   preserving values and temporal metadata through the existing core command.
   Finite signed endpoint speeds place the box; snapping is time-only and drafts
@@ -114,16 +125,16 @@ does not establish a complete native editing workflow.
 
 The combined checkpoint includes all prior restoration/I01/Gradient/Pen fixes,
 selected-group creation, Speed Graph time scaling, whole-track path ordering and
-native `.lep` storage integration and same-path marquee/Ctrl+A. Formatting, type
-checking, all 661 default
+native `.lep` storage integration, same-path marquee/Ctrl+A and the sibling tree.
+Formatting, type checking, all 690 default
 tests, the explicit 30-test media suite
 and the optimized release build passed. Native checks are listed separately with
 their tested build and coverage; automated tests do not imply native acceptance.
 
 | Check | Result and boundary |
 | --- | --- |
-| Core tests | 227 passed, including 16 codec and one native-budget regression plus prior save-budget, group-space and path-order tests. |
-| Desktop default tests on Linux | 434 passed, including native storage/view/recovery/editor/queue/CLI and 35 new marquee/view regressions plus prior editing/focus/I01 tests; 30 FFmpeg tests ignored by default. |
+| Core tests | 238 passed, including 11 Contents permutation/preservation regressions, 16 codec and one native-budget regression plus prior save-budget, group-space and path-order tests. |
+| Desktop default tests on Linux | 452 passed, including 13 tree interaction/shortcut, 2 Contents reorder render and 3 direct-Save focus regressions, plus the prior native-file/marquee/editing/focus/I01 tests; 30 FFmpeg tests ignored by default. |
 | Explicit FFmpeg integration suite | All 30 ignored media tests were explicitly run and passed. They are not included in the default pass count. |
 | Focused editing regressions | 16 modal-transaction tests, 89 Pen tests (including 26 marquee, 8 frozen-view, 14 group-creation and 14 path-order tests), 3 Preview tests (one new view snapshot), 17 Speed-box tests, 5 path-order rendering tests, 3 shell-focus tests and the prior 20 gradient-draft/endpoint tests passed within the desktop suite; do not add these counts a second time. |
 | Release build | `cargo build -p libre-effects-desktop --release --locked` succeeded after the final review fixes. The earlier interrupted-build blocker is closed. |
@@ -139,6 +150,7 @@ their tested build and coverage; automated tests do not imply native acceptance.
 | Native selected-group Pen / Speed time box | Optimized release passed nested closed/open curves, repeated group creation, Cancel, one-Undo/Redo, save/reopen and Ctrl-mask/standalone controls. Existing path/paint JSON remained exact; independent group-transform reconstruction matched actual click coordinates within 0.223 pixels per axis. Speed showed only two side handles; vertical-only and return-to-start drags were no-ops, horizontal scaling preserved values/influences with common nominal slope compensation, and one-Undo/Redo/reopen matched saved data. The inset frame-zero handle was visible and draggable without hiding the key glyph. 26 post-hoc assertions and 15 native screenshots record these flows. Alt-centered/differential snap, held-drag interruption, tiny plots and full layout/DPI coverage remain unverified natively. Extremely short plots may omit a handle if no glyph-clear position fits. |
 | Native whole-track path order | Corrected release passed First/Reverse geometry and tangent permutations, independent first-point marker, index-zero no-op history, exact Undo/Redo, remapped pair drag, whole animated base/pose/timing preservation, Properties Reverse, save/reopen at frame 60, and nested/mask routes. Multiple-selection First and unfinished-draft shortcuts were safely rejected. 25 post-hoc assertions and 16 original screenshots record the tested flows; four original fixture hashes were unchanged. Native open-path, locked/stale/modifier/IME and held-input combinations remain unverified after the requested format-priority change. |
 | Native Pen marquee/Ctrl+A | Separately pinned release passed static additive box selection, Ctrl+A whole-path movement, nested rotated/skewed Contents and mask targeting, including box selection from an empty retained mask target. Only intended anchor positions changed by equal local deltas; other vertices, tangents and metadata stayed exact. One-step Undo/Redo matched baseline/results. No-target and selection-only gestures changed no source; animated box/Ctrl+A at frame 30 preserved every pose and timing key without adding keys. Static .lep geometry was saved and actually reopened. A first tightly batched selection/save/drag attempt moved one point; it was undone and the separately observed gesture passed. No general Save-focus guarantee is inferred from that input-timing observation. Held-drag observation/interruption, broader focus/IME, Windows and DPI combinations remain unverified natively. |
+| Native Contents sibling tree | Candidate v2 passed root/nested block moves, nonnumeric visual order, expanded/collapsed subtree targets, rejected/no-op drops, one Undo/Redo, singleton/multi controls, clipboard/trim routing, text-field input, Pen targeting and native save/reopen. 17 recorded cases (including the discovered focus issue) and 26 file assertions preserve build attribution. QA found direct Ctrl+S could blur an apparently active tree before a subsequent Delete; the final tested v3 corrects direct-save focus and distinguishes inactive selection. Final v3 passed the exact row→duplicate→direct Save→Undo→Delete regression with one layer retained, blue active focus through direct Save, gray inactive focus after Save As and explicit refocus. During actual five-minute-fixture playback, owned Delete/arrows/Ctrl+D stayed consumed while frames advanced; stopped/save/reopen PROJ and saved frame 2466 remained exact. V2 functional cases and v3 focus/playback checks retain their separate build attribution. Held-drag intermediate observation, real IME, Windows/DPI and the wider interruption/gradient-control matrix remain unverified natively. |
 | Windows CI and device behavior | Fresh remote CI has not run: the requested checkpoint is local commits only, with no push or PR. Historical Windows native/device results remain in the backlog; the Windows-only audio-device test was not run on Linux. |
 
 Linux native startup needs a working Vulkan driver, and Open/Save needs a running
@@ -221,7 +233,7 @@ Every original A01–L05 ID appears once below. The labels are deliberately boun
 | E01 | Partial | Drag-created rectangle, rounded rectangle, ellipse, polygon and star; open lines can be drawn with Pen. Dedicated parametric line/tool-default controls and wider native regression remain. |
 | E02 | Partial | Open/closed Bezier Pen, insert/delete/convert points, handles, parametric conversion, same-path additive marquee/Ctrl+A, multi-vertex moves/static deletion through transforms, animated-safe Reverse/Set First and first-point marker. Cross-path selection, numeric vertex editing and topology-changing animation remain. |
 | E03 | Partial | Animated scalar/RGB/opacity paint, cap/join/miter/dash controls, fractional Points and Contents linear/radial Gradient Fill/Stroke. Remaining parametric details, topology editing and complete native coverage are not done. |
-| E04 | Partial | Nested Contents tree, paths/paints, animated group transforms/Skew, Composite ordering, 16 paint blend modes, live gradient ramp drafts, transformed canvas endpoints, transactional modal Gradient Editor and selected-group Pen creation. Compound Colors animation and tree drag/multi-selection remain. |
+| E04 | Partial | Nested Contents tree, paths/paints, animated group transforms/Skew, Composite ordering, 16 paint blend modes, gradient drafts/endpoints/modal editor, selected-group Pen and same-parent sibling multi-selection/block ordering. Compound Colors animation, cross-parent block dragging and bulk field editing remain; bounded native acceptance is recorded above. |
 | E05 | Partial | Fixed-topology shape/mask path animation exists. Trim Paths, Repeater, Merge/Offset Paths and topology-changing interpolation are not implemented. |
 | E06 | Not implemented | SVG import with editable element conversion and unsupported-element reporting. Internal SVG rendering is not an SVG importer. |
 
@@ -306,8 +318,11 @@ Save/Open/Save As, CLI, recovery and Collect Files implementation, automated che
 and the bounded native acceptance above passed. The dedicated-format milestone
 is complete. The preserved same-path marquee/Ctrl+A slice also passes
 focused/aggregate/media/release checks and the bounded native acceptance above.
-Next: E04 Contents sibling multi-selection and same-parent block reordering;
-cross-parent moves need their own coordinate/paint-scope design.
+The E04 Contents sibling tree also passes aggregate/model/render checks, its
+bounded native workflows and the corrected direct-save focus/playback gate.
+Next proposed bounded F03/D01 slice: layer-wide Text Fill RGB, Stroke RGB and
+Stroke Width animation, retaining static typography and paint switches/order.
+Cross-parent tree moves need their own coordinate/paint-scope design.
 This does not close the broader A04 backup-management or other backlog extensions.
 
 1. Extend native editing acceptance and retained regression evidence, especially

@@ -92,8 +92,9 @@ changes without falling through to layer deletion. The same selection workflow
 works on legacy shapes, vector masks and nested Contents paths. Escape, focus,
 time, tool, target or document changes cancel a pending gesture. Opening Settings,
 Help or other shell overlays removes canvas focus before editing shortcuts run.
-File actions such as Save request canvas blur; actual focus loss clears transient
-vertex selection. Check/reselect vertices before the next multi-vertex gesture.
+Actions that open native file choosers request canvas blur; actual focus loss
+clears transient vertex selection. Ordinary Ctrl+S to the existing native file
+keeps focus. Check/reselect vertices after a chooser or another focus change.
 
 Existing vector paths support **Reverse Direction** from their Path property row,
 or **Shift+R** with a nonempty same-path Pen selection. **Shift+F** sets a single
@@ -108,8 +109,8 @@ IDs. Incoming/outgoing tangent offsets swap during reversal. Each change is one
 Undo, and choosing the current first vertex creates no history entry. Selected
 indices remap so the same geometric points remain selected for the next drag.
 Shortcuts require canvas focus and ignore key repeat or unrelated modifier chords;
-finish/cancel a draft, insertion or held drag before changing path order. Save and
-other file actions request blur; actual focus changes clear transient Pen selection.
+finish/cancel a draft, insertion or held drag before changing path order. Native
+chooser actions request blur; actual focus changes clear transient Pen selection.
 
 The cubic curve is preserved, but its **appearance can change**: reversing one
 contour changes its winding and can create/remove holes in a Non-Zero compound
@@ -2061,6 +2062,51 @@ independently of layer transforms. Parametric paths have independent size and
 position and can be converted to editable Bezier paths. Pen edits existing
 Contents paths through the accumulated group/layer transform.
 
+### Contents selection and ordering
+
+Click an item **label** to select it. Ctrl-click toggles siblings, Shift-click
+selects a sibling range, and Ctrl+Shift-click adds that range. Selecting a child
+of another parent starts a new selection. A Group is one item with its entire
+subtree; selecting it does not independently select each descendant. Eye and
+disclosure buttons remain separate controls.
+
+Drag a selected label to move the selected sibling block before/after the
+insertion marker. The selected items retain their original order, as do all
+unselected siblings. An unselected label first becomes the sole selection. A
+Group's after-marker follows its whole subtree, including collapsed children.
+Dragging does **not** reparent items; the existing singleton indent/outdent
+controls remain separate. Hover and selection do not edit the document. A valid
+release is one Undo; an unchanged order or canceled drag preserves Undo/Redo.
+Source, document, composition, layer, frame, lock or hidden-row changes, focus
+loss and window deactivation cancel a stale drag instead of applying its old target.
+
+Rename, numeric/paint controls, duplicate/delete and indent/outdent require one
+selected item. Add uses the selected Group or the existing singleton parent;
+with no selection it adds at root, and with multiple selections it is disabled.
+Only a singleton selection is shared with Pen group creation and gradient
+endpoint controls. Multi-selection never chooses one of its Groups implicitly.
+
+With the tree focused, Ctrl+A selects its active sibling list; Up/Down navigates
+visible rows, Shift+Up/Down extends a sibling range, and Left/Right collapses or
+expands one Group. Delete/Backspace and Ctrl+D affect one Contents item only;
+they do nothing for multi-selection. Unsupported Contents clipboard,
+pre-compose, layer trim and time-remap shortcuts are consumed here, rather than
+editing whole layers or old Timeline keys. Select the layer/Timeline to use
+those layer commands. Name/numeric fields retain their own text-input shortcuts,
+and global Save/Open, Undo/Redo, tool, view/time and Space playback shortcuts remain
+available. Ordinary Ctrl+S to an existing native file preserves the active tree
+focus. Blue rows and the count-line focus label identify the active tree; retained
+inactive selections are gray. After a native chooser or another focus change,
+click a row again before using tree shortcuts. Tree interaction is inactive
+during playback, Render Queue display or
+another blocked editing/dialog flow; its owned keys do not fall through to layers.
+
+Reordering preserves item IDs, local transforms, keys, poses, paint settings and
+references. It can intentionally change **which paths receive a paint and the
+overlap order**, following the rules below. It does not compensate coordinates or
+promise unchanged pixels. Cross-parent block dragging, bulk field edits and a
+Contents clipboard remain future work; no new project/LEP schema is required.
+
 Paints consume paths above them in the same group, including transformed paths
 from child groups. Earlier paints/groups composite in front of later ones.
 A Fill treats its paths as one compound shape, with Non-Zero or Even-Odd fill
@@ -2083,8 +2129,8 @@ are isolated before group opacity and the layer's masks/effects are applied.
 Non-Normal paint blending requires project version 47; old paints remain Normal.
 The modes follow sRGB/W3C compositing at the current 8-bit raster precision.
 AE pixel/color-space equivalence, Add/other AE modes, group Blend Mode and
-animated mode switching remain future work, alongside path operators and tree
-dragging. Layer blending remains the existing separate five-mode control.
+animated mode switching remain future work, alongside path operators and
+cross-parent block dragging. Layer blending remains the existing separate five-mode control.
 Fill and Stroke have a common color picker with HEX/RGB/HSV, opacity, recent
 colors and viewer sampling. Cancel leaves the document unchanged; accepting a
 draft updates only changed channels at the current frame as one Undo step.

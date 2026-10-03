@@ -4,17 +4,23 @@ use crate::{
     ui,
 };
 use gpui::{
-    Bounds, Context, Entity, FocusHandle, Pixels, Window, anchored, canvas, deferred, div, point,
-    prelude::*, px, rgb,
+    Bounds, Context, Entity, FocusHandle, MouseButton, Pixels, Window, anchored, canvas, deferred,
+    div, point, prelude::*, px, rgb,
 };
 use libre_effects_core::{
     Command, Content, ContentsEdit, ContentsKind, ContentsParam, GradientParam, PaintBlend,
     PaintComposite, PathTarget, PropertyPath, ShapeGradient, ShapeKind, ShapeStroke, StrokeCap,
     StrokeJoin, TrackEdit,
 };
-use std::{cell::Cell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 pub(super) mod gradient_ramp;
+mod tree;
+mod tree_selection;
 use gradient_ramp::RampDrag;
+use tree_selection::Selection;
 
 struct PaintMenu {
     layer: u64,
@@ -37,6 +43,11 @@ pub(crate) struct ContentsControls {
     state: Entity<EditorState>,
     owner: Option<(libre_effects_core::CompositionId, u64)>,
     selected: Option<u64>,
+    selection: Selection,
+    owner_revision: u64,
+    tree_drag: Option<tree::Drag>,
+    tree_focus: FocusHandle,
+    tree_rows: Rc<RefCell<std::collections::BTreeMap<u64, tree::RowBounds>>>,
     fields: Vec<(ContentsParam, Entity<TextField>)>,
     name: Option<Entity<TextField>>,
     add_open: bool,
@@ -59,9 +70,17 @@ impl ContentsControls {
                 .ramp_drag
                 .as_ref()
                 .is_some_and(|d| !d.current(s, this.selected));
+            let cancel_tree = this
+                .tree_drag
+                .as_ref()
+                .is_some_and(|d| !d.current(s, &this.selection, &this.collapsed));
             let cancel_menu = this.paint_menu.as_ref().is_some_and(|m| {
                 m.revision != s.document_revision || s.editor.selected() != Some(m.layer)
             });
+            if cancel_tree {
+                this.tree_drag = None;
+            }
+            this.reconcile_tree(cx);
             if cancel_ramp {
                 this.cancel_ramp(cx);
             }
@@ -75,6 +94,11 @@ impl ContentsControls {
             state,
             owner: None,
             selected: None,
+            selection: Selection::default(),
+            owner_revision: 0,
+            tree_drag: None,
+            tree_focus: cx.focus_handle(),
+            tree_rows: Default::default(),
             fields: vec![],
             name: None,
             add_open: false,
@@ -95,6 +119,7 @@ impl ContentsControls {
         self.cancel_ramp(cx);
         self.ramp_selected = None;
         let composition = self.state.read(cx).editor.project().active_composition_id();
+        let revision = self.state.read(cx).document_revision;
         if self.owner != Some((composition, layer)) || self.selected != Some(item) {
             self.gradient_stop = None;
         }
@@ -130,7 +155,10 @@ impl ContentsControls {
                     cx.new(|cx| {
                         TextField::new(cx, move |text, w, cx| {
                             state.update(cx, |s, cx| {
-                                if s.editor.selected() != Some(layer) {
+                                if s.editor.selected() != Some(layer)
+                                    || s.document_revision != revision
+                                    || s.contents_selection != Some((composition, layer, item))
+                                {
                                     return;
                                 }
                                 match text.trim().parse::<f64>() {
@@ -164,7 +192,10 @@ impl ContentsControls {
         self.name = Some(cx.new(|cx| {
             TextField::new(cx, move |text, w, cx| {
                 state.update(cx, |s, cx| {
-                    if s.editor.selected() == Some(layer) {
+                    if s.editor.selected() == Some(layer)
+                        && s.document_revision == revision
+                        && s.contents_selection == Some((composition, layer, item))
+                    {
                         s.dispatch(
                             &Action::Edit(Command::Contents {
                                 id: layer,
@@ -231,6 +262,7 @@ impl Render for ContentsControls {
             watches.push(cx.observe_window_activation(w, |this, w, cx| {
                 if !w.is_window_active() {
                     this.paint_menu = None;
+                    this.tree_drag = None;
                     this.cancel_ramp(cx);
                     cx.notify();
                 }
@@ -239,8 +271,17 @@ impl Render for ContentsControls {
                 this.cancel_ramp(cx);
                 cx.notify();
             }));
+            watches.push(cx.on_blur(&self.tree_focus, w, |this, _, cx| {
+                this.tree_drag = None;
+                cx.notify();
+            }));
+            // Repaint retained selection when keyboard focus enters/leaves any
+            // part of the tree. The singleton Pen target survives these changes.
+            watches.push(cx.on_focus_in(&self.tree_focus, w, |_, _, cx| cx.notify()));
+            watches.push(cx.on_focus_out(&self.tree_focus, w, |_, _, _, cx| cx.notify()));
             self.paint_watches = Some(watches);
         }
+        self.reconcile_tree(cx);
         let mut root = div().flex().flex_col().gap_1();
         let Some(layer) = self.state.read(cx).editor.selected_layer().cloned() else {
             return root;
@@ -258,21 +299,6 @@ impl Render for ContentsControls {
             return root;
         };
         let composition = self.state.read(cx).editor.project().active_composition_id();
-        if self.owner != Some((composition, id))
-            || self.selected.is_some_and(|n| contents.node(n).is_none())
-        {
-            self.cancel_ramp(cx);
-            self.owner = Some((composition, id));
-            self.state.update(cx, |s, cx| {
-                s.contents_selection = None;
-                cx.notify();
-            });
-            self.selected = None;
-            self.fields.clear();
-            self.name = None;
-            self.add_open = false;
-            self.collapsed.clear();
-        }
         let parent = self
             .selected
             .and_then(|item| {
@@ -289,12 +315,17 @@ impl Render for ContentsControls {
                     })
             })
             .unwrap_or(0);
-        root = root.child(ui::text_button("contents-add", "Add ▾").when(!locked, |b| {
-            b.on_click(cx.listener(|this, _, _, cx| {
-                this.add_open = !this.add_open;
-                cx.notify();
-            }))
-        }));
+        root = root.child(
+            ui::text_button("contents-add", "Add ▾")
+                .when(self.selection.items.len() > 1 || locked, |b| b.opacity(0.4))
+                .when(!locked && self.selection.items.len() <= 1, |b| {
+                    b.on_click(cx.listener(|this, _, _, cx| {
+                        this.tree_drag = None;
+                        this.add_open = !this.add_open;
+                        cx.notify();
+                    }))
+                }),
+        );
         if self.add_open {
             for (index, kind) in [
                 ContentsKind::Group(vec![]),
@@ -342,89 +373,137 @@ impl Render for ContentsControls {
                 );
             }
         }
-        let mut hidden_depth = None;
-        for (depth, _, node) in contents.rows() {
-            if hidden_depth.is_some_and(|d| depth > d) {
-                continue;
-            }
-            hidden_depth = None;
+        let tree_active = self.tree_focus.contains_focused(w, cx);
+        let visible = tree_selection::visible_rows(contents, &self.collapsed);
+        self.tree_rows
+            .borrow_mut()
+            .retain(|id, _| visible.iter().any(|(_, _, item)| item == id));
+        let marker = self
+            .tree_drag
+            .as_ref()
+            .and_then(|d| d.gap)
+            .and_then(|g| tree::marker_row(g, &visible));
+        let tree_owner = cx.entity();
+        let mut tree = div()
+            .id("contents-tree")
+            .track_focus(&self.tree_focus)
+            .tab_index(0)
+            .relative()
+            .flex()
+            .flex_col()
+            .min_h(px(26.))
+            .on_key_down(cx.listener(Self::tree_key))
+            .child(
+                canvas(
+                    |_, _, _| (),
+                    move |_, _, w, _| {
+                        // Register before the first press, so a fast down/up cannot lose release.
+                        let moving = tree_owner.clone();
+                        w.on_mouse_event(move |e: &gpui::MouseMoveEvent, phase, w, cx| {
+                            if phase.bubble() {
+                                moving.update(cx, |this, cx| this.tree_move(e, w, cx));
+                            }
+                        });
+                        let ending = tree_owner.clone();
+                        w.on_mouse_event(move |e: &gpui::MouseUpEvent, phase, w, cx| {
+                            if phase.bubble() && e.button == MouseButton::Left {
+                                ending.update(cx, |this, cx| this.tree_up(e.position, w, cx));
+                            }
+                        });
+                    },
+                )
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full(),
+            );
+        for &(depth, parent, item) in &visible {
+            let node = contents.node(item).unwrap();
             let is_group = matches!(node.kind, ContentsKind::Group(_));
-            let collapsed = self.collapsed.contains(&node.id);
-            if is_group && collapsed {
-                hidden_depth = Some(depth);
-            }
-            let item = node.id;
+            let collapsed = self.collapsed.contains(&item);
             let state = self.state.clone();
             let enabled = node.enabled;
-            root = root.child(
+            let row_bounds = self.tree_rows.clone();
+            tree = tree.child(
                 div()
+                    .relative()
                     .flex()
                     .items_center()
                     .pl(px(depth as f32 * 10.))
-                    .h(px(26.))
+                    .h(px(26.)).flex_none()
                     .when(is_group, |d| {
                         d.child(
                             ui::tool(
                                 ("contents-expand", item),
-                                if collapsed {
-                                    "chevron-right"
-                                } else {
-                                    "chevron-down"
-                                },
+                                if collapsed { "chevron-right" } else { "chevron-down" },
                                 "Expand or collapse group",
                                 false,
                             )
-                            .on_click(cx.listener(
-                                move |this, _, _, cx| {
-                                    if !this.collapsed.remove(&item) {
-                                        this.collapsed.insert(item);
-                                    }
-                                    cx.notify();
-                                },
-                            )),
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.tree_collapse(item, cx);
+                                cx.stop_propagation();
+                            })),
                         )
                     })
                     .child(
-                        ui::tool(
-                            ("contents-visible", item),
-                            "eye",
-                            "Toggle item visibility",
-                            enabled,
-                        )
+                        ui::tool(("contents-visible", item), "eye", "Toggle item visibility", enabled)
                         .when(!locked, |b| {
                             b.on_click(move |_, w, cx| {
                                 state.update(cx, |s, cx| {
-                                    s.dispatch(
-                                        &Action::Edit(Command::Contents {
-                                            id,
-                                            edit: ContentsEdit::Enabled {
-                                                item,
-                                                enabled: !enabled,
-                                            },
-                                        }),
-                                        w,
-                                        cx,
-                                    )
-                                })
+                                    s.dispatch(&Action::Edit(Command::Contents { id, edit: ContentsEdit::Enabled { item, enabled: !enabled } }), w, cx)
+                                });
+                                cx.stop_propagation();
                             })
                         }),
                     )
                     .child(
-                        ui::text_button(("contents-item", item), node.name.clone())
-                            .when(is_group, |b| b.tooltip(|_, cx| cx.new(|_| ui::Tip("Select this group to draw new Pen paths inside it. Paths use existing applicable paints; without a paint they remain editable outlines with no rendered output.".into())).into()))
-                            .flex_1()
-                            .min_w_0()
-                            .justify_start()
-                            .when(self.selected == Some(item), |b| b.bg(rgb(0x164a7b)))
-                            .on_click(cx.listener(move |this, _, _, cx| this.select(id, item, cx))),
-                    ),
+                        div().id(("contents-item", item))
+                            .px_2().h(px(25.)).flex().items_center().cursor_pointer()
+                            .hover(|b| b.bg(rgb(0x353535)))
+                            .when(is_group, |b| b.tooltip(|_, cx| cx.new(|_| ui::Tip("Select this group to draw new Pen paths inside it. Drag its label to move the whole subtree between siblings. Order can change paint scope and overlap.".into())).into()))
+                            .flex_1().min_w_0().justify_start()
+                            .when(self.selection.items.contains(&item), |b| b.bg(rgb(if tree_active { 0x164a7b } else { 0x34383f })))
+                            .on_mouse_down(MouseButton::Left, cx.listener(move |this, event, w, cx| this.tree_down(id, parent, item, event, w, cx)))
+                            .child(node.name.clone()),
+                    )
+                    .child(canvas(|_, _, _| (), move |bounds, _, w, _| {
+                        row_bounds.borrow_mut().insert(item, tree::RowBounds { parent, bounds, visible: bounds.intersect(&w.content_mask().bounds) });
+                    }).absolute().top_0().left_0().size_full())
+                    .when(marker.is_some_and(|(id, _)| id == item), |row| {
+                        row.child(div().absolute().left_0().right_0().h(px(2.)).bg(rgb(ui::BLUE))
+                            .when(marker.is_some_and(|(_, after)| after), |line| line.bottom_0())
+                            .when(marker.is_some_and(|(_, after)| !after), |line| line.top_0()))
+                    }),
             );
         }
+        root = root
+            .child(tree)
+            .child(div().text_size(px(11.)).child(format!(
+                "{} selected · tree {}",
+                self.selection.items.len(),
+                if tree_active { "focused" } else { "inactive" }
+            )))
+            .child(
+                div()
+                    .text_size(px(10.))
+                    .text_color(rgb(ui::MUTED))
+                    .child("Ctrl-click toggles siblings · Shift-click selects a range"),
+            )
+            .child(
+                div()
+                    .text_size(px(10.))
+                    .text_color(rgb(ui::MUTED))
+                    .child("Drag labels between siblings · order may change paint scope"),
+            );
         let Some(item) = self.selected else {
             return root.child(
                 div()
                     .text_size(px(11.))
-                    .child("Select a Contents item to edit"),
+                    .child(if self.selection.items.len() > 1 {
+                        "Select one item for editing controls"
+                    } else {
+                        "Select a Contents item to edit"
+                    }),
             );
         };
         let Some(node) = contents.node(item) else {

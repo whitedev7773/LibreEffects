@@ -1207,11 +1207,15 @@ pub enum Command {
 }
 
 impl Command {
-    fn reorders_paths_only(&self) -> bool {
+    fn reorders_only(&self) -> bool {
         match self {
-            Self::ReorderPath { .. } => true,
+            Self::ReorderPath { .. }
+            | Self::Contents {
+                edit: ContentsEdit::Reorder { .. },
+                ..
+            } => true,
             Self::Batch(commands) => {
-                !commands.is_empty() && commands.iter().all(Self::reorders_paths_only)
+                !commands.is_empty() && commands.iter().all(Self::reorders_only)
             }
             _ => false,
         }
@@ -1305,9 +1309,9 @@ impl Editor {
     pub fn execute(&mut self, command: Command) -> Result<(), String> {
         // Apply to a candidate so invalid commands never partially mutate the project.
         let mut next = self.current.clone();
-        let geometry_only = command.reorders_paths_only();
+        let reorder_only = command.reorders_only();
         apply(&mut next, command)?;
-        if geometry_only {
+        if reorder_only {
             // Reindexing needs no schema/asset migration, even for imported projects.
             return self.accept_candidate(next);
         }

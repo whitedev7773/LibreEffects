@@ -336,6 +336,30 @@ impl EditorState {
             })
             .cloned()
     }
+    pub(super) fn should_blur_for_file_action(&self, action: &Action) -> bool {
+        match action {
+            // Direct saves and already-running saves do not open a chooser.
+            // Keep keyboard ownership unless save_project will prompt.
+            Action::Save | Action::SaveAs => {
+                !self.saving && self.save_path(matches!(action, Action::SaveAs)).is_none()
+            }
+            Action::Open
+            | Action::CollectFiles
+            | Action::RelinkSource(_)
+            | Action::RelinkMissing
+            | Action::ImportImageSequence
+            | Action::RelinkSequence(_)
+            | Action::ImportImage
+            | Action::ImportVideo
+            | Action::RelinkVideo
+            | Action::ExportFrame
+            | Action::ExportFrameBackground
+            | Action::ExportSequence
+            | Action::ExportSequenceBackground
+            | Action::ExportVideo(_) => true,
+            _ => false,
+        }
+    }
     fn save_directory(&self) -> PathBuf {
         self.path
             .as_ref()
