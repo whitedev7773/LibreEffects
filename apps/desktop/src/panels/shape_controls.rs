@@ -4,7 +4,9 @@ use crate::{
     ui,
 };
 use gpui::{Context, Entity, Window, div, prelude::*, px};
-use libre_effects_core::{Command, Content, PropertyPath, ShapeKind, ShapeParam, TrackEdit};
+use libre_effects_core::{
+    Command, Content, PropertyPath, ShapeKind, ShapePaint, ShapeParam, TrackEdit,
+};
 
 fn parameter(index: usize) -> Option<ShapeParam> {
     match index {
@@ -33,6 +35,14 @@ impl ShapeControls {
                     if layer.locked() {return;}
                     let Content::Shape(mut shape) = layer.content().clone() else {return;};
                     let id = layer.id();
+                    if index == 0 {
+                        let command = ui::parse_hex_color(text).map_err(str::to_owned).and_then(|color| layer.shape_color_command(ShapePaint::Stroke, color, s.frame));
+                        match command {
+                            Ok(command) => s.dispatch(&Action::Edit(command), window, cx),
+                            Err(error) => {s.status = error; cx.notify();}
+                        }
+                        return;
+                    }
                     if let Some(parameter) = parameter(index) {
                         match text.trim().parse::<f64>() {
                             Ok(value) => s.dispatch(&Action::Edit(Command::EditTrack {
@@ -77,6 +87,7 @@ impl Render for ShapeControls {
             return root;
         };
         let id = layer.id();
+        let fill_color = layer.color();
         let frame = self.state.read(cx).frame;
         let path_row = shape.path.as_ref().map(|_| {
             super::path_controls::row(
@@ -147,13 +158,26 @@ impl Render for ShapeControls {
             )));
         }
         let values = [
-            format!("{:06X}", shape.stroke_color),
-            shape.value_at(ShapeParam::StrokeWidth, frame).to_string(),
-            shape.value_at(ShapeParam::Roundness, frame).to_string(),
+            format!(
+                "{:06X}",
+                shape.paint_color_at(ShapePaint::Stroke, fill_color, frame)
+            ),
+            shape
+                .value_at(ShapeParam::StrokeWidth, frame, fill_color)
+                .to_string(),
+            shape
+                .value_at(ShapeParam::Roundness, frame, fill_color)
+                .to_string(),
             shape.points.to_string(),
-            shape.value_at(ShapeParam::InnerRadius, frame).to_string(),
-            shape.value_at(ShapeParam::FillOpacity, frame).to_string(),
-            shape.value_at(ShapeParam::StrokeOpacity, frame).to_string(),
+            shape
+                .value_at(ShapeParam::InnerRadius, frame, fill_color)
+                .to_string(),
+            shape
+                .value_at(ShapeParam::FillOpacity, frame, fill_color)
+                .to_string(),
+            shape
+                .value_at(ShapeParam::StrokeOpacity, frame, fill_color)
+                .to_string(),
         ];
         for (index, label) in [
             (5, "Fill opacity"),
@@ -188,6 +212,15 @@ impl Render for ShapeControls {
                             .w(px(105.0))
                             .flex()
                             .items_center()
+                            .when(index == 0, |d| {
+                                d.child(super::shape_values::color_watch(
+                                    &self.state,
+                                    &shape,
+                                    id,
+                                    ShapePaint::Stroke,
+                                    frame,
+                                ))
+                            })
                             .when_some(parameter(index), |d, p| {
                                 d.child(super::shape_values::watch(
                                     &self.state,
@@ -202,8 +235,8 @@ impl Render for ShapeControls {
                     .when(index == 0, |d| {
                         d.child(super::color_picker::swatch(
                             "shape-stroke-color",
-                            shape.stroke_color,
-                            crate::color_edit::Target::Stroke(id),
+                            shape.paint_color_at(ShapePaint::Stroke, fill_color, frame),
+                            crate::color_edit::Target::Shape(id, ShapePaint::Stroke),
                             locked,
                             &self.state,
                         ))

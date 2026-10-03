@@ -1,5 +1,7 @@
 //! Color-dialog drafts never mutate the document until accepted.
-use libre_effects_core::{Command, Content, Frame, LayerId, Project, Property};
+use libre_effects_core::{
+    Command, Content, Frame, LayerId, Project, Property, ShapePaint, TrackEdit,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -23,16 +25,19 @@ impl Color {
 pub(crate) enum Target {
     Fill(LayerId),
     Stroke(LayerId),
+    Shape(LayerId, ShapePaint),
     BackgroundDraft(u32),
 }
 impl Target {
     pub fn alpha(self) -> bool {
-        matches!(self, Self::Fill(_))
+        matches!(self, Self::Fill(_) | Self::Shape(_, _))
     }
     pub fn title(self) -> &'static str {
         match self {
             Self::Fill(_) => "Layer color",
             Self::Stroke(_) => "Stroke color",
+            Self::Shape(_, ShapePaint::Fill) => "Shape fill color",
+            Self::Shape(_, ShapePaint::Stroke) => "Shape stroke color",
             Self::BackgroundDraft(_) => "Composition background",
         }
     }
@@ -57,6 +62,22 @@ impl Session {
         frame: Frame,
     ) -> Result<Self, String> {
         let color = match target {
+            Target::Shape(id, paint) => {
+                let layer = project
+                    .composition()
+                    .layer(id)
+                    .ok_or("Layer no longer exists")?;
+                if layer.locked() {
+                    return Err("Unlock the layer before changing its color".into());
+                }
+                let Content::Shape(shape) = layer.content() else {
+                    return Err("Select a shape layer".into());
+                };
+                Color {
+                    rgb: shape.paint_color_at(paint, layer.color(), frame),
+                    opacity: shape.value_at(paint.opacity(), frame, layer.color()),
+                }
+            }
             Target::BackgroundDraft(rgb) => Color {
                 rgb,
                 opacity: 100.0,
@@ -181,6 +202,27 @@ impl Session {
     pub fn command(&self) -> Option<Command> {
         let mut commands = Vec::new();
         match self.target {
+            Target::Shape(id, paint) => {
+                if let Some(layer) = self.origin.composition().layer(id) {
+                    if self.color.rgb != self.original.rgb {
+                        commands.push(
+                            layer
+                                .shape_color_command(paint, self.color.rgb, self.frame)
+                                .ok()?,
+                        );
+                    }
+                    if self.color.opacity != self.original.opacity {
+                        commands.push(Command::EditShape {
+                            id,
+                            parameter: paint.opacity(),
+                            edit: TrackEdit::Value {
+                                frame: self.frame,
+                                value: self.color.opacity,
+                            },
+                        });
+                    }
+                }
+            }
             Target::Fill(id) => {
                 if self.color.rgb != self.original.rgb {
                     commands.push(Command::SetColor {
@@ -411,6 +453,123 @@ mod tests {
         assert_eq!(matte.get_pixel(50, 50).0[3], 255);
         e.execute(Command::ToggleLocked(1)).unwrap();
         assert!(Session::new(Target::Fill(1), e.project(), 3, 30).is_err());
+    }
+
+    #[test]
+    fn animated_shape_color_picker_edits_rgb_and_paint_alpha_in_one_undo() {
+        use libre_effects_core::{PropertyPath, Shape, ShapeParam};
+        let mut e = Editor::default();
+        e.execute(Command::ConfigureComposition {
+            name: "Paint colors".into(),
+            width: 200,
+            height: 200,
+            fps: 30,
+            duration: 60,
+        })
+        .unwrap();
+        e.execute(Command::AddContent {
+            content: Content::Shape(Shape {
+                stroke_color: 0x0000ff,
+                stroke_width: 20.,
+                ..Default::default()
+            }),
+            width: 100.,
+            height: 100.,
+            name: "Paint".into(),
+        })
+        .unwrap();
+        e.execute(Command::SetColor {
+            id: 1,
+            color: 0xff0000,
+        })
+        .unwrap();
+        for (paint, hex) in [
+            (ShapePaint::Fill, "0000FF80"),
+            (ShapePaint::Stroke, "FF000040"),
+        ] {
+            e.execute(
+                e.selected_layer()
+                    .unwrap()
+                    .shape_color_animation_command(paint, 0)
+                    .unwrap(),
+            )
+            .unwrap();
+            e.execute(Command::EditShape {
+                id: 1,
+                parameter: paint.opacity(),
+                edit: TrackEdit::ToggleAnimation { frame: 0 },
+            })
+            .unwrap();
+            let before = e.project().clone();
+            let mut draft = Session::new(Target::Shape(1, paint), e.project(), 0, 40).unwrap();
+            draft.input(0, hex).unwrap();
+            assert_eq!(e.project(), &before);
+            e.execute(draft.command().unwrap()).unwrap();
+            let after = e.project().clone();
+            e.undo();
+            assert_eq!(e.project(), &before);
+            e.redo();
+            assert_eq!(e.project(), &after);
+            assert!(draft.validate(e.project(), 0, 40).is_err());
+            assert_eq!(
+                e.selected_layer()
+                    .unwrap()
+                    .property(Property::Opacity)
+                    .value_at(40),
+                100.
+            );
+        }
+        let saved = Project::from_json(&e.project().to_json().unwrap()).unwrap();
+        let renderer = crate::rendering::Renderer::new();
+        for frame in [0, 10, 20, 30, 40] {
+            let image = renderer.render(&saved, frame, 200).unwrap();
+            assert_eq!(
+                image,
+                renderer.render_output(&saved, frame, 200, 200).unwrap()
+            );
+            let t = frame as f64 / 40.;
+            let f = [
+                (255. * (1. - t)).round() as u8,
+                0,
+                (255. * t).round() as u8,
+                (255. - 127. * t).round() as u8,
+            ];
+            let s = [
+                (255. * t).round() as u8,
+                0,
+                (255. * (1. - t)).round() as u8,
+                (255. - 191. * t).round() as u8,
+            ];
+            for (point, expected) in [((100, 100), f), ((45, 100), s)] {
+                let actual = image.get_pixel(point.0, point.1).0;
+                assert!(
+                    actual
+                        .into_iter()
+                        .zip(expected)
+                        .all(|(a, b)| a.abs_diff(b) <= 2),
+                    "{frame}: {actual:?} != {expected:?}"
+                );
+            }
+            for paint in [ShapePaint::Fill, ShapePaint::Stroke] {
+                let draft = Session::new(Target::Shape(1, paint), &saved, 0, frame).unwrap();
+                let expected = if paint == ShapePaint::Fill { f } else { s };
+                assert_eq!(
+                    draft.original.rgb,
+                    (expected[0] as u32) << 16 | expected[2] as u32
+                );
+            }
+        }
+        assert_eq!(
+            saved
+                .composition()
+                .layer(1)
+                .unwrap()
+                .track(PropertyPath::Shape(ShapeParam::FillRed))
+                .unwrap()
+                .keys()
+                .len(),
+            2
+        );
     }
 
     #[test]

@@ -18,6 +18,14 @@
 - **후속 고급 기능:** 패널 도킹·소스 뷰어·최근 프로젝트, 타임라인 고급 시간 편집/검색/가상화, 공간 경로·프리셋·표현식, Shape 연산/SVG·Text Animator, 추가 효과·모션 블러, 고정밀 색/HDR·Proxy/GPU, 템플릿, 설치/업데이트·한글화와 UI 회귀 자동화.
 - **별도 대형 단계:** 3D/카메라/라이트·모델, 추적·로토/Puppet, 플러그인/교환 포맷 연구, 웹/API 제품 범위. AEP/MOGRT 호환은 구현되지 않았다.
 
+### 도형 Fill·Stroke 색상 애니메이션 — 2026-10-03
+
+- E03/D01: Properties의 Fill/Stroke 색상 스톱워치가 RGB 세 채널을 함께 켜고 끈다. 다른 프레임의 HEX 입력·색 선택기는 RGB 키를 한 Undo로 편집한다. Timeline의 Fill Color/Stroke Color 그룹과 R/G/B별 Graph 선택, 공통 키 복사·시간 편집·보간을 연결했다. 일부 채널만 붙여넣은 경우 색상 편집 시 나머지 채널의 기본색을 최초 색상 키 시점에 보존한다.
+- 도형 색 선택기의 알파는 해당 Fill/Stroke 불투명도를 편집하며 레이어 Transform Opacity는 유지한다. RGB와 알파의 동시 변경도 한 Undo이고, 확정 전 임시 편집은 문서를 바꾸지 않는다. 프로젝트 v41은 색상 트랙을 사용할 때만 필요하며 이전 정적 색상은 유지한다. 보간은 0–255 인코딩 RGB 기준이며 표시/출력에서 8비트로 제한·반올림한다.
+- 검증: 코어 169개 + 데스크톱 230개(총 399개) 통과, 외부 미디어/장치 30개 제외. 부분 채널 붙여넣기, 색상/알파 Undo/Redo, 입력 원자성·잠금·버전·JSON·키 이동, Preview/출력 RGBA를 검사했다. Cargo check/fmt/test/release build와 git diff --check 통과(Moon/proto 미설치), 기존 경고 17개.
+- 실제 Windows에서 0/60프레임 Fill FFFFFF→204080, Stroke FFFFFF→C08020을 입력했다. Fill 선택기의 알파 40% 동시 편집과 한 번의 Undo/Redo, 30프레임 Fill 90A0C0/70%, Stroke E0C090/80%, U 필터의 색상 그룹과 Green Value Graph 159.5를 확인했다. 실제 저장 v41 `target/qa/shape-color-native.lfe.json`을 재열어 값과 미리보기를 확인했다. CLI PNG 0/15/30/45/60프레임에서 채움·선·겹침·외부 9,100개 RGBA 샘플이 독립 계산과 2단계 이내로 일치했다(`target/qa/verify_shape_color_native.py`). 1920/1442px 창의 타임라인 그룹·Properties 스크롤 표시를 확인했다.
+- 남음: Points 애니메이션, Contents 그룹·다중 Fill/Stroke, Gradient Fill/Stroke와 도형 연산자. RGB 수치 보간은 구현했지만 AE 색 공간/픽셀 동등성을 뜻하지 않으며 E03 전체 완료로 표시하지 않는다.
+
 ### 도형 Fill·Stroke 불투명도 — 2026-10-03
 
 - E03: Properties에 Fill opacity와 Stroke opacity를 별도로 추가했다. 각각 0–100%와 스톱워치를 제공하고 기존 Contents · Shape/Timeline/Graph, 키 편집, Undo/Redo에 연결한다. [Adobe Shape paint 속성](https://helpx.adobe.com/in/after-effects/desktop/drawing-painting-and-paths/shapes-and-shape-attributes/shape-attributes-paint-operations-path.html)을 참고했다. Fill/Stroke는 겹치는 영역에서 합성한 뒤 레이어 Transform Opacity를 적용한다. Fill 비활성·Stroke Width 0은 기존처럼 해당 페인트를 숨긴다.

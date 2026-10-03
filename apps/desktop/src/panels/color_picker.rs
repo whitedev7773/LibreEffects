@@ -305,7 +305,9 @@ impl Render for ColorPicker {
         );
         root = root.child(div().flex().gap_3().child(maps).child(inputs));
         root = root.child(div().text_size(px(11.0)).text_color(rgb(ui::MUTED)).child(
-            if target.alpha() {
+            if matches!(target, crate::color_edit::Target::Shape(_, _)) {
+                "Opacity changes this fill or stroke at the current frame. HEX accepts RRGGBBAA."
+            } else if target.alpha() {
                 "Opacity changes the entire layer at the current frame. HEX accepts RRGGBBAA."
             } else {
                 "RGB color · background is opaque; stroke keeps the layer opacity."

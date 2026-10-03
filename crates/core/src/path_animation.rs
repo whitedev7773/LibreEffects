@@ -116,8 +116,12 @@ impl Shape {
         self.path.as_ref().map(|p| self.path_animation.at(p, frame))
     }
     pub fn svg_at(&self, width: f64, height: f64, color: u32, frame: Frame) -> String {
-        self.evaluated(frame)
-            .svg_with_path(width, height, color, self.path_at(frame).as_ref())
+        self.evaluated(frame, color).svg_with_path(
+            width,
+            height,
+            self.paint_color_at(ShapePaint::Fill, color, frame),
+            self.path_at(frame).as_ref(),
+        )
     }
 }
 impl PathMask {

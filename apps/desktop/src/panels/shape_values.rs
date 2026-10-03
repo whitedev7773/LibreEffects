@@ -3,7 +3,28 @@ use crate::{
     ui,
 };
 use gpui::{Entity, IntoElement, SharedString};
-use libre_effects_core::{Command, Frame, LayerId, PropertyPath, Shape, ShapeParam, TrackEdit};
+use libre_effects_core::{
+    Command, Frame, LayerId, PropertyPath, Shape, ShapePaint, ShapeParam, TrackEdit,
+};
+
+pub(super) fn color_watch(
+    state: &Entity<EditorState>,
+    shape: &Shape,
+    id: LayerId,
+    paint: ShapePaint,
+    frame: Frame,
+) -> impl IntoElement {
+    let animated = shape.paint_color_animated(paint);
+    let command = shape.paint_color_animation_command(id, paint, frame);
+    ui::action_tool(
+        SharedString::from(format!("shape-{paint:?}-color-watch")),
+        "stopwatch",
+        "Toggle color animation",
+        state,
+        Action::Edit(command),
+        animated,
+    )
+}
 
 pub(super) fn watch(
     state: &Entity<EditorState>,

@@ -84,7 +84,7 @@ Each individual Dash/Gap row also has a stopwatch and uses project version 39
 when edited. Removing the final row removes its track and keys in the same Undo;
 adding that row again starts at 10 px with no old keys. Existing rows keep their
 tracks. Copying a dash key to another shape requires the corresponding row to
-exist. Cap/join, points, colors and grouped Contents are not animated by these
+exist. Cap/join, points and grouped Contents are not animated by these
 controls yet.
 
 Shape Properties also provides independent **Fill opacity** and **Stroke opacity**
@@ -93,6 +93,17 @@ These paint opacities combine where fill and stroke overlap, before the layer's
 Transform Opacity is applied. Turning Fill off or setting Stroke Width to zero
 still hides that paint. Old shapes default to 100%; edited paint opacity values
 and tracks use project version 40. Disabling animation retains the current value.
+
+The Fill and Stroke color stopwatches animate three RGB channels together.
+Edit their HEX field or color swatch at another frame to add RGB keys in one
+Undo. Timeline groups them under **Fill Color** and **Stroke Color**; R/G/B
+buttons select the corresponding Graph channel. Individual channels support
+the existing key copying, retiming and interpolation controls. Missing channels
+from a partial key paste retain their base color until color editing seeds them
+at the earliest existing color key. Disabling the color stopwatch retains the
+current color. Color tracks use project version 41; plain static edits keep the
+older format. RGB interpolation operates on 0–255 encoded channel values, with
+display/output values clamped and rounded to 8-bit RGB.
 
 ## Color selection
 
@@ -103,8 +114,10 @@ and twelve recent colors saved in the local user profile. Arrow keys adjust
 saturation/brightness; Page Up/Down adjusts hue; Shift increases the step.
 
 Layer color accepts RRGGBB or RRGGBBAA. Its **Opacity %** edits the entire layer's
-opacity at the current frame, preserving animation and other keys. Stroke and
-composition background edit RGB only. The background remains opaque for MP4
+opacity at the current frame, preserving animation and other keys. For shapes,
+Fill and Stroke dialogs instead edit their own paint opacity and RGB animation;
+color plus opacity remains one Undo. Text stroke and composition background
+edit RGB only. The background remains opaque for MP4
 and background-inclusive stills; alpha exports retain transparency.
 
 Changes are drafts until OK. Accepting a layer color/opacity is one Undo;

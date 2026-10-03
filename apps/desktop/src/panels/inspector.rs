@@ -185,7 +185,18 @@ impl Inspector {
                                 }
                                 2 => u32::from_str_radix(text.trim().trim_start_matches('#'), 16)
                                     .ok()
-                                    .map(|color| Command::SetColor { id, color }),
+                                    .and_then(|color| {
+                                        if matches!(l.content(), Content::Shape(_)) {
+                                            l.shape_color_command(
+                                                libre_effects_core::ShapePaint::Fill,
+                                                color,
+                                                s.frame,
+                                            )
+                                            .ok()
+                                        } else {
+                                            Some(Command::SetColor { id, color })
+                                        }
+                                    }),
                                 3 | 4 => number.map(|v| {
                                     let mut effects = l.effects();
                                     if index == 3 {
@@ -412,7 +423,13 @@ impl Render for Inspector {
             }
         }
         let is_adjustment = matches!(layer.content(), Content::Adjustment);
-        let mut entries = vec![(2, "Fill (hex)", format!("{:06X}", layer.color()))];
+        let fill_color = match layer.content() {
+            Content::Shape(shape) => {
+                shape.paint_color_at(libre_effects_core::ShapePaint::Fill, layer.color(), frame)
+            }
+            _ => layer.color(),
+        };
+        let mut entries = vec![(2, "Fill (hex)", format!("{fill_color:06X}"))];
         if let Content::Text { text, font_size } = layer.content() {
             entries.insert(0, (0, "Text", text.clone()));
             entries.insert(1, (1, "Font size", font_size.to_string()));
@@ -704,19 +721,53 @@ impl Render for Inspector {
                 if index != 0 && index != 2 {
                     field.set_numeric();
                 }
-                field.sync(id.to_string(), value.clone(), window);
+                field.sync(
+                    if index == 2 {
+                        format!("{id}-{frame}")
+                    } else {
+                        id.to_string()
+                    },
+                    value.clone(),
+                    window,
+                );
             });
             contents = contents.child(
                 div()
                     .flex()
                     .h(px(29.0))
                     .items_center()
-                    .child(div().w(px(105.0)).child(label))
+                    .child(
+                        div()
+                            .w(px(105.0))
+                            .flex()
+                            .items_center()
+                            .when(index == 2, |d| {
+                                if let Content::Shape(shape) = layer.content() {
+                                    d.child(super::shape_values::color_watch(
+                                        &self.state,
+                                        shape,
+                                        id,
+                                        libre_effects_core::ShapePaint::Fill,
+                                        frame,
+                                    ))
+                                } else {
+                                    d
+                                }
+                            })
+                            .child(label),
+                    )
                     .when(index == 2, |d| {
                         d.child(super::color_picker::swatch(
                             "layer-fill-color",
-                            layer.color(),
-                            crate::color_edit::Target::Fill(id),
+                            fill_color,
+                            if matches!(layer.content(), Content::Shape(_)) {
+                                crate::color_edit::Target::Shape(
+                                    id,
+                                    libre_effects_core::ShapePaint::Fill,
+                                )
+                            } else {
+                                crate::color_edit::Target::Fill(id)
+                            },
                             locked,
                             &self.state,
                         ))

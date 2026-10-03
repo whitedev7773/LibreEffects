@@ -194,6 +194,7 @@ impl Render for StrokeControls {
             return root;
         };
         let id = l.id();
+        let fill_color = l.color();
         let locked = l.locked();
         let frame = s.frame;
         let shape = shape.clone();
@@ -311,11 +312,11 @@ impl Render for StrokeControls {
             let (label, value) = match index {
                 0 => (
                     "Miter Limit".to_owned(),
-                    shape.value_at(ShapeParam::MiterLimit, frame),
+                    shape.value_at(ShapeParam::MiterLimit, frame, fill_color),
                 ),
                 1 => (
                     "Dash Offset".to_owned(),
-                    shape.value_at(ShapeParam::DashOffset, frame),
+                    shape.value_at(ShapeParam::DashOffset, frame, fill_color),
                 ),
                 _ => (
                     format!(
@@ -323,7 +324,7 @@ impl Render for StrokeControls {
                         if index % 2 == 0 { "Dash" } else { "Gap" },
                         (index - 2) / 2 + 1
                     ),
-                    shape.value_at(number_parameter(index).unwrap(), frame),
+                    shape.value_at(number_parameter(index).unwrap(), frame, fill_color),
                 ),
             };
             self.fields[index].update(cx, |f, _| {

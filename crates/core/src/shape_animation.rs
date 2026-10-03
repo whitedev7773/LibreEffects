@@ -11,6 +11,12 @@ pub enum ShapeParam {
     DashLength(u8),
     FillOpacity,
     StrokeOpacity,
+    FillRed,
+    FillGreen,
+    FillBlue,
+    StrokeRed,
+    StrokeGreen,
+    StrokeBlue,
 }
 impl From<ShapeParam> for String {
     fn from(p: ShapeParam) -> Self {
@@ -31,6 +37,12 @@ impl TryFrom<String> for ShapeParam {
             "DashOffset" => Self::DashOffset,
             "FillOpacity" => Self::FillOpacity,
             "StrokeOpacity" => Self::StrokeOpacity,
+            "FillRed" => Self::FillRed,
+            "FillGreen" => Self::FillGreen,
+            "FillBlue" => Self::FillBlue,
+            "StrokeRed" => Self::StrokeRed,
+            "StrokeGreen" => Self::StrokeGreen,
+            "StrokeBlue" => Self::StrokeBlue,
             _ => {
                 let index = value
                     .strip_prefix("DashLength")
@@ -54,6 +66,12 @@ impl ShapeParam {
             Self::DashOffset => "Dash Offset",
             Self::FillOpacity => "Fill Opacity",
             Self::StrokeOpacity => "Stroke Opacity",
+            Self::FillRed => "Fill Color · Red",
+            Self::FillGreen => "Fill Color · Green",
+            Self::FillBlue => "Fill Color · Blue",
+            Self::StrokeRed => "Stroke Color · Red",
+            Self::StrokeGreen => "Stroke Color · Green",
+            Self::StrokeBlue => "Stroke Color · Blue",
             Self::DashLength(index) => {
                 return format!(
                     "{} {}",
@@ -73,16 +91,28 @@ impl ShapeParam {
             Self::MiterLimit => (1., 1024.),
             Self::DashOffset => (-32768., 32768.),
             Self::DashLength(_) => (0., 8192.),
+            Self::FillRed
+            | Self::FillGreen
+            | Self::FillBlue
+            | Self::StrokeRed
+            | Self::StrokeGreen
+            | Self::StrokeBlue => (0., 255.),
         }
     }
     fn accepts(self, value: f64) -> bool {
         value.is_finite() && (self.bounds().0..=self.bounds().1).contains(&value)
     }
-    fn base(self, shape: &Shape) -> f64 {
+    fn base(self, shape: &Shape, fill_color: u32) -> f64 {
         match self {
             Self::StrokeWidth => shape.stroke_width,
             Self::FillOpacity => shape.fill_opacity,
             Self::StrokeOpacity => shape.stroke_opacity,
+            Self::FillRed => ((fill_color >> 16) & 255) as f64,
+            Self::FillGreen => ((fill_color >> 8) & 255) as f64,
+            Self::FillBlue => (fill_color & 255) as f64,
+            Self::StrokeRed => ((shape.stroke_color >> 16) & 255) as f64,
+            Self::StrokeGreen => ((shape.stroke_color >> 8) & 255) as f64,
+            Self::StrokeBlue => (shape.stroke_color & 255) as f64,
             Self::Roundness => shape.roundness,
             Self::InnerRadius => shape.inner_radius,
             Self::MiterLimit => shape.stroke_style.miter_limit,
@@ -109,9 +139,9 @@ impl Shape {
             _ => true,
         }
     }
-    pub fn value_at(&self, parameter: ShapeParam, frame: Frame) -> f64 {
+    pub fn value_at(&self, parameter: ShapeParam, frame: Frame, fill_color: u32) -> f64 {
         self.parameters.get(&parameter).map_or_else(
-            || parameter.base(self),
+            || parameter.base(self, fill_color),
             |track| {
                 track
                     .value_at(frame)
@@ -119,23 +149,28 @@ impl Shape {
             },
         )
     }
-    pub(super) fn shape_track_mut(&mut self, parameter: ShapeParam) -> &mut AnimatedProperty {
-        let base = parameter.base(self);
+    pub(super) fn shape_track_mut(
+        &mut self,
+        parameter: ShapeParam,
+        fill_color: u32,
+    ) -> &mut AnimatedProperty {
+        let base = parameter.base(self, fill_color);
         self.parameters
             .entry(parameter)
             .or_insert_with(|| AnimatedProperty::new(base))
     }
-    pub(super) fn evaluated(&self, frame: Frame) -> Self {
+    pub(super) fn evaluated(&self, frame: Frame, fill_color: u32) -> Self {
         let mut shape = self.clone();
-        shape.stroke_width = self.value_at(ShapeParam::StrokeWidth, frame);
-        shape.fill_opacity = self.value_at(ShapeParam::FillOpacity, frame);
-        shape.stroke_opacity = self.value_at(ShapeParam::StrokeOpacity, frame);
-        shape.roundness = self.value_at(ShapeParam::Roundness, frame);
-        shape.inner_radius = self.value_at(ShapeParam::InnerRadius, frame);
-        shape.stroke_style.miter_limit = self.value_at(ShapeParam::MiterLimit, frame);
-        shape.stroke_style.dash_offset = self.value_at(ShapeParam::DashOffset, frame);
+        shape.stroke_width = self.value_at(ShapeParam::StrokeWidth, frame, fill_color);
+        shape.fill_opacity = self.value_at(ShapeParam::FillOpacity, frame, fill_color);
+        shape.stroke_opacity = self.value_at(ShapeParam::StrokeOpacity, frame, fill_color);
+        shape.stroke_color = self.paint_color_at(ShapePaint::Stroke, fill_color, frame);
+        shape.roundness = self.value_at(ShapeParam::Roundness, frame, fill_color);
+        shape.inner_radius = self.value_at(ShapeParam::InnerRadius, frame, fill_color);
+        shape.stroke_style.miter_limit = self.value_at(ShapeParam::MiterLimit, frame, fill_color);
+        shape.stroke_style.dash_offset = self.value_at(ShapeParam::DashOffset, frame, fill_color);
         for (index, length) in shape.stroke_style.dashes.iter_mut().enumerate() {
-            *length = self.value_at(ShapeParam::DashLength(index as u8), frame);
+            *length = self.value_at(ShapeParam::DashLength(index as u8), frame, fill_color);
         }
         shape
     }
@@ -149,6 +184,9 @@ pub(super) fn validate(layer: &Layer, duration: Frame, version: u32) -> Result<(
     }
     if version < 40 && shape.has_paint_opacity() {
         return Err("Shape fill/stroke opacity requires project version 40".into());
+    }
+    if version < 41 && shape.has_paint_color_tracks() {
+        return Err("Shape color animation requires project version 41".into());
     }
     for (&parameter, track) in &shape.parameters {
         if !shape.has_parameter(parameter)
@@ -176,15 +214,19 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
     Some((|| {
         let duration = state.project.composition.duration;
         let layer = editing::editable(state, *id)?;
+        let fill_color = layer.color;
         let Content::Shape(shape) = &mut layer.content else {
             return Err("Select a shape layer".into());
         };
         if !shape.has_parameter(*parameter) {
             return Err("Dash or gap no longer exists".into());
         }
-        time_remap::edit_track(shape.shape_track_mut(*parameter), duration, edit, |v| {
-            parameter.accepts(v)
-        })
+        time_remap::edit_track(
+            shape.shape_track_mut(*parameter, fill_color),
+            duration,
+            edit,
+            |v| parameter.accepts(v),
+        )
     })())
 }
 
@@ -256,8 +298,8 @@ mod tests {
         let Content::Shape(shape) = e.selected_layer().unwrap().content() else {
             unreachable!()
         };
-        assert_eq!(shape.evaluated(20).fill_opacity, 50.);
-        assert_eq!(shape.evaluated(20).stroke_opacity, 70.);
+        assert_eq!(shape.evaluated(20, 0).fill_opacity, 50.);
+        assert_eq!(shape.evaluated(20, 0).stroke_opacity, 70.);
         assert_eq!(shape.stroke_width, 12.);
         assert_eq!(shape.fill_opacity, 100.);
         for p in [ShapeParam::FillOpacity, ShapeParam::StrokeOpacity] {

@@ -102,7 +102,7 @@ impl Layer {
     pub fn track_value(&self, path: PropertyPath, frame: Frame) -> Option<f64> {
         Some(match path {
             PropertyPath::Shape(p) => match &self.content {
-                Content::Shape(s) if s.has_parameter(p) => s.value_at(p, frame),
+                Content::Shape(s) if s.has_parameter(p) => s.value_at(p, frame, self.color),
                 _ => return None,
             },
             PropertyPath::Path(_) => return None,
@@ -207,7 +207,7 @@ impl Layer {
     ) -> Result<&mut AnimatedProperty, String> {
         match path {
             PropertyPath::Shape(p) => match &mut self.content {
-                Content::Shape(s) if s.has_parameter(p) => Some(s.shape_track_mut(p)),
+                Content::Shape(s) if s.has_parameter(p) => Some(s.shape_track_mut(p, self.color)),
                 _ => None,
             },
             PropertyPath::Path(target) => {

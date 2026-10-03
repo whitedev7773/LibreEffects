@@ -978,9 +978,23 @@ impl Render for Timeline {
                 for path in layer
                     .track_paths()
                     .into_iter()
-                    .filter(|p| matches!(p, PropertyPath::Shape(_)))
+                    .filter(|p| matches!(p, PropertyPath::Shape(parameter) if libre_effects_core::ShapePaint::from_parameter(*parameter).is_none()))
                 {
                     groups.push((layer.track_label(path).unwrap(), vec![path]));
+                }
+                for (paint, label) in [
+                    (libre_effects_core::ShapePaint::Fill, "Fill Color"),
+                    (libre_effects_core::ShapePaint::Stroke, "Stroke Color"),
+                ] {
+                    let channels: Vec<_> = paint
+                        .channels()
+                        .into_iter()
+                        .map(PropertyPath::Shape)
+                        .filter(|p| layer.track(*p).is_some())
+                        .collect();
+                    if !channels.is_empty() {
+                        groups.push((label.into(), channels));
+                    }
                 }
                 if layer.track(shape_path).is_some() {
                     groups.push(("Shape Path".into(), vec![shape_path]));
@@ -1213,7 +1227,10 @@ impl Render for Timeline {
                             .child(
                                 ui::text_button(
                                     SharedString::from(format!("channel-{id}-{property:?}")),
-                                    if properties.len() == 2 {
+                                    if let PropertyPath::Shape(p) = property {
+                                        libre_effects_core::ShapePaint::component_label(p)
+                                            .unwrap_or("")
+                                    } else if properties.len() == 2 {
                                         if matches!(
                                             property,
                                             PropertyPath::Transform(
