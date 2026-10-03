@@ -141,6 +141,18 @@ impl Render for ShapeControls {
         if let Some(row) = path_row {
             root = root.child(row);
         }
+        if shape.path.is_none() {
+            let state = self.state.clone();
+            root = root.child(
+                ui::text_button("shape-to-path", "Convert To Bezier Path")
+                    .tooltip(|_, cx| cx.new(|_| ui::Tip("Freeze geometry at current time; replaces Points/Radius/Roundness animation. Paint animation is retained. Undo restores the original.".into())).into())
+                    .when(!locked, |b| b.on_click(move |_, w, cx| {
+                        state.update(cx, |s, cx| {
+                            s.dispatch(&Action::Edit(Command::ConvertShapeToPath { id, frame: s.frame }), w, cx);
+                        });
+                    })),
+            );
+        }
         if let Some(path) = &shape.path {
             let mut changed = shape.clone();
             changed.path.as_mut().unwrap().closed = !path.closed;
@@ -279,6 +291,93 @@ impl Render for ShapeControls {
 mod tests {
     use super::*;
     use libre_effects_core::{Editor, Project, Property, Shape};
+
+    #[test]
+    fn converted_shapes_preserve_preview_output_and_keep_paint_animation() {
+        let renderer = crate::rendering::Renderer::new();
+        for kind in ShapeKind::ALL {
+            for stroke in [0., 8.] {
+                let mut e = Editor::default();
+                e.execute(Command::ConfigureComposition {
+                    name: "Conversion".into(),
+                    width: 300,
+                    height: 200,
+                    fps: 30,
+                    duration: 90,
+                })
+                .unwrap();
+                e.execute(Command::AddContent {
+                    content: Content::Shape(Shape {
+                        kind,
+                        points: 7,
+                        roundness: 24.,
+                        stroke_width: stroke,
+                        ..Default::default()
+                    }),
+                    width: 200.,
+                    height: 120.,
+                    name: "Shape".into(),
+                })
+                .unwrap();
+                e.execute(Command::SetColor {
+                    id: 1,
+                    color: 0x204080,
+                })
+                .unwrap();
+                for edit in [
+                    TrackEdit::ToggleAnimation { frame: 0 },
+                    TrackEdit::Value {
+                        frame: 60,
+                        value: 30.,
+                    },
+                ] {
+                    e.execute(Command::EditShape {
+                        id: 1,
+                        parameter: ShapeParam::FillOpacity,
+                        edit,
+                    })
+                    .unwrap();
+                }
+                if matches!(kind, ShapeKind::Star | ShapeKind::Polygon) {
+                    e.execute(Command::EditShape {
+                        id: 1,
+                        parameter: ShapeParam::Points,
+                        edit: TrackEdit::Value {
+                            frame: 0,
+                            value: 7.25,
+                        },
+                    })
+                    .unwrap();
+                }
+                let before = e.project().clone();
+                e.execute(Command::ConvertShapeToPath { id: 1, frame: 30 })
+                    .unwrap();
+                let saved = Project::from_json(&e.project().to_json().unwrap()).unwrap();
+                for frame in [0, 30, 60] {
+                    let original = renderer.render(&before, frame, 300).unwrap();
+                    let converted = renderer.render(&saved, frame, 300).unwrap();
+                    assert_eq!(
+                        converted,
+                        renderer.render_output(&saved, frame, 300, 200).unwrap()
+                    );
+                    // Cubic circle arcs approximate SVG arcs; allow only a small
+                    // antialiased boundary difference, including the stroked edge.
+                    let alpha_error = original
+                        .pixels()
+                        .zip(converted.pixels())
+                        .map(|(a, b)| (a[3] as f64 - b[3] as f64).abs() / 255.)
+                        .sum::<f64>();
+                    assert!(
+                        alpha_error < 30.,
+                        "{kind:?} stroke {stroke} frame {frame}: {alpha_error}"
+                    );
+                    assert_eq!(original.get_pixel(150, 100), converted.get_pixel(150, 100));
+                }
+                e.undo();
+                assert_eq!(e.project(), &before);
+            }
+        }
+    }
 
     #[test]
     fn points_animation_matches_closed_form_area_and_preview_output() {

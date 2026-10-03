@@ -1799,6 +1799,16 @@ visual playback. These preview switches left the document clean.
 
 ## Mask and path animation
 
+Properties → **Convert To Bezier Path** converts Rectangle, Rounded Rectangle,
+Ellipse, Polygon or Star into an editable closed path at the current frame.
+Points, Inner Radius and Roundness tracks are replaced by that static geometry;
+paint tracks, effects, masks and layer transforms are retained. One Undo restores
+the parametric shape and all original keys. The resulting Path stopwatch and
+Pen (G) controls can then animate vertices and tangent handles. Existing paths
+and locked layers cannot be converted again. Ellipse and rounded corners use
+four cubic quarter-circle arcs, so curved boundaries are an approximation.
+This conversion uses the existing path file format; no new version is required.
+
 Each vector mask has stable identity, animated Opacity, Feather and Expansion.
 Controls are grouped per mask in Properties; the same scalar tracks appear in
 the Timeline and Value Graph. Mask reordering preserves animation targets.

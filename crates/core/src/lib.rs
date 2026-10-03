@@ -59,6 +59,7 @@ pub use shape_animation::ShapeParam;
 mod shape_color;
 pub use shape_color::ShapePaint;
 mod polystar;
+mod shape_conversion;
 mod shapes;
 pub use shape_stroke::{ShapeStroke, StrokeCap, StrokeJoin};
 mod text_style;
@@ -992,6 +993,11 @@ pub enum Command {
         id: LayerId,
         content: Content,
     },
+    /// Freeze parametric geometry at this frame as an editable Bezier path.
+    ConvertShapeToPath {
+        id: LayerId,
+        frame: Frame,
+    },
     /// Changes footage sampling only; keeps the layer range and transform keys.
     SetVideoSpeed {
         id: LayerId,
@@ -1527,6 +1533,9 @@ impl Editor {
 }
 
 fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
+    if let Some(result) = shape_conversion::apply(state, &command) {
+        return result;
+    }
     if let Some(result) = shape_animation::apply(state, &command) {
         return result;
     }

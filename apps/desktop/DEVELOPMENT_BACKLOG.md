@@ -18,6 +18,15 @@
 - **후속 고급 기능:** 패널 도킹·소스 뷰어·최근 프로젝트, 타임라인 고급 시간 편집/검색/가상화, 공간 경로·프리셋·표현식, Shape 연산/SVG·Text Animator, 추가 효과·모션 블러, 고정밀 색/HDR·Proxy/GPU, 템플릿, 설치/업데이트·한글화와 UI 회귀 자동화.
 - **별도 대형 단계:** 3D/카메라/라이트·모델, 추적·로토/Puppet, 플러그인/교환 포맷 연구, 웹/API 제품 범위. AEP/MOGRT 호환은 구현되지 않았다.
 
+### 기본 도형 → Bezier 경로 전환 — 2026-10-03
+
+- E02/E03: Properties의 `Convert To Bezier Path`로 Rectangle·Rounded Rectangle·Ellipse·Polygon·Star를 현재 프레임의 닫힌 경로로 전환한다. Points·Inner Radius·Roundness 트랙은 평가된 정적 기하로 대체하고 페인트 트랙·레이어 변형·마스크·효과는 유지한다. 툴팁에서 이 동작을 설명한다. 한 Undo로 원래 도형과 키를 복원하며, 전환 후 기존 Path 스톱워치와 Pen 편집으로 경로 애니메이션을 만들 수 있다. 잠금·없는 레이어·비도형·이미 전환된 경로·잘못된 시간은 원자적으로 거부한다.
+- [Adobe의 경로 전환 흐름](https://helpx.adobe.com/after-effects/desktop/animate-in-after-effects/animate-shape-paths-and-masks/animating-shape-paths-masks.html)을 참고했다. Libre Effects는 기존 레이어 좌표의 경로를 생성하고 현재 파일 형식을 사용한다. 원과 둥근 모서리는 4개의 cubic 원호로 근사한다. AE Contents의 그룹 좌표/변환이나 픽셀 동등성까지 구현한 것은 아니다.
+- 검증: 코어 175개 + 데스크톱 232개(총 407개) 통과, 외부 미디어/장치 30개 제외. 5종 도형·Fill/Stroke·페인트 애니메이션의 Preview/출력, 전환/경로 키의 Undo/Redo·저장 왕복을 검사했다. Cargo check/fmt/test/release build와 git diff --check 통과(Moon/proto 미설치), 기존 경고 17개.
+- 실제 Windows에서 30프레임의 Star를 14정점 경로로 전환하고 Undo/Redo를 확인했다. Path 애니메이션 활성화 후 60프레임의 윗꼭짓점을 드래그했으며, 드래그 Undo/Redo·45프레임 보간·저장 후 재열기·U 필터를 확인했다. 1920/1442px 창 배치와 실제 작업 창 1개, 사용자 보존 원본 SHA256 불변을 확인했다.
+- 실제 저장본 `target/qa/path-conversion-native.lfe.json`의 0/30/45/60/90프레임 출력에서 독립 다각형 계산의 내부/외부 RGBA 22,155개 샘플이 일치했다(`target/qa/verify_path_conversion.py`). 전환 직후 별의 출력은 경계 48픽셀에만 알파 최대 16/255의 차이가 있었고, 적분 알파 차이는 3.004px였다. 정적 전환본의 30/90프레임은 전체 RGBA가 동일하다. 곡선 도형과 페인트 애니메이션의 네이티브 조작은 별도 미검증이다.
+- 남음: Contents 그룹·다중 경로/페인트·도형 연산자, 여러 정점 선택·경로 방향/첫 정점 편집. E02/E03 전체 완료로 표시하지 않는다.
+
 ### Polygon·Star Points 애니메이션 — 2026-10-03
 
 - E03/D01: Polygon·Star의 Points를 3–128 범위의 소수 속성으로 편집하고 스톱워치·Timeline·Graph·공통 키 편집에 연결했다. Polygon은 평가 값의 정수 부분으로 꼭짓점을 만들고 Star는 소수 부분에 따라 부분 꼭짓점이 자란다. 기존 정수 도형 좌표와 선의 시작점은 유지한다. Bezier 경로나 다른 종류의 도형에는 Points 트랙을 붙여넣을 수 없다.
