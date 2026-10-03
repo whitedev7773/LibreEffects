@@ -82,6 +82,22 @@ in v31. Enable the Path stopwatch and edit with the Pen at another frame.
 Animated paths require matching topology. Marquee/cross-path selection, topology
 changes across keys, variable feather and shape Contents operators remain open.
 
+With an explicitly selected **Contents Group**, starting Pen on empty canvas adds
+a new Path at the start of that Group and keeps the Group selected for repeated
+drawing. Points and tangents use the selected Group's evaluated local coordinates,
+including nested groups, layer parenting, rotation and Skew. Existing paths/handles
+retain hit-test precedence; Ctrl on empty canvas still creates a mask. Without a
+matching Group selection, starting a path keeps the standalone-shape behavior.
+
+New group paths inherit existing applicable paints; no Fill/Stroke is added or
+changed. Without an applicable paint, the new path is an editable outline with no
+rendered pixels. Open paths do not automatically receive a stroke. Disabled or
+missing selected Groups, singular transforms and model limits reject creation
+without silently adding a new layer. The existing Pen layer policy remains:
+hidden/out-of-range selected layers can be edited, while the renderer controls
+output visibility. New paths start with animation disabled and use the existing
+project format. Cancel/focus/file-dialog behavior is the same as other Pen drafts.
+
 Shape Stroke controls in Properties provide Butt/Round/Projecting line caps,
 Miter/Round/Bevel joins and a 1–1024 Miter Limit. Dashes **+** adds alternating
 Dash/Gap lengths; **−** removes the last entry. Up to 16 lengths of 0–8192 layer
@@ -626,8 +642,28 @@ timeline still limits time zoom to 1–64× and integer viewport start frames.
   pivot stays fixed. Ctrl inverts Snap for the drag; Alt continues to center
   scaling (it bypasses snapping only for ordinary key moves). Orange guides show
   matches. Unmoved axes do not snap, and occupied or rounded-together key times
-  are skipped. Speed Graph transformation, custom anchor points and skew remain pending. This overlay does not alter the
-  panel layout or saved document format.
+  are skipped. Custom anchor points and skew remain pending. This overlay does not
+  alter the panel layout or saved document format.
+- In **Speed Graph**, the same Transform box toggle exposes only **left/right time
+  handles** for two or more selected scalar keys. The opposite time edge is the
+  pivot; Alt uses the selection midpoint. Vertical pointer motion is ignored,
+  including mouse-up. Ordinary key dragging still translates selected key times.
+  Time-only snapping uses the captured Snap switch (Ctrl inverts it), with no speed
+  or value guide. All selected keys participate, including offscreen keys; handles
+  for offscreen time boundaries are omitted. Visible composition-edge handles are
+  inset without changing their true time pivots or covering key glyphs.
+  The box uses finite signed units/second endpoints; missing sides remain gaps and
+  no finite endpoints use the zero line. Very short plots may have no glyph-clear
+  handle position; enlarge the graph panel in that case.
+  Key/base values, interpolation, temporal modes and influences are preserved.
+  Explicit slopes divide by the positive nominal time factor, Auto recomputes and
+  Hold remains Hold, so displayed speeds can change. Rounded or partial selections
+  are not guaranteed to be exact affine transforms of every neighboring curve.
+  Invalid factors, time collisions, duration or slope limits reject atomically.
+  A frozen source/view/selection protects each draft; tool, channel, layer,
+  document, Value/Speed changes, Escape or focus loss cancel it. Identity and
+  return-to-start drags add no history. Vertical Speed scaling, corner transforms,
+  simultaneous multi-channel graphs and AE equivalence remain separate work.
 - Graph numeric fields return keyboard focus to the graph after Enter/Escape.
   Enter commits, Escape cancels the field draft, and Escape from the graph closes
   Keyframe...; Undo, selection and fitting shortcuts work without another click.
