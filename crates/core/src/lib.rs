@@ -28,6 +28,8 @@ pub use effects::{
     ParameterSpec,
 };
 mod geometry;
+mod layer_transform;
+pub use layer_transform::LayerTransformOp;
 mod layer_workflow;
 pub use layer_workflow::{LayerClipboard, LayerSwitch};
 mod markers;
@@ -994,6 +996,11 @@ pub enum Command {
         ids: Vec<LayerId>,
         frame: Frame,
     },
+    TransformLayers {
+        ids: Vec<LayerId>,
+        frame: Frame,
+        operation: LayerTransformOp,
+    },
     SetAnchor {
         id: LayerId,
         frame: Frame,
@@ -1331,12 +1338,13 @@ impl Editor {
         let reorder_only = command.reorders_only();
         let text_values_only = text_animation::value_edits_only(&command);
         let velocity_scales_only = key_velocity_scale::edits_only(&command);
+        let layer_transforms_only = layer_transform::edits_only(&command);
         apply(&mut next, command)?;
         if text_values_only && next == self.current {
             return Ok(());
         }
-        if reorder_only || velocity_scales_only {
-            // Reindexing and velocity scaling need no unrelated schema/asset migration.
+        if reorder_only || velocity_scales_only || layer_transforms_only {
+            // Reindexing, velocity scaling and layer essentials need no unrelated schema/asset migration.
             // Velocity scaling applies only its existing temporal schema minimums.
             return self.accept_candidate(next);
         }

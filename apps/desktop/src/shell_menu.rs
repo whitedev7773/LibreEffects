@@ -335,6 +335,20 @@ pub fn items(menu: &str, state: &EditorState) -> Vec<Item> {
         })
         .collect();
     match menu {
+        "Layer" => {
+            let availability = state.layer_transform_availability();
+            let transforms =
+                crate::editor::layer_transform::ENTRIES
+                    .into_iter()
+                    .map(|(label, operation)| Item {
+                        label,
+                        shortcut: "",
+                        target: availability
+                            .allows(operation)
+                            .then_some(Target::Action(Action::TransformLayers(operation))),
+                    });
+            result.splice(0..0, transforms);
+        }
         "Composition" => result.extend([
             Item::special(
                 "Add to Render Queue",
@@ -494,6 +508,111 @@ pub fn resolve(key: Key, state: &EditorState) -> Option<Target> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn layer_transform_menu_and_search_share_availability_without_shortcuts() {
+        let mut state = EditorState::default();
+        for enabled in [false, true] {
+            if enabled {
+                state.editor.execute(Command::AddRectangle).unwrap();
+                state.editor.execute(Command::AddRectangle).unwrap();
+                state.selected_layers = [1, 2].into();
+            }
+            for (label, operation) in crate::editor::layer_transform::ENTRIES {
+                let menu = items("Layer", &state)
+                    .into_iter()
+                    .find(|item| item.label == label)
+                    .unwrap();
+                let results = search(label, &state);
+                let found = results
+                    .iter()
+                    .find(|entry| entry.key.label == label)
+                    .unwrap();
+                assert_eq!(menu.target.is_some(), enabled);
+                assert_eq!(found.item.target.is_some(), enabled);
+                assert_eq!(found.key.category, "Layer");
+                assert!(menu.shortcut.is_empty());
+                assert!(found.item.shortcut.is_empty());
+                if enabled {
+                    assert!(matches!(menu.target,
+                        Some(Target::Action(Action::TransformLayers(actual))) if actual == operation));
+                    assert!(matches!(resolve(found.key, &state),
+                        Some(Target::Action(Action::TransformLayers(actual))) if actual == operation));
+                } else {
+                    assert!(resolve(found.key, &state).is_none());
+                }
+            }
+        }
+        state.editor.execute(Command::ToggleLocked(1)).unwrap();
+        for (label, _) in crate::editor::layer_transform::ENTRIES {
+            assert!(
+                resolve(
+                    Key {
+                        category: "Layer",
+                        label
+                    },
+                    &state
+                )
+                .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn cached_layer_menu_and_search_targets_plan_fresh_ids_and_time() {
+        use libre_effects_core::LayerTransformOp;
+        let mut state = EditorState::default();
+        state.editor.execute(Command::AddRectangle).unwrap();
+        state.editor.execute(Command::AddRectangle).unwrap();
+        state.selected_layers = [1].into();
+        let cached_menu = items("Layer", &state)
+            .into_iter()
+            .find(|item| item.label == "Flip Horizontal")
+            .unwrap()
+            .target
+            .unwrap();
+        let cached_search = search("layer flip horizontal", &state).remove(0);
+        state.selected_layers = [2].into();
+        state.frame = 27;
+        for target in [
+            cached_menu,
+            cached_search.item.target.unwrap(),
+            resolve(cached_search.key, &state).unwrap(),
+        ] {
+            let Target::Action(action) = target else {
+                panic!("expected action")
+            };
+            assert!(matches!(action.layer_transform_command(&state),
+                Some(Command::TransformLayers {
+                    ids, frame: 27, operation: LayerTransformOp::FlipHorizontal
+                }) if ids == vec![2]));
+        }
+        state.editor.execute(Command::ToggleLocked(2)).unwrap();
+        assert!(resolve(cached_search.key, &state).is_none());
+        state.editor.execute(Command::AddNull).unwrap();
+        state.selected_layers = [1, 3].into();
+        assert!(resolve(cached_search.key, &state).is_some());
+        assert!(
+            resolve(
+                Key {
+                    category: "Layer",
+                    label: "Fit Layer Inside Composition"
+                },
+                &state
+            )
+            .is_none()
+        );
+        assert!(
+            resolve(
+                Key {
+                    category: "Layer",
+                    label: "Center Anchor in Source Bounds"
+                },
+                &state
+            )
+            .is_none()
+        );
+    }
 
     #[test]
     fn command_search_matches_words_categories_shortcuts_and_disabled_entries() {

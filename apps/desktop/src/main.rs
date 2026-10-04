@@ -26,6 +26,8 @@ mod font_usage;
 mod fonts;
 mod footage;
 mod image_sequence;
+#[cfg(test)]
+mod layer_transform_render_tests;
 mod matte_render;
 mod media_io;
 #[cfg(test)]

@@ -20,6 +20,7 @@ pub(crate) struct Browser {
     interpretation_open: bool,
     interpretation: Option<(u64, Entity<super::footage_interpretation::Interpretation>)>,
     thumbnail: Option<Arc<gpui::RenderImage>>,
+    retired_images: super::image_retirement::ImageRetirement,
     thumbnail_key: Option<(ProjectItem, Project, u64)>,
     thumbnail_pending: bool,
     thumbnail_error: Option<String>,
@@ -59,6 +60,7 @@ impl Browser {
             interpretation_open: false,
             interpretation: None,
             thumbnail: None,
+            retired_images: Default::default(),
             thumbnail_key: None,
             thumbnail_pending: false,
             thumbnail_error: None,
@@ -76,7 +78,7 @@ impl Browser {
             return;
         }
         if let Some(image) = self.thumbnail.take() {
-            let _ = window.drop_image(image);
+            self.retired_images.retire(image, window);
         }
         self.thumbnail_key = Some(key.clone());
         self.thumbnail_error = None;

@@ -566,6 +566,42 @@ future work.
   Each operation commits one undo step; animated positions receive a current-frame
   key. Alignment through a zero-scale parent is rejected when movement is needed.
 
+### Layer transform commands
+
+The **Layer** menu and shared command search provide:
+
+- **Reset Scale & Rotation**: set local Scale X/Y to 100% and Rotation to 0.
+  Position, anchor and opacity are left alone.
+- **Flip Horizontal / Flip Vertical**: negate the corresponding local scale
+  around the existing anchor. A zero scale stays unchanged.
+- **Fit Layer Inside Composition**: uniformly fit each independent selected
+  layer's transformed source rectangle inside the composition, then center it.
+  Rotation, scale ratio and reflection are retained. This fits source dimensions,
+  not text ink, mask trimming, effect expansion or descendant artwork.
+- **Center Anchor in Source Bounds**: set anchor X/Y to half the source width/
+  height and compensate position, preserving the current rendered pose. It does
+  not compensate every frame of an animated layer.
+
+Reset, Flip and Fit act on selected root ancestors so a selected child is not
+transformed twice. Center Anchor can process every explicitly selected layer
+because each compensated local pose stays fixed. All selected IDs, locks and
+unsupported types are checked before editing; a failure rejects the entire
+operation. Audio layers do not support these commands. Null layers support
+Reset/Flip, but have no source bounds for Fit/Center. Fit rejects collapsed or
+unsupported parent spaces and numerically unrepresentable results; it never
+clamps a failed fit. Center Anchor does not require an inverse parent transform.
+
+Static channels change their base value. Animated channels change/add only the
+current-frame key, retaining existing interpolation and temporal handles. An
+unchanged channel receives no key. Each successful operation is one Undo;
+unchanged operations preserve source bytes, animation and Redo. Fit recognizes
+an already solved scale/center within a hierarchy-based machine-roundoff budget,
+so repeated fitting does not accumulate tiny edits. The selection/frame are
+resolved when the command runs, after active text edits finish. Invocation keeps
+the selection; Undo/Redo follows the existing primary-layer restoration policy.
+These commands add no project or LEP schema version. Auto Orient, layer Skew,
+stretch-to-width/height and whole-animation anchor compensation remain separate.
+
 ## Viewer guides and channels
 
 - Composition's **Guides** menu (also View) toggles rulers, grid, guides and the

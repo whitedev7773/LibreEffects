@@ -8,6 +8,7 @@ mod contents;
 mod effects;
 mod footage_interpretation;
 mod graph;
+mod image_retirement;
 mod inspector;
 mod key_easing;
 mod key_glyph;

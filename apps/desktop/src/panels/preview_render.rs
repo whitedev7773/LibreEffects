@@ -143,7 +143,7 @@ impl Preview {
             if !keep_gradient_frame {
                 self.raw = None;
                 if let Some((_, _, _, old)) = self.cached.take() {
-                    let _ = window.drop_image(old);
+                    self.retired_images.retire(old, window);
                 }
             }
         }
@@ -186,7 +186,7 @@ impl Preview {
                         if ready.frame == request.frame {
                             self.raw = None;
                             if let Some((_, _, _, old)) = self.cached.take() {
-                                let _ = window.drop_image(old);
+                                self.retired_images.retire(old, window);
                             }
                         }
                         if self.warming.is_some() {

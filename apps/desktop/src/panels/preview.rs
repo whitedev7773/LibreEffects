@@ -103,6 +103,7 @@ pub(crate) struct Preview {
     menu_focus: FocusHandle,
     menu_index: usize,
     raw: Option<std::sync::Arc<image::RgbaImage>>,
+    retired_images: super::image_retirement::ImageRetirement,
     ram: crate::preview_cache::Cache,
     warming: Option<Request>,
     display_channel: Channel,
@@ -268,6 +269,7 @@ impl Preview {
             menu_focus: cx.focus_handle(),
             menu_index: 0,
             raw: None,
+            retired_images: Default::default(),
             ram: Default::default(),
             warming: None,
             display_channel: Channel::Rgb,
@@ -333,7 +335,7 @@ impl Preview {
         window: &mut Window,
     ) {
         if let Some((_, _, _, old)) = self.cached.take() {
-            let _ = window.drop_image(old);
+            self.retired_images.retire(old, window);
         }
         let display = channel.display(&pixels);
         self.raw = Some(pixels);
@@ -1357,10 +1359,12 @@ impl Render for Preview {
         if channel != self.display_channel {
             if let Some((_, _, _, image)) = &mut self.cached {
                 if let Some(raw) = &self.raw {
-                    let _ = window.drop_image(image.clone());
-                    *image = std::sync::Arc::new(gpui::RenderImage::new(vec![image::Frame::new(
-                        channel.display(raw),
-                    )]));
+                    let replacement =
+                        std::sync::Arc::new(gpui::RenderImage::new(vec![image::Frame::new(
+                            channel.display(raw),
+                        )]));
+                    let old = std::mem::replace(image, replacement);
+                    self.retired_images.retire(old, window);
                     self.display_channel = channel;
                 }
             }

@@ -17,6 +17,8 @@ pub(crate) mod assets;
 mod footage;
 #[path = "editor_io.rs"]
 mod io;
+#[path = "editor_layer_transform.rs"]
+pub(crate) mod layer_transform;
 #[path = "editor_media.rs"]
 mod media;
 #[path = "editor_playback.rs"]
@@ -117,6 +119,8 @@ pub(crate) enum Action {
     SplitSelection,
     TrimSelection(bool),
     NudgeSelection(f64, f64),
+    /// Resolve selected layer IDs and playhead only after dispatch preparation.
+    TransformLayers(libre_effects_core::LayerTransformOp),
     SelectMany(LayerId, bool, bool),
     ZoomTimeline(f32),
     PanTimeline(i32),
@@ -145,6 +149,18 @@ impl Action {
     /// In particular, Undo/Redo must never reach the source behind the modal.
     fn allowed_in_vertex_editor(&self) -> bool {
         matches!(self, Self::ApplyVertex | Self::CancelVertex)
+    }
+    fn allowed_in_gradient_editor(&self) -> bool {
+        matches!(self, Self::ApplyGradient | Self::CancelGradient)
+    }
+    fn allowed_in_color_editor(&self) -> bool {
+        matches!(
+            self,
+            Self::ApplyColor | Self::CancelColor | Self::PickColor | Self::SampleColor(_)
+        )
+    }
+    fn commits_text_before_dispatch(&self) -> bool {
+        !matches!(self, Self::CancelText | Self::CommitText)
     }
 }
 
@@ -571,6 +587,34 @@ impl EditorState {
         self.preview_revision = self.preview_revision.wrapping_add(1);
     }
 
+    fn apply_edit(&mut self, command: &Command) {
+        self.stop();
+        self.remember_view();
+        let before = self.editor.selected();
+        let composition = self.editor.project().active_composition_id();
+        self.status = match self.editor.execute(command.clone()) {
+            Ok(()) => "Edited".into(),
+            Err(error) => error,
+        };
+        if self.status == "Edited"
+            && matches!(
+                command,
+                Command::Effect {
+                    edit: libre_effects_core::EffectEdit::Add(_),
+                    ..
+                }
+            )
+        {
+            self.effect_controls_open = true;
+        }
+        if before != self.editor.selected() {
+            self.selected_layers.clear();
+        }
+        if composition != self.editor.project().active_composition_id() {
+            self.composition_changed();
+        }
+    }
+
     pub fn dispatch(&mut self, action: &Action, window: &mut Window, cx: &mut Context<Self>) {
         let vertex_was_open = self.vertex_editor.is_some();
         let vertex_invalidated = self.invalidate_vertex_editor();
@@ -587,23 +631,13 @@ impl EditorState {
             self.vertex_return = None;
         }
         self.invalidate_gradient_editor();
-        if self.gradient_editor.is_some()
-            && !matches!(action, Action::ApplyGradient | Action::CancelGradient)
-        {
+        if self.gradient_editor.is_some() && !action.allowed_in_gradient_editor() {
             return;
         }
-        if !matches!(action, Action::CancelText | Action::CommitText) {
+        if action.commits_text_before_dispatch() {
             self.finish_text(true, cx);
         }
-        if self.colors.session.is_some()
-            && !matches!(
-                action,
-                Action::ApplyColor
-                    | Action::CancelColor
-                    | Action::PickColor
-                    | Action::SampleColor(_)
-            )
-        {
+        if self.colors.session.is_some() && !action.allowed_in_color_editor() {
             return;
         }
 
@@ -1352,32 +1386,11 @@ impl EditorState {
                     self.frame = frame;
                 }
             }
-            Action::Edit(command) => {
-                self.stop();
-                self.remember_view();
-                let before = self.editor.selected();
-                let composition = self.editor.project().active_composition_id();
-                self.status = match self.editor.execute(command.clone()) {
-                    Ok(()) => "Edited".into(),
-                    Err(error) => error,
-                };
-                if self.status == "Edited"
-                    && matches!(
-                        command,
-                        Command::Effect {
-                            edit: libre_effects_core::EffectEdit::Add(_),
-                            ..
-                        }
-                    )
-                {
-                    self.effect_controls_open = true;
-                }
-                if before != self.editor.selected() {
-                    self.selected_layers.clear();
-                }
-                if composition != self.editor.project().active_composition_id() {
-                    self.composition_changed();
-                }
+            Action::Edit(command) => self.apply_edit(command),
+            Action::TransformLayers(_) => {
+                // Unlike menu render, this runs after modal gates and text commit.
+                let command = action.layer_transform_command(self).unwrap();
+                self.apply_edit(&command);
             }
             Action::ActivateComposition(id) => {
                 if *id != self.editor.project().active_composition_id() {

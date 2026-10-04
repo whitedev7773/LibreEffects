@@ -304,6 +304,7 @@ pub(super) fn apply_extended(
             | Command::NudgeLayers { .. }
             | Command::DuplicateLayers(_)
             | Command::SplitLayers { .. }
+            | Command::TransformLayers { .. }
             | Command::SetAnchor { .. }
             | Command::AddContent { .. }
             | Command::SetContent { .. }
@@ -614,6 +615,13 @@ pub(super) fn apply_extended(
                     state.selected = Some(copy.id);
                     state.project.composition.layers.insert(index, copy);
                 }
+            }
+            Command::TransformLayers {
+                ids,
+                frame,
+                operation,
+            } => {
+                layer_transform::apply(state, ids, *frame, *operation)?;
             }
             Command::SetAnchor { id, frame, x, y } => {
                 let layer = editable(state, *id)?;
