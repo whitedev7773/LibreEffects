@@ -22,6 +22,42 @@ mod tree_selection;
 use gradient_ramp::RampDrag;
 use tree_selection::Selection;
 
+const TRIM_HELP: &str = "Trims each source contour above this item. Start and End are percentages; Offset moves the interval in degrees. Source paths remain editable.";
+
+#[derive(Clone, Copy)]
+struct ContentsFieldTarget {
+    composition: libre_effects_core::CompositionId,
+    layer: u64,
+    item: u64,
+    revision: u64,
+}
+impl ContentsFieldTarget {
+    fn current(self, state: &EditorState) -> bool {
+        state.editor.project().active_composition_id() == self.composition
+            && state.editor.selected() == Some(self.layer)
+            && state.document_revision == self.revision
+            && state.contents_selection == Some((self.composition, self.layer, self.item))
+    }
+    fn value_command(
+        self,
+        state: &EditorState,
+        parameter: ContentsParam,
+        value: f64,
+    ) -> Option<Command> {
+        self.current(state).then_some(Command::Contents {
+            id: self.layer,
+            edit: ContentsEdit::Track {
+                item: self.item,
+                parameter,
+                edit: TrackEdit::Value {
+                    frame: state.frame,
+                    value,
+                },
+            },
+        })
+    }
+}
+
 struct PaintMenu {
     layer: u64,
     item: u64,
@@ -120,6 +156,12 @@ impl ContentsControls {
         self.ramp_selected = None;
         let composition = self.state.read(cx).editor.project().active_composition_id();
         let revision = self.state.read(cx).document_revision;
+        let target = ContentsFieldTarget {
+            composition,
+            layer,
+            item,
+            revision,
+        };
         if self.owner != Some((composition, layer)) || self.selected != Some(item) {
             self.gradient_stop = None;
         }
@@ -155,28 +197,15 @@ impl ContentsControls {
                     cx.new(|cx| {
                         TextField::new(cx, move |text, w, cx| {
                             state.update(cx, |s, cx| {
-                                if s.editor.selected() != Some(layer)
-                                    || s.document_revision != revision
-                                    || s.contents_selection != Some((composition, layer, item))
-                                {
+                                if !target.current(s) {
                                     return;
                                 }
                                 match text.trim().parse::<f64>() {
-                                    Ok(value) => s.dispatch(
-                                        &Action::Edit(Command::Contents {
-                                            id: layer,
-                                            edit: ContentsEdit::Track {
-                                                item,
-                                                parameter: p,
-                                                edit: TrackEdit::Value {
-                                                    frame: s.frame,
-                                                    value,
-                                                },
-                                            },
-                                        }),
-                                        w,
-                                        cx,
-                                    ),
+                                    Ok(value) => {
+                                        if let Some(command) = target.value_command(s, p, value) {
+                                            s.dispatch(&Action::Edit(command), w, cx);
+                                        }
+                                    }
                                     Err(_) => {
                                         s.status = "Enter a finite Contents value".into();
                                         cx.notify();
@@ -192,10 +221,7 @@ impl ContentsControls {
         self.name = Some(cx.new(|cx| {
             TextField::new(cx, move |text, w, cx| {
                 state.update(cx, |s, cx| {
-                    if s.editor.selected() == Some(layer)
-                        && s.document_revision == revision
-                        && s.contents_selection == Some((composition, layer, item))
-                    {
+                    if target.current(s) {
                         s.dispatch(
                             &Action::Edit(Command::Contents {
                                 id: layer,
@@ -344,6 +370,7 @@ impl Render for ContentsControls {
                     style: ShapeStroke::default(),
                     gradient: ShapeGradient::default(),
                 },
+                ContentsKind::TrimPaths,
             ]
             .into_iter()
             .enumerate()
@@ -668,6 +695,17 @@ impl Render for ContentsControls {
             );
         }
         root = root.child(parenting);
+        if matches!(node.kind, ContentsKind::TrimPaths) {
+            root = root.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .text_size(px(11.))
+                    .child("Each source contour")
+                    .child(div().text_color(rgb(ui::MUTED)).child(TRIM_HELP)),
+            );
+        }
         if node.kind.is_paint() {
             for picker in 0..2 {
                 let current = if picker == 0 {
@@ -1211,7 +1249,21 @@ impl Render for ContentsControls {
                             .w(px(72.))
                             .when(!locked, |d| d.child(field.clone()))
                             .when(locked, |d| d.child(value)),
-                    ),
+                    )
+                    .when(matches!(p, ContentsParam::Trim(_)), |row| {
+                        row.child(ui::action_tool(
+                            gpui::SharedString::from(format!("contents-key-{p:?}")),
+                            "diamond",
+                            "Add or remove key at playhead",
+                            &self.state,
+                            Action::Edit(Command::EditTrack {
+                                id,
+                                property,
+                                edit: TrackEdit::ToggleKey { frame },
+                            }),
+                            track.keys().contains_key(&frame),
+                        ))
+                    }),
             );
         }
         if let Some(m) = &self.paint_menu {
@@ -1259,5 +1311,285 @@ impl Render for ContentsControls {
             ));
         }
         root
+    }
+}
+
+#[cfg(test)]
+mod trim_controls_tests {
+    use super::*;
+    use libre_effects_core::{ContentsNode, TrimParam};
+
+    fn fixture() -> (EditorState, ContentsFieldTarget) {
+        let mut state = EditorState::default();
+        state
+            .editor
+            .execute(Command::AddContent {
+                content: Content::Shape(Default::default()),
+                width: 200.,
+                height: 120.,
+                name: "Trim controls fixture".into(),
+            })
+            .unwrap();
+        state
+            .editor
+            .execute(Command::Contents {
+                id: 1,
+                edit: ContentsEdit::Promote,
+            })
+            .unwrap();
+        state
+            .editor
+            .execute(Command::Contents {
+                id: 1,
+                edit: ContentsEdit::Add {
+                    parent: 1,
+                    kind: ContentsKind::TrimPaths,
+                },
+            })
+            .unwrap();
+        let Content::ShapeContents(contents) = state.editor.selected_layer().unwrap().content()
+        else {
+            panic!("expected Contents");
+        };
+        let item = contents
+            .rows()
+            .into_iter()
+            .find(|(_, _, node)| matches!(node.kind, ContentsKind::TrimPaths))
+            .unwrap()
+            .2
+            .id;
+        let target = ContentsFieldTarget {
+            composition: state.editor.project().active_composition_id(),
+            layer: 1,
+            item,
+            revision: state.document_revision,
+        };
+        state.contents_selection = Some((target.composition, target.layer, target.item));
+        (state, target)
+    }
+
+    fn node(state: &EditorState, item: u64) -> &ContentsNode {
+        let Content::ShapeContents(contents) = state.editor.selected_layer().unwrap().content()
+        else {
+            panic!("expected Contents");
+        };
+        contents.node(item).unwrap()
+    }
+
+    #[test]
+    fn trim_controls_order_and_selection_keep_source_path_controls_separate() {
+        let (state, target) = fixture();
+        let node = node(&state, target.item);
+        assert_eq!(
+            node.parameter_order(),
+            [TrimParam::Start, TrimParam::End, TrimParam::Offset].map(ContentsParam::Trim)
+        );
+        assert_eq!(
+            node.parameter_order()
+                .into_iter()
+                .map(|p| node.value_at(p, 0))
+                .collect::<Vec<_>>(),
+            [0., 100., 0.]
+        );
+        assert!(!matches!(node.kind, ContentsKind::Path { .. }));
+        assert!(node.path_at(0).is_none());
+        assert!(
+            state
+                .editor
+                .selected_layer()
+                .unwrap()
+                .track(PropertyPath::Path(PathTarget::Contents(target.item)))
+                .is_none()
+        );
+        let Content::ShapeContents(contents) = state.editor.selected_layer().unwrap().content()
+        else {
+            unreachable!();
+        };
+        let mut selection = Selection::default();
+        selection.one(1, target.item);
+        selection.reconcile(contents, &Default::default());
+        assert_eq!(selection.singleton(), Some(target.item));
+        assert_eq!(selection.parent, Some(1));
+        assert!(TRIM_HELP.contains("each source contour"));
+        assert!(TRIM_HELP.contains("Source paths remain editable"));
+    }
+
+    #[test]
+    fn trim_field_commands_reject_stale_selection_and_use_the_current_frame() {
+        let (mut state, target) = fixture();
+        let parameter = ContentsParam::Trim(TrimParam::End);
+        for stale in [
+            ContentsFieldTarget {
+                composition: target.composition + 1,
+                ..target
+            },
+            ContentsFieldTarget {
+                layer: 999,
+                ..target
+            },
+            ContentsFieldTarget {
+                item: target.item + 1,
+                ..target
+            },
+            ContentsFieldTarget {
+                revision: target.revision + 1,
+                ..target
+            },
+        ] {
+            assert!(stale.value_command(&state, parameter, 50.).is_none());
+        }
+        state.contents_selection = None;
+        assert!(target.value_command(&state, parameter, 50.).is_none());
+        state.contents_selection = Some((target.composition, target.layer, target.item));
+        state.frame = 13;
+        assert!(matches!(
+            target.value_command(&state, parameter, 50.),
+            Some(Command::Contents {
+                id: 1,
+                edit: ContentsEdit::Track {
+                    edit: TrackEdit::Value {
+                        frame: 13,
+                        value: 50.
+                    },
+                    ..
+                }
+            })
+        ));
+        state.editor.clear_selection();
+        assert!(target.value_command(&state, parameter, 50.).is_none());
+    }
+
+    #[test]
+    fn same_displayed_trim_field_value_preserves_bytes_redo_and_in_between_keys() {
+        for (parameter, end) in [
+            (TrimParam::Start, 40.),
+            (TrimParam::End, 60.),
+            (TrimParam::Offset, 720.),
+        ] {
+            let (mut state, target) = fixture();
+            let parameter = ContentsParam::Trim(parameter);
+            let property = PropertyPath::Contents {
+                item: target.item,
+                parameter,
+            };
+            state
+                .editor
+                .execute(Command::EditTrack {
+                    id: target.layer,
+                    property,
+                    edit: TrackEdit::ToggleAnimation { frame: 0 },
+                })
+                .unwrap();
+            state
+                .editor
+                .execute(Command::EditTrack {
+                    id: target.layer,
+                    property,
+                    edit: TrackEdit::Value {
+                        frame: 20,
+                        value: end,
+                    },
+                })
+                .unwrap();
+            state.editor.clear_history();
+            state
+                .editor
+                .execute(Command::RenameLayer {
+                    id: target.layer,
+                    name: "Undo this rename".into(),
+                })
+                .unwrap();
+            state.editor.undo();
+            state.frame = 10;
+            let displayed = node(&state, target.item).value_at(parameter, state.frame);
+            let source = state.editor.project().to_json().unwrap();
+            let command = target.value_command(&state, parameter, displayed).unwrap();
+            state.editor.execute(command).unwrap();
+            assert_eq!(state.editor.project().to_json().unwrap(), source);
+            assert!(!state.editor.can_undo());
+            assert!(state.editor.can_redo());
+            assert!(
+                !node(&state, target.item).parameters[&parameter]
+                    .keys()
+                    .contains_key(&10)
+            );
+            // The explicit diamond intentionally creates the key at the same value.
+            state
+                .editor
+                .execute(Command::EditTrack {
+                    id: target.layer,
+                    property,
+                    edit: TrackEdit::ToggleKey { frame: state.frame },
+                })
+                .unwrap();
+            assert!(
+                node(&state, target.item).parameters[&parameter]
+                    .keys()
+                    .contains_key(&10)
+            );
+            assert_eq!(node(&state, target.item).value_at(parameter, 10), displayed);
+            assert!(state.editor.can_undo());
+            assert!(!state.editor.can_redo());
+            state.editor.undo();
+            assert_eq!(state.editor.project().to_json().unwrap(), source);
+        }
+    }
+
+    #[test]
+    fn trim_pending_value_then_stopwatch_or_key_uses_normal_transactions() {
+        for edit in [
+            TrackEdit::ToggleAnimation { frame: 7 },
+            TrackEdit::ToggleKey { frame: 7 },
+        ] {
+            let (mut state, target) = fixture();
+            let parameter = ContentsParam::Trim(TrimParam::End);
+            state.frame = 7;
+            let command = target.value_command(&state, parameter, 25.).unwrap();
+            state.editor.execute(command).unwrap();
+            state.document_revision += 1;
+            assert!(target.value_command(&state, parameter, 40.).is_none());
+            // Existing action_tool routing has no stale field-revision gate.
+            state
+                .editor
+                .execute(Command::EditTrack {
+                    id: target.layer,
+                    property: PropertyPath::Contents {
+                        item: target.item,
+                        parameter,
+                    },
+                    edit,
+                })
+                .unwrap();
+            let track = &node(&state, target.item).parameters[&parameter];
+            assert_eq!(track.keys().len(), 1);
+            assert!(track.keys().contains_key(&7));
+            assert_eq!(track.value_at(7), 25.);
+        }
+    }
+
+    #[test]
+    fn trim_field_values_still_reach_core_lock_range_and_frame_guards() {
+        let (mut state, target) = fixture();
+        let parameter = ContentsParam::Trim(TrimParam::Start);
+        for value in [-1., 101., f64::NAN, f64::INFINITY] {
+            let source = state.editor.project().clone();
+            let command = target.value_command(&state, parameter, value).unwrap();
+            assert!(state.editor.execute(command).is_err());
+            assert_eq!(state.editor.project(), &source);
+        }
+        state.frame = state.editor.project().composition().duration();
+        let source = state.editor.project().clone();
+        let command = target.value_command(&state, parameter, 0.).unwrap();
+        assert!(state.editor.execute(command).is_err());
+        assert_eq!(state.editor.project(), &source);
+        state.frame = 0;
+        state
+            .editor
+            .execute(Command::ToggleLocked(target.layer))
+            .unwrap();
+        let source = state.editor.project().clone();
+        let command = target.value_command(&state, parameter, 0.).unwrap();
+        assert!(state.editor.execute(command).is_err());
+        assert_eq!(state.editor.project(), &source);
     }
 }

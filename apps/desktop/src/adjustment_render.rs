@@ -1,6 +1,6 @@
 //! Adjustment filters evaluate the accumulated lower composite in layer space.
 //! Interpolation uses premultiplied RGBA: source-over would incorrectly increase alpha.
-use crate::rendering::Renderer;
+use crate::rendering::{Renderer, SVG_LIMIT, append_svg, svg_document};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use libre_effects_core::{Affine, Effects, Layer, Property};
 use resvg::tiny_skia::Pixmap;
@@ -11,13 +11,32 @@ fn transform(matrix: Affine) -> String {
 }
 
 pub(crate) fn embedded(pixels: &Pixmap, width: u32, height: u32) -> Result<String, String> {
-    let png = STANDARD.encode(pixels.encode_png().map_err(|e| e.to_string())?);
-    if png.len() > 64 * 1024 * 1024 {
-        return Err("Adjustment frame exceeds the 64 MiB image limit".into());
-    }
-    Ok(format!(
-        "<image width='{width}' height='{height}' preserveAspectRatio='none' xlink:href='data:image/png;base64,{png}'/>"
-    ))
+    let bytes = pixels.encode_png().map_err(|e| e.to_string())?;
+    // Base64's checked expansion is known before allocating its output.
+    let encoded_len = bytes
+        .len()
+        .checked_add(2)
+        .and_then(|n| n.checked_div(3))
+        .and_then(|n| n.checked_mul(4))
+        .filter(|n| *n <= SVG_LIMIT)
+        .ok_or("Adjustment frame exceeds the 64 MiB image limit")?;
+    let prefix = format!(
+        "<image width='{width}' height='{height}' preserveAspectRatio='none' xlink:href='data:image/png;base64,"
+    );
+    let total = prefix
+        .len()
+        .checked_add(encoded_len)
+        .and_then(|n| n.checked_add(3))
+        .filter(|n| *n <= SVG_LIMIT)
+        .ok_or("Adjustment frame SVG exceeds the 64 MiB image limit")?;
+    let mut output = String::new();
+    output
+        .try_reserve_exact(total)
+        .map_err(|_| "Could not allocate bounded adjustment image")?;
+    output.push_str(&prefix);
+    STANDARD.encode_string(bytes, &mut output);
+    output.push_str("'/>");
+    Ok(output)
 }
 impl Renderer {
     pub(crate) fn raster_canvas(
@@ -33,9 +52,7 @@ impl Renderer {
         if u64::from(pw) * u64::from(ph) > 33_554_432 {
             return Err("Adjustment rendering supports up to 32 megapixels".into());
         }
-        let source = format!(
-            "<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' width='{width}' height='{height}'>{svg}</svg>"
-        );
+        let source = svg_document(svg, f64::from(width), f64::from(height))?;
         let tree =
             resvg::usvg::Tree::from_str(&source, &self.options).map_err(|e| e.to_string())?;
         let mut pixels = Pixmap::new(pw, ph).ok_or("Could not allocate adjustment frame")?;
@@ -119,9 +136,13 @@ impl Renderer {
         } else {
             format!("filter='url(#{id}-legacy-adjustment)'")
         };
-        let filtered_svg = format!(
-            "<defs>{defs}<filter id='{id}-legacy-adjustment' x='-100%' y='-100%' width='300%' height='300%'>{legacy}</filter></defs><g transform='{forward}'>{open}<g {legacy_group}><g transform='{back}'>{input}</g></g>{close}</g>"
-        );
+        let mut filtered_svg = String::new();
+        append_svg(
+            &mut filtered_svg,
+            format_args!(
+                "<defs>{defs}<filter id='{id}-legacy-adjustment' x='-100%' y='-100%' width='300%' height='300%'>{legacy}</filter></defs><g transform='{forward}'>{open}<g {legacy_group}><g transform='{back}'>{input}</g></g>{close}</g>"
+            ),
+        )?;
         let filtered = self.raster_canvas(&filtered_svg, width, height, max_dimension)?;
         let mut region = String::new();
         let clip = if let Some(m) = layer.mask() {

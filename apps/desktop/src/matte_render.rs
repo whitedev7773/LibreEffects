@@ -1,5 +1,5 @@
 //! Matte coverage multiplies all premultiplied channels after source effects.
-use crate::rendering::Renderer;
+use crate::rendering::{FrameRenderBudget, Renderer};
 use libre_effects_core::{CompositionId, Layer, MatteMode, Project};
 use resvg::tiny_skia::Pixmap;
 
@@ -41,7 +41,7 @@ impl Renderer {
         frame: u32,
         max_dimension: u32,
         prefix: &str,
-        layer_count: &mut usize,
+        budget: &mut FrameRenderBudget,
     ) -> Result<Option<(Pixmap, MatteMode)>, String> {
         let Some(matte) = layer.track_matte() else {
             return Ok(None);
@@ -56,7 +56,7 @@ impl Renderer {
             frame,
             max_dimension,
             &format!("{prefix}-matte"),
-            layer_count,
+            budget,
         )?;
         Ok(Some((
             self.raster_canvas(&source, comp.width(), comp.height(), max_dimension)?,

@@ -3,7 +3,7 @@ use super::*;
 use crate::view_state::GraphChannel;
 use libre_effects_core::{
     AudioParam, Content, ContentsParam, EffectKind, EffectParam, GradientParam, KeyRef, MaskParam,
-    Project, Property, ShapeParam,
+    Project, Property, ShapeParam, TrimParam,
 };
 use std::collections::BTreeSet;
 
@@ -153,6 +153,8 @@ pub(super) fn describe(project: &Project, channel: GraphChannel) -> Option<Descr
                 ContentsParam::Skew | ContentsParam::SkewAxis => Unit::Degrees,
                 ContentsParam::Shape(p) => shape_unit(p),
                 ContentsParam::Gradient(p) => gradient_unit(p),
+                ContentsParam::Trim(TrimParam::Start | TrimParam::End) => Unit::Percent,
+                ContentsParam::Trim(TrimParam::Offset) => Unit::Degrees,
             }
         }
         PropertyPath::Effect { effect, parameter } => {
@@ -290,6 +292,103 @@ mod typography_units_tests {
                     id: 1,
                     property: channel.property,
                     frame: 7
+                }]
+                .into()
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod trim_units_tests {
+    use super::*;
+    use libre_effects_core::{Command, ContentsEdit, ContentsKind, Editor, TrackEdit};
+
+    #[test]
+    fn trim_lanes_use_percent_and_unwrapped_degree_units_and_keep_legacy_descriptors() {
+        let mut editor = Editor::default();
+        editor
+            .execute(Command::AddContent {
+                content: Content::Shape(Default::default()),
+                width: 200.,
+                height: 120.,
+                name: "Trim controls fixture".into(),
+            })
+            .unwrap();
+        editor
+            .execute(Command::Contents {
+                id: 1,
+                edit: ContentsEdit::Promote,
+            })
+            .unwrap();
+        let legacy = editor
+            .project()
+            .composition()
+            .layer(1)
+            .unwrap()
+            .track_paths()
+            .into_iter()
+            .filter_map(|property| describe(editor.project(), GraphChannel { id: 1, property }))
+            .map(|descriptor| (descriptor.channel, descriptor.label, descriptor.units))
+            .collect::<Vec<_>>();
+        editor
+            .execute(Command::Contents {
+                id: 1,
+                edit: ContentsEdit::Add {
+                    parent: 1,
+                    kind: ContentsKind::TrimPaths,
+                },
+            })
+            .unwrap();
+        let Content::ShapeContents(contents) = editor.selected_layer().unwrap().content() else {
+            panic!("expected Contents");
+        };
+        let item = contents
+            .rows()
+            .into_iter()
+            .find(|(_, _, node)| matches!(node.kind, ContentsKind::TrimPaths))
+            .unwrap()
+            .2
+            .id;
+        for (channel, label, units) in legacy {
+            let descriptor = describe(editor.project(), channel).unwrap();
+            assert_eq!((descriptor.label, descriptor.units), (label, units));
+        }
+        for (parameter, value_unit, speed_unit) in [
+            (TrimParam::Start, "%", "%/s"),
+            (TrimParam::End, "%", "%/s"),
+            (TrimParam::Offset, "deg", "deg/s"),
+        ] {
+            let channel = GraphChannel {
+                id: 1,
+                property: PropertyPath::Contents {
+                    item,
+                    parameter: ContentsParam::Trim(parameter),
+                },
+            };
+            editor
+                .execute(Command::EditTrack {
+                    id: 1,
+                    property: channel.property,
+                    edit: TrackEdit::ToggleKey { frame: 7 },
+                })
+                .unwrap();
+            let descriptor = describe(editor.project(), channel).unwrap();
+            assert_eq!(descriptor.channel, channel);
+            assert_eq!(descriptor.units.label(false), value_unit);
+            assert_eq!(descriptor.units.label(true), speed_unit);
+            assert!(
+                descriptor
+                    .label
+                    .contains(&format!("Trim Paths {item} [#{item}]"))
+            );
+            assert!(descriptor.label.ends_with(parameter.label()));
+            assert_eq!(
+                all_keys(editor.project(), &[channel]),
+                [KeyRef {
+                    id: 1,
+                    property: channel.property,
+                    frame: 7,
                 }]
                 .into()
             );

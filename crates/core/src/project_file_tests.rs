@@ -760,3 +760,105 @@ fn native_and_legacy_share_mask_shape_and_asset_migrations() {
     assert_eq!(native, Project::from_json(&legacy.to_string()).unwrap());
     assert_eq!(native.version, 22);
 }
+
+#[test]
+fn trim_paths_schema_50_roundtrips_native_without_container_or_view_version_changes() {
+    let mut editor = Editor::default();
+    add(&mut editor, Content::Shape(Shape::default()), "Trim native");
+    editor
+        .execute(Command::Contents {
+            id: 1,
+            edit: ContentsEdit::Promote,
+        })
+        .unwrap();
+    editor
+        .execute(Command::Contents {
+            id: 1,
+            edit: ContentsEdit::Add {
+                parent: 1,
+                kind: ContentsKind::TrimPaths,
+            },
+        })
+        .unwrap();
+    editor
+        .execute(Command::Contents {
+            id: 1,
+            edit: ContentsEdit::Enabled {
+                item: 5,
+                enabled: false,
+            },
+        })
+        .unwrap();
+    editor.execute(Command::NewComposition).unwrap();
+    assert_eq!(editor.project().version, 50);
+    assert!(editor.project().composition.layers.is_empty());
+    for view in [b"{\"version\":1}".as_slice(), b"{\"version\":2}".as_slice()] {
+        let bytes = encode(editor.project(), Some(view)).unwrap();
+        assert_eq!(&bytes[..8], MAGIC);
+        assert_eq!(u16::from_le_bytes(bytes[8..10].try_into().unwrap()), 1);
+        let decoded = decode(&bytes).unwrap();
+        assert_eq!(&decoded.project, editor.project());
+        assert_eq!(decoded.view, Some(view));
+        assert_eq!(encode(&decoded.project, decoded.view).unwrap(), bytes);
+        assert_eq!(decoded.project.version, 50);
+    }
+    let mut invalid = editor.project().clone();
+    invalid.version = 49;
+    assert!(encode(&invalid, None).is_err());
+}
+
+#[test]
+fn trim_same_displayed_value_keeps_native_project_and_view_bytes_exact() {
+    let mut editor = Editor::default();
+    add(
+        &mut editor,
+        Content::ShapeContents(ShapeContents::default()),
+        "Trim native no-op",
+    );
+    editor
+        .execute(Command::Contents {
+            id: 1,
+            edit: ContentsEdit::Add {
+                parent: 0,
+                kind: ContentsKind::TrimPaths,
+            },
+        })
+        .unwrap();
+    let parameter = ContentsParam::Trim(TrimParam::End);
+    editor
+        .execute(Command::Contents {
+            id: 1,
+            edit: ContentsEdit::Track {
+                item: 1,
+                parameter,
+                edit: TrackEdit::ToggleAnimation { frame: 0 },
+            },
+        })
+        .unwrap();
+    editor
+        .execute(Command::Contents {
+            id: 1,
+            edit: ContentsEdit::Track {
+                item: 1,
+                parameter,
+                edit: TrackEdit::Value {
+                    frame: 30,
+                    value: 0.,
+                },
+            },
+        })
+        .unwrap();
+    let view = b"{\"version\":2,\"fixture\":\"unchanged opaque view\"}";
+    let before = encode(editor.project(), Some(view)).unwrap();
+    editor
+        .execute(Command::Batch(vec![Command::EditTrack {
+            id: 1,
+            property: PropertyPath::Contents { item: 1, parameter },
+            edit: TrackEdit::Value {
+                frame: 15,
+                value: 50.,
+            },
+        }]))
+        .unwrap();
+    assert_eq!(encode(editor.project(), Some(view)).unwrap(), before);
+}

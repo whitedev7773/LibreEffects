@@ -83,11 +83,4 @@ impl PaintBlend {
     pub(crate) fn is_normal(&self) -> bool {
         *self == Self::Normal
     }
-    pub(crate) fn wrap(self, svg: String) -> String {
-        if self.is_normal() {
-            svg
-        } else {
-            format!("<g style='mix-blend-mode:{}'>{svg}</g>", self.css())
-        }
-    }
 }

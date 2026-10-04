@@ -1,7 +1,74 @@
 //! One compositing path for preview, stills and frame sequences.
 use base64::{Engine, engine::general_purpose::STANDARD};
 use libre_effects_core::{Content, Project, Property, TextPaint, TextParam};
-use std::{io::Cursor, path::Path, sync::Arc};
+use std::{fmt, io::Cursor, path::Path, sync::Arc};
+
+/// The ceiling includes wrappers and copies, not only Contents' path payload.
+pub(crate) const SVG_LIMIT: usize = 64 * 1024 * 1024;
+
+/// Count formatting before reserving or copying so a rejected nested paint/image
+/// never allocates an unbounded intermediate `format!` string.
+pub(crate) fn append_svg(output: &mut String, args: fmt::Arguments<'_>) -> Result<(), String> {
+    struct Count(usize);
+    impl fmt::Write for Count {
+        fn write_str(&mut self, value: &str) -> fmt::Result {
+            self.0 = self.0.checked_add(value.len()).ok_or(fmt::Error)?;
+            if self.0 > SVG_LIMIT {
+                return Err(fmt::Error);
+            }
+            Ok(())
+        }
+    }
+    if output.len() > SVG_LIMIT {
+        return Err("Frame SVG exceeds 64 MiB; simplify the composition".into());
+    }
+    let mut count = Count(output.len());
+    fmt::write(&mut count, args)
+        .map_err(|_| "Frame SVG exceeds 64 MiB; simplify the composition".to_string())?;
+    output
+        .try_reserve_exact(count.0 - output.len())
+        .map_err(|_| "Could not allocate bounded frame SVG".to_string())?;
+    fmt::write(output, args).map_err(|_| "Could not format frame SVG".to_string())
+}
+
+pub(crate) fn svg_document(body: &str, width: f64, height: f64) -> Result<String, String> {
+    let mut output = String::new();
+    append_svg(
+        &mut output,
+        format_args!(
+            "<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' width='{width}' height='{height}'>{body}</svg>"
+        ),
+    )?;
+    Ok(output)
+}
+
+/// One value is shared by every nested composition and matte in a frame.
+#[derive(Default)]
+pub(crate) struct FrameRenderBudget {
+    layer_instances: usize,
+    contents: libre_effects_core::ContentsRenderBudget,
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_CONTENTS_BUDGET: std::cell::RefCell<Option<libre_effects_core::ContentsRenderBudget>> = const { std::cell::RefCell::new(None) };
+}
+/// Capture the lowered limits at Renderer construction; the resulting Renderer
+/// keeps them even when a preview task moves to another thread. Restore on panic.
+#[cfg(test)]
+pub(crate) fn with_test_contents_budget<T>(
+    budget: libre_effects_core::ContentsRenderBudget,
+    run: impl FnOnce() -> T,
+) -> T {
+    struct Restore(Option<libre_effects_core::ContentsRenderBudget>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            TEST_CONTENTS_BUDGET.with(|budget| *budget.borrow_mut() = self.0.take());
+        }
+    }
+    let _restore = Restore(TEST_CONTENTS_BUDGET.with(|current| current.replace(Some(budget))));
+    run()
+}
 
 fn xml(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -14,6 +81,8 @@ pub(crate) struct Renderer {
     pub(crate) options: resvg::usvg::Options<'static>,
     decoders: std::sync::Mutex<crate::video_decoder::Pool>,
     cancel: Arc<std::sync::atomic::AtomicBool>,
+    #[cfg(test)]
+    contents_budget: libre_effects_core::ContentsRenderBudget,
 }
 pub(crate) fn text_svg(
     text: &str,
@@ -146,15 +215,19 @@ pub(crate) fn image_limits() -> image::Limits {
     limits.max_alloc = Some(128 * 1024 * 1024);
     limits
 }
-fn count_layer(count: &mut usize) -> Result<(), String> {
-    *count += 1;
-    if *count > 4096 {
+fn count_layer(budget: &mut FrameRenderBudget) -> Result<(), String> {
+    budget.layer_instances = budget
+        .layer_instances
+        .checked_add(1)
+        .ok_or("Frame layer instance count overflow")?;
+    if budget.layer_instances > 4096 {
         return Err(
             "Frame exceeds 4096 nested layer or matte instances; simplify the composition".into(),
         );
     }
     Ok(())
 }
+
 impl Renderer {
     pub fn new() -> Self {
         Self::with_cancel(Default::default())
@@ -165,6 +238,18 @@ impl Renderer {
             options,
             decoders: Default::default(),
             cancel,
+            #[cfg(test)]
+            contents_budget: TEST_CONTENTS_BUDGET
+                .with(|budget| budget.borrow().clone().unwrap_or_default()),
+        }
+    }
+    fn frame_budget(&self) -> FrameRenderBudget {
+        FrameRenderBudget {
+            layer_instances: 0,
+            #[cfg(test)]
+            contents: self.contents_budget.clone(),
+            #[cfg(not(test))]
+            contents: Default::default(),
         }
     }
     pub fn clear_decoders(&self) {
@@ -180,7 +265,7 @@ impl Renderer {
         frame: u32,
         max_dimension: u32,
         prefix: &str,
-        layer_count: &mut usize,
+        budget: &mut FrameRenderBudget,
         include_guides: bool,
     ) -> Result<String, String> {
         let c = project
@@ -196,17 +281,10 @@ impl Renderer {
                 let Some(matrix) = c.world_transform(l.id(), frame) else {
                     continue;
                 };
-                count_layer(layer_count)?;
+                count_layer(budget)?;
                 let id = format!("{prefix}-{}", l.id());
-                let matte = self.matte_pixels(
-                    project,
-                    composition,
-                    l,
-                    frame,
-                    max_dimension,
-                    &id,
-                    layer_count,
-                )?;
+                let matte =
+                    self.matte_pixels(project, composition, l, frame, max_dimension, &id, budget)?;
                 svg = self.adjust_composite(
                     &svg,
                     l,
@@ -226,10 +304,10 @@ impl Renderer {
                     frame,
                     max_dimension,
                     prefix,
-                    layer_count,
+                    budget,
                 )?;
                 if l.blend_mode() == libre_effects_core::BlendMode::Normal {
-                    svg.push_str(&source);
+                    append_svg(&mut svg, format_args!("{source}"))?;
                 } else {
                     svg = self.blend_composite(
                         &svg,
@@ -241,7 +319,7 @@ impl Renderer {
                     )?;
                 }
             }
-            if svg.len() > 64 * 1024 * 1024 {
+            if svg.len() > SVG_LIMIT {
                 return Err("Frame SVG exceeds 64 MiB; reduce embedded image instances".into());
             }
         }
@@ -257,7 +335,7 @@ impl Renderer {
         frame: u32,
         max_dimension: u32,
         prefix: &str,
-        layer_count: &mut usize,
+        budget: &mut FrameRenderBudget,
     ) -> Result<String, String> {
         let c = project
             .composition_by_id(composition)
@@ -272,7 +350,7 @@ impl Renderer {
         let Some(matrix) = c.world_transform(l.id(), frame) else {
             return Ok(String::new());
         };
-        count_layer(layer_count)?;
+        count_layer(budget)?;
         let id = format!("{prefix}-{}", l.id());
         let mut svg = String::new();
         let e = l.effects();
@@ -287,6 +365,37 @@ impl Renderer {
             let fill = format!("#{:06x}", l.text_color_at(TextPaint::Fill, frame).unwrap());
             (fill, style, typography.font_size)
         });
+        let sampled_svg = match l.content() {
+            Content::ShapeContents(contents) => Some(
+                contents
+                    .svg_at_with_budget(
+                        frame,
+                        &id,
+                        &mut budget.contents,
+                        Some(&|| self.cancel.load(std::sync::atomic::Ordering::Relaxed)),
+                    )
+                    .map_err(|error| {
+                        format!(
+                            "Composition '{}' ({composition}), layer '{}' ({}): {error}",
+                            c.name(),
+                            l.name(),
+                            l.id(),
+                        )
+                    })?,
+            ),
+            Content::Text { text, .. } => {
+                let (fill, style, font_size) = text_paint.as_ref().unwrap();
+                Some(layer_text_svg(
+                    text,
+                    *font_size,
+                    fill,
+                    l.width(),
+                    l.height(),
+                    style.clone(),
+                ))
+            }
+            _ => None,
+        };
         let mut effect_bounds = [0.0, 0.0, l.width(), l.height()];
         if matches!(
             l.content(),
@@ -295,23 +404,7 @@ impl Renderer {
         {
             // Point text can extend outside the layer's nominal size. Measure the
             // same shaped glyph paths used by the compositor before filtering.
-            let source = format!(
-                "<svg xmlns='http://www.w3.org/2000/svg' width='{}' height='{}'>{}</svg>",
-                l.width(),
-                l.height(),
-                match l.content() {
-                    Content::ShapeContents(c) => c.svg_at(frame),
-                    Content::Text { text, .. } => layer_text_svg(
-                        text,
-                        text_paint.as_ref().unwrap().2,
-                        &text_paint.as_ref().unwrap().0,
-                        l.width(),
-                        l.height(),
-                        text_paint.as_ref().unwrap().1.clone()
-                    ),
-                    _ => unreachable!(),
-                }
-            );
+            let source = svg_document(sampled_svg.as_deref().unwrap(), l.width(), l.height())?;
             let measured =
                 resvg::usvg::Tree::from_str(&source, &self.options).map_err(|e| e.to_string())?;
             let bounds = measured.root().stroke_bounding_box();
@@ -332,85 +425,114 @@ impl Renderer {
         }
         let (effect_defs, effect_open, effect_close) =
             crate::effect_render::stack(l, frame, &id, effect_bounds)?;
-        svg.push_str(&effect_defs);
-        svg.push_str(&format!(
-            "<defs><filter id='fx{id}' x='-100%' y='-100%' width='300%' height='300%'>"
-        ));
+        append_svg(&mut svg, format_args!("{effect_defs}"))?;
+        append_svg(
+            &mut svg,
+            format_args!(
+                "<defs><filter id='fx{id}' x='-100%' y='-100%' width='300%' height='300%'>"
+            ),
+        )?;
         if e.blur > 0.0 {
-            svg.push_str(&format!("<feGaussianBlur stdDeviation='{}'/>", e.blur));
+            append_svg(
+                &mut svg,
+                format_args!("<feGaussianBlur stdDeviation='{}'/>", e.blur),
+            )?;
         }
         if e.grayscale {
-            svg.push_str("<feColorMatrix type='saturate' values='0'/>");
+            append_svg(
+                &mut svg,
+                format_args!("<feColorMatrix type='saturate' values='0'/>"),
+            )?;
         }
         if e.brightness != 1.0 {
             let b = e.brightness;
-            svg.push_str(&format!(
-                "<feColorMatrix values='{b} 0 0 0 0 0 {b} 0 0 0 0 0 {b} 0 0 0 0 0 1 0'/>"
-            ));
+            append_svg(
+                &mut svg,
+                format_args!(
+                    "<feColorMatrix values='{b} 0 0 0 0 0 {b} 0 0 0 0 0 {b} 0 0 0 0 0 1 0'/>"
+                ),
+            )?;
         }
-        svg.push_str("</filter>");
+        append_svg(&mut svg, format_args!("</filter>"))?;
         if let Some(m) = l.mask() {
-            svg.push_str(&format!("<clipPath id='mask{id}'><path clip-rule='evenodd' d='{}M{} {}h{}v{}h{}z'/></clipPath>", if m.inverted { format!("M0 0h{}v{}h{}z ",l.width(),l.height(),-l.width()) } else { String::new() },m.x,m.y,m.width,m.height,-m.width));
+            append_svg(
+                &mut svg,
+                format_args!(
+                    "<clipPath id='mask{id}'><path clip-rule='evenodd' d='{}M{} {}h{}v{}h{}z'/></clipPath>",
+                    if m.inverted {
+                        format!("M0 0h{}v{}h{}z ", l.width(), l.height(), -l.width())
+                    } else {
+                        String::new()
+                    },
+                    m.x,
+                    m.y,
+                    m.width,
+                    m.height,
+                    -m.width
+                ),
+            )?;
         }
-        svg.push_str("</defs>");
+        append_svg(&mut svg, format_args!("</defs>"))?;
         let (path_defs, path_mask) = crate::path_mask_render::mask(l, &id, frame);
-        svg.push_str(&path_defs);
+        append_svg(&mut svg, format_args!("{path_defs}"))?;
         let a = matrix.0;
-        svg.push_str(&format!(
-            "<g transform='matrix({} {} {} {} {} {})' opacity='{}'>{effect_open}<g {}><g {}><g {path_mask}>",
-            a[0],
-            a[1],
-            a[2],
-            a[3],
-            a[4],
-            a[5],
-            l.property(Property::Opacity)
-                .value_at(frame)
-                .clamp(0.0, 100.0)
-                / 100.0,
-            if e != libre_effects_core::Effects::default() {
-                format!("filter='url(#fx{id})'")
-            } else {
-                String::new()
-            },
-            if l.mask().is_some() {
-                format!("clip-path='url(#mask{id})'")
-            } else {
-                String::new()
-            }
-        ));
+        append_svg(
+            &mut svg,
+            format_args!(
+                "<g transform='matrix({} {} {} {} {} {})' opacity='{}'>{effect_open}<g {}><g {}><g {path_mask}>",
+                a[0],
+                a[1],
+                a[2],
+                a[3],
+                a[4],
+                a[5],
+                l.property(Property::Opacity)
+                    .value_at(frame)
+                    .clamp(0.0, 100.0)
+                    / 100.0,
+                if e != libre_effects_core::Effects::default() {
+                    format!("filter='url(#fx{id})'")
+                } else {
+                    String::new()
+                },
+                if l.mask().is_some() {
+                    format!("clip-path='url(#mask{id})'")
+                } else {
+                    String::new()
+                }
+            ),
+        )?;
         let color = format!("#{:06x}", l.color());
         match l.content() {
             Content::Null | Content::Adjustment => {}
-            Content::Rectangle | Content::Solid => svg.push_str(&format!(
-                "<rect width='{}' height='{}' fill='{color}'/>",
-                l.width(),
-                l.height()
-            )),
-            Content::Shape(shape) => {
-                svg.push_str(&shape.svg_at(l.width(), l.height(), l.color(), frame))
-            }
-            Content::ShapeContents(contents) => {
-                svg.push_str(&contents.svg_at_with_prefix(frame, &id))
-            }
-            Content::Text { text, .. } => {
-                let (fill, style, font_size) = text_paint.as_ref().unwrap();
-                svg.push_str(&layer_text_svg(
-                    text,
-                    *font_size,
-                    fill,
+            Content::Rectangle | Content::Solid => append_svg(
+                &mut svg,
+                format_args!(
+                    "<rect width='{}' height='{}' fill='{color}'/>",
                     l.width(),
-                    l.height(),
-                    style.clone(),
-                ));
+                    l.height()
+                ),
+            )?,
+            Content::Shape(shape) => append_svg(
+                &mut svg,
+                format_args!("{}", shape.svg_at(l.width(), l.height(), l.color(), frame)),
+            )?,
+            Content::ShapeContents(_) | Content::Text { .. } => {
+                append_svg(
+                    &mut svg,
+                    format_args!("{}", sampled_svg.as_deref().unwrap()),
+                )?;
             }
             Content::Image { png } => {
                 let png = crate::source_render::alpha_png(png, l.footage_interpretation())?;
-                svg.push_str(&format!(
-                    "<image width='{}' height='{}' xlink:href='data:image/png;base64,{png}'/>",
-                    l.width(),
-                    l.height()
-                ));
+                append_svg(
+                    &mut svg,
+                    format_args!(
+                        "<image width='{}' height='{}' xlink:href='data:image/png;base64,{png}'/>",
+                        l.width(),
+                        l.height()
+                    ),
+                )?;
             }
             Content::Composition { composition, .. } => {
                 let source = project
@@ -423,7 +545,7 @@ impl Renderer {
                         source_frame,
                         max_dimension,
                         &id,
-                        layer_count,
+                        budget,
                         false,
                     )?;
                     // An unchanged full-canvas group already shares its parent's clip.
@@ -435,10 +557,19 @@ impl Renderer {
                         && matrix == libre_effects_core::Affine::default()
                         && e == libre_effects_core::Effects::default()
                     {
-                        svg.push_str(&inner);
+                        append_svg(&mut svg, format_args!("{inner}"))?;
                     } else {
                         // Nested viewports clip to the source canvas and retain alpha.
-                        svg.push_str(&format!("<svg width='{}' height='{}' viewBox='0 0 {} {}' preserveAspectRatio='none' overflow='hidden'>{inner}</svg>", l.width(), l.height(), source.width(), source.height()));
+                        append_svg(
+                            &mut svg,
+                            format_args!(
+                                "<svg width='{}' height='{}' viewBox='0 0 {} {}' preserveAspectRatio='none' overflow='hidden'>{inner}</svg>",
+                                l.width(),
+                                l.height(),
+                                source.width(),
+                                source.height()
+                            ),
+                        )?;
                     }
                 }
             }
@@ -451,7 +582,14 @@ impl Renderer {
                         l.height() as u32,
                         l.footage_interpretation(),
                     )? {
-                        svg.push_str(&format!("<image width='{}' height='{}' xlink:href='data:image/png;base64,{png}'/>", l.width(), l.height()));
+                        append_svg(
+                            &mut svg,
+                            format_args!(
+                                "<image width='{}' height='{}' xlink:href='data:image/png;base64,{png}'/>",
+                                l.width(),
+                                l.height()
+                            ),
+                        )?;
                     }
                 }
             }
@@ -478,30 +616,27 @@ impl Renderer {
                         &self.cancel,
                     )?;
                     let png = crate::source_render::alpha_png(&png, interpretation)?;
-                    svg.push_str(&format!(
-                        "<image width='{}' height='{}' xlink:href='data:image/png;base64,{png}'/>",
-                        l.width(),
-                        l.height()
-                    ));
+                    append_svg(
+                        &mut svg,
+                        format_args!(
+                            "<image width='{}' height='{}' xlink:href='data:image/png;base64,{png}'/>",
+                            l.width(),
+                            l.height()
+                        ),
+                    )?;
                 }
             }
         }
-        svg.push_str(&format!("</g></g></g>{effect_close}</g>"));
+        append_svg(&mut svg, format_args!("</g></g></g>{effect_close}</g>"))?;
 
-        if let Some((matte, mode)) = self.matte_pixels(
-            project,
-            composition,
-            l,
-            frame,
-            max_dimension,
-            &id,
-            layer_count,
-        )? {
+        if let Some((matte, mode)) =
+            self.matte_pixels(project, composition, l, frame, max_dimension, &id, budget)?
+        {
             let mut source = self.raster_canvas(&svg, c.width(), c.height(), max_dimension)?;
             crate::matte_render::apply_matte(&mut source, &matte, mode);
             svg = crate::adjustment_render::embedded(&source, c.width(), c.height())?;
         }
-        if svg.len() > 64 * 1024 * 1024 {
+        if svg.len() > SVG_LIMIT {
             return Err("Layer SVG exceeds 64 MiB; reduce embedded image instances".into());
         }
         Ok(svg)
@@ -554,21 +689,17 @@ impl Renderer {
         if width as u64 * height as u64 > 33_554_432 {
             return Err("Rendering supports up to 32 megapixels per frame".into());
         }
-        let mut svg = format!(
-            "<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' width='{}' height='{}'>",
-            c.width(),
-            c.height()
-        );
-        svg.push_str(&self.layers_svg(
+        let mut budget = self.frame_budget();
+        let body = self.layers_svg(
             project,
             project.active_composition_id(),
             frame,
             max_dimension,
             "root",
-            &mut 0,
+            &mut budget,
             include_guides,
-        )?);
-        svg.push_str("</svg>");
+        )?;
+        let svg = svg_document(&body, f64::from(c.width()), f64::from(c.height()))?;
         self.check_cancel()?;
         let tree = resvg::usvg::Tree::from_str(&svg, &self.options).map_err(|e| e.to_string())?;
         self.check_cancel()?;
@@ -1431,3 +1562,7 @@ mod tests {
         assert!(image.pixels().filter(|p| p[3] > 0).count() > 40);
     }
 }
+
+#[cfg(test)]
+#[path = "trim_render_tests.rs"]
+pub(crate) mod trim_tests;

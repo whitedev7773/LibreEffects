@@ -71,6 +71,34 @@ mod tests {
         e.project().clone()
     }
     #[test]
+    #[ignore = "requires FFmpeg; verifies Trim errors preserve an existing video and clean staging"]
+    fn trim_failure_keeps_video_destination_and_cleans_encoder_temporaries() {
+        for (e, budget, kind) in crate::rendering::trim_tests::failure_cases() {
+            let dir = tempfile::tempdir().unwrap();
+            let output = dir.path().join("keep.mp4");
+            std::fs::write(&output, b"existing video").unwrap();
+            let progress = Arc::new(AtomicU32::new(0));
+            let error = crate::rendering::with_test_contents_budget(budget, || {
+                export_video(
+                    e.project(),
+                    0..2,
+                    VideoPreset::H264,
+                    &output,
+                    Default::default(),
+                    progress.clone(),
+                )
+            })
+            .unwrap_err();
+            assert!(
+                error.contains(kind) && error.contains("Trim line") && error.contains("frame 0"),
+                "{error}"
+            );
+            assert_eq!(progress.load(Ordering::Relaxed), 0);
+            assert_eq!(std::fs::read(&output).unwrap(), b"existing video");
+            assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+        }
+    }
+    #[test]
     #[ignore = "requires FFmpeg; validates exact fractional clocks and start timecode"]
     fn fractional_rate_mp4_and_mov_preserve_frame_count_duration_and_timecode() {
         use libre_effects_core::FrameRate;

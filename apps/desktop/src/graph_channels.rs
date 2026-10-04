@@ -440,3 +440,174 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod trim_channel_tests {
+    use super::*;
+    use libre_effects_core::{Command, Content, ContentsEdit, ContentsKind, Editor, TrimParam};
+
+    fn fixture() -> (Editor, u64, Vec<GraphChannel>) {
+        let mut editor = Editor::default();
+        editor
+            .execute(Command::AddContent {
+                content: Content::Shape(Default::default()),
+                width: 200.,
+                height: 120.,
+                name: "Trim controls fixture".into(),
+            })
+            .unwrap();
+        editor
+            .execute(Command::Contents {
+                id: 1,
+                edit: ContentsEdit::Promote,
+            })
+            .unwrap();
+        editor
+            .execute(Command::Contents {
+                id: 1,
+                edit: ContentsEdit::Add {
+                    parent: 1,
+                    kind: ContentsKind::TrimPaths,
+                },
+            })
+            .unwrap();
+        let Content::ShapeContents(contents) = editor.selected_layer().unwrap().content() else {
+            panic!("expected Contents");
+        };
+        let item = contents
+            .rows()
+            .into_iter()
+            .find(|(_, _, node)| matches!(node.kind, ContentsKind::TrimPaths))
+            .unwrap()
+            .2
+            .id;
+        let channels = TrimParam::ALL
+            .into_iter()
+            .map(|parameter| GraphChannel {
+                id: 1,
+                property: PropertyPath::Contents {
+                    item,
+                    parameter: ContentsParam::Trim(parameter),
+                },
+            })
+            .collect();
+        (editor, item, channels)
+    }
+
+    #[test]
+    fn trim_addresses_roundtrip_in_existing_typed_contents_address_version() {
+        let (editor, item, channels) = fixture();
+        let mut state = GraphChannels::default();
+        for &channel in &channels {
+            state.pin(channel).unwrap();
+            state.ranges.insert(
+                channel,
+                GraphRanges {
+                    value: Some([-360., 720.]),
+                    speed: Some([-100., 100.]),
+                },
+            );
+        }
+        state.activate(channels[2]);
+        let source = editor.project().to_json().unwrap();
+        let value = serde_json::to_value(&state).unwrap();
+        assert_eq!(value["version"], 1);
+        for (index, name) in ["Trim.Start", "Trim.End", "Trim.Offset"]
+            .into_iter()
+            .enumerate()
+        {
+            assert_eq!(value["pinned"][index]["property"]["kind"], "contents");
+            assert_eq!(value["pinned"][index]["property"]["item"], item);
+            assert_eq!(value["pinned"][index]["property"]["parameter"], name);
+        }
+        let mut loaded: GraphChannels = serde_json::from_value(value).unwrap();
+        loaded.reconcile(Some(editor.project().composition()), false);
+        assert_eq!(loaded, state);
+        assert_eq!(editor.project().to_json().unwrap(), source);
+    }
+
+    #[test]
+    fn trim_delete_save_copy_and_history_preserve_only_original_pin_identities() {
+        let (mut editor, item, channels) = fixture();
+        let mut state = GraphChannels::default();
+        for &channel in &channels {
+            state.pin(channel).unwrap();
+            state.ranges.insert(
+                channel,
+                GraphRanges {
+                    value: Some([0., 100.]),
+                    speed: Some([-10., 10.]),
+                },
+            );
+        }
+        state.activate(channels[1]);
+        editor
+            .execute(Command::Contents {
+                id: 1,
+                edit: ContentsEdit::Duplicate(item),
+            })
+            .unwrap();
+        state.reconcile(Some(editor.project().composition()), false);
+        assert_eq!(state.pinned, channels);
+        editor
+            .execute(Command::Contents {
+                id: 1,
+                edit: ContentsEdit::Remove(item),
+            })
+            .unwrap();
+        state.reconcile(Some(editor.project().composition()), false);
+        assert_eq!(state.pinned, channels);
+        assert!(state.included().is_empty());
+        assert_eq!(state.active, None);
+        let live = state.clone();
+        let source = editor.project().clone();
+        let mut saved = state.clone();
+        saved.prune(editor.project().composition());
+        assert!(saved.is_legacy());
+        assert!(saved.pinned.is_empty());
+        assert!(saved.ranges.is_empty());
+        assert_eq!(state, live);
+        assert_eq!(editor.project(), &source);
+        editor.undo();
+        state.reconcile(Some(editor.project().composition()), true);
+        assert_eq!(state.included(), channels);
+        assert!(channels.iter().all(|c| state.ranges.contains_key(c)));
+        editor.redo();
+        state.reconcile(Some(editor.project().composition()), true);
+        assert!(state.included().is_empty());
+        editor.undo();
+        state.reconcile(Some(editor.project().composition()), true);
+        assert_eq!(state.included(), channels);
+    }
+
+    #[test]
+    fn reused_trim_item_id_does_not_revive_removed_pin_intent() {
+        let (mut editor, item, channels) = fixture();
+        let mut state = GraphChannels::default();
+        state.pin(channels[0]).unwrap();
+        state.activate(channels[0]);
+        editor.undo();
+        state.reconcile(Some(editor.project().composition()), true);
+        assert!(!state.is_available(channels[0]));
+        editor
+            .execute(Command::Contents {
+                id: 1,
+                edit: ContentsEdit::Add {
+                    parent: 1,
+                    kind: ContentsKind::TrimPaths,
+                },
+            })
+            .unwrap();
+        let Content::ShapeContents(contents) = editor.selected_layer().unwrap().content() else {
+            panic!("expected Contents");
+        };
+        assert!(matches!(
+            contents.node(item).unwrap().kind,
+            ContentsKind::TrimPaths
+        ));
+        state.reconcile(Some(editor.project().composition()), false);
+        assert!(!state.is_pinned(channels[0]));
+        assert_eq!(state.active, None);
+        assert!(state.included().is_empty());
+    }
+}

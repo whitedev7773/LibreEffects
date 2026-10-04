@@ -1001,3 +1001,204 @@ mod tests {
         assert_eq!(project.to_json().unwrap(), source);
     }
 }
+
+#[cfg(test)]
+mod trim_view_tests {
+    use super::*;
+    use libre_effects_core::{
+        Command, Content, ContentsEdit, ContentsKind, ContentsParam, Editor, PropertyPath,
+        TrackEdit, TrimParam,
+    };
+
+    fn fixture() -> (Editor, ProjectViews, Vec<(u64, u64, u64)>) {
+        let mut editor = Editor::default();
+        let mut views = ProjectViews::default();
+        let mut addresses = Vec::new();
+        for index in 0..2 {
+            if index != 0 {
+                editor.execute(Command::NewComposition).unwrap();
+            }
+            editor
+                .execute(Command::AddContent {
+                    content: Content::Shape(Default::default()),
+                    width: 200.,
+                    height: 120.,
+                    name: "Trim controls fixture".into(),
+                })
+                .unwrap();
+            let id = editor.selected().unwrap();
+            editor
+                .execute(Command::Contents {
+                    id,
+                    edit: ContentsEdit::Promote,
+                })
+                .unwrap();
+            editor
+                .execute(Command::Contents {
+                    id,
+                    edit: ContentsEdit::Add {
+                        parent: 1,
+                        kind: ContentsKind::TrimPaths,
+                    },
+                })
+                .unwrap();
+            let Content::ShapeContents(contents) = editor.selected_layer().unwrap().content()
+            else {
+                panic!("expected Contents");
+            };
+            let item = contents
+                .rows()
+                .into_iter()
+                .find(|(_, _, node)| matches!(node.kind, ContentsKind::TrimPaths))
+                .unwrap()
+                .2
+                .id;
+            let composition = editor.project().active_composition_id();
+            addresses.push((composition, id, item));
+            let mut view = CompositionView {
+                frame: 10,
+                graph_open: true,
+                ..Default::default()
+            };
+            view.graph_view.speed = true;
+            for parameter in TrimParam::ALL {
+                let channel = GraphChannel {
+                    id,
+                    property: PropertyPath::Contents {
+                        item,
+                        parameter: ContentsParam::Trim(parameter),
+                    },
+                };
+                if index != 0 {
+                    editor
+                        .execute(Command::EditTrack {
+                            id,
+                            property: channel.property,
+                            edit: TrackEdit::ToggleAnimation { frame: 0 },
+                        })
+                        .unwrap();
+                }
+                view.graph_channels.pin(channel).unwrap();
+                view.graph_channels.activate(channel);
+                view.graph_channels.ranges.insert(
+                    channel,
+                    GraphRanges {
+                        value: Some([-360., 720.]),
+                        speed: Some([-100., 100.]),
+                    },
+                );
+            }
+            if index == 0 {
+                editor
+                    .execute(Command::Contents {
+                        id,
+                        edit: ContentsEdit::Enabled {
+                            item,
+                            enabled: false,
+                        },
+                    })
+                    .unwrap();
+            }
+            views.compositions.insert(composition, view);
+        }
+        views.normalize(editor.project());
+        (editor, views, addresses)
+    }
+
+    #[test]
+    fn trim_active_and_inactive_pins_roundtrip_schema50_view2_address1_and_lep1() {
+        let (editor, views, addresses) = fixture();
+        let project = editor.project();
+        let source = project.to_json().unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&source).unwrap()["version"],
+            50
+        );
+        assert_ne!(addresses[0].0, project.active_composition_id());
+        let bytes = views.encode_native(project).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["version"], 2);
+        for (composition, _, _) in &addresses {
+            let channels = &value["compositions"][composition.to_string()]["graph_channels"];
+            assert_eq!(channels["version"], 1);
+            assert_eq!(channels["pinned"].as_array().unwrap().len(), 3);
+            for (index, name) in ["Trim.Start", "Trim.End", "Trim.Offset"]
+                .into_iter()
+                .enumerate()
+            {
+                assert_eq!(channels["pinned"][index]["property"]["parameter"], name);
+                assert_eq!(channels["pinned"][index]["property"]["kind"], "contents");
+            }
+        }
+        let native = crate::project_io::encode_native_project(project, Some(&views)).unwrap();
+        assert_eq!(&native[8..10], &[1, 0]);
+        let opened = crate::project_io::decode_project(&native).unwrap();
+        assert_eq!(opened.project, *project);
+        assert_eq!(opened.views, views);
+        assert_eq!(
+            crate::project_io::encode_native_project(&opened.project, Some(&opened.views)).unwrap(),
+            native
+        );
+        assert_eq!(project.to_json().unwrap(), source);
+        // A Trim source does not itself opt its view into explicit Graph lanes.
+        let legacy = ProjectViews::default().encode_native(project).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&legacy).unwrap()["version"],
+            1
+        );
+    }
+
+    #[test]
+    fn trim_save_prunes_unavailable_active_and_inactive_pins_only_in_copy() {
+        let (mut editor, mut views, addresses) = fixture();
+        let originally_active = editor.project().active_composition_id();
+        for &(composition, id, item) in &addresses {
+            editor.activate_composition(composition).unwrap();
+            editor
+                .execute(Command::Contents {
+                    id,
+                    edit: ContentsEdit::Remove(item),
+                })
+                .unwrap();
+            views
+                .compositions
+                .get_mut(&composition)
+                .unwrap()
+                .graph_channels
+                .reconcile(Some(editor.project().composition()), false);
+        }
+        editor.activate_composition(originally_active).unwrap();
+        let live = views.clone();
+        let source = editor.project().to_json().unwrap();
+        let bytes = views.encode_native(editor.project()).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["version"], 1);
+        let loaded = ProjectViews::read_native(&bytes, editor.project()).unwrap();
+        for &(composition, _, _) in &addresses {
+            assert!(
+                loaded.compositions[&composition]
+                    .graph_channels
+                    .pinned
+                    .is_empty()
+            );
+            assert!(
+                loaded.compositions[&composition]
+                    .graph_channels
+                    .ranges
+                    .is_empty()
+            );
+            assert_eq!(
+                views.compositions[&composition].graph_channels.pinned.len(),
+                3
+            );
+        }
+        assert_eq!(views, live);
+        assert_eq!(editor.project().to_json().unwrap(), source);
+        let native =
+            crate::project_io::encode_native_project(editor.project(), Some(&views)).unwrap();
+        let opened = crate::project_io::decode_project(&native).unwrap();
+        assert_eq!(opened.project, *editor.project());
+        assert_eq!(opened.views, loaded);
+        assert_eq!(views, live);
+    }
+}

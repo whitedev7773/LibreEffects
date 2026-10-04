@@ -209,7 +209,7 @@ mod tests {
                     0,
                     100,
                     "qa",
-                    &mut 0,
+                    &mut crate::rendering::FrameRenderBudget::default(),
                 )
                 .unwrap();
             let pixels = r.raster_canvas(&svg, 100, 100, 100).unwrap();

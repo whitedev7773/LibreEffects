@@ -232,6 +232,34 @@ pub(crate) fn run() -> Result<bool, String> {
 mod tests {
     use super::*;
     #[test]
+    fn trim_failure_keeps_existing_still_and_leaves_no_temporary_output() {
+        for (e, budget, kind) in crate::rendering::trim_tests::failure_cases() {
+            let dir = tempfile::tempdir().unwrap();
+            let project = dir.path().join("trim.lep");
+            let output = dir.path().join("keep.png");
+            crate::project_io::write_native_project(&project, e.project(), None).unwrap();
+            std::fs::write(&output, b"existing still").unwrap();
+            let error = crate::rendering::with_test_contents_budget(budget, || {
+                render(Options {
+                    project: project.clone(),
+                    output: output.clone(),
+                    start: 0,
+                    end: Some(1),
+                    composition: None,
+                    png_background: false,
+                    settings: Default::default(),
+                })
+            })
+            .unwrap_err();
+            assert!(
+                error.contains(kind) && error.contains("Trim line") && error.contains("frame 0"),
+                "{error}"
+            );
+            assert_eq!(std::fs::read(&output).unwrap(), b"existing still");
+            assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
+        }
+    }
+    #[test]
     fn output_options_parse_exact_rates_and_reject_conflicting_rate_control() {
         let args = [
             "--render",

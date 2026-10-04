@@ -3,7 +3,7 @@
 `.lep` is the native Libre Effects Project file extension. It is a bounded binary
 container for portable project metadata, optional editor view state, and embedded
 images. The container version is **1**. The project's JSON schema version remains
-independent (currently **49**); choosing this format does not upgrade that schema.
+independent (currently **50**); choosing this format does not upgrade that schema.
 Schema 48 adds optional layer-wide text-paint tracks. Schema 49 adds sparse
 `FontSize`, `Tracking` and `Leading` tracks in the same text-parameter map. Any
 materialized typography track, including a keyless override or an inactive
@@ -13,6 +13,15 @@ legacy static text. Merely inspecting or focusing a sparse typography property
 does not materialize a track or upgrade its project schema. Readers that only
 support project schema 48 reject typography-track projects; the unchanged LEP
 container version does not grant forward model compatibility.
+Schema 50 adds the Contents `TrimPaths` operator with `Trim.Start`, `Trim.End`
+and `Trim.Offset` scalar tracks. Its presence requires schema 50 even when disabled,
+identity-valued, keyless, nested or in an inactive composition. No new chunk or
+container version is introduced. Projects without Trim are not upgraded merely
+by this executable, and unchanged Trim Value edits retain exact source/history.
+Readers limited to project schema 49 reject Trim projects; existing typed Contents
+property addresses retain address version 1 and VIEW uses its existing version 1/2
+rules. The render-only fragments are derived at evaluation time, never stored as
+replacement source vertices or path poses.
 The codec retains the project's declared version on unmodified load/save.
 Existing generic edit commands may recalculate the version required by the
 resulting features; a changed static edit can therefore lower an overdeclared

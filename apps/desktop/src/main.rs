@@ -13,6 +13,7 @@ mod audio;
 mod audio_mix;
 mod audio_playback;
 mod blend_render;
+mod build_info;
 mod cli;
 mod color_edit;
 mod components;

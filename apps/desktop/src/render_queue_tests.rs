@@ -772,3 +772,46 @@ fn v4_jobs_migrate_protection_explicitly_and_v5_missing_or_invalid_protection_is
         assert_eq!(std::fs::read(root.join("queue.json")).unwrap(), bytes);
     }
 }
+
+#[test]
+fn trim_evaluation_failure_is_durable_failed_queue_status_and_cleans_staging() {
+    for (e, budget, kind) in crate::rendering::trim_tests::failure_cases() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("queue");
+        let mut queue = Queue::load(root.clone()).unwrap();
+        queue
+            .enqueue(
+                e.project(),
+                None,
+                0..2,
+                &[Format::PngAlpha.into()],
+                dir.path(),
+            )
+            .unwrap();
+        let destination = queue.data.jobs[0].outputs[0].path.clone();
+        queue.begin().unwrap();
+        let queue = Arc::new(Mutex::new(queue));
+        crate::rendering::with_test_contents_budget(budget, || run(queue.clone()));
+        {
+            let queue = queue.lock().unwrap();
+            let output = &queue.data.jobs[0].outputs[0];
+            assert_eq!(output.status, Status::Failed);
+            assert!(
+                output.message.contains(kind) && output.message.contains("Trim line"),
+                "{}",
+                output.message
+            );
+            assert_eq!(queue.progress.load(Ordering::Relaxed), 0);
+            assert!(!queue.running);
+        }
+        assert!(!destination.exists());
+        assert_eq!(
+            std::fs::read_dir(dir.path()).unwrap().count(),
+            1,
+            "only persistent queue storage remains"
+        );
+        let reopened = Queue::load(root).unwrap();
+        assert_eq!(reopened.data.jobs[0].outputs[0].status, Status::Failed);
+        assert!(reopened.data.jobs[0].outputs[0].message.contains(kind));
+    }
+}

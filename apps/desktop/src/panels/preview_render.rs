@@ -308,6 +308,54 @@ impl Preview {
 mod tests {
     use super::*;
     #[test]
+    fn trim_failure_survives_preview_worker_transfer_and_stale_request_is_rejected() {
+        let e = crate::rendering::trim_tests::partial_scene();
+        let request = Request {
+            project: e.project().clone(),
+            frame: 0,
+            dimension: 200,
+            revision: 4,
+            transport: 7,
+            gradient_gesture: None,
+        };
+        let renderer = crate::rendering::with_test_contents_budget(
+            libre_effects_core::ContentsRenderBudget {
+                frame_work_limit: 0,
+                ..Default::default()
+            },
+            crate::rendering::Renderer::new,
+        );
+        let job = request.clone();
+        let result = std::thread::spawn(move || {
+            renderer.render_preview(&job.project, job.frame, job.dimension)
+        })
+        .join()
+        .unwrap();
+        let error = result.unwrap_err();
+        assert!(
+            error.contains("WorkLimit") && error.contains("Trim line"),
+            "{error}"
+        );
+        assert!(request.accepts(&request, false));
+        let mut superseded = request.clone();
+        superseded.revision += 1;
+        assert!(!superseded.accepts(&request, false));
+        superseded = request.clone();
+        superseded.transport += 1;
+        assert!(!superseded.accepts(&request, false));
+        // A cancelled render remains an error across the same worker boundary,
+        // allowing start_render's cancellation guard to discard it, never cache it.
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let renderer = crate::rendering::Renderer::with_cancel(cancel);
+        let error = std::thread::spawn(move || {
+            renderer.render_preview(&request.project, request.frame, request.dimension)
+        })
+        .join()
+        .unwrap()
+        .unwrap_err();
+        assert!(error.to_lowercase().contains("cancel"), "{error}");
+    }
+    #[test]
     fn seek_loop_edit_quality_and_refresh_reject_stale_frames() {
         let current = Request {
             project: Default::default(),

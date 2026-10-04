@@ -20,6 +20,7 @@ pub enum Target {
     Settings,
     ResetWorkspace,
     Help,
+    About,
     Search,
 }
 pub struct Item {
@@ -376,6 +377,7 @@ pub fn items(menu: &str, state: &EditorState) -> Vec<Item> {
         "Help" => result.extend([
             Item::special("Find command…", "Ctrl+Shift+P", Target::Search),
             Item::special("Keyboard shortcuts", "", Target::Help),
+            Item::special("About Libre Effects", "", Target::About),
         ]),
         _ => {}
     }
@@ -508,6 +510,22 @@ pub fn resolve(key: Key, state: &EditorState) -> Option<Target> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn about_is_a_dedicated_help_command_and_search_result() {
+        let state = EditorState::default();
+        let help = items("Help", &state);
+        assert!(
+            help.iter().any(|item| item.label == "Keyboard shortcuts"
+                && matches!(item.target, Some(Target::Help)))
+        );
+        assert!(help.iter().any(|item| item.label == "About Libre Effects"
+            && matches!(item.target, Some(Target::About))));
+        let about = search("about", &state);
+        assert_eq!(about.len(), 1);
+        assert_eq!(about[0].key.category, "Help");
+        assert!(matches!(resolve(about[0].key, &state), Some(Target::About)));
+    }
 
     #[test]
     fn layer_transform_menu_and_search_share_availability_without_shortcuts() {

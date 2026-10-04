@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-const PROJECT_VERSION: u32 = 49;
+const PROJECT_VERSION: u32 = 50;
 pub type Frame = u32;
 pub type LayerId = u64;
 pub type CompositionId = u64;
@@ -67,15 +67,20 @@ mod shape_color;
 pub use shape_color::ShapePaint;
 mod polystar;
 mod shape_contents;
+mod trim_paths;
+pub use trim_paths::{ContentsRenderBudget, ContentsRenderError, ContentsRenderErrorKind};
 mod shape_gradient;
 pub use shape_gradient::{GradientParam, ShapeGradient};
 mod shape_conversion;
 pub use shape_contents::{
     ContentsEdit, ContentsKind, ContentsNode, ContentsParam, PaintComposite, ShapeContents,
+    TrimParam,
 };
 #[cfg(test)]
 mod shape_contents_tests;
 mod shapes;
+#[cfg(test)]
+mod trim_contents_tests;
 pub use shape_stroke::{ShapeStroke, StrokeCap, StrokeJoin};
 mod text_animation;
 mod text_style;
@@ -1339,10 +1344,11 @@ impl Editor {
         let mut next = self.current.clone();
         let reorder_only = command.reorders_only();
         let text_values_only = text_animation::value_edits_only(&command);
+        let trim_values_only = shape_contents::trim_value_edits_only(&command);
         let velocity_scales_only = key_velocity_scale::edits_only(&command);
         let layer_transforms_only = layer_transform::edits_only(&command);
         apply(&mut next, command)?;
-        if text_values_only && next == self.current {
+        if (text_values_only || trim_values_only) && next == self.current {
             return Ok(());
         }
         if reorder_only || velocity_scales_only || layer_transforms_only {
@@ -1636,7 +1642,9 @@ impl Editor {
                 })
                 .flat_map(ShapeContents::rows)
                 .map(|(_, _, n)| {
-                    if n.blend != PaintBlend::Normal {
+                    if matches!(n.kind, ContentsKind::TrimPaths) {
+                        50
+                    } else if n.blend != PaintBlend::Normal {
                         47
                     } else if n.composite != PaintComposite::BelowPrevious {
                         46

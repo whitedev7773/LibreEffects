@@ -2,6 +2,36 @@
 //! earlier paints/groups composite in front of later paints/groups.
 use super::*;
 
+/// Animated Trim Paths controls. Offset stays unwrapped in the document.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum TrimParam {
+    Start,
+    End,
+    Offset,
+}
+impl TrimParam {
+    pub const ALL: [Self; 3] = [Self::Start, Self::End, Self::Offset];
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Start => "Start",
+            Self::End => "End",
+            Self::Offset => "Offset",
+        }
+    }
+    pub fn label(self) -> &'static str {
+        self.name()
+    }
+    pub fn bounds(self) -> (f64, f64) {
+        match self {
+            Self::Start | Self::End => (0., 100.),
+            Self::Offset => (-1000000., 1000000.),
+        }
+    }
+    pub fn parse(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|p| p.name() == name)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(into = "String", try_from = "String")]
 pub enum ContentsParam {
@@ -12,6 +42,7 @@ pub enum ContentsParam {
     SkewAxis,
     Shape(ShapeParam),
     Gradient(GradientParam),
+    Trim(TrimParam),
 }
 impl From<ContentsParam> for String {
     fn from(p: ContentsParam) -> String {
@@ -23,6 +54,7 @@ impl From<ContentsParam> for String {
             ContentsParam::SkewAxis => "SkewAxis".into(),
             ContentsParam::Shape(p) => format!("Shape.{}", String::from(p)),
             ContentsParam::Gradient(p) => format!("Gradient.{}", p.name()),
+            ContentsParam::Trim(p) => format!("Trim.{}", p.name()),
         }
     }
 }
@@ -49,6 +81,11 @@ impl TryFrom<String> for ContentsParam {
                 .map(Self::Gradient)
                 .ok_or_else(|| "Unknown gradient property".into());
         }
+        if let Some(p) = s.strip_prefix("Trim.") {
+            return TrimParam::parse(p)
+                .map(Self::Trim)
+                .ok_or_else(|| "Unknown Trim Paths property".into());
+        }
         Property::ALL
             .into_iter()
             .find(|p| s == format!("Transform.{p:?}"))
@@ -66,6 +103,7 @@ impl ContentsParam {
             Self::SkewAxis => "Skew Axis".into(),
             Self::Shape(p) => p.label(),
             Self::Gradient(p) => p.label(),
+            Self::Trim(p) => p.label().into(),
         }
     }
     pub fn bounds(self) -> (f64, f64) {
@@ -75,6 +113,7 @@ impl ContentsParam {
             Self::SkewAxis => (-1000000., 1000000.),
             Self::Shape(p) => p.bounds(),
             Self::Gradient(p) => p.bounds(),
+            Self::Trim(p) => p.bounds(),
             Self::Transform(Property::Opacity) => (0., 100.),
             Self::Transform(Property::ScaleX | Property::ScaleY) => (-10000., 10000.),
             Self::Transform(_) => (-1000000., 1000000.),
@@ -88,6 +127,7 @@ impl ContentsParam {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ContentsKind {
     Group(Vec<ContentsNode>),
+    TrimPaths,
     Parametric(ShapeKind),
     Path {
         path: VectorPath,
@@ -110,6 +150,7 @@ impl ContentsKind {
     pub fn label(&self) -> &'static str {
         match self {
             Self::Group(_) => "Group",
+            Self::TrimPaths => "Trim Paths",
             Self::Parametric(k) => k.label(),
             Self::Path { .. } => "Path",
             Self::Fill { .. } => "Fill",
@@ -186,6 +227,11 @@ impl ContentsKind {
                 v
             }
             Self::Path { .. } => vec![],
+            Self::TrimPaths => vec![
+                (ContentsParam::Trim(TrimParam::Start), 0.),
+                (ContentsParam::Trim(TrimParam::End), 100.),
+                (ContentsParam::Trim(TrimParam::Offset), 0.),
+            ],
             Self::Fill { .. } => vec![
                 (S(FillRed), 255.),
                 (S(FillGreen), 255.),
@@ -282,6 +328,11 @@ impl ContentsNode {
             .into_iter()
             .filter(|p| self.parameters.contains_key(p))
             .collect()
+        } else if matches!(self.kind, ContentsKind::TrimPaths) {
+            TrimParam::ALL
+                .into_iter()
+                .map(ContentsParam::Trim)
+                .collect()
         } else {
             self.parameters.keys().copied().collect()
         }
@@ -444,7 +495,7 @@ impl ShapeContents {
         Ok(id)
     }
     pub fn validate(&self, duration: Frame) -> Result<(), String> {
-        self.validate_version(duration, 47)
+        self.validate_version(duration, PROJECT_VERSION)
     }
     pub(super) fn validate_version(&self, duration: Frame, version: u32) -> Result<(), String> {
         fn walk(
@@ -458,6 +509,9 @@ impl ShapeContents {
                 return Err("Contents nesting exceeds 8 groups".into());
             }
             for n in nodes {
+                if matches!(n.kind, ContentsKind::TrimPaths) && version < 50 {
+                    return Err("Trim Paths requires project version 50".into());
+                }
                 if n.blend != PaintBlend::Normal && (version < 47 || !n.kind.is_paint()) {
                     return Err("Paint blending requires a paint item and project v47".into());
                 }
@@ -561,7 +615,7 @@ impl ShapeContents {
         walk(&self.items, f, Affine::default(), &mut out);
         out
     }
-    pub fn svg_at(&self, f: Frame) -> String {
+    pub fn svg_at(&self, f: Frame) -> Result<String, ContentsRenderError> {
         self.svg_at_with_prefix(f, "contents")
     }
     /// Map a group's local geometry into layer space, including the group's own
@@ -584,13 +638,46 @@ impl ShapeContents {
         }
         walk(&self.items, item, f, Affine::default())
     }
-    pub fn svg_at_with_prefix(&self, f: Frame, prefix: &str) -> String {
-        let scope = prefix
-            .as_bytes()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<String>();
-        render(&self.items, f, &scope).0
+    pub fn svg_at_with_prefix(
+        &self,
+        f: Frame,
+        prefix: &str,
+    ) -> Result<String, ContentsRenderError> {
+        self.svg_at_with_budget(f, prefix, &mut ContentsRenderBudget::default(), None)
+    }
+    /// Evaluate a layer once, sharing the frame's work/output limits and cancellation.
+    /// Group recursion preserves the same layer budget; subsequent layer calls reset
+    /// only per-layer work while keeping the frame totals.
+    pub fn svg_at_with_budget(
+        &self,
+        f: Frame,
+        prefix: &str,
+        budget: &mut ContentsRenderBudget,
+        cancel: Option<&dyn Fn() -> bool>,
+    ) -> Result<String, ContentsRenderError> {
+        budget.begin_layer();
+        budget.check_cancel(f, cancel)?;
+        let mut scope = String::new();
+        let bytes = prefix.len().checked_mul(2).ok_or(ContentsRenderError {
+            kind: ContentsRenderErrorKind::OutputLimit,
+            frame: f,
+            operator_id: None,
+            source_id: None,
+            message: "Contents prefix exceeds output limit",
+        })?;
+        budget.charge_output(bytes, f)?;
+        scope.try_reserve(bytes).map_err(|_| ContentsRenderError {
+            kind: ContentsRenderErrorKind::OutputLimit,
+            frame: f,
+            operator_id: None,
+            source_id: None,
+            message: "Unable to allocate Contents prefix",
+        })?;
+        use std::fmt::Write;
+        for byte in prefix.as_bytes() {
+            write!(&mut scope, "{byte:02x}").expect("writing to a String cannot fail");
+        }
+        Ok(render(&self.items, f, &scope, budget, cancel)?.svg)
     }
 }
 fn find(nodes: &[ContentsNode], id: u64) -> Option<&ContentsNode> {
@@ -640,16 +727,151 @@ fn transformed(mut path: VectorPath, t: Affine) -> VectorPath {
     }
     path
 }
-fn render(nodes: &[ContentsNode], f: Frame, scope: &str) -> (String, Vec<VectorPath>) {
-    let mut paths = Vec::<VectorPath>::new();
-    // Back-to-front SVG order. Each new paint goes behind the previous result
-    // by default; Above Previous overlays that accumulated result in this group.
-    let mut paints = std::collections::VecDeque::new();
+/// Every source keeps its original contour identity through splitting and export.
+struct EvaluatedGroup {
+    svg: String,
+    contours: Vec<trim_paths::RenderContour>,
+}
+
+enum PlannedPaint<'a> {
+    Group(&'a ContentsNode, String),
+    Paint(&'a ContentsNode, usize),
+}
+
+/// Charge before allocation or copying. In particular, repeated paint and nested
+/// group copies cannot build an oversized temporary and reject it only afterward.
+fn append_svg(
+    out: &mut String,
+    value: &str,
+    frame: Frame,
+    budget: &mut ContentsRenderBudget,
+) -> Result<(), ContentsRenderError> {
+    let size = out
+        .len()
+        .checked_add(value.len())
+        .ok_or(ContentsRenderError {
+            kind: ContentsRenderErrorKind::OutputLimit,
+            frame,
+            operator_id: None,
+            source_id: None,
+            message: "Contents SVG length overflow",
+        })?;
+    budget.check_output_size(size, frame)?;
+    budget.charge_output(value.len(), frame)?;
+    out.try_reserve(value.len())
+        .map_err(|_| ContentsRenderError {
+            kind: ContentsRenderErrorKind::OutputLimit,
+            frame,
+            operator_id: None,
+            source_id: None,
+            message: "Unable to allocate Contents SVG",
+        })?;
+    out.push_str(value);
+    Ok(())
+}
+
+fn checked_paint_bytes(
+    previous: usize,
+    added: usize,
+    frame: Frame,
+    budget: &ContentsRenderBudget,
+) -> Result<usize, ContentsRenderError> {
+    let size = previous.checked_add(added).ok_or(ContentsRenderError {
+        kind: ContentsRenderErrorKind::OutputLimit,
+        frame,
+        operator_id: None,
+        source_id: None,
+        message: "Contents staged paint length overflow",
+    })?;
+    budget.check_output_size(size, frame)?;
+    Ok(size)
+}
+
+fn render(
+    nodes: &[ContentsNode],
+    f: Frame,
+    scope: &str,
+    budget: &mut ContentsRenderBudget,
+    cancel: Option<&dyn Fn() -> bool>,
+) -> Result<EvaluatedGroup, ContentsRenderError> {
+    let mut contours = Vec::<trim_paths::RenderContour>::new();
+    let mut planned = Vec::new();
+    let mut operators = Vec::new();
+    let mut staged_children_bytes = 0usize;
+    // Capture paths-above memberships before any operator runs. Because source
+    // records are appended in sibling order, a frozen prefix is their exact set.
     for n in nodes.iter().filter(|n| n.enabled) {
-        if let Some(p) = n.path_at(f) {
-            paths.push(p);
-            continue;
+        budget.check_cancel(f, cancel)?;
+        if let Some(path) = n.path_at(f) {
+            contours.push(trim_paths::RenderContour::new(n.id, 0, path));
+        } else if let ContentsKind::Group(children) = &n.kind {
+            let child = render(children, f, scope, budget, cancel)?;
+            let transform = n.transform(f);
+            for contour in child.contours {
+                contours.push(contour.transformed(transform, f)?);
+            }
+            staged_children_bytes =
+                staged_children_bytes
+                    .checked_add(child.svg.len())
+                    .ok_or(ContentsRenderError {
+                        kind: ContentsRenderErrorKind::OutputLimit,
+                        frame: f,
+                        operator_id: None,
+                        source_id: None,
+                        message: "Contents child SVG length overflow",
+                    })?;
+            budget.check_output_size(staged_children_bytes, f)?;
+            // Opacity affects this painted group only. Its geometry still exports.
+            planned.push(PlannedPaint::Group(n, child.svg));
+        } else if matches!(n.kind, ContentsKind::TrimPaths) {
+            operators.push((n, contours.len()));
+        } else if n.kind.is_paint() {
+            planned.push(PlannedPaint::Paint(n, contours.len()));
         }
+    }
+    for (operator, count) in operators {
+        let value = |p| operator.value_at(ContentsParam::Trim(p), f);
+        for contour in &mut contours[..count] {
+            budget.check_cancel(f, cancel)?;
+            contour.trim(
+                value(TrimParam::Start),
+                value(TrimParam::End),
+                value(TrimParam::Offset),
+                operator.id,
+                f,
+                budget,
+                cancel,
+            )?;
+        }
+    }
+    // Back-to-front SVG order is unchanged, including isolated child paintings.
+    let mut paints = std::collections::VecDeque::new();
+    let mut painted_bytes = 0usize;
+    for plan in planned {
+        budget.check_cancel(f, cancel)?;
+        let (n, count) = match plan {
+            PlannedPaint::Group(n, child_svg) => {
+                staged_children_bytes -= child_svg.len();
+                let [a, b, c, d, x, y] = n.transform(f).0;
+                let mut svg = String::new();
+                append_svg(
+                    &mut svg,
+                    &format!(
+                        "<g transform='matrix({a} {b} {c} {d} {x} {y})' opacity='{}'>",
+                        n.value_at(ContentsParam::Transform(Property::Opacity), f) / 100.
+                    ),
+                    f,
+                    budget,
+                )?;
+                append_svg(&mut svg, &child_svg, f, budget)?;
+                append_svg(&mut svg, "</g>", f, budget)?;
+                painted_bytes = checked_paint_bytes(painted_bytes, svg.len(), f, budget)?;
+                checked_paint_bytes(painted_bytes, staged_children_bytes, f, budget)?;
+                paints.push_front(svg);
+                continue;
+            }
+            PlannedPaint::Paint(n, count) => (n, count),
+        };
         let v = |p| n.value_at(ContentsParam::Shape(p), f);
         let color = |r, g, b| {
             format!(
@@ -659,46 +881,77 @@ fn render(nodes: &[ContentsNode], f: Frame, scope: &str) -> (String, Vec<VectorP
                 v(b).round() as u8
             )
         };
-        use ShapeParam::*;
-        let gradient = n.kind.gradient().map(|g| {
-            let id = format!("g{scope}-{}", n.id);
-            (
-                format!("<defs>{}</defs>", g.svg(n, f, &id)),
-                format!("url(#{id})"),
-            )
-        });
-        match &n.kind {
-            ContentsKind::Group(children) => {
-                let (svg, child_paths) = render(children, f, scope);
-                let t = n.transform(f);
-                let [a, b, c, d, x, y] = t.0;
-                paints.push_front(format!(
-                    "<g transform='matrix({a} {b} {c} {d} {x} {y})' opacity='{}'>{svg}</g>",
-                    n.value_at(ContentsParam::Transform(Property::Opacity), f) / 100.
-                ));
-                paths.extend(child_paths.into_iter().map(|p| transformed(p, t)));
+        let mut paint = String::new();
+        if n.blend != PaintBlend::Normal {
+            append_svg(
+                &mut paint,
+                &format!("<g style='mix-blend-mode:{}'>", n.blend.css()),
+                f,
+                budget,
+            )?;
+        }
+        let gradient = if let Some(gradient) = n.kind.gradient() {
+            // The identifier may include a caller-supplied prefix; check its size
+            // before formatting either identifier or gradient markup.
+            let mut id = String::new();
+            append_svg(&mut id, "g", f, budget)?;
+            append_svg(&mut id, scope, f, budget)?;
+            append_svg(&mut id, &format!("-{}", n.id), f, budget)?;
+            // Keep potentially large caller prefixes out of infallible formatting.
+            // Gradient source/stop count is bounded; insert the ID with checked
+            // copies into the exact markup emitted by the existing paint helper.
+            let markup = gradient.svg(n, f, "");
+            let (head, tail) = markup.split_once("id='").expect("gradient has an ID");
+            append_svg(&mut paint, "<defs>", f, budget)?;
+            append_svg(&mut paint, head, f, budget)?;
+            append_svg(&mut paint, "id='", f, budget)?;
+            append_svg(&mut paint, &id, f, budget)?;
+            append_svg(&mut paint, tail, f, budget)?;
+            append_svg(&mut paint, "</defs>", f, budget)?;
+            let mut reference = String::new();
+            append_svg(&mut reference, "url(#", f, budget)?;
+            append_svg(&mut reference, &id, f, budget)?;
+            append_svg(&mut reference, ")", f, budget)?;
+            Some(reference)
+        } else {
+            None
+        };
+        append_svg(&mut paint, "<path d='", f, budget)?;
+        let mut first = true;
+        for contour in &contours[..count] {
+            if contour.is_empty() {
+                continue;
             }
+            if !first {
+                append_svg(&mut paint, " ", f, budget)?;
+            }
+            first = false;
+            let data = contour.svg_data_checked(f, budget)?;
+            append_svg(&mut paint, &data, f, budget).map_err(|mut error| {
+                error.source_id = Some(contour.source_id());
+                error
+            })?;
+        }
+        use ShapeParam::*;
+        match &n.kind {
             ContentsKind::Fill { even_odd } | ContentsKind::GradientFill { even_odd, .. } => {
-                let paint = format!(
-                    "{}<path d='{}' fill='{}' fill-opacity='{}' fill-rule='{}'/>",
-                    gradient.as_ref().map_or("", |g| g.0.as_str()),
-                    paths
-                        .iter()
-                        .map(VectorPath::svg_data)
-                        .collect::<Vec<_>>()
-                        .join(" "),
-                    gradient
-                        .as_ref()
-                        .map_or_else(|| color(FillRed, FillGreen, FillBlue), |g| g.1.clone()),
-                    v(FillOpacity) / 100.,
-                    if *even_odd { "evenodd" } else { "nonzero" }
-                );
-                let paint = n.blend.wrap(paint);
-                if n.composite == PaintComposite::AbovePrevious {
-                    paints.push_back(paint);
-                } else {
-                    paints.push_front(paint);
-                }
+                append_svg(&mut paint, "' fill='", f, budget)?;
+                append_svg(
+                    &mut paint,
+                    &gradient.unwrap_or_else(|| color(FillRed, FillGreen, FillBlue)),
+                    f,
+                    budget,
+                )?;
+                append_svg(
+                    &mut paint,
+                    &format!(
+                        "' fill-opacity='{}' fill-rule='{}'/>",
+                        v(FillOpacity) / 100.,
+                        if *even_odd { "evenodd" } else { "nonzero" }
+                    ),
+                    f,
+                    budget,
+                )?;
             }
             ContentsKind::Stroke(style) | ContentsKind::GradientStroke { style, .. } => {
                 let mut style = style.clone();
@@ -707,44 +960,52 @@ fn render(nodes: &[ContentsNode], f: Frame, scope: &str) -> (String, Vec<VectorP
                 for (i, x) in style.dashes.iter_mut().enumerate() {
                     *x = v(DashLength(i as u8));
                 }
-                let paint = format!(
-                    "{}<path d='{}' fill='none' stroke='{}' stroke-opacity='{}' stroke-width='{}' {}/>",
-                    gradient.as_ref().map_or("", |g| g.0.as_str()),
-                    paths
-                        .iter()
-                        .map(VectorPath::svg_data)
-                        .collect::<Vec<_>>()
-                        .join(" "),
-                    gradient.as_ref().map_or_else(
-                        || color(StrokeRed, StrokeGreen, StrokeBlue),
-                        |g| g.1.clone()
+                append_svg(&mut paint, "' fill='none' stroke='", f, budget)?;
+                append_svg(
+                    &mut paint,
+                    &gradient.unwrap_or_else(|| color(StrokeRed, StrokeGreen, StrokeBlue)),
+                    f,
+                    budget,
+                )?;
+                append_svg(
+                    &mut paint,
+                    &format!(
+                        "' stroke-opacity='{}' stroke-width='{}' {}/>",
+                        v(StrokeOpacity) / 100.,
+                        v(StrokeWidth),
+                        style.svg()
                     ),
-                    v(StrokeOpacity) / 100.,
-                    v(StrokeWidth),
-                    style.svg()
-                );
-                let paint = n.blend.wrap(paint);
-                if n.composite == PaintComposite::AbovePrevious {
-                    paints.push_back(paint);
-                } else {
-                    paints.push_front(paint);
-                }
+                    f,
+                    budget,
+                )?;
             }
-            _ => {}
+            _ => unreachable!("only paint nodes enter the paint plan"),
+        }
+        if n.blend != PaintBlend::Normal {
+            append_svg(&mut paint, "</g>", f, budget)?;
+        }
+        painted_bytes = checked_paint_bytes(painted_bytes, paint.len(), f, budget)?;
+        checked_paint_bytes(painted_bytes, staged_children_bytes, f, budget)?;
+        if n.composite == PaintComposite::AbovePrevious {
+            paints.push_back(paint);
+        } else {
+            paints.push_front(paint);
         }
     }
-    let svg: String = paints.into_iter().collect();
-    // A group's paints blend together, never with a sibling group's pixels or
-    // the layer underneath. Isolate even at opacity 100%, which SVG may flatten.
-    let svg = if nodes
+    let mut svg = String::new();
+    let isolated = nodes
         .iter()
-        .any(|n| n.enabled && n.blend != PaintBlend::Normal)
-    {
-        format!("<g style='isolation:isolate'>{svg}</g>")
-    } else {
-        svg
-    };
-    (svg, paths)
+        .any(|n| n.enabled && n.blend != PaintBlend::Normal);
+    if isolated {
+        append_svg(&mut svg, "<g style='isolation:isolate'>", f, budget)?;
+    }
+    for paint in paints {
+        append_svg(&mut svg, &paint, f, budget)?;
+    }
+    if isolated {
+        append_svg(&mut svg, "</g>", f, budget)?;
+    }
+    Ok(EvaluatedGroup { svg, contours })
 }
 
 #[derive(Clone, Debug)]
@@ -890,6 +1151,34 @@ pub(super) fn migrate(project: &mut Project) {
         project.version = 44;
     }
 }
+/// Restrict exact source-preserving no-op handling to Trim value transactions.
+pub(super) fn trim_value_edits_only(command: &Command) -> bool {
+    match command {
+        Command::Contents {
+            edit:
+                ContentsEdit::Track {
+                    parameter: ContentsParam::Trim(_),
+                    edit: TrackEdit::Value { .. },
+                    ..
+                },
+            ..
+        }
+        | Command::EditTrack {
+            property:
+                PropertyPath::Contents {
+                    parameter: ContentsParam::Trim(_),
+                    ..
+                },
+            edit: TrackEdit::Value { .. },
+            ..
+        } => true,
+        Command::Batch(commands) => {
+            !commands.is_empty() && commands.iter().all(trim_value_edits_only)
+        }
+        _ => false,
+    }
+}
+
 pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<(), String>> {
     let Command::Contents { id, edit } = command else {
         return None;
@@ -913,7 +1202,9 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                 let id = contents.allocate()?;
                 let n = ContentsNode::new(id, kind.clone());
                 let group = contents.group_mut(*parent)?;
-                let index = if kind.is_paint() {
+                let index = if matches!(kind, ContentsKind::TrimPaths) {
+                    group.len()
+                } else if kind.is_paint() {
                     group
                         .iter()
                         .position(|n| n.kind.is_paint())
@@ -1005,9 +1296,30 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                 parameter,
                 edit,
             } => {
-                let t = contents
+                let node = contents
                     .node_mut(*item)
-                    .and_then(|n| n.parameters.get_mut(parameter))
+                    .ok_or("Contents item no longer exists")?;
+                if matches!(parameter, ContentsParam::Trim(_)) {
+                    if !matches!(node.kind, ContentsKind::TrimPaths)
+                        || !node.parameters.contains_key(parameter)
+                    {
+                        return Err("Select a Trim Paths property".into());
+                    }
+                    if let TrackEdit::Value { frame, value } = edit {
+                        if *frame >= duration {
+                            return Err("Key is outside the composition".into());
+                        }
+                        if !parameter.accepts(*value) {
+                            return Err("Invalid animated property value".into());
+                        }
+                        if *value == node.value_at(*parameter, *frame) {
+                            return Ok(());
+                        }
+                    }
+                }
+                let t = node
+                    .parameters
+                    .get_mut(parameter)
                     .ok_or("Contents property no longer exists")?;
                 time_remap::edit_track(t, duration, edit, |v| parameter.accepts(v))?;
                 if let TrackEdit::ToggleAnimation { frame } | TrackEdit::ToggleKey { frame } = edit

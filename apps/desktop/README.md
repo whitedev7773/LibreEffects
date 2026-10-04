@@ -56,6 +56,44 @@ draft first. Native F10 opening, menu/item navigation, Enter execution and
 Escape closing have been checked; full Windows keyboard, IME and DPI regression
 remains to be completed.
 
+## Build identity
+
+Open **Help → About Libre Effects** (also available in Find command) for the
+version, build number, UTC build time, source revision/state, source fingerprint,
+and target/profile of the running executable. Escape, Enter, Space or Close
+dismisses About; editor shortcuts and Tab cannot reach the covered workspace.
+Keyboard shortcuts remains a separate Help command.
+
+The dependency-free `build.rs` stamps metadata at compile time. Build numbers use
+`YYYYMMDD.HHMMSS-<source fingerprint>`, so changed sources still differ when built
+within the same second. The fingerprint is a deterministic, path-and-content
+FNV-1a 64-bit change identifier, **not a cryptographic security signature**. It
+covers desktop/core source trees (including source tests), bundled desktop assets,
+build helpers/integration tests and fixtures, bundled example test inputs,
+workspace/package manifests, Cargo.lock, the
+vendored grid source/manifest and existing relevant toolchain/build configuration.
+Paths and contents are sorted and hashed independently of the checkout location.
+Uncommitted edits, additions, deletions and renames inside watched source/asset
+trees are included. Git revision and relevant-source dirty state are optional;
+source archives and machines without Git build normally and say Git is unavailable.
+No Git or changing source files are read when the application is running.
+
+Cargo watches source/asset directories and individual configuration files using
+its normal modification-time change detection. A source-changing build gets new
+metadata automatically; a cached invocation retains the compiled identity. A
+clean rebuild without source changes gets a new UTC build time. This is not a
+persisted sequential release counter or a reproducible-build timestamp. Restoring
+old file modification times can bypass Cargo's normal change detection; use
+`cargo clean -p libre-effects-desktop` before building such a restored tree.
+Missing optional configuration paths are not watched (which would force repeated
+rebuilds); Cargo itself handles newly introduced compiler configuration.
+
+Metadata is emitted only via Cargo's compile-time environment. Repository/package
+roots, `target`, `vendor/grid/target`, `OUT_DIR`, web/API dependencies and generated
+build output are never fingerprint inputs. Keep Cargo output outside source/asset
+trees. Moon's desktop check/test/build/format tasks include the build helpers and
+integration tests so build-support changes invalidate their task caches too.
+
 ## Pen and path masks
 
 Use **G** for the Pen tool. Click to add corners, drag to create Bezier handles,
@@ -183,7 +221,8 @@ The cubic curve is preserved, but its **appearance can change**: reversing one
 contour changes its winding and can create/remove holes in a Non-Zero compound
 fill. Reversal or a new first vertex can change stroke dash placement without
 changing dash settings. Even-Odd mask coverage is direction-independent. These
-controls do not implement Trim Paths, path text or AE-equivalent behavior.
+controls only reorder the source; separate Trim Paths controls are described
+below. Path text and AE-equivalent behavior are not implemented by these controls.
 
 Properties contains shape Fill/Stroke and Closed Path controls, and ordered
 mask Add/Subtract/Intersect/None, Invert, reorder and remove controls. Paths
@@ -192,7 +231,8 @@ version 29. Existing rectangular masks remain supported. Mask Opacity,
 Feather and Expansion animate in v30; shape/mask vertices and handles animate
 in v31. Enable the Path stopwatch and edit with the Pen at another frame.
 Animated paths require matching topology. Cross-path selection, topology
-changes across keys, variable feather and shape Contents operators remain open.
+changes across keys and variable feather remain open. The bounded Contents
+Trim Paths operator is described below; other path operators remain separate.
 
 With an explicitly selected **Contents Group**, starting Pen on empty canvas adds
 a new Path at the start of that Group and keeps the Group selected for repeated
@@ -2438,8 +2478,8 @@ are isolated before group opacity and the layer's masks/effects are applied.
 Non-Normal paint blending requires project version 47; old paints remain Normal.
 The modes follow sRGB/W3C compositing at the current 8-bit raster precision.
 AE pixel/color-space equivalence, Add/other AE modes, group Blend Mode and
-animated mode switching remain future work, alongside path operators and
-cross-parent block dragging. Layer blending remains the existing separate five-mode control.
+animated mode switching remain future work, alongside Repeater, Merge/Offset
+Paths and cross-parent block dragging. Layer blending remains the existing separate five-mode control.
 Fill and Stroke have a common color picker with HEX/RGB/HSV, opacity, recent
 colors and viewer sampling. Cancel leaves the document unchanged; accepting a
 draft updates only changed channels at the current frame as one Undo step.
@@ -2447,6 +2487,60 @@ Stroke items expose Line Cap/Line Join choices and add/remove-last dash controls
 Existing dash/gap and offset animation survives these edits; Undo restores a
 removed dash's keys. Numeric controls and watches refresh when dash rows change.
 Curved parametric paths use cubic approximations, as in Bezier conversion.
+
+### Trim Paths
+
+Contents → Add → **Trim Paths** appends a nondestructive operator to the chosen
+Group (or root). It trims each original source contour above that item; paths
+below it are unaffected. Start and End accept 0–100%; Offset accepts unwrapped
+degrees from −1,000,000 to 1,000,000. Their stopwatches, explicit key diamonds,
+Timeline channels and Value/Speed Graph lanes use the normal animation/history
+system. Start/End lanes use percent and percent/second; Offset uses degrees and
+degrees/second. Entering the unchanged sampled value does not add an in-between
+key or discard Redo. Use the diamond to intentionally add/remove a key.
+
+This milestone uses **Each source contour** semantics:
+
+- Start and End choose the same interval when swapped. Equal endpoints produce
+  no geometry. Exactly 0–100 (or 100–0) preserves the current geometry unchanged,
+  regardless of Offset. Offset moves the interval cyclically.
+- Each group's operators run top-to-bottom before its paints, retaining each
+  operator's and paint's original paths-above membership. A paint above a Trim
+  therefore uses the final trimmed geometry of its own original sources.
+- Length is measured in the operator's containing-group space. Descendant group
+  transforms are included; that group's own and ancestor/layer/view transforms
+  are excluded. Child groups keep their own painted output. A parent Trim changes
+  their exported geometry for parent paints, without repainting the child.
+- A later Trim measures all surviving fragments of one original contour together,
+  excluding removed gaps. Open wraps stay disconnected. Closed wraps join at the
+  original seam only while that adjacency survives. A later operator cannot
+  reconnect a removed gap merely because endpoints coincide.
+- Partial contours are open. Fill uses SVG's implicit closure of each subpath;
+  Stroke keeps open caps/dashes, without an artificial connecting segment.
+
+Source vertices, tangents, animation poses and parametric settings remain editable
+and are never replaced by generated fragments. Reverse Direction and Set First
+Vertex can intentionally change which portion is retained. The output keeps
+cubic curves; it does not flatten them into editable polylines.
+
+Arc-length evaluation uses deterministic outward-rounded bounds and bounded
+subdivision/inversion. Its cut-position target is 1/1024 operator-local unit,
+further limited to one eighth of the smaller retained/removed arc length. Later
+transforms can magnify this source-space error; this is not a universal final-pixel
+promise. Work is limited to 65,536 measurement nodes per contour/operator,
+1,048,576 visits per Contents-layer evaluation and 4,194,304 per rendered frame.
+Unrepresentable tiny features or exhausted work bounds produce an explicit render
+error, never an empty/unchanged substitute. Preview and export propagate that error;
+failed output does not replace an existing destination. The final SVG ceiling
+remains 64 MiB, checked before oversized assembly.
+
+Any Trim item requires project schema 50, including a disabled, default-valued or
+inactive-composition item. The LEP container remains version 1 and existing
+VIEW/address versions are unchanged. Projects without Trim retain their otherwise
+required schema. These are explicit Libre Effects rules; Adobe edge-case or pixel
+equivalence, distributed/compound modes, Repeater, Merge/Offset Paths, mask inputs,
+canvas trim handles and topology-changing animation remain outside this slice.
+See STATUS.md for the actual automated and native validation boundaries.
 
 Contents → Add → **Gradient Fill / Gradient Stroke** adds linear or radial paint.
 Select a color or opacity stop to edit its location and midpoint; color stops use

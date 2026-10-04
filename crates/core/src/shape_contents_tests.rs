@@ -367,14 +367,14 @@ fn v43_contents_migration_adds_zero_skew_without_changing_existing_tracks() {
         node.parameters.remove(&ContentsParam::Skew);
         node.parameters.remove(&ContentsParam::SkewAxis);
     }
-    let before = c.svg_at(0);
+    let before = c.svg_at(0).unwrap();
     let json = serde_json::to_string(&old).unwrap();
     let loaded = Project::from_json(&json).unwrap();
     assert_eq!(loaded, expected);
     let Content::ShapeContents(c) = &loaded.composition.layers[0].content else {
         panic!()
     };
-    assert_eq!(before, c.svg_at(0));
+    assert_eq!(before, c.svg_at(0).unwrap());
     assert_eq!(
         c.node(1).unwrap().parameter_order(),
         vec![
@@ -805,7 +805,7 @@ fn contents_paths_convert_animate_and_follow_group_transforms() {
         },
     );
     assert!(contents(&e).editable_paths(30).is_empty());
-    assert_eq!(contents(&e).svg_at(30), "");
+    assert_eq!(contents(&e).svg_at(30).unwrap(), "");
 }
 
 #[test]

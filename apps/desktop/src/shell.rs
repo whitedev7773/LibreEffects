@@ -20,6 +20,7 @@ mod search;
 struct FocuslessModals {
     settings: bool,
     help: bool,
+    about: bool,
     media: bool,
     confirmation: bool,
 }
@@ -27,9 +28,14 @@ impl FocuslessModals {
     fn opened_since(self, previous: Self) -> bool {
         (self.settings && !previous.settings)
             || (self.help && !previous.help)
+            || (self.about && !previous.about)
             || (self.media && !previous.media)
             || (self.confirmation && !previous.confirmation)
     }
+}
+
+fn about_key_closes(key: &str, modified: bool) -> bool {
+    !modified && matches!(key, "escape" | "enter" | "space")
 }
 
 pub(crate) struct Shell {
@@ -59,6 +65,7 @@ pub(crate) struct Shell {
     settings_error: String,
     fields: Vec<Entity<TextField>>,
     help: bool,
+    about: bool,
     closing: bool,
     pending_document: Option<Action>,
     pending_save: bool,
@@ -151,6 +158,7 @@ impl Shell {
             settings_error: String::new(),
             fields,
             help: false,
+            about: false,
             closing: false,
             pending_document: None,
             pending_save: false,
@@ -167,7 +175,8 @@ impl Shell {
         cx.notify();
     }
     fn dispatch(&mut self, mut action: Action, window: &mut Window, cx: &mut Context<Self>) {
-        if self.state.read(cx).colors.session.is_some()
+        if self.about
+            || self.state.read(cx).colors.session.is_some()
             || self.state.read(cx).gradient_editor.is_some()
             || self.state.read(cx).vertex_editor.is_some()
         {
@@ -200,7 +209,7 @@ impl Shell {
             .update(cx, |state, cx| state.dispatch(&action, window, cx));
     }
     fn reset_layout(&mut self, cx: &mut Context<Self>) {
-        if self.state.read(cx).vertex_editor.is_some() {
+        if self.about || self.state.read(cx).vertex_editor.is_some() {
             return;
         }
         self.state.update(cx, |s, cx| {
@@ -215,7 +224,8 @@ impl Shell {
         self.right.update(cx, |p, cx| p.reset(cx));
     }
     fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.state.read(cx).colors.session.is_some()
+        if self.about
+            || self.state.read(cx).colors.session.is_some()
             || self.state.read(cx).gradient_editor.is_some()
             || self.state.read(cx).vertex_editor.is_some()
         {
@@ -247,7 +257,8 @@ impl Shell {
         cx.notify();
     }
     fn new_composition(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.state.read(cx).colors.session.is_some()
+        if self.about
+            || self.state.read(cx).colors.session.is_some()
             || self.state.read(cx).gradient_editor.is_some()
             || self.state.read(cx).vertex_editor.is_some()
         {
@@ -266,7 +277,7 @@ impl Shell {
         self.fields[0].update(cx, |f, _| f.sync("new-composition".into(), name, window));
     }
     fn apply_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.state.read(cx).vertex_editor.is_some() {
+        if self.about || self.state.read(cx).vertex_editor.is_some() {
             return;
         }
         let name = self.fields[0].read(cx).value().to_string();
@@ -339,7 +350,7 @@ impl Shell {
         cx.notify();
     }
     fn open_menu(&mut self, name: &'static str, window: &mut Window, cx: &mut Context<Self>) {
-        if self.state.read(cx).vertex_editor.is_some() {
+        if self.about || self.state.read(cx).vertex_editor.is_some() {
             return;
         }
         if self.menu.is_none() {
@@ -364,7 +375,7 @@ impl Shell {
         cx.notify();
     }
     fn run_menu(&mut self, target: menu::Target, window: &mut Window, cx: &mut Context<Self>) {
-        if self.state.read(cx).vertex_editor.is_some() {
+        if self.about || self.state.read(cx).vertex_editor.is_some() {
             return;
         }
         self.menu = None;
@@ -377,16 +388,60 @@ impl Shell {
             menu::Target::Settings => self.open_settings(window, cx),
             menu::Target::ResetWorkspace => self.reset_layout(cx),
             menu::Target::Help => self.help = true,
+            menu::Target::About => self.open_about(window, cx),
             menu::Target::Search => self.open_search(window, cx),
         }
+        cx.notify();
+    }
+    fn open_about(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let state = self.state.read(cx);
+        if self.settings
+            || self.help
+            || self.closing
+            || self.pending_document.is_some()
+            || state.media_open
+            || state.fonts_open
+            || state.recovery.is_some()
+            || state.colors.session.is_some()
+            || state.gradient_editor.is_some()
+            || state.vertex_editor.is_some()
+        {
+            return;
+        }
+        self.about = true;
+        cx.stop_active_drag(window);
+        window.focus(&self.focus);
+        cx.notify();
+    }
+    fn close_about(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.about = false;
+        window.focus(&self.focus);
         cx.notify();
     }
     fn menu_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let key = event.keystroke.key.as_str();
         let m = event.keystroke.modifiers;
         let state = self.state.read(cx);
+        if self.about
+            && !self.closing
+            && self.pending_document.is_none()
+            && state.recovery.is_none()
+        {
+            // Trap all editor keys and Tab before descendants can edit the canvas
+            // or focus an occluded control. Keep the platform close shortcut.
+            if m.alt && key == "f4" {
+                return;
+            }
+            cx.stop_propagation();
+            window.prevent_default();
+            if about_key_closes(key, m.control || m.alt || m.shift || m.platform) {
+                self.close_about(window, cx);
+            }
+            return;
+        }
         if self.settings
             || self.help
+            || self.about
             || self.closing
             || self.pending_document.is_some()
             || state.media_open
@@ -511,12 +566,14 @@ impl Shell {
             self.menu = None;
             self.settings = false;
             self.help = false;
+            self.about = false;
             window.focus(&self.focus);
             cx.notify();
             return;
         }
         if self.settings
             || self.help
+            || self.about
             || self.state.read(cx).media_open
             || self.state.read(cx).fonts_open
             || self.closing
@@ -1277,6 +1334,67 @@ impl Render for Shell {
                 .with_priority(3),
             );
         }
+        if self.about {
+            let mut dialog = div()
+                .id("about-libre-effects-dialog")
+                .w(px(540.0))
+                .p_5()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .bg(rgb(ui::PANEL))
+                .border_1()
+                .border_color(rgb(0x555555))
+                .shadow_lg()
+                .child(
+                    div()
+                        .text_size(px(18.0))
+                        .text_color(rgb(0xffffff))
+                        .child("About Libre Effects"),
+                )
+                .child(
+                    div()
+                        .text_color(rgb(ui::MUTED))
+                        .child("Motion graphics editor · Rust + GPUI"),
+                );
+            for (label, value) in crate::build_info::rows() {
+                dialog = dialog.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_size(px(10.0))
+                                .text_color(rgb(ui::MUTED))
+                                .child(label),
+                        )
+                        .child(div().text_size(px(12.0)).child(value)),
+                );
+            }
+            dialog = dialog
+                .child(div().text_size(px(10.0)).text_color(rgb(ui::MUTED))
+                    .child("Build information is embedded in this executable. The source fingerprint identifies changes; it is not a security signature."))
+                .child(div().flex().justify_end().child(
+                    ui::text_button("close-about", "Close (Esc)")
+                        .bg(rgb(0x175c99))
+                        .on_click(cx.listener(|this, _, window, cx| this.close_about(window, cx))),
+                ));
+            root = root.child(
+                gpui::deferred(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(gpui::rgba(0x00000080))
+                        .occlude()
+                        .child(dialog),
+                )
+                .with_priority(3),
+            );
+        }
         if self.state.read(cx).media_open {
             root = root.child(
                 gpui::deferred(
@@ -1314,6 +1432,7 @@ impl Render for Shell {
         let focus_modals = FocuslessModals {
             settings: self.settings,
             help: self.help,
+            about: self.about,
             media: self.state.read(cx).media_open,
             confirmation,
         };
@@ -1477,7 +1596,29 @@ impl Render for Shell {
 
 #[cfg(test)]
 mod modal_focus_tests {
-    use super::FocuslessModals;
+    use super::{FocuslessModals, about_key_closes};
+
+    #[test]
+    fn about_keyboard_dismissal_does_not_enable_editor_shortcuts() {
+        for key in ["escape", "enter", "space"] {
+            assert!(about_key_closes(key, false));
+            assert!(!about_key_closes(key, true));
+        }
+        for key in [
+            "tab",
+            "delete",
+            "backspace",
+            "n",
+            "z",
+            "p",
+            "f10",
+            "left",
+            "right",
+        ] {
+            assert!(!about_key_closes(key, false));
+            assert!(!about_key_closes(key, true));
+        }
+    }
 
     #[test]
     fn shell_modal_focus_captures_every_focusless_overlay_only_on_open() {
@@ -1488,6 +1629,10 @@ mod modal_focus_tests {
             },
             FocuslessModals {
                 help: true,
+                ..Default::default()
+            },
+            FocuslessModals {
+                about: true,
                 ..Default::default()
             },
             FocuslessModals {
@@ -1534,6 +1679,7 @@ mod modal_focus_tests {
         let focus_only = FocuslessModals {
             settings: true,
             help: true,
+            about: true,
             media: true,
             confirmation: false,
         };

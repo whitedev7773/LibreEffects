@@ -553,7 +553,9 @@ fn text_typography_schema49_inactive_and_empty_tracks_native_and_legacy_validati
             let bytes = project_file::encode(&original, None).unwrap();
             assert_eq!(&bytes[8..10], &[1, 0]);
             assert_eq!(project_file::decode(&bytes).unwrap().project, original);
-            for version in [3, 48, 50] {
+            // Typography still requires 49; reject versions newer than the
+            // executable rather than hard-coding the former future version.
+            for version in [3, 48, PROJECT_VERSION + 1] {
                 let mut bad = serde_json::to_value(&original).unwrap();
                 bad["version"] = version.into();
                 assert!(Project::from_json(&bad.to_string()).is_err());
