@@ -31,6 +31,11 @@ preserve exact source/history/assets rather than materializing a key or normaliz
 an older declaration. No new LEP chunk, VIEW version or property-address shape is
 needed; older readers reject the unsupported model. Luma-containing effect presets
 separately use preset version 4; that is not a project/container version change.
+A numeric project schema newer than this reader's supported maximum is rejected
+with both version numbers before model deserialization or asset resolution. This
+also covers future model variants and large unsigned version values. Native
+container/CRC/size/strict-JSON checks remain prior boundaries; missing, malformed
+or older versions retain their own existing diagnostics.
 The codec retains the project's declared version on unmodified load/save.
 Existing generic edit commands may recalculate the version required by the
 resulting features; a changed static edit can therefore lower an overdeclared

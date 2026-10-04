@@ -488,6 +488,174 @@ fn native_json_rejects_duplicate_keys_at_every_depth_and_keeps_legacy_behavior()
 }
 
 #[test]
+fn future_project_versions_report_bounds_before_assets_or_model_variants() {
+    let mut editor = Editor::default();
+    editor.execute(Command::AddRectangle).unwrap();
+    for project in [editor.project().clone(), image_project(PNG)] {
+        let json: Value = serde_json::from_str(&project.to_json().unwrap()).unwrap();
+        let entries = chunks(&encode(&project, Some(b"{\"opaque\":true}")).unwrap());
+        for version in [u64::from(PROJECT_VERSION) + 1, u64::MAX] {
+            let expected = format!(
+                "Unsupported project version {version}; this build supports up to version {PROJECT_VERSION}"
+            );
+            for change in ["version", "unknown_fields", "unknown_kind", "future_assets"] {
+                let change_schema = |value: &mut Value| {
+                    value["version"] = version.into();
+                    match change {
+                        "unknown_fields" => {
+                            value["future_settings"] = serde_json::json!({"enabled": true});
+                            value["composition"]["future_setting"] = true.into();
+                        }
+                        "unknown_kind" => {
+                            value["composition"]["layers"][0]["content"] =
+                                serde_json::json!({"FutureContent": {"mode": "NewMode"}});
+                        }
+                        "future_assets" => {
+                            value["sequence_assets"] = serde_json::json!(["new layout"]);
+                        }
+                        _ => {}
+                    }
+                };
+                let mut future_json = json.clone();
+                change_schema(&mut future_json);
+                let future_json = future_json.to_string();
+                assert_eq!(Project::from_json(&future_json).unwrap_err(), expected);
+
+                let mut future_entries = entries.clone();
+                let mut metadata: Value = serde_json::from_slice(&future_entries[0].1).unwrap();
+                change_schema(&mut metadata);
+                future_entries[0].1 = serde_json::to_vec(&metadata).unwrap();
+                let bytes = pack(&future_entries);
+                assert_eq!(decode(&bytes).unwrap_err(), expected);
+                // A failed read leaves the original portable bytes available.
+                assert_eq!(bytes, pack(&future_entries));
+            }
+        }
+        assert_eq!(Project::from_json(&json.to_string()).unwrap(), project);
+        assert_eq!(decode(&pack(&entries)).unwrap().project, project);
+    }
+}
+
+#[test]
+fn future_version_preflight_keeps_supported_json_and_native_roundtrips_exact() {
+    for mut project in [Project::default(), image_project(PNG)] {
+        for version in [project.version, PROJECT_VERSION] {
+            project.version = version;
+            let json = project.to_json().unwrap();
+            let loaded = Project::from_json(&json).unwrap();
+            assert_eq!(loaded, project);
+            assert_eq!(loaded.to_json().unwrap(), json);
+            let view = br#" { "version":2, "opaque":{"selection":[1],"future_view_field":true} } "#;
+            let bytes = encode(&project, Some(view)).unwrap();
+            let loaded = decode(&bytes).unwrap();
+            assert_eq!(loaded.project, project);
+            assert_eq!(loaded.view, Some(view.as_slice()));
+            assert_eq!(encode(&loaded.project, loaded.view).unwrap(), bytes);
+        }
+    }
+}
+
+#[test]
+fn future_version_preflight_preserves_missing_invalid_and_lower_image_versions() {
+    let invalid_versions = [
+        None,
+        Some(Value::Null),
+        Some(serde_json::json!(-1)),
+        Some(serde_json::json!(1.5)),
+        Some(serde_json::json!(PROJECT_VERSION.to_string())),
+        Some(Value::Bool(true)),
+        Some(serde_json::json!([])),
+        Some(serde_json::json!({})),
+        Some(serde_json::json!(0)),
+    ];
+    for version in &invalid_versions {
+        let mut value = serde_json::to_value(Project::default()).unwrap();
+        if let Some(version) = version {
+            value["version"] = version.clone();
+        } else {
+            value.as_object_mut().unwrap().remove("version");
+        }
+        // Preserve the original typed-model and validation diagnostics.
+        let expected = match serde_json::from_value::<Project>(value.clone()) {
+            Ok(project) => project.validate().unwrap_err(),
+            Err(error) => error.to_string(),
+        };
+        assert_eq!(
+            Project::from_json(&value.to_string()).unwrap_err(),
+            expected
+        );
+        assert_eq!(
+            decode(&pack(&[(*b"PROJ", serde_json::to_vec(&value).unwrap())])).unwrap_err(),
+            expected
+        );
+    }
+    let metadata = metadata_with_refs(&["old-image".into()]);
+    for version in invalid_versions.into_iter().chain([Some(6.into())]) {
+        let mut value: Value = serde_json::from_slice(&metadata).unwrap();
+        if let Some(version) = version {
+            value["version"] = version;
+        } else {
+            value.as_object_mut().unwrap().remove("version");
+        }
+        let bytes = pack(&[
+            (*b"PROJ", serde_json::to_vec(&value).unwrap()),
+            (*b"IMAG", image_payload("old-image", 1, b"YWJj")),
+        ]);
+        assert_eq!(
+            decode(&bytes).unwrap_err(),
+            "Image assets require project version 7"
+        );
+        value["image_assets"] = serde_json::json!({"old-image":"YWJj"});
+        assert_eq!(
+            Project::from_json(&value.to_string()).unwrap_err(),
+            "Image assets require project version 7"
+        );
+    }
+}
+
+#[test]
+fn future_version_preflight_does_not_bypass_native_container_checks() {
+    let mut entries = chunks(&encode(&image_project(PNG), None).unwrap());
+    let mut metadata: Value = serde_json::from_slice(&entries[0].1).unwrap();
+    metadata["version"] = (PROJECT_VERSION + 1).into();
+    entries[0].1 = serde_json::to_vec(&metadata).unwrap();
+    let bytes = pack(&entries);
+
+    let mut bad = bytes.clone();
+    bad[28] ^= 1;
+    error(&bad, "Native header checksum mismatch");
+    let mut bad = bytes.clone();
+    *bad.last_mut().unwrap() ^= 1;
+    error(&bad, "Native chunk checksum mismatch");
+    let mut bad = bytes.clone();
+    bad[40..48].copy_from_slice(&(MAX_JSON_BYTES as u64 + 1).to_le_bytes());
+    error(&bad, "Native JSON exceeds 16 MiB");
+    let mut bad = entries.clone();
+    bad.push(entries[0].clone());
+    error(&pack(&bad), "Duplicate native PROJ chunk");
+    let mut bad = entries.clone();
+    bad[1].1 = image_payload("image-1", 2, b"YWJj");
+    error(&pack(&bad), "Unsupported native image storage kind");
+    let mut bad = entries.clone();
+    bad.push((*b"VIEW", br#"{"key":1,"key":2}"#.to_vec()));
+    error(&pack(&bad), "Duplicate native JSON object key");
+    let mut bad = entries.clone();
+    bad[0].1 = format!(
+        "{{\"version\":{},\"version\":{}}}",
+        PROJECT_VERSION + 1,
+        PROJECT_VERSION + 1
+    )
+    .into_bytes();
+    error(&pack(&bad), "Duplicate native JSON object key");
+    metadata["image_assets"] = serde_json::json!({});
+    entries[0].1 = serde_json::to_vec(&metadata).unwrap();
+    error(
+        &pack(&entries),
+        "Native metadata must not contain inline image_assets",
+    );
+}
+
+#[test]
 fn native_rejects_unsupported_project_schema_and_invalid_sequence_references() {
     for version in [0, PROJECT_VERSION + 1] {
         let mut value = serde_json::to_value(Project::default()).unwrap();

@@ -17,6 +17,27 @@ an After Effects replacement, an AE pixel-equivalent renderer, or an AEP/Adobe
 script-compatible application. A working control or passing model test alone
 does not establish a complete native editing workflow.
 
+## Project-version diagnostic checkpoint
+
+Legacy JSON and native LEP now reject a numeric future project version before
+asset resolution or unsupported model variants can obscure the cause. The error
+states both the requested version and this build's supported maximum, including
+u64-sized input values. Missing/invalid versions and the older image-version
+requirement retain their previous behavior. Container versions, CRC, chunk/JSON
+limits and strict native metadata checks still run in their existing order. There
+is no schema, serialization, migration, rendering or UI-control change.
+
+Four new core regressions pass, together with the existing future-version test.
+The full gate passes 1150 default tests (367 core, 777 desktop, 6 build helpers),
+all 32 media tests, formatting, all-target typechecking and a normal optimized
+release. Its build number is `20261004.073702-8b8e23ce8527ad09`; all 325 source inputs
+match the pinned executable's fingerprint. Sixteen real before/after CLI checks
+prove eight clearer future-version errors, six unchanged lower/invalid/container/
+CRC errors, all 14 existing destinations preserved without temporary files, and
+216,000 identical valid JSON/native RGBA reference pixels. The original inputs
+are unchanged. Luma's eight native scenarios remain pending; this headless
+stability fix does not claim to close the screen-transport gap.
+
 ## G06 Luma Key headless checkpoint — native acceptance pending
 
 The last fully native-validated checkpoint is local `9f108b2` (Trim Paths and
@@ -56,7 +77,8 @@ new image-bearing schema51 file before output mutation, using its existing image
 version-range guard and imprecise “Image assets require project version 7” message.
 An initial assertion expected an unknown-kind diagnostic; observed behavior and
 its unchanged old-source cause are recorded without modifying the old binary.
-Clearer future-version diagnostics remain a separate small stability follow-up.
+The subsequent diagnostic checkpoint above fixes this wording for future files;
+the old immutable reader and its recorded behavior remain unchanged.
 
 An initial desktop test typecheck ended in SIGKILL after199.9s without a Rust source
 error. A temporary desktop-only debug=0 retry passed; the repository/toolchain,

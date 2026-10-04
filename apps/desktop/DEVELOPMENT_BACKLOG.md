@@ -22,6 +22,13 @@
 - **후속 고급 기능:** 패널 도킹·소스 뷰어·최근 프로젝트, 타임라인 고급 시간 편집/검색/가상화, 공간 경로·프리셋·표현식, Shape 연산/SVG·Text Animator, 추가 효과·모션 블러, 고정밀 색/HDR·Proxy/GPU, 템플릿, 설치/업데이트·한글화와 UI 회귀 자동화.
 - **별도 대형 단계:** 3D/카메라/라이트·모델, 추적·로토/Puppet, 플러그인/교환 포맷 연구, 웹/API 제품 범위. AEP/MOGRT 호환은 구현되지 않았다.
 
+### A05 미래 project version 진단 보강 — 2026-10-04
+
+- JSON/native metadata가 숫자로 선언한 미래 project version을 asset/model decoding 전에 확인하고 “Unsupported project version {version}; this build supports up to version {maximum}”으로 거부한다. u64::MAX도 모델의 좁은 version 타입으로 변환하지 않고 명확히 보고한다. schema/serialization/migration/rendering/UI control은 바꾸지 않았다.
+- 기존 missing/invalid version, 구형 image-version 요구, native container/CRC/JSON 크기/중복 chunk/strict JSON/storage kind/inline image 검사 순서는 유지했다. 새 회귀 4개와 기존 future test 1개가 집중 통과했고, 전체 기본 1150(Core367+Desktop777+helper6), media32, fmt/all-target check와 일반 optimized release가 통과했다.
+- 실제 CLI before/after 16개에서 미래 버전 8개의 진단만 개선됐다. 나머지 lower/invalid/container/CRC 6개는 같은 오류를 냈고, 거부된 14개 모두 기존 출력·원본을 보존하고 임시 파일을 남기지 않았다. 정상 JSON/native의 216,000 RGBA reference pixel은 정확히 같다. 빌드 번호20261004.073702-8b8e23ce8527ad09와 전체 source input325개 fingerprint를 확인했다.
+- CUA native pipe는 이전에 동작하던 Trim session에서도 지원된 read-only 재확인에 실패했다. 이 fix는 headless 안정성 체크포인트이며 Luma native 8-case를 닫거나 새 UI 검증을 했다고 주장하지 않는다.
+
 ### G06 Luma Key — 2026-10-04, headless 검증 완료·native 대기
 
 - 다음 bounded 효과로 Luma Key를 구현했다. 0–255 Threshold/Softness 두 scalar(default128/0)와 static Keep Brighter/Darker, 독립 animation/key/Timeline/Graph 및 mode를 보존하는 preset4를 연결한다. Audio/Null, 잘못된 mode/kind 및 LinearRgb는 거부하며 존재 자체가 bypass/identity/inactive 상태에서도 schema51을 요구한다. 기존 effect/preset serialization, LEP1과 VIEW/address version은 유지한다.
@@ -31,7 +38,7 @@
 - 기본 debug metadata test typecheck는 source error 없이 SIGKILL(199.9초)로 끝났다. desktop package만 command-line debug=0으로 바꾼 재시도가 통과했다. assertions/features/optimization/release profile과 저장소 설정은 그대로이며 실제 종료 원인이나 통제된 성능 개선을 단정하지 않는다.
 - aggregate 기본1146(Core363+Desktop777+build-helper6), explicit media32, fmt와 all-target typecheck가 통과했다. 일반 optimized release도 161.7초에 통과했다. 빌드 번호20261004.071022-e9c96a05a1f8e6d7은 전체 watched input325개의 독립 fingerprint와 일치한다. native는 정확히8-case 계획이며 candidate-v2 LEP6개가 공식 codec을 통과했다. 최초 수동 fixture의 asset ID 누락은 거부 bytes/log를 남기고 sample metadata만 고쳤다. cloud native pipe 연결이 QA와 parent 양쪽 및 fresh supported reset에서 실패해 실제 Luma 화면 검증은 아직 실행하지 못했다. 기존 정상 Trim save는 변경/강제 종료하지 않았다. G06 전체는 Partial이며 나머지 keying/정리/변위/왜곡/noise/전환/style은 별도 범위다.
 
-- 최종 고정 release CLI에서 기존 text/reference31,940,800 RGBA pixel과 Trim21frame이 정확히 같았다. 준비된 Luma fixture18render가 성공했고 frame30은 Luma 없는 독립 baked-image reference와216,000 RGBA pixel이 일치한다. 이 결과는 native-created save나 실제 UI PNG export의 증거가 아니다. 모든 원본 hash를 보존했다. 기존 schema50 reader는 image-bearing schema51을 output 변경 전에 거부했지만 기존7..50 guard의 “Image assets require project version 7” 진단을 냈다. 첫 assertion의 unknown-kind 기대가 틀렸으며 old source를 확인하고 그 사실을 기록했다. 더 명확한 미래 버전 진단은 다음 작은 안정성 작업으로 남긴다. 07:20의 supported CUA 재확인도 pipe 부재로 실패했고 우회 제어/다른 컴퓨터 사용은 하지 않았다.
+- 최종 고정 release CLI에서 기존 text/reference31,940,800 RGBA pixel과 Trim21frame이 정확히 같았다. 준비된 Luma fixture18render가 성공했고 frame30은 Luma 없는 독립 baked-image reference와216,000 RGBA pixel이 일치한다. 이 결과는 native-created save나 실제 UI PNG export의 증거가 아니다. 모든 원본 hash를 보존했다. 기존 schema50 reader는 image-bearing schema51을 output 변경 전에 거부했지만 기존7..50 guard의 “Image assets require project version 7” 진단을 냈다. 첫 assertion의 unknown-kind 기대가 틀렸으며 old source를 확인하고 그 사실을 기록했다. 더 명확한 미래 버전 진단은 위 후속 A05 안정성 체크포인트에서 보강했다. 07:20의 supported CUA 재확인도 pipe 부재로 실패했고 우회 제어/다른 컴퓨터 사용은 하지 않았다.
 
 ### E05 Trim Paths 및 자동 About 빌드 번호 — 2026-10-04
 

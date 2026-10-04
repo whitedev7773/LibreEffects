@@ -229,10 +229,9 @@ pub(super) fn decode(json: &str) -> Result<Project, String> {
         return Err("Project exceeds 256 MiB".into());
     }
     let mut value: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
-    let assets_value = value
-        .as_object_mut()
-        .ok_or("Project must be an object")?
-        .remove("image_assets");
+    let object = value.as_object_mut().ok_or("Project must be an object")?;
+    reject_future_version(object)?;
+    let assets_value = object.remove("image_assets");
     if assets_value.is_some()
         && !value["version"]
             .as_u64()
@@ -259,6 +258,7 @@ pub(super) fn decode_native(
     if object.contains_key("image_assets") {
         return Err("Native metadata must not contain inline image_assets".into());
     }
+    reject_future_version(object)?;
     if !images.is_empty()
         && !value["version"]
             .as_u64()
@@ -267,6 +267,22 @@ pub(super) fn decode_native(
         return Err("Image assets require project version 7".into());
     }
     finish(resolve(value, images, true)?)
+}
+
+// Reject newer schemas before asset resolution or model deserialization can
+// mistake their new fields or variants for malformed supported project data.
+// Leave missing, invalid and older version handling to the existing checks.
+fn reject_future_version(
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), String> {
+    if let Some(version) = object.get("version").and_then(serde_json::Value::as_u64)
+        && version > u64::from(PROJECT_VERSION)
+    {
+        return Err(format!(
+            "Unsupported project version {version}; this build supports up to version {PROJECT_VERSION}"
+        ));
+    }
+    Ok(())
 }
 
 /// Both formats use the same migrations and validate the final resident model.
