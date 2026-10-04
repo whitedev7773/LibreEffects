@@ -71,6 +71,135 @@ mod tests {
         e.project().clone()
     }
     #[test]
+    #[ignore = "requires FFmpeg; validates Luma Key alpha and colored MP4 matte output"]
+    fn luma_key_video_preserves_single_alpha_multiplication_and_animated_transparency() {
+        use base64::{Engine, engine::general_purpose::STANDARD};
+        use image::ImageEncoder;
+        use libre_effects_core::{EffectEdit, EffectKind, EffectParam};
+
+        let pixels = image::RgbaImage::from_pixel(64, 64, image::Rgba([255, 0, 0, 128]));
+        let mut png = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut png)
+            .write_image(pixels.as_raw(), 64, 64, image::ExtendedColorType::Rgba8)
+            .unwrap();
+        let mut e = Editor::default();
+        e.execute(Edit::ConfigureComposition {
+            name: "Luma video".into(),
+            width: 64,
+            height: 64,
+            fps: 24,
+            duration: 2,
+        })
+        .unwrap();
+        e.execute(Edit::SetCompositionBackground(0x2060a0)).unwrap();
+        e.execute(Edit::AddContent {
+            content: Content::Image {
+                png: STANDARD.encode(png).into(),
+            },
+            width: 64.,
+            height: 64.,
+            name: "Translucent red".into(),
+        })
+        .unwrap();
+        for edit in [
+            EffectEdit::Add(EffectKind::LumaKey),
+            EffectEdit::SetValue {
+                effect: 1,
+                parameter: EffectParam::LumaThreshold,
+                frame: 0,
+                value: 54.,
+            },
+            EffectEdit::SetValue {
+                effect: 1,
+                parameter: EffectParam::LumaSoftness,
+                frame: 0,
+                value: 100.,
+            },
+            EffectEdit::ToggleAnimation {
+                effect: 1,
+                parameter: EffectParam::LumaThreshold,
+                frame: 0,
+            },
+            EffectEdit::SetValue {
+                effect: 1,
+                parameter: EffectParam::LumaThreshold,
+                frame: 1,
+                value: 254.,
+            },
+        ] {
+            e.execute(Edit::Effect { id: 1, edit }).unwrap();
+        }
+        let before = e.project().to_json().unwrap();
+        let project = Project::from_json(&before).unwrap();
+        let renderer = Renderer::new();
+        // Independent anchor: reconstructed red255 gives q54 and K128.
+        // Original premultiplied red/alpha128 becomes64 exactly, not32.
+        assert_eq!(
+            renderer
+                .render(&project, 0, 64)
+                .unwrap()
+                .get_pixel(32, 32)
+                .0,
+            [255, 0, 0, 64]
+        );
+        assert_eq!(
+            renderer
+                .render(&project, 1, 64)
+                .unwrap()
+                .get_pixel(32, 32)
+                .0,
+            [0; 4]
+        );
+        let dir = tempfile::tempdir().unwrap();
+        for preset in [VideoPreset::H264, VideoPreset::ProResAlpha] {
+            let output = dir.path().join(format!("luma.{}", preset.extension()));
+            let progress = Arc::new(AtomicU32::new(0));
+            export_video(
+                &project,
+                0..2,
+                preset,
+                &output,
+                Default::default(),
+                progress.clone(),
+            )
+            .unwrap();
+            assert_eq!(progress.load(Ordering::Relaxed), 2);
+            let decoded = command(&ffmpeg_path())
+                .args(["-v", "error", "-i"])
+                .arg(&output)
+                .args(["-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"])
+                .output()
+                .unwrap();
+            assert!(
+                decoded.status.success(),
+                "{}",
+                String::from_utf8_lossy(&decoded.stderr)
+            );
+            assert_eq!(decoded.stdout.len(), 64 * 64 * 4 * 2);
+            let pixel = |frame: usize| &decoded.stdout[(frame * 64 * 64 + 32 * 64 + 32) * 4..][..4];
+            let (first, second) = (pixel(0), pixel(1));
+            if preset == VideoPreset::H264 {
+                // Existing lossy-codec tolerances are separate from the exact
+                // source/PNG oracle above. Matte=(32,96,160), alpha64/255.
+                for (actual, expected) in [(first, [88, 72, 120]), (second, [32, 96, 160])] {
+                    for channel in 0..3 {
+                        assert!(
+                            (i32::from(actual[channel]) - expected[channel]).abs() < 9,
+                            "{actual:?}"
+                        );
+                    }
+                    assert_eq!(actual[3], 255);
+                }
+            } else {
+                assert!((i32::from(first[3]) - 64).abs() < 3, "{first:?}");
+                assert!(first[0] > 245 && first[1] < 8 && first[2] < 8, "{first:?}");
+                assert_eq!(second[3], 0, "{second:?}");
+            }
+        }
+        assert_eq!(project.to_json().unwrap(), before);
+        assert_eq!(e.project().to_json().unwrap(), before);
+    }
+    #[test]
     #[ignore = "requires FFmpeg; verifies Trim errors preserve an existing video and clean staging"]
     fn trim_failure_keeps_video_destination_and_cleans_encoder_temporaries() {
         for (e, budget, kind) in crate::rendering::trim_tests::failure_cases() {

@@ -48,6 +48,7 @@ impl EffectPreset {
         if effects.is_empty() {
             return Err("No effects to save".into());
         }
+        validate_target(layer, &effects)?;
         let start = effects
             .iter()
             .flat_map(|e| e.parameters.values())
@@ -65,7 +66,9 @@ impl EffectPreset {
             }
         }
         let result = Self {
-            version: if effects
+            version: if effects.iter().any(|e| e.kind == EffectKind::LumaKey) {
+                4
+            } else if effects
                 .iter()
                 .flat_map(|e| e.parameters.values())
                 .any(|t| t.keys.values().any(|k| !k.temporal.mode.is_independent()))
@@ -110,7 +113,7 @@ impl EffectPreset {
         Ok(preset)
     }
     fn validate(&self) -> Result<(), String> {
-        if !(1..=3).contains(&self.version) {
+        if !(1..=4).contains(&self.version) {
             return Err("Unsupported effect preset version".into());
         }
         if self.name.trim().is_empty()
@@ -129,6 +132,9 @@ impl EffectPreset {
             .any(|(i, e)| e.id != i as u64 + 1)
         {
             return Err("Invalid preset effect identities".into());
+        }
+        if self.version < 4 && self.effects.iter().any(|e| e.kind == EffectKind::LumaKey) {
+            return Err("Luma Key requires effect preset version 4".into());
         }
         for key in self
             .effects
@@ -157,6 +163,7 @@ impl EffectPreset {
         duration: Frame,
     ) -> Result<(), String> {
         self.validate()?;
+        validate_target(layer, &self.effects)?;
         if frame >= duration {
             return Err("Preset start is outside the composition".into());
         }

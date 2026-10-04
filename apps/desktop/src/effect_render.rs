@@ -1,5 +1,7 @@
 //! Layer-space SVG filters. Each stage takes the preceding stage's complete RGBA result.
-use libre_effects_core::{EffectColorSpace, EffectInstance, EffectKind, EffectParam as P, Layer};
+use libre_effects_core::{
+    EffectColorSpace, EffectInstance, EffectKind, EffectParam as P, Layer, LumaKeyMode,
+};
 use std::fmt::Write;
 
 pub(crate) fn stack(
@@ -16,20 +18,31 @@ pub(crate) fn stack(
     } else {
         (0.0, 0.0)
     };
-    let mut enabled = layer
-        .effect_stack()
-        .iter()
-        .filter(|e| !e.bypassed())
-        .peekable();
+    let mut stages = Vec::new();
+    for effect in layer.effect_stack().iter().filter(|e| !e.bypassed()) {
+        if effect.kind() == EffectKind::LumaKey {
+            let mode = luma_key_mode(effect)?;
+            // Even an identity filter can introduce another 8-bit intermediate.
+            // Keep the full preceding stage byte-exact for the all-pass key.
+            // Omit it before grouping so it cannot split migrated linear stages.
+            if mode == LumaKeyMode::KeepBrighter
+                && effect.value_at(P::LumaThreshold, frame) == 0.0
+                && effect.value_at(P::LumaSoftness, frame) == 0.0
+            {
+                continue;
+            }
+        }
+        stages.push(effect);
+    }
+    let mut enabled = stages.into_iter().peekable();
     while let Some(effect) = enabled.next() {
         if effect.color_space() == EffectColorSpace::LinearRgb {
             let id = format!("{prefix}-legacy-{}", effect.id());
-            let mut operations = primitives(effect, frame, bounds);
-            while enabled
-                .peek()
-                .is_some_and(|e| e.color_space() == EffectColorSpace::LinearRgb)
-            {
-                operations.push_str(&primitives(enabled.next().unwrap(), frame, bounds));
+            let mut operations = primitives(effect, frame, bounds)?;
+            while enabled.peek().is_some_and(|e| {
+                e.color_space() == EffectColorSpace::LinearRgb && e.kind() != EffectKind::LumaKey
+            }) {
+                operations.push_str(&primitives(enabled.next().unwrap(), frame, bounds)?);
             }
             // Keep migrated legacy primitives in a single linear-light filter,
             // avoiding extra color conversions and 8-bit rounding between stages.
@@ -59,7 +72,7 @@ pub(crate) fn stack(
             );
         }
         let id = format!("{prefix}-effect-{}", effect.id());
-        write!(definitions,"<filter id='{id}' filterUnits='userSpaceOnUse' x='{}' y='{}' width='{width}' height='{height}' color-interpolation-filters='sRGB'>{}</filter>",left-px,top-py,primitives(effect,frame,[left-px,top-py,width,height])).unwrap();
+        write!(definitions,"<filter id='{id}' filterUnits='userSpaceOnUse' x='{}' y='{}' width='{width}' height='{height}' color-interpolation-filters='sRGB'>{}</filter>",left-px,top-py,primitives(effect,frame,[left-px,top-py,width,height])?).unwrap();
         filters.push(id);
     }
     // Outer filters are evaluated after inner filters.
@@ -72,7 +85,7 @@ pub(crate) fn stack(
     Ok((definitions, open, close))
 }
 
-fn primitives(effect: &EffectInstance, frame: u32, bounds: [f64; 4]) -> String {
+fn primitives(effect: &EffectInstance, frame: u32, bounds: [f64; 4]) -> Result<String, String> {
     let v = |p| effect.value_at(p, frame);
     let color = || {
         format!(
@@ -82,7 +95,11 @@ fn primitives(effect: &EffectInstance, frame: u32, bounds: [f64; 4]) -> String {
             v(P::Blue).round()
         )
     };
-    match effect.kind() {
+    Ok(match effect.kind() {
+        EffectKind::LumaKey => {
+            let mode = luma_key_mode(effect)?;
+            luma_key(v(P::LumaThreshold), v(P::LumaSoftness), mode)
+        }
         EffectKind::Curves => {
             use libre_effects_core::{CurveChannel, sample_color_curve};
             let master = effect.curve_values(CurveChannel::Rgb, frame);
@@ -194,7 +211,48 @@ fn primitives(effect: &EffectInstance, frame: u32, bounds: [f64; 4]) -> String {
             v(P::Radius),
             v(P::Amount)
         ),
+    })
+}
+
+fn luma_key_mode(effect: &EffectInstance) -> Result<LumaKeyMode, String> {
+    if effect.color_space() != EffectColorSpace::Srgb {
+        return Err("Luma Key requires sRGB color space".into());
     }
+    effect
+        .luma_key_mode()
+        .ok_or_else(|| "Luma Key requires a key mode".into())
+}
+
+fn luma_key(threshold: f64, softness: f64, mode: LumaKeyMode) -> String {
+    let table = (0..=255)
+        .map(|q| {
+            // q is the matrix's truncated 8-bit luma, not ideal real-valued luma.
+            // Softness is the full centered transition width; endpoints are not
+            // renormalized when the interval extends past black or white.
+            let coverage = if softness == 0.0 {
+                if f64::from(q) >= threshold { 1.0 } else { 0.0 }
+            } else {
+                (0.5 + (f64::from(q) - threshold) / softness).clamp(0.0, 1.0)
+            };
+            let brighter = (255.0 * coverage).round() as u8;
+            let matte = match mode {
+                LumaKeyMode::KeepBrighter => brighter,
+                LumaKeyMode::KeepDarker => 255 - brighter,
+            };
+            // resvg truncates transfer outputs. Encode inside each byte's bin
+            // so the rounded matte and its exact complement survive f32 parsing.
+            ((f64::from(matte) + 0.25) / 255.0).min(1.0).to_string()
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    // resvg evaluates the explicit matrix in f32 after reconstructing straight
+    // RGB bytes. Zero bias intentionally preserves its truncated luma stage.
+    // luminanceToAlpha has different coefficients in our pinned renderer.
+    // The matte never includes source alpha: apply it to the original
+    // premultiplied SourceGraphic exactly once without reconstructing its RGB.
+    format!(
+        "<feColorMatrix in='SourceGraphic' type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.2126 0.7152 0.0722 0 0' result='luma'/><feComponentTransfer in='luma' result='luma-matte'><feFuncA type='discrete' tableValues='{table}'/></feComponentTransfer><feComposite in='SourceGraphic' in2='luma-matte' operator='in'/>"
+    )
 }
 
 fn gradient(effect: &EffectInstance, frame: u32, bounds: [f64; 4]) -> String {
@@ -280,6 +338,71 @@ mod tests {
                 frame: 0,
                 value: v,
             },
+        );
+    }
+
+    fn luma_transfer_bytes(threshold: f64, softness: f64, mode: LumaKeyMode) -> Vec<u8> {
+        let svg = luma_key(threshold, softness, mode);
+        assert_eq!(svg.matches("<feColorMatrix ").count(), 1);
+        assert_eq!(svg.matches("<feComponentTransfer ").count(), 1);
+        assert_eq!(svg.matches("<feComposite ").count(), 1);
+        assert!(svg.ends_with("<feComposite in='SourceGraphic' in2='luma-matte' operator='in'/>"));
+        svg.split("tableValues='")
+            .nth(1)
+            .unwrap()
+            .split('\'')
+            .next()
+            .unwrap()
+            .split_whitespace()
+            .map(|value| (value.parse::<f32>().unwrap() * 255.0) as u8)
+            .collect()
+    }
+
+    #[test]
+    fn luma_key_transfer_is_bounded_complementary_and_centered() {
+        for threshold in [0.0, 0.5, 54.0, 128.0, 128.5, 255.0] {
+            for softness in [0.0, f64::MIN_POSITIVE, 0.001, 1.0, 100.0, 255.0] {
+                let bright = luma_transfer_bytes(threshold, softness, LumaKeyMode::KeepBrighter);
+                let dark = luma_transfer_bytes(threshold, softness, LumaKeyMode::KeepDarker);
+                assert_eq!(bright.len(), 256);
+                assert_eq!(dark.len(), 256);
+                assert!(bright.windows(2).all(|pair| pair[0] <= pair[1]));
+                for (bright, dark) in bright.into_iter().zip(dark) {
+                    assert_eq!(u16::from(bright) + u16::from(dark), 255);
+                }
+            }
+        }
+        let soft = luma_transfer_bytes(128.0, 100.0, LumaKeyMode::KeepBrighter);
+        assert_eq!((soft[78], soft[128], soft[178]), (0, 128, 255));
+        let hard = luma_transfer_bytes(128.0, 0.0, LumaKeyMode::KeepBrighter);
+        assert_eq!((hard[127], hard[128]), (0, 255));
+        let fractional = luma_transfer_bytes(128.5, 0.0, LumaKeyMode::KeepBrighter);
+        assert_eq!((fractional[128], fractional[129]), (0, 255));
+        let edge = luma_transfer_bytes(0.0, 255.0, LumaKeyMode::KeepBrighter);
+        assert_eq!(edge[0], 128);
+    }
+
+    #[test]
+    fn luma_key_rejects_invalid_state_before_legacy_grouping() {
+        let mut e = scene();
+        edit(&mut e, EffectEdit::Add(EffectKind::Brightness));
+        edit(&mut e, EffectEdit::Add(EffectKind::LumaKey));
+        let mut layer = serde_json::to_value(e.project().composition().layer(1).unwrap()).unwrap();
+        layer["effect_stack"][0]["color_space"] = "LinearRgb".into();
+        layer["effect_stack"][1]["color_space"] = "LinearRgb".into();
+        let invalid: Layer = serde_json::from_value(layer.clone()).unwrap();
+        assert!(
+            stack(&invalid, 0, "invalid", [0.0, 0.0, 20.0, 20.0])
+                .unwrap_err()
+                .contains("sRGB")
+        );
+        layer["effect_stack"][1]["color_space"] = "Srgb".into();
+        layer["effect_stack"][1]["luma_key_mode"] = serde_json::Value::Null;
+        let invalid: Layer = serde_json::from_value(layer).unwrap();
+        assert!(
+            stack(&invalid, 0, "invalid", [0.0, 0.0, 20.0, 20.0])
+                .unwrap_err()
+                .contains("key mode")
         );
     }
 
@@ -871,3 +994,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "luma_key_render_tests.rs"]
+mod luma_key_render_tests;

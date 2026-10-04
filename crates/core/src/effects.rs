@@ -20,6 +20,7 @@ pub enum EffectKind {
     Curves,
     LinearGradient,
     RadialGradient,
+    LumaKey,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -64,6 +65,8 @@ pub enum EffectParam {
     EndX,
     EndY,
     BlendOriginal,
+    LumaThreshold,
+    LumaSoftness,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -80,7 +83,7 @@ impl ParameterSpec {
     }
 }
 impl EffectKind {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::GaussianBlur,
         Self::Brightness,
         Self::Grayscale,
@@ -93,6 +96,7 @@ impl EffectKind {
         Self::Curves,
         Self::LinearGradient,
         Self::RadialGradient,
+        Self::LumaKey,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -108,6 +112,7 @@ impl EffectKind {
             Self::Curves => "Curves",
             Self::LinearGradient => "Linear Gradient",
             Self::RadialGradient => "Radial Gradient",
+            Self::LumaKey => "Luma Key",
         }
     }
     pub fn parameters(self) -> Vec<ParameterSpec> {
@@ -153,6 +158,10 @@ impl EffectKind {
                 spec(Green, "End green", 0.0, 255.0, 255.0),
                 spec(Blue, "End blue", 0.0, 255.0, 255.0),
                 spec(BlendOriginal, "Original (%)", 0.0, 100.0, 0.0),
+            ],
+            Self::LumaKey => vec![
+                spec(LumaThreshold, "Threshold", 0.0, 255.0, 128.0),
+                spec(LumaSoftness, "Softness", 0.0, 255.0, 0.0),
             ],
             Self::GaussianBlur => vec![radius()],
             Self::Brightness => vec![spec(Amount, "Multiplier", 0.0, 4.0, 1.0)],
@@ -206,6 +215,22 @@ pub enum EffectColorSpace {
     LinearRgb,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LumaKeyMode {
+    #[default]
+    KeepBrighter,
+    KeepDarker,
+}
+impl LumaKeyMode {
+    pub const ALL: [Self; 2] = [Self::KeepBrighter, Self::KeepDarker];
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::KeepBrighter => "Keep Brighter",
+            Self::KeepDarker => "Keep Darker",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EffectInstance {
     id: EffectId,
@@ -215,6 +240,8 @@ pub struct EffectInstance {
     bypassed: bool,
     #[serde(default)]
     color_space: EffectColorSpace,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    luma_key_mode: Option<LumaKeyMode>,
     parameters: BTreeMap<EffectParam, AnimatedProperty>,
 }
 impl EffectInstance {
@@ -232,6 +259,9 @@ impl EffectInstance {
     }
     pub fn color_space(&self) -> EffectColorSpace {
         self.color_space
+    }
+    pub fn luma_key_mode(&self) -> Option<LumaKeyMode> {
+        self.luma_key_mode
     }
     pub fn parameter(&self, param: EffectParam) -> Option<&AnimatedProperty> {
         self.parameters.get(&param)
@@ -275,6 +305,7 @@ impl EffectInstance {
             name: kind.label().into(),
             bypassed: false,
             color_space: EffectColorSpace::Srgb,
+            luma_key_mode: (kind == EffectKind::LumaKey).then_some(LumaKeyMode::KeepBrighter),
             parameters: kind
                 .parameters()
                 .iter()
@@ -314,6 +345,10 @@ pub enum EffectEdit {
         name: String,
     },
     Reset(EffectId),
+    SetLumaKeyMode {
+        effect: EffectId,
+        mode: LumaKeyMode,
+    },
     SetValue {
         effect: EffectId,
         parameter: EffectParam,
@@ -373,7 +408,16 @@ pub(super) fn first_effect_id() -> EffectId {
     1
 }
 pub(super) fn validate(layer: &Layer, duration: Frame) -> Result<(), String> {
+    validate_target(layer, &layer.effect_stack)?;
     validate_stack(&layer.effect_stack, layer.next_effect_id, duration)
+}
+fn validate_target(layer: &Layer, stack: &[EffectInstance]) -> Result<(), String> {
+    if matches!(layer.content, Content::Null | Content::Audio { .. })
+        && stack.iter().any(|e| e.kind == EffectKind::LumaKey)
+    {
+        return Err("Luma Key requires a layer with rendered pixels".into());
+    }
+    Ok(())
 }
 fn validate_stack(stack: &[EffectInstance], next: EffectId, duration: Frame) -> Result<(), String> {
     if stack.len() > 64 || next == 0 {
@@ -388,6 +432,12 @@ fn validate_stack(stack: &[EffectInstance], next: EffectId, duration: Frame) -> 
             || effect.name.len() > 256
         {
             return Err("Invalid effect identity or name".into());
+        }
+        if (effect.kind == EffectKind::LumaKey) != effect.luma_key_mode.is_some() {
+            return Err("Luma Key mode must belong to a Luma Key effect".into());
+        }
+        if effect.kind == EffectKind::LumaKey && effect.color_space != EffectColorSpace::Srgb {
+            return Err("Luma Key supports only sRGB".into());
         }
         let specs = effect.kind.parameters();
         if effect.parameters.len() != specs.len() {
@@ -411,6 +461,10 @@ fn validate_stack(stack: &[EffectInstance], next: EffectId, duration: Frame) -> 
     Ok(())
 }
 fn add(layer: &mut Layer, kind: EffectKind) -> Result<EffectId, String> {
+    if kind == EffectKind::LumaKey && matches!(layer.content, Content::Null | Content::Audio { .. })
+    {
+        return Err("Luma Key requires a layer with rendered pixels".into());
+    }
     if layer.effect_stack.len() >= 64 || layer.next_effect_id == u64::MAX {
         return Err("Effect limit reached".into());
     }
@@ -420,6 +474,41 @@ fn add(layer: &mut Layer, kind: EffectKind) -> Result<EffectId, String> {
     effect.gradient_defaults(layer.width, layer.height);
     layer.effect_stack.push(effect);
     Ok(id)
+}
+/// Restrict no-op preservation to the new Luma Key scalar/mode paths. Explicit
+/// watch/key actions and existing effects retain their established behavior.
+pub(super) fn luma_value_edits_only(command: &Command) -> bool {
+    match command {
+        Command::Effect {
+            edit: EffectEdit::SetLumaKeyMode { .. },
+            ..
+        }
+        | Command::Effect {
+            edit:
+                EffectEdit::SetValue {
+                    parameter: EffectParam::LumaThreshold | EffectParam::LumaSoftness,
+                    ..
+                }
+                | EffectEdit::EditKeyframe {
+                    parameter: EffectParam::LumaThreshold | EffectParam::LumaSoftness,
+                    ..
+                },
+            ..
+        }
+        | Command::EditTrack {
+            property:
+                PropertyPath::Effect {
+                    parameter: EffectParam::LumaThreshold | EffectParam::LumaSoftness,
+                    ..
+                },
+            edit: TrackEdit::Value { .. } | TrackEdit::Keyframe { .. },
+            ..
+        } => true,
+        Command::Batch(commands) => {
+            !commands.is_empty() && commands.iter().all(luma_value_edits_only)
+        }
+        _ => false,
+    }
 }
 pub(super) fn apply(state: &mut Snapshot, id: LayerId, edit: EffectEdit) -> Result<(), String> {
     let duration = state.project.composition.duration;
@@ -437,6 +526,7 @@ pub(super) fn apply(state: &mut Snapshot, id: LayerId, edit: EffectEdit) -> Resu
     if matches!(layer.content, Content::Null) {
         return Err("Null objects have no rendered pixels to affect".into());
     }
+    validate_target(layer, &layer.effect_stack)?;
     match edit {
         EffectEdit::ApplyPreset { preset, frame } => preset.apply(layer, frame, fps, duration)?,
         EffectEdit::EditKeyframe {
@@ -571,6 +661,17 @@ pub(super) fn apply(state: &mut Snapshot, id: LayerId, edit: EffectEdit) -> Resu
             fresh.color_space = e.color_space;
             *e = fresh;
         }
+        EffectEdit::SetLumaKeyMode { effect, mode } => {
+            let effect = layer
+                .effect_stack
+                .iter_mut()
+                .find(|e| e.id == effect)
+                .ok_or("Effect not found")?;
+            if effect.kind != EffectKind::LumaKey {
+                return Err("Select a Luma Key effect".into());
+            }
+            effect.luma_key_mode = Some(mode);
+        }
         EffectEdit::SetValue {
             effect,
             parameter,
@@ -618,6 +719,13 @@ pub(super) fn apply(state: &mut Snapshot, id: LayerId, edit: EffectEdit) -> Resu
                             "{} must be between {} and {}",
                             spec.label, spec.min, spec.max
                         ));
+                    }
+                    // A scalar commit at the displayed value is not an implicit key action.
+                    // Validate the target, frame and value above before recognizing this no-op.
+                    if effect.kind == EffectKind::LumaKey
+                        && track.value_at(frame).clamp(spec.min, spec.max) == value
+                    {
+                        return Ok(());
                     }
                     if track.keys.is_empty() {
                         track.value = value;

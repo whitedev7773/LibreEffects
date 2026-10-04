@@ -5,7 +5,8 @@ E04/E02 editing, D03 time-box, animated path-order, native LEP, Pen marquee and
 Contents sibling-tree, layer-wide text-paint, numeric-vertex, font-diagnostic and
 Speed Graph endpoint-velocity, multi-channel Graph, multi-vertex transform and
 C09 layer-command / Linux image-retirement, F03 typography and B01 Project-list
-label, E05 Trim Paths and automatic About build-identity checkpoints.
+label, E05 Trim Paths, automatic About build identity and the G06 Luma Key
+headless checkpoint (native validation pending).
 This is the current checkpoint inventory;
 [DEVELOPMENT_BACKLOG.md](DEVELOPMENT_BACKLOG.md) retains the original audit and
 its dated implementation/test history. Older “remaining” lists and test counts
@@ -15,6 +16,53 @@ Libre Effects is an **early 2D motion-graphics and compositing editor**. It is n
 an After Effects replacement, an AE pixel-equivalent renderer, or an AEP/Adobe
 script-compatible application. A working control or passing model test alone
 does not establish a complete native editing workflow.
+
+## G06 Luma Key headless checkpoint — native acceptance pending
+
+The last fully native-validated checkpoint is local `9f108b2` (Trim Paths and
+About identity). The next bounded effect slice adds Luma Key with animated
+Threshold/Softness, static Keep Brighter/Darker, explicit staged 8-bit sRGB
+coverage, guarded input and typed Graph/preset/native-file persistence. It requires
+schema51 and Luma-containing preset4; LEP1 and existing VIEW/address versions stay.
+The raw matte is applied to the original premultiplied source exactly once.
+
+Core 363 tests (15 new), production typechecks, 30 focused desktop matches
+(29 new plus one existing matte regression), and the new explicit FFmpeg test pass.
+The focused default count includes an independent all-alpha legacy-opacity proof;
+it is not additional product scope. An initial integration reference incorrectly
+used byte coverage128 for 50% layer opacity. Existing SVG group opacity instead
+uses f32 scaling with nearest-even byte storage; the reference was corrected and
+all exact comparisons pass without changing production or adding tolerance.
+
+The combined workspace gate passes all 1146 default tests (363 core, 777 desktop,
+6 build helpers); all 32 explicit media tests, formatting and all-target typecheck
+also pass. The ordinary optimized release also passes (161.7s); its build number is
+`20261004.071022-e9c96a05a1f8e6d7`, independently matched to all 325 watched inputs.
+The native eight-case plan
+is prepared and all six corrected candidate files pass the official codec.
+Initial manually assembled samples lacked media asset IDs; rejected files and the
+failure record are retained separately. No production change was needed for that
+fixture correction. Native Luma acceptance has **not** run: the cloud native screen
+transport reports a missing pipe from both QA and its parent, including a fresh
+supported session reset. No alternate OS-control route or forced close was used.
+The last actual observed app state remains the clean Trim scene from its checkpoint.
+
+The pinned release preserves all 31,940,800 prior text/reference RGBA pixels and
+all 21 prior Trim fixture frames exactly. Eighteen prepared Luma renders pass;
+frame30 matches an independently baked no-Luma image at all 216,000 RGBA pixels.
+These are headless fixture checks, not native-created-save or native PNG-export
+acceptance. All input hashes remain unchanged. The schema50 reader rejects the
+new image-bearing schema51 file before output mutation, using its existing image
+version-range guard and imprecise “Image assets require project version 7” message.
+An initial assertion expected an unknown-kind diagnostic; observed behavior and
+its unchanged old-source cause are recorded without modifying the old binary.
+Clearer future-version diagnostics remain a separate small stability follow-up.
+
+An initial desktop test typecheck ended in SIGKILL after199.9s without a Rust source
+error. A temporary desktop-only debug=0 retry passed; the repository/toolchain,
+assertions, features, optimization and ordinary release profile remain unchanged.
+This is a build-recovery observation, not proof of the external termination's cause
+or a controlled memory/performance comparison. See README for the scoped commands.
 
 ## Restored work and current verification
 
@@ -250,7 +298,7 @@ does not establish a complete native editing workflow.
   by [make_native_study.rs](../../crates/core/examples/make_native_study.rs), adds
   one embedded PNG shared by two layers, animated rotation and a frame-30 view.
 
-### Verification record for this checkpoint
+### Verification record through the Trim/About checkpoint
 
 The combined checkpoint includes all prior restoration/I01/Gradient/Pen fixes,
 selected-group creation, Speed Graph time scaling, whole-track path ordering and
@@ -408,7 +456,7 @@ Every original A01–L05 ID appears once below. The labels are deliberately boun
 | G03 | Implemented | Normal/Multiply/Screen/Add/Overlay layer modes with alpha and Adjustment rules in the 8-bit sRGB compositor. The separate 16 Contents paint modes do not extend this layer list. |
 | G04 | Implemented | Ordered, named effect instances with add/delete/duplicate/reorder/bypass/reset, common animated parameters and legacy migration. |
 | G05 | Implemented | Basic Fill/Tint, Levels/Curves, Hue/Saturation, Glow, Drop Shadow and linear/radial Gradient effects, including effect endpoint handles. Free-form Curves, more advanced options and AE pixel equivalence remain outside this baseline. |
-| G06 | Not implemented | The planned keying/matte-cleanup, displacement/distortion, noise/transition and layer-style families. |
+| G06 | Partial | Bounded Luma Key source/model/UI and exact automated pixel/history/persistence coverage are implemented; all automated/media/release and prepared CLI gates pass; native acceptance is blocked by the cloud screen transport. Chroma key, spill/edge cleanup, morphology, displacement/distortion, noise/transition and layer-style families remain. |
 | G07 | Not implemented | Motion blur/shutter sampling, subframe temporal compositing, frame blending and optical flow. |
 
 ### H — Audio

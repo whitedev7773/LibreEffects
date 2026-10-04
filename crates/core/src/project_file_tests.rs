@@ -862,3 +862,156 @@ fn trim_same_displayed_value_keeps_native_project_and_view_bytes_exact() {
         .unwrap();
     assert_eq!(encode(editor.project(), Some(view)).unwrap(), before);
 }
+
+#[test]
+fn luma_schema51_native_roundtrip_keeps_container_view_addresses_and_shared_images() {
+    let mut editor = Editor::default();
+    add(
+        &mut editor,
+        Content::Image { png: PNG.into() },
+        "Luma image",
+    );
+    editor
+        .execute(Command::Effect {
+            id: 1,
+            edit: EffectEdit::Add(EffectKind::LumaKey),
+        })
+        .unwrap();
+    editor
+        .execute(Command::Effect {
+            id: 1,
+            edit: EffectEdit::SetLumaKeyMode {
+                effect: 1,
+                mode: LumaKeyMode::KeepDarker,
+            },
+        })
+        .unwrap();
+    for edit in [
+        EffectEdit::ToggleAnimation {
+            effect: 1,
+            parameter: EffectParam::LumaThreshold,
+            frame: 0,
+        },
+        EffectEdit::SetValue {
+            effect: 1,
+            parameter: EffectParam::LumaThreshold,
+            frame: 30,
+            value: 64.0,
+        },
+        EffectEdit::Bypass {
+            effect: 1,
+            bypassed: true,
+        },
+    ] {
+        editor.execute(Command::Effect { id: 1, edit }).unwrap();
+    }
+    editor.execute(Command::DuplicateLayer(1)).unwrap();
+    editor.execute(Command::NewComposition).unwrap();
+    assert_eq!(editor.project().version, 51);
+    assert!(editor.project().composition().layers().is_empty());
+    for view in [
+        br#" {"version":1,"effect_address":{"layer":1,"effect":1,"parameter":"LumaThreshold"}} "#
+            .as_slice(),
+        br#" {"version":2,"effect_address":{"layer":1,"effect":1,"parameter":"LumaSoftness"}} "#
+            .as_slice(),
+    ] {
+        let bytes = encode(editor.project(), Some(view)).unwrap();
+        assert_eq!(&bytes[..8], MAGIC);
+        assert_eq!(u16::from_le_bytes(bytes[8..10].try_into().unwrap()), 1);
+        let sections = chunks(&bytes);
+        assert_eq!(
+            sections.iter().map(|(tag, _)| *tag).collect::<Vec<_>>(),
+            [*b"PROJ", *b"VIEW", *b"IMAG"]
+        );
+        let metadata: Value = serde_json::from_slice(&sections[0].1).unwrap();
+        assert_eq!(metadata["version"], 51);
+        assert_eq!(sections[1].1.as_slice(), view);
+        assert!(!String::from_utf8_lossy(&sections[0].1).contains(PNG));
+        let decoded = decode(&bytes).unwrap();
+        assert_eq!(&decoded.project, editor.project());
+        assert_eq!(decoded.view, Some(view));
+        assert_eq!(encode(&decoded.project, decoded.view).unwrap(), bytes);
+        let inactive = decoded.project.composition_by_id(1).unwrap();
+        let Content::Image { png: a } = inactive.layer(1).unwrap().content() else {
+            panic!("image");
+        };
+        let Content::Image { png: b } = inactive.layer(2).unwrap().content() else {
+            panic!("image");
+        };
+        assert!(Arc::ptr_eq(a, b));
+        assert_eq!(a.as_ref(), PNG);
+        for layer in inactive.layers() {
+            let effect = &layer.effect_stack()[0];
+            assert!(effect.bypassed());
+            assert_eq!(effect.luma_key_mode(), Some(LumaKeyMode::KeepDarker));
+            assert_eq!(effect.value_at(EffectParam::LumaThreshold, 15), 96.0);
+        }
+        for change in ["old_schema", "missing_mode", "linear_rgb"] {
+            let mut sections = sections.clone();
+            let mut metadata: Value = serde_json::from_slice(&sections[0].1).unwrap();
+            match change {
+                "old_schema" => metadata["version"] = 50.into(),
+                "missing_mode" => {
+                    metadata["other_compositions"]["1"]["layers"][0]["effect_stack"][0]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("luma_key_mode");
+                }
+                _ => {
+                    metadata["other_compositions"]["1"]["layers"][0]["effect_stack"][0]["color_space"] =
+                        "LinearRgb".into()
+                }
+            }
+            sections[0].1 = serde_json::to_vec(&metadata).unwrap();
+            assert!(decode(&pack(&sections)).is_err(), "accepted {change}");
+        }
+    }
+}
+
+#[test]
+fn luma_nested_scalar_and_mode_noops_keep_native_and_opaque_view_bytes_exact() {
+    let mut editor = Editor::default();
+    editor.execute(Command::AddRectangle).unwrap();
+    for edit in [
+        EffectEdit::Add(EffectKind::LumaKey),
+        EffectEdit::ToggleAnimation {
+            effect: 1,
+            parameter: EffectParam::LumaThreshold,
+            frame: 0,
+        },
+        EffectEdit::SetValue {
+            effect: 1,
+            parameter: EffectParam::LumaThreshold,
+            frame: 30,
+            value: 64.0,
+        },
+    ] {
+        editor.execute(Command::Effect { id: 1, edit }).unwrap();
+    }
+    let view = br#" { "version":2, "pin":{"effect":1,"parameter":"LumaThreshold"} } "#;
+    let before = encode(editor.project(), Some(view)).unwrap();
+    editor
+        .execute(Command::Batch(vec![Command::Batch(vec![
+            Command::EditTrack {
+                id: 1,
+                property: PropertyPath::Effect {
+                    effect: 1,
+                    parameter: EffectParam::LumaThreshold,
+                },
+                edit: TrackEdit::Value {
+                    frame: 15,
+                    value: 96.0,
+                },
+            },
+            Command::Effect {
+                id: 1,
+                edit: EffectEdit::SetLumaKeyMode {
+                    effect: 1,
+                    mode: LumaKeyMode::KeepBrighter,
+                },
+            },
+        ])]))
+        .unwrap();
+    assert_eq!(encode(editor.project(), Some(view)).unwrap(), before);
+    assert_eq!(decode(&before).unwrap().view, Some(view.as_slice()));
+}

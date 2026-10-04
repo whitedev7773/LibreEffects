@@ -1190,7 +1190,7 @@ or the right dock's Effects & Presets search adds an effect and opens the left
 Effect Controls tab. The stack supports rename, duplicate, reorder, bypass, reset
 and removal, with up to 64 instances per layer. Available effects are Gaussian
 Blur, Brightness, Grayscale, Fill, Tint, Hue/Saturation, Levels, Drop Shadow, Glow,
-Curves, Linear Gradient and Radial Gradient.
+Curves, Linear Gradient, Radial Gradient and Luma Key.
 
 Use a parameter's stopwatch to enable animation, its diamond to add/remove a key,
 and its arrow buttons to visit keys. Editing an animated value inserts a key at
@@ -1226,7 +1226,7 @@ outgoing Bezier handles use the same validated commands as transform properties.
 Copying effect keys to another layer requires the same effect instance ID and kind;
 a missing or mismatched destination is rejected atomically. Effect IDs remain stable
 when the stack is reordered. Removing an effect clears stale key/graph selections.
-Preset saving and additional effect families remain in the backlog.
+Effect presets are described above; additional effect families remain in the backlog.
 The same
 resvg compositor renders both the composition preview and exported frames,
 including text, images, parenting, interpolation, layer timing and alpha.
@@ -1285,6 +1285,56 @@ modules can disable sound with Audio: off.
 Exact fractional clocks are passed directly to FFmpeg. When a nonzero start
 timecode is set, MP4/MOV include its NDF timecode plus the work-area offset.
 PNG sequence manifests record the exact rate, first-frame timecode and NDF format.
+
+### Luma Key
+
+Add **Keying → Luma Key** from Effects & Presets, or choose it from the Effect
+menu, on an unlocked pixel-bearing layer. Audio and Null layers cannot host this
+kind. **Keep Brighter** retains brighter pixels; **Keep Darker** uses the exact
+complementary matte. Mode is a static typed choice, not an animation channel.
+Threshold and Softness are independent animated scalars from 0 to 255, defaulting
+to 128 and 0. Their Value/Speed Graph lanes use luma units and luma units per second.
+
+This effect uses the existing **8-bit encoded-sRGB** stages, not linear-light or
+ideal original-image luminance. The preceding stage's premultiplied bytes are
+reconstructed to straight RGB bytes by the pinned rasterizer. Its explicit f32
+matrix weights R/G/B by 0.2126/0.7152/0.0722, then clamps and **truncates** the luma
+to a byte `q`. This quantization can differ from mathematical nearest luminance,
+and cannot recover color discarded by earlier premultiplication.
+
+- With zero Softness, Keep Brighter retains `q >= Threshold`; equality belongs to
+  this mode. Otherwise its coverage is `clamp(0.5 + (q - Threshold) / Softness, 0, 1)`.
+- Softness is the full centered transition width. A transition reaching beyond
+  black/white is not rescaled to fit that range.
+- Coverage is rounded to a byte; Keep Darker uses `255 - coverage_byte` exactly.
+  That matte multiplies the **original preceding premultiplied RGBA once**.
+  Transparent input remains transparent. Separately rounded output alpha bytes
+  need not sum to the original alpha, even though the matte bytes are complements.
+- Keep Brighter with Threshold 0 and Softness 0 omits the stage entirely, preserving
+  exact original pixels and migrated linear-effect grouping. Bypass does likewise.
+
+Luma Key follows source interpretation, masks and earlier effects. Layer opacity,
+transforms, Track Matte and blend remain downstream; earlier blur/shadow expansion
+is retained. Adjustment layers use the same accumulated-composite region and
+opacity rules as other effects. There is no intentional recoloring, but reducing
+alpha can change exported straight RGB through existing 8-bit quantization.
+Luma Key rejects the legacy LinearRgb effect color-space flag.
+
+Fields show full-precision values. Re-entering the displayed/equivalent scalar or
+mode preserves keys, history and Redo after validating the target and range;
+explicit watches/keys remain intentional edits. Mode, numeric fields and stack
+buttons use captured document/composition/layer/effect/frame bindings. Normal blur
+commits to the still-valid old target before a selection switch; stale input must
+not be redirected to another layer or composition with reused IDs. Exactly restoring
+the complete source with Undo follows the existing input-binding contract.
+
+Any Luma Key instance requires project schema **51**, including bypassed, identity,
+keyless and inactive-composition instances. The `.lep` container stays version 1,
+and existing VIEW/address versions are unchanged. Presets containing Luma Key use
+version 4 and retain the static mode, tracks and fresh destination IDs; existing
+presets keep their older versions. Chroma key, spill/edge repair, matte morphology,
+referenced-layer keying and Adobe equivalence remain future work. See STATUS.md
+for the actual tested scope and native/platform limitations.
 
 ### Composition background and transparent output
 
@@ -1999,6 +2049,16 @@ The recorded typography gate used this override after an unstripped build took
 30m18s. The corrected test-only rebuild took 40.66s and its focused execution
 17.58s. These are observed local runs with different test/profile/cache state,
 not a controlled performance guarantee. Omit the override for ordinary debugging.
+
+If emitting desktop debug metadata still exhausts a constrained worker, disable
+that metadata for this package in the command rather than changing the repository
+profile. Assertions, optimization and features are unchanged; normal release
+builds use neither override:
+
+~~~sh
+cargo --config 'profile.dev.package.libre-effects-desktop.debug=0' check -p libre-effects-desktop --tests --locked
+cargo --config 'profile.test.package.libre-effects-desktop.debug=0' --config 'profile.test.package.libre-effects-desktop.strip="debuginfo"' test --workspace --locked
+~~~
 
 Optional FFmpeg integration checks encode and decode MP4/ProRes, check work-area
 timing and alpha, and cancel an active encoder while preserving the destination:

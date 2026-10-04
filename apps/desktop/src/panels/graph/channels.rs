@@ -14,6 +14,7 @@ pub(super) enum Unit {
     Degrees,
     Percent,
     Rgb,
+    Luma,
     Decibels,
     Seconds,
     Ratio,
@@ -32,6 +33,8 @@ impl Unit {
             (Self::Percent, true) => "%/s",
             (Self::Rgb, false) => "RGB 0–255",
             (Self::Rgb, true) => "RGB units/s",
+            (Self::Luma, false) => "Luma 0–255",
+            (Self::Luma, true) => "Luma units/s",
             (Self::Decibels, false) => "dB",
             (Self::Decibels, true) => "dB/s",
             (Self::Seconds, false) => "s",
@@ -170,6 +173,7 @@ pub(super) fn describe(project: &Project, channel: GraphChannel) -> Option<Descr
                 | EffectParam::EndY => Unit::Pixels,
                 EffectParam::Opacity | EffectParam::BlendOriginal => Unit::Percent,
                 EffectParam::Hue => Unit::Degrees,
+                EffectParam::LumaThreshold | EffectParam::LumaSoftness => Unit::Luma,
                 EffectParam::Black | EffectParam::White | EffectParam::Gamma => Unit::Ratio,
                 // Amount is intentionally effect-kind aware. Brightness, Saturation
                 // and Glow intensity store raw multipliers, not percentages.
@@ -393,5 +397,120 @@ mod trim_units_tests {
                 .into()
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod luma_units_tests {
+    use super::*;
+    use libre_effects_core::{Command, Editor, EffectEdit};
+
+    #[test]
+    fn luma_lanes_are_independent_with_explicit_luma_value_and_speed_units() {
+        let mut editor = Editor::default();
+        editor.execute(Command::AddRectangle).unwrap();
+        editor
+            .execute(Command::Effect {
+                id: 1,
+                edit: EffectEdit::Add(EffectKind::Brightness),
+            })
+            .unwrap();
+        let legacy = GraphChannel {
+            id: 1,
+            property: PropertyPath::Effect {
+                effect: 1,
+                parameter: EffectParam::Amount,
+            },
+        };
+        let before = describe(editor.project(), legacy).unwrap();
+        assert_eq!(before.units, Unit::Ratio);
+        editor
+            .execute(Command::Effect {
+                id: 1,
+                edit: EffectEdit::Add(EffectKind::LumaKey),
+            })
+            .unwrap();
+        let channels =
+            [EffectParam::LumaThreshold, EffectParam::LumaSoftness].map(|parameter| GraphChannel {
+                id: 1,
+                property: PropertyPath::Effect {
+                    effect: 2,
+                    parameter,
+                },
+            });
+        for (index, channel) in channels.into_iter().enumerate() {
+            let PropertyPath::Effect { effect, parameter } = channel.property else {
+                unreachable!()
+            };
+            editor
+                .execute(Command::Effect {
+                    id: 1,
+                    edit: EffectEdit::ToggleKey {
+                        effect,
+                        parameter,
+                        frame: 7 + index as u32,
+                    },
+                })
+                .unwrap();
+            let descriptor = describe(editor.project(), channel).unwrap();
+            assert_eq!(descriptor.channel, channel);
+            assert_eq!(descriptor.units.label(false), "Luma 0–255");
+            assert_eq!(descriptor.units.label(true), "Luma units/s");
+            assert!(descriptor.label.contains("Luma Key"));
+            assert!(descriptor.label.contains("[effect #2]"));
+            assert!(
+                descriptor
+                    .label
+                    .contains(if index == 0 { "Threshold" } else { "Softness" })
+            );
+        }
+        assert_eq!(
+            all_keys(editor.project(), &channels),
+            channels
+                .into_iter()
+                .enumerate()
+                .map(|(index, channel)| KeyRef {
+                    id: 1,
+                    property: channel.property,
+                    frame: 7 + index as u32
+                })
+                .collect()
+        );
+        let after = describe(editor.project(), legacy).unwrap();
+        assert_eq!((after.label, after.units), (before.label, before.units));
+        let wrong_kind = GraphChannel {
+            id: 1,
+            property: PropertyPath::Effect {
+                effect: 1,
+                parameter: EffectParam::LumaThreshold,
+            },
+        };
+        assert!(describe(editor.project(), wrong_kind).is_none());
+        editor
+            .execute(Command::Effect {
+                id: 1,
+                edit: EffectEdit::Bypass {
+                    effect: 2,
+                    bypassed: true,
+                },
+            })
+            .unwrap();
+        assert!(
+            channels
+                .into_iter()
+                .all(|channel| describe(editor.project(), channel).is_some())
+        );
+        editor
+            .execute(Command::Effect {
+                id: 1,
+                edit: EffectEdit::Remove(2),
+            })
+            .unwrap();
+        assert!(
+            channels
+                .into_iter()
+                .all(|channel| describe(editor.project(), channel).is_none())
+        );
+        assert!(all_keys(editor.project(), &channels).is_empty());
     }
 }

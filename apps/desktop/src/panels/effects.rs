@@ -1,3 +1,6 @@
+#[path = "luma_controls.rs"]
+mod luma_controls;
+
 use crate::editor::presets::PresetAction;
 use crate::{
     components::TextField,
@@ -11,6 +14,7 @@ use libre_effects_core::{
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) struct EffectControls {
+    luma: luma_controls::Controls,
     curves: BTreeMap<(LayerId, EffectId), Entity<super::color_curve::ColorCurve>>,
     state: Entity<EditorState>,
     fields: BTreeMap<(LayerId, EffectId, EffectParam), Entity<TextField>>,
@@ -20,6 +24,7 @@ impl EffectControls {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
         Self {
+            luma: Default::default(),
             state,
             fields: BTreeMap::new(),
             curves: BTreeMap::new(),
@@ -30,6 +35,7 @@ impl EffectControls {
 impl Render for EffectControls {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.state.read(cx);
+        self.luma.refresh(state);
         let layer = state.editor.selected_layer().cloned();
         let frame = state.frame;
         let composition = state.editor.project().active_composition_id();
@@ -119,6 +125,10 @@ impl Render for EffectControls {
         let mut keep_names = BTreeSet::new();
         for (index, effect) in layer.effect_stack().iter().enumerate() {
             let effect_id = effect.id();
+            if effect.kind() == EffectKind::LumaKey {
+                body = body.child(self.luma.render(&self.state, &layer, effect, window, cx));
+                continue;
+            }
             let key = (id, effect_id);
             keep_names.insert(key);
             if !self.names.contains_key(&key) {
@@ -487,6 +497,7 @@ pub(crate) struct EffectCatalog {
     state: Entity<EditorState>,
     search: Entity<TextField>,
     collapsed: BTreeSet<&'static str>,
+    input_source: Option<crate::color_edit::InputTarget>,
 }
 impl EffectCatalog {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
@@ -496,10 +507,12 @@ impl EffectCatalog {
         Self {
             state,
             search,
+            input_source: None,
             collapsed: [
                 "Blur & Sharpen",
                 "Color Correction",
                 "Generate",
+                "Keying",
                 "Perspective",
                 "Stylize",
             ]
@@ -510,6 +523,7 @@ impl EffectCatalog {
 }
 impl Render for EffectCatalog {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::color_edit::InputTarget::refresh(&mut self.input_source, self.state.read(cx));
         let selected = self
             .state
             .read(cx)
@@ -627,6 +641,7 @@ impl Render for EffectCatalog {
                     EffectKind::RadialGradient,
                 ],
             ),
+            ("Keying", vec![EffectKind::LumaKey]),
             ("Perspective", vec![EffectKind::DropShadow]),
             ("Stylize", vec![EffectKind::Glow]),
         ] {
@@ -662,6 +677,30 @@ impl Render for EffectCatalog {
                 continue;
             }
             for kind in kinds {
+                if kind == EffectKind::LumaKey {
+                    let layer = self.state.read(cx).editor.selected_layer();
+                    let selected = layer.filter(|l| luma_controls::eligible(l)).map(|l| l.id());
+                    let control = format!("add-{kind:?}");
+                    let button = ui::text_button(
+                        SharedString::from(control.clone()),
+                        format!("ƒx  {}", kind.label()),
+                    )
+                    .h(px(23.0))
+                    .flex_none()
+                    .ml_3()
+                    .justify_start()
+                    .when(selected.is_none(), |s| s.opacity(0.5));
+                    list = list.child(luma_controls::button(
+                        button,
+                        control,
+                        &self.state,
+                        self.input_source.clone().filter(|_| selected.is_some()),
+                        selected.unwrap_or(0),
+                        0,
+                        luma_controls::Intent::Add,
+                    ));
+                    continue;
+                }
                 let state = self.state.clone();
                 list = list.child(
                     ui::text_button(

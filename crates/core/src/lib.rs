@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-const PROJECT_VERSION: u32 = 50;
+const PROJECT_VERSION: u32 = 51;
 pub type Frame = u32;
 pub type LayerId = u64;
 pub type CompositionId = u64;
@@ -25,10 +25,12 @@ pub use key_velocity_scale::KeyVelocityScale;
 mod effects;
 pub use effects::{
     EffectColorSpace, EffectEdit, EffectId, EffectInstance, EffectKind, EffectParam, EffectPreset,
-    ParameterSpec,
+    LumaKeyMode, ParameterSpec,
 };
 mod geometry;
 mod layer_transform;
+#[cfg(test)]
+mod luma_key_tests;
 pub use layer_transform::LayerTransformOp;
 mod layer_workflow;
 pub use layer_workflow::{LayerClipboard, LayerSwitch};
@@ -707,6 +709,15 @@ impl Project {
             if self.version < 20 && !comp.guides.is_empty() {
                 return Err("Composition guides require project version 20".into());
             }
+            if self.version < 51
+                && comp
+                    .layers
+                    .iter()
+                    .flat_map(|l| &l.effect_stack)
+                    .any(|e| e.kind() == EffectKind::LumaKey)
+            {
+                return Err("Luma Key requires project version 51".into());
+            }
             if self.version < 19
                 && comp.layers.iter().flat_map(|l| &l.effect_stack).any(|e| {
                     matches!(
@@ -1345,10 +1356,11 @@ impl Editor {
         let reorder_only = command.reorders_only();
         let text_values_only = text_animation::value_edits_only(&command);
         let trim_values_only = shape_contents::trim_value_edits_only(&command);
+        let luma_values_only = effects::luma_value_edits_only(&command);
         let velocity_scales_only = key_velocity_scale::edits_only(&command);
         let layer_transforms_only = layer_transform::edits_only(&command);
         apply(&mut next, command)?;
-        if (text_values_only || trim_values_only) && next == self.current {
+        if (text_values_only || trim_values_only || luma_values_only) && next == self.current {
             return Ok(());
         }
         if reorder_only || velocity_scales_only || layer_transforms_only {
@@ -1668,6 +1680,14 @@ impl Editor {
             .max()
         {
             next.project.version = next.project.version.max(version);
+        }
+        if next.project.compositions().into_iter().any(|(_, comp)| {
+            comp.layers
+                .iter()
+                .flat_map(|l| &l.effect_stack)
+                .any(|e| e.kind() == EffectKind::LumaKey)
+        }) {
+            next.project.version = next.project.version.max(51);
         }
         self.accept_candidate(next)
     }

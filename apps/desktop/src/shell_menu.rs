@@ -224,7 +224,13 @@ pub fn items(menu: &str, state: &EditorState) -> Vec<Item> {
                         .editor
                         .selected_layer()
                         .filter(|l| {
-                            !l.locked() && !matches!(l.content(), libre_effects_core::Content::Null)
+                            !l.locked()
+                                && !matches!(l.content(), libre_effects_core::Content::Null)
+                                && (kind != libre_effects_core::EffectKind::LumaKey
+                                    || !matches!(
+                                        l.content(),
+                                        libre_effects_core::Content::Audio { .. }
+                                    ))
                         })
                         .map(|l| {
                             Action::Edit(Command::Effect {
@@ -796,5 +802,70 @@ mod tests {
         assert_eq!(state.editor.project(), &before);
         state.editor.redo();
         assert_eq!(state.editor.project(), &after);
+    }
+}
+
+#[cfg(test)]
+mod luma_menu_tests {
+    use super::*;
+    use libre_effects_core::{AudioMetadata, Content, EffectEdit, EffectKind};
+
+    #[test]
+    fn luma_menu_requires_pixel_target_without_changing_existing_audio_effect_entries() {
+        let audio = Content::Audio {
+            path: "menu-fixture.wav".into(),
+            audio: AudioMetadata {
+                stream_index: 0,
+                sample_rate: 48000,
+                channels: 2,
+                channel_layout: "stereo".into(),
+                duration: 5.0,
+                start_time: 0.0,
+                file_offset: 0.0,
+            },
+            start_frame: 0,
+            playback: Default::default(),
+        };
+        for (content, luma_allowed, legacy_allowed) in [
+            (Content::Rectangle, true, true),
+            (Content::Adjustment, true, true),
+            (Content::Null, false, false),
+            (audio, false, true),
+        ] {
+            let mut state = EditorState::default();
+            state
+                .editor
+                .execute(Command::AddContent {
+                    content,
+                    width: 200.0,
+                    height: 120.0,
+                    name: "Effect menu fixture".into(),
+                })
+                .unwrap();
+            let entries = items("Effect", &state);
+            let luma = entries.iter().find(|i| i.label == "Luma Key").unwrap();
+            assert_eq!(luma.target.is_some(), luma_allowed);
+            assert!(
+                entries
+                    .iter()
+                    .filter(|i| i.label != "Luma Key")
+                    .all(|i| i.target.is_some() == legacy_allowed)
+            );
+            if luma_allowed {
+                assert!(matches!(
+                    &luma.target,
+                    Some(Target::Action(Action::Edit(Command::Effect {
+                        id: 1,
+                        edit: EffectEdit::Add(EffectKind::LumaKey)
+                    })))
+                ));
+            }
+            state.editor.execute(Command::ToggleLocked(1)).unwrap();
+            assert!(
+                items("Effect", &state)
+                    .into_iter()
+                    .all(|i| i.target.is_none())
+            );
+        }
     }
 }

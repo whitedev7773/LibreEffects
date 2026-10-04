@@ -3,7 +3,7 @@
 `.lep` is the native Libre Effects Project file extension. It is a bounded binary
 container for portable project metadata, optional editor view state, and embedded
 images. The container version is **1**. The project's JSON schema version remains
-independent (currently **50**); choosing this format does not upgrade that schema.
+independent (currently **51**); choosing this format does not upgrade that schema.
 Schema 48 adds optional layer-wide text-paint tracks. Schema 49 adds sparse
 `FontSize`, `Tracking` and `Leading` tracks in the same text-parameter map. Any
 materialized typography track, including a keyless override or an inactive
@@ -22,6 +22,15 @@ Readers limited to project schema 49 reject Trim projects; existing typed Conten
 property addresses retain address version 1 and VIEW uses its existing version 1/2
 rules. The render-only fragments are derived at evaluation time, never stored as
 replacement source vertices or path poses.
+Schema 51 adds the ordered `LumaKey` effect, `LumaThreshold`/`LumaSoftness`
+tracks and its required `luma_key_mode` (`KeepBrighter` or `KeepDarker`). Other
+kinds omit that field and reject a non-null Luma mode. Presence requires schema 51
+regardless of bypass, identity values, key count or active composition. Luma Key
+supports sRGB pixel-bearing layers only. Unchanged validated scalar/mode edits
+preserve exact source/history/assets rather than materializing a key or normalizing
+an older declaration. No new LEP chunk, VIEW version or property-address shape is
+needed; older readers reject the unsupported model. Luma-containing effect presets
+separately use preset version 4; that is not a project/container version change.
 The codec retains the project's declared version on unmodified load/save.
 Existing generic edit commands may recalculate the version required by the
 resulting features; a changed static edit can therefore lower an overdeclared

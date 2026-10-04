@@ -611,3 +611,137 @@ mod trim_channel_tests {
         assert!(state.included().is_empty());
     }
 }
+
+#[cfg(test)]
+mod luma_channel_tests {
+    use super::*;
+    use libre_effects_core::{Command, Editor, EffectEdit, EffectKind};
+
+    fn fixture() -> (Editor, [GraphChannel; 2]) {
+        let mut editor = Editor::default();
+        editor.execute(Command::AddRectangle).unwrap();
+        editor
+            .execute(Command::Effect {
+                id: 1,
+                edit: EffectEdit::Add(EffectKind::LumaKey),
+            })
+            .unwrap();
+        (
+            editor,
+            [EffectParam::LumaThreshold, EffectParam::LumaSoftness].map(|parameter| GraphChannel {
+                id: 1,
+                property: PropertyPath::Effect {
+                    effect: 1,
+                    parameter,
+                },
+            }),
+        )
+    }
+    fn pins(channels: [GraphChannel; 2]) -> GraphChannels {
+        let mut state = GraphChannels::default();
+        for channel in channels {
+            state.pin(channel).unwrap();
+            state.ranges.insert(
+                channel,
+                GraphRanges {
+                    value: Some([0.0, 255.0]),
+                    speed: Some([-255.0, 255.0]),
+                },
+            );
+        }
+        state.activate(channels[1]);
+        state
+    }
+
+    #[test]
+    fn luma_addresses_keep_effect_wire_kind_and_address_version_one() {
+        let (editor, channels) = fixture();
+        let state = pins(channels);
+        let source = editor.project().to_json().unwrap();
+        let value = serde_json::to_value(&state).unwrap();
+        assert_eq!(value["version"], 1);
+        for (index, parameter) in ["LumaThreshold", "LumaSoftness"].into_iter().enumerate() {
+            assert_eq!(value["pinned"][index]["property"]["kind"], "effect");
+            assert_eq!(value["pinned"][index]["property"]["effect"], 1);
+            assert_eq!(value["pinned"][index]["property"]["parameter"], parameter);
+        }
+        let mut loaded: GraphChannels = serde_json::from_value(value).unwrap();
+        loaded.reconcile(Some(editor.project().composition()), false);
+        assert_eq!(loaded, state);
+        assert_eq!(editor.project().to_json().unwrap(), source);
+        assert!(
+            channels
+                .into_iter()
+                .all(|c| c.available(editor.project().composition()))
+        );
+    }
+
+    #[test]
+    fn luma_pins_survive_reset_bypass_reorder_and_duplicate_but_delete_prunes_only_saved_copy() {
+        let (mut editor, channels) = fixture();
+        let mut state = pins(channels);
+        for edit in [
+            EffectEdit::Duplicate(1),
+            EffectEdit::Move {
+                effect: 1,
+                index: 1,
+            },
+            EffectEdit::Reset(1),
+            EffectEdit::Bypass {
+                effect: 1,
+                bypassed: true,
+            },
+        ] {
+            editor.execute(Command::Effect { id: 1, edit }).unwrap();
+            state.reconcile(Some(editor.project().composition()), false);
+            assert_eq!(state.pinned, channels);
+            assert_eq!(state.included(), channels);
+        }
+        editor
+            .execute(Command::Effect {
+                id: 1,
+                edit: EffectEdit::Remove(1),
+            })
+            .unwrap();
+        state.reconcile(Some(editor.project().composition()), false);
+        assert_eq!(state.pinned, channels);
+        assert_eq!(state.active, None);
+        assert!(state.included().is_empty());
+        let live = state.clone();
+        let source = editor.project().clone();
+        let mut saved = state.clone();
+        saved.prune(editor.project().composition());
+        assert!(saved.is_legacy());
+        assert!(saved.pinned.is_empty());
+        assert!(saved.ranges.is_empty());
+        assert_eq!(state, live);
+        assert_eq!(editor.project(), &source);
+        editor.undo();
+        state.reconcile(Some(editor.project().composition()), true);
+        assert_eq!(state.included(), channels);
+        assert!(channels.into_iter().all(|c| state.ranges.contains_key(&c)));
+        editor.redo();
+        state.reconcile(Some(editor.project().composition()), true);
+        assert!(state.included().is_empty());
+    }
+
+    #[test]
+    fn new_luma_instance_with_reused_effect_id_does_not_revive_old_pins() {
+        let (mut editor, channels) = fixture();
+        let mut state = pins(channels);
+        editor.undo();
+        state.reconcile(Some(editor.project().composition()), true);
+        assert!(state.included().is_empty());
+        editor
+            .execute(Command::Effect {
+                id: 1,
+                edit: EffectEdit::Add(EffectKind::LumaKey),
+            })
+            .unwrap();
+        assert_eq!(editor.selected_layer().unwrap().effect_stack()[0].id(), 1);
+        state.reconcile(Some(editor.project().composition()), false);
+        assert!(state.pinned.is_empty());
+        assert!(state.included().is_empty());
+        assert!(state.ranges.is_empty());
+    }
+}

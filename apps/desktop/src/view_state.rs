@@ -1202,3 +1202,171 @@ mod trim_view_tests {
         assert_eq!(views, live);
     }
 }
+
+#[cfg(test)]
+mod luma_view_tests {
+    use super::*;
+    use libre_effects_core::{Command, Editor, EffectEdit, EffectKind, EffectParam, PropertyPath};
+
+    fn fixture() -> (Editor, ProjectViews, Vec<(u64, u64)>) {
+        let mut editor = Editor::default();
+        let mut views = ProjectViews::default();
+        let mut addresses = Vec::new();
+        for index in 0..2 {
+            if index != 0 {
+                editor.execute(Command::NewComposition).unwrap();
+            }
+            editor.execute(Command::AddRectangle).unwrap();
+            let id = editor.selected().unwrap();
+            editor
+                .execute(Command::Effect {
+                    id,
+                    edit: EffectEdit::Add(EffectKind::LumaKey),
+                })
+                .unwrap();
+            let effect = editor.selected_layer().unwrap().effect_stack()[0].id();
+            let composition = editor.project().active_composition_id();
+            addresses.push((composition, id));
+            let mut view = CompositionView {
+                frame: 10,
+                graph_open: true,
+                ..Default::default()
+            };
+            view.graph_view.speed = true;
+            for parameter in [EffectParam::LumaThreshold, EffectParam::LumaSoftness] {
+                if index != 0 {
+                    editor
+                        .execute(Command::Effect {
+                            id,
+                            edit: EffectEdit::ToggleAnimation {
+                                effect,
+                                parameter,
+                                frame: 0,
+                            },
+                        })
+                        .unwrap();
+                }
+                let channel = GraphChannel {
+                    id,
+                    property: PropertyPath::Effect { effect, parameter },
+                };
+                view.graph_channels.pin(channel).unwrap();
+                view.graph_channels.activate(channel);
+                view.graph_channels.ranges.insert(
+                    channel,
+                    GraphRanges {
+                        value: Some([0.0, 255.0]),
+                        speed: Some([-255.0, 255.0]),
+                    },
+                );
+            }
+            if index == 0 {
+                editor
+                    .execute(Command::Effect {
+                        id,
+                        edit: EffectEdit::Bypass {
+                            effect,
+                            bypassed: true,
+                        },
+                    })
+                    .unwrap();
+            }
+            views.compositions.insert(composition, view);
+        }
+        views.normalize(editor.project());
+        (editor, views, addresses)
+    }
+
+    #[test]
+    fn luma_active_inactive_and_bypassed_pins_roundtrip_schema51_view2_address1_lep1() {
+        let (editor, views, addresses) = fixture();
+        let project = editor.project();
+        let source = project.to_json().unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&source).unwrap()["version"],
+            51
+        );
+        assert_ne!(addresses[0].0, project.active_composition_id());
+        let bytes = views.encode_native(project).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["version"], 2);
+        for (composition, _) in addresses {
+            let channels = &value["compositions"][composition.to_string()]["graph_channels"];
+            assert_eq!(channels["version"], 1);
+            assert_eq!(channels["pinned"].as_array().unwrap().len(), 2);
+            for (index, name) in ["LumaThreshold", "LumaSoftness"].into_iter().enumerate() {
+                assert_eq!(channels["pinned"][index]["property"]["parameter"], name);
+                assert_eq!(channels["pinned"][index]["property"]["kind"], "effect");
+            }
+        }
+        let native = crate::project_io::encode_native_project(project, Some(&views)).unwrap();
+        assert_eq!(&native[8..10], &[1, 0]);
+        let opened = crate::project_io::decode_project(&native).unwrap();
+        assert_eq!(opened.project, *project);
+        assert_eq!(opened.views, views);
+        assert_eq!(
+            crate::project_io::encode_native_project(&opened.project, Some(&opened.views)).unwrap(),
+            native
+        );
+        assert_eq!(project.to_json().unwrap(), source);
+        let legacy = ProjectViews::default().encode_native(project).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&legacy).unwrap()["version"],
+            1
+        );
+    }
+
+    #[test]
+    fn luma_save_prunes_inactive_and_active_unavailable_pins_without_mutating_live_view() {
+        let (mut editor, mut views, addresses) = fixture();
+        let originally_active = editor.project().active_composition_id();
+        for &(composition, id) in &addresses {
+            editor.activate_composition(composition).unwrap();
+            editor
+                .execute(Command::Effect {
+                    id,
+                    edit: EffectEdit::Remove(1),
+                })
+                .unwrap();
+            views
+                .compositions
+                .get_mut(&composition)
+                .unwrap()
+                .graph_channels
+                .reconcile(Some(editor.project().composition()), false);
+        }
+        editor.activate_composition(originally_active).unwrap();
+        let live = views.clone();
+        let source = editor.project().to_json().unwrap();
+        let bytes = views.encode_native(editor.project()).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["version"], 1);
+        let loaded = ProjectViews::read_native(&bytes, editor.project()).unwrap();
+        for (composition, _) in addresses {
+            assert!(
+                loaded.compositions[&composition]
+                    .graph_channels
+                    .pinned
+                    .is_empty()
+            );
+            assert!(
+                loaded.compositions[&composition]
+                    .graph_channels
+                    .ranges
+                    .is_empty()
+            );
+            assert_eq!(
+                views.compositions[&composition].graph_channels.pinned.len(),
+                2
+            );
+        }
+        assert_eq!(views, live);
+        assert_eq!(editor.project().to_json().unwrap(), source);
+        let native =
+            crate::project_io::encode_native_project(editor.project(), Some(&views)).unwrap();
+        let opened = crate::project_io::decode_project(&native).unwrap();
+        assert_eq!(opened.project, *editor.project());
+        assert_eq!(opened.views, loaded);
+        assert_eq!(views, live);
+    }
+}
