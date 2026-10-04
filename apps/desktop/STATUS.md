@@ -10,6 +10,8 @@ headless checkpoint, independent Text Fill/Stroke opacity and Hold-only Source
 Text animation, all-stored-pose vertex transforms and cross-parent Contents
 buttons/keyboard and guarded cross-parent dragging (native validation pending for
 these six newest feature slices).
+The paused state, push blocker and next implementation contract are recorded in
+[HANDOFF.md](HANDOFF.md).
 This is the current checkpoint inventory;
 [DEVELOPMENT_BACKLOG.md](DEVELOPMENT_BACKLOG.md) retains the original audit and
 its dated implementation/test history. Older “remaining” lists and test counts
@@ -526,8 +528,9 @@ or a controlled memory/performance comparison. See README for the scoped command
 - **Output path protection:** canonical-parent alias comparison now covers
   destinations that do not yet exist, with alias and offline-source regression
   cases. The previous Windows CI failure at `52ab32d` was addressed locally.
-  Delivery is currently local-commit-only under the owner’s latest instruction.
-  Fresh remote Windows CI has not run for the current changes.
+  The owner authorized a same-branch snapshot push on 2026-10-04. SSH DNS and
+  missing HTTPS authentication currently block that transfer; the remote remains
+  at `52ab32d`. Fresh remote Windows CI has not run for the current changes.
 - **Dependency maintenance:** the vendored `grid` 0.18 compatibility backport
   uses upstream checked dimension arithmetic. The application still has the
   GPUI/Taffy-compatible API. See [backport provenance and removal criteria](../../vendor/grid/README.libreeffects.md).
@@ -605,7 +608,7 @@ their tested build and coverage; automated tests do not imply native acceptance.
 | Native typography animation | Final pin passed all ten bounded cases: sparse static base edits; point/paragraph Character samples at 0/30/60 and dedicated Inspector sample at 30; one middle Font Size key, unchanged re-entry, exact Undo/Redo; independent Tracking disable; pending numeric draft→stopwatch with separate field/toggle history and drag-out cancellation; ten Timeline channels and three typed Value/Speed lanes/pins; direct point/paragraph source edits with original newlines, base values and tracks preserved; current-frame Fit, pending-size→Fit, drag-out and predicted Point conversion with Undo; frame-labelled font checks; locked/read-only and simple-field input containment; exact final native PROJ/VIEW reopening. Twenty exact saved-data reports and 26 CRC/official-codec containers pass, including 20 saved working copies. Sixty original F03 screenshots plus two separately attributed prior-C09 captures are archived. Changed static schema47→34 exactly matches replayed pre-F03 commands; it is not masked or treated as a new regression. Static no-op, out-of-bound curve clamping, arbitrary Unicode/caret/IME/DPI and Windows/macOS are not independently established by this native session. Diagnostics prove close/seek/recheck, not frame invalidation with a live modal worker. File-chooser return required timeline refocus for global Undo. The final Inspector read-only observation follows, and does not replace, the saved VIEW comparison. |
 | Native Project-list labels | Corrected final pin passed four bounded cases: visible ellipses at narrow and ordinary widths without row overlap; exact composition/folder full-name tooltips; hidden-suffix search and selection; correct composition Add, one Undo, and native Save/reopen with exact PROJ/VIEW and byte-identical baseline/Undo/reopen copies. Five final fixture/save files pass the official codec. Initial native v1 exposed GPUI nowrap caching that hard-clipped the text despite a style pass; width-sensitive shaping plus a one-line clamp fixes it and the regression guards that configuration. Cross-DPI, arbitrary-depth/minimum-width trees, screen readers and every Project action remain outside this session. |
 | Native Trim and About | About A and B each display the exact six fields from their pinned executable; a real test-source edit with unchanged Git HEAD changes the build number and fingerprint. Independent hashing of all 322 watched inputs (22,278,369 bytes) matches B. All ten bounded Trim scenarios pass: Add/default/order and exact Undo; End/Offset animation and Timeline editing; Value/Speed units and saved pins; disconnected open wrap and closed seam/fill behavior; original paint membership and geometry-before-paint reordering; nested operator-local length and child-paint isolation; repeated Trim over combined surviving fragments; original Pen geometry, one-coordinate edit and Undo; same-value/Redo/Escape, duplicate/delete and locked protection; native reopen of active/inactive pins, exact saved bytes and visible contextual Precision failure with cleared preview. Normal field blur commits only to its still-valid old target before a selection switch; this native flow is not evidence of deferred stale-callback rejection. That rejection remains automated coverage. All 21 native saves pass independent CRC and official codec round trips; 39 original screenshots are archived and SHA-verified. All eight admitted bases and the old B01 fixture remain unchanged, and the app is left running on a clean normal project. Real IME, alternate DPI, Windows/macOS, mid-held-pointer states and exhaustive asynchronous event permutations are not established. |
-| Windows CI and device behavior | Fresh remote CI has not run: the requested checkpoint is local commits only, with no push or PR. Historical Windows native/device results remain in the backlog; the Windows-only audio-device test was not run on Linux. |
+| Windows CI and device behavior | Fresh remote CI has not run. The owner authorized the completed same-branch snapshot, but SSH DNS and missing HTTPS authentication block its push; no PR was requested. Historical Windows native/device results remain in the backlog; the Windows-only audio-device test was not run on Linux. |
 
 Linux native startup needs a working Vulkan driver, and Open/Save needs a running
 D-Bus desktop session with `xdg-desktop-portal` plus a compatible file-chooser
@@ -757,7 +760,7 @@ Every original A01–L05 ID appears once below. The labels are deliberately boun
 
 | ID | Status | Current scope and remaining boundary |
 | --- | --- | --- |
-| L01 | Partial | Moon test/media/format tasks, dependency lockfiles, explicit non-deploying web/API CI and Windows desktop/media/release workflow. Final local model/media/check/release checkpoints pass as recorded above. Fresh remote Windows CI is unrun under the local-commit-only scope. |
+| L01 | Partial | Moon test/media/format tasks, dependency lockfiles, explicit non-deploying web/API CI and Windows desktop/media/release workflow. Final local model/media/check/release checkpoints pass as recorded above. Fresh remote Windows CI is unrun; the authorized same-branch push is blocked by Git transport/authentication. |
 | L02 | Partial | Single-editor ownership/recovery, CLI tool discovery/overrides and startup prerequisites. Installer, updater, distribution and clean-machine end-to-end qualification remain. |
 | L03 | Partial | Reproducible examples, extensive model/render/media tests and recorded native sessions. Automated UI state-transition/DPI regression and maintained performance thresholds remain. |
 | L04 | Partial | User/developer guides, in-app shortcut help, examples and recorded format migrations. Korean UI localization, broader error/help polish and release packaging remain. |
@@ -795,8 +798,8 @@ This does not close the broader A04 backup-management or other backlog extension
 
 1. Extend native editing acceptance and retained regression evidence, especially
    animation, transformed/mask paths, focus/IME and DPI. Mid-drag preview observation
-   remains tool-limited. Remote Windows CI remains unrun while delivery is local
-   commits only.
+   remains tool-limited. Remote Windows CI remains unrun until the authorized same-branch snapshot
+   reaches the remote and its checks complete.
 2. The bounded C09 layer-command and causal Linux image-retirement checkpoint
    now passes automated, release and native gates. F03 Font Size, Tracking and
    Leading now pass automated/release and all ten bounded native cases.

@@ -32,6 +32,23 @@ Read the root [AGENTS.md](../../AGENTS.md) before changing code.
 - Prioritize editing/UI, effects, text and masks before cache/high-end output work.
   This remains an early 2D editor, not complete AE/AEP/JSX compatibility.
 
+## Publication status at handoff
+
+The owner explicitly authorized the completed snapshot and this note to be pushed
+to `codex/ae-workspace` on 2026-10-04. The attempted documentation-inclusive push
+of `88db33c8a5026fef4e2bffa04ca41d9f25a23956` failed before authentication:
+`could not read Username for 'https://github.com': terminal prompts disabled`.
+The existing SSH route also failed hostname resolution. No credentials, host
+security settings or network policy were changed to work around these failures.
+
+Read-only Git and the GitHub connector both verified the remote branch remains
+`52ab32dcff3e66fd5980255db84e7ce9ac0979fa`; it is an ancestor of the local work.
+The subsequent documentation correction records this blocker. No push succeeded,
+and no new remote CI was triggered for the completed work. Do not recreate commits
+through an API with different authors/timestamps just to imitate a push. Retain
+the original complete history in the provided self-contained bundle and use a
+normally authenticated Git environment when transfer is available.
+
 ## Latest validated implementation
 
 E04 stage1, `20783a9fec8e6576fc36cd37f7faa9c4c99345cd`, added atomic cross-parent
