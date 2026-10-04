@@ -849,4 +849,155 @@ mod tests {
             serde_json::from_slice(&loaded.encode_native(&project).unwrap()).unwrap();
         assert_eq!(encoded["version"], 1);
     }
+
+    fn typography_view_fixture(materialize: bool) -> (Project, Vec<(u64, u64)>) {
+        use libre_effects_core::{Command, Content, Editor, TextParam, TrackEdit};
+        let mut editor = Editor::default();
+        let mut addresses = Vec::new();
+        for index in 0..2 {
+            if index != 0 {
+                editor.execute(Command::NewComposition).unwrap();
+            }
+            editor
+                .execute(Command::AddContent {
+                    content: Content::Text {
+                        text: "Sparse typography".into(),
+                        font_size: 48.,
+                    },
+                    width: 300.,
+                    height: 100.,
+                    name: "Text".into(),
+                })
+                .unwrap();
+            let id = editor.selected().unwrap();
+            addresses.push((editor.project().active_composition_id(), id));
+            if materialize {
+                for parameter in [TextParam::FontSize, TextParam::Tracking, TextParam::Leading] {
+                    editor
+                        .execute(Command::EditText {
+                            id,
+                            parameter,
+                            edit: TrackEdit::ToggleAnimation { frame: 0 },
+                        })
+                        .unwrap();
+                }
+            }
+        }
+        (editor.project().clone(), addresses)
+    }
+
+    #[test]
+    fn sparse_typography_addresses_are_pruned_in_active_and_inactive_save_copies() {
+        use libre_effects_core::{Property, PropertyPath, TextParam};
+        let (project, addresses) = typography_view_fixture(false);
+        let source = project.to_json().unwrap();
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&source).unwrap()["version"]
+                .as_u64()
+                .unwrap()
+                <= 48
+        );
+        for mixed in [false, true] {
+            let mut views = ProjectViews::default();
+            for &(composition, id) in &addresses {
+                let mut view = CompositionView::default();
+                if mixed {
+                    let transform = GraphChannel {
+                        id,
+                        property: Property::PositionX.into(),
+                    };
+                    view.graph_channels.pin(transform).unwrap();
+                    view.graph_channels.activate(transform);
+                }
+                views.compositions.insert(composition, view);
+            }
+            let baseline = views.encode_native(&project).unwrap();
+            for &(composition, id) in &addresses {
+                let channels = &mut views
+                    .compositions
+                    .get_mut(&composition)
+                    .unwrap()
+                    .graph_channels;
+                for parameter in [TextParam::FontSize, TextParam::Tracking, TextParam::Leading] {
+                    let channel = GraphChannel {
+                        id,
+                        property: PropertyPath::Text(parameter),
+                    };
+                    channels.pin(channel).unwrap();
+                    channels.activate(channel);
+                    channels.ranges.insert(
+                        channel,
+                        GraphRanges {
+                            value: Some([-10., 20.]),
+                            speed: Some([-1., 2.]),
+                        },
+                    );
+                }
+            }
+            let live = views.clone();
+            let bytes = views.encode_native(&project).unwrap();
+            assert_eq!(bytes, baseline);
+            assert_eq!(views, live, "saving must prune only the copy");
+            for name in ["FontSize", "Tracking", "Leading"] {
+                assert!(!std::str::from_utf8(&bytes).unwrap().contains(name));
+            }
+            let native = crate::project_io::encode_native_project(&project, Some(&views)).unwrap();
+            let opened = crate::project_io::decode_project(&native).unwrap();
+            assert_eq!(opened.project, project);
+            assert_eq!(opened.views.encode_native(&project).unwrap(), baseline);
+            assert_eq!(project.to_json().unwrap(), source);
+        }
+    }
+
+    #[test]
+    fn materialized_typography_lanes_use_project49_view2_and_existing_lep_container() {
+        use libre_effects_core::{PropertyPath, TextParam};
+        let (project, addresses) = typography_view_fixture(true);
+        let source = project.to_json().unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&source).unwrap()["version"],
+            49
+        );
+        let mut views = ProjectViews::default();
+        for &(composition, id) in &addresses {
+            let mut view = CompositionView::default();
+            view.frame = 30;
+            view.graph_open = true;
+            for parameter in [TextParam::FontSize, TextParam::Tracking, TextParam::Leading] {
+                let channel = GraphChannel {
+                    id,
+                    property: PropertyPath::Text(parameter),
+                };
+                view.graph_channels.pin(channel).unwrap();
+                view.graph_channels.activate(channel);
+                view.graph_channels.ranges.insert(
+                    channel,
+                    GraphRanges {
+                        value: Some([-10., 200.]),
+                        speed: Some([-20., 20.]),
+                    },
+                );
+            }
+            views.compositions.insert(composition, view);
+        }
+        views.normalize(&project);
+        let bytes = views.encode_native(&project).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["version"], 2);
+        for (composition, _) in addresses {
+            let channel = &value["compositions"][composition.to_string()]["graph_channels"];
+            assert_eq!(channel["version"], 1);
+            assert_eq!(channel["pinned"].as_array().unwrap().len(), 3);
+        }
+        let native = crate::project_io::encode_native_project(&project, Some(&views)).unwrap();
+        assert_eq!(&native[8..10], &[1, 0]);
+        let opened = crate::project_io::decode_project(&native).unwrap();
+        assert_eq!(opened.project, project);
+        assert_eq!(opened.views, views);
+        assert_eq!(
+            crate::project_io::encode_native_project(&opened.project, Some(&opened.views)).unwrap(),
+            native
+        );
+        assert_eq!(project.to_json().unwrap(), source);
+    }
 }

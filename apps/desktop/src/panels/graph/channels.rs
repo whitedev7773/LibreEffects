@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Unit {
     Pixels,
+    ThousandthsEm,
     Degrees,
     Percent,
     Rgb,
@@ -23,6 +24,8 @@ impl Unit {
         match (self, speed) {
             (Self::Pixels, false) => "px",
             (Self::Pixels, true) => "px/s",
+            (Self::ThousandthsEm, false) => "1/1000 em",
+            (Self::ThousandthsEm, true) => "(1/1000 em)/s",
             (Self::Degrees, false) => "deg",
             (Self::Degrees, true) => "deg/s",
             (Self::Percent, false) => "%",
@@ -46,6 +49,20 @@ pub(super) struct Descriptor {
     pub label: String,
     pub units: Unit,
 }
+pub(super) fn text_unit(parameter: TextParam) -> Unit {
+    match parameter {
+        TextParam::FontSize | TextParam::StrokeWidth => Unit::Pixels,
+        TextParam::Tracking => Unit::ThousandthsEm,
+        TextParam::Leading => Unit::Ratio,
+        TextParam::FillRed
+        | TextParam::FillGreen
+        | TextParam::FillBlue
+        | TextParam::StrokeRed
+        | TextParam::StrokeGreen
+        | TextParam::StrokeBlue => Unit::Rgb,
+    }
+}
+
 fn transform_unit(p: Property) -> Unit {
     match p {
         Property::PositionX | Property::PositionY | Property::AnchorX | Property::AnchorY => {
@@ -101,8 +118,7 @@ pub(super) fn describe(project: &Project, channel: GraphChannel) -> Option<Descr
         PropertyPath::Path(_) => return None,
         PropertyPath::Transform(p) => transform_unit(p),
         PropertyPath::Shape(p) => shape_unit(p),
-        PropertyPath::Text(TextParam::StrokeWidth) => Unit::Pixels,
-        PropertyPath::Text(_) => Unit::Rgb,
+        PropertyPath::Text(parameter) => text_unit(parameter),
         PropertyPath::Mask { mask, parameter } => {
             label = format!("{label} [mask #{mask}]");
             match parameter {
@@ -221,4 +237,62 @@ pub(super) fn all_keys(project: &Project, channels: &[GraphChannel]) -> BTreeSet
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod typography_units_tests {
+    use super::*;
+    use libre_effects_core::{Command, Editor, TrackEdit};
+
+    #[test]
+    fn actual_text_lane_descriptors_use_distinct_scalar_units_in_value_and_speed_modes() {
+        let mut editor = Editor::default();
+        editor
+            .execute(Command::AddContent {
+                content: Content::Text {
+                    text: "Text".into(),
+                    font_size: 48.,
+                },
+                width: 400.,
+                height: 120.,
+                name: "Title".into(),
+            })
+            .unwrap();
+        for parameter in TextParam::ALL {
+            let channel = GraphChannel {
+                id: 1,
+                property: PropertyPath::Text(parameter),
+            };
+            // Unmaterialized typography stays sparse and does not become an
+            // accidental graph curve just because the UI can show its base.
+            assert!(describe(editor.project(), channel).is_none());
+            editor
+                .execute(Command::EditText {
+                    id: 1,
+                    parameter,
+                    edit: TrackEdit::ToggleAnimation { frame: 7 },
+                })
+                .unwrap();
+            let descriptor = describe(editor.project(), channel).unwrap();
+            let (value_unit, speed_unit) = match parameter {
+                TextParam::FontSize | TextParam::StrokeWidth => ("px", "px/s"),
+                TextParam::Tracking => ("1/1000 em", "(1/1000 em)/s"),
+                TextParam::Leading => ("ratio", "ratio/s"),
+                _ => ("RGB 0–255", "RGB units/s"),
+            };
+            assert_eq!(descriptor.channel, channel);
+            assert_eq!(descriptor.units.label(false), value_unit);
+            assert_eq!(descriptor.units.label(true), speed_unit);
+            assert!(descriptor.label.ends_with(parameter.label()));
+            assert_eq!(
+                all_keys(editor.project(), &[channel]),
+                [KeyRef {
+                    id: 1,
+                    property: channel.property,
+                    frame: 7
+                }]
+                .into()
+            );
+        }
+    }
 }

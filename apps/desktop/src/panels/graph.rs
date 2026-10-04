@@ -30,10 +30,7 @@ use std::{
 #[cfg(test)]
 fn graph_units(property: PropertyPath, speed: bool) -> &'static str {
     match (property, speed) {
-        (PropertyPath::Text(TextParam::StrokeWidth), false) => "px",
-        (PropertyPath::Text(TextParam::StrokeWidth), true) => "px/s",
-        (PropertyPath::Text(_), false) => "RGB 0–255",
-        (PropertyPath::Text(_), true) => "RGB units/s",
+        (PropertyPath::Text(parameter), speed) => channels::text_unit(parameter).label(speed),
         (_, true) => "units/s",
         _ => "",
     }
@@ -3429,13 +3426,14 @@ mod tests {
     fn text_paint_graph_units_are_channel_and_mode_specific() {
         for p in libre_effects_core::TextParam::ALL {
             let path = libre_effects_core::PropertyPath::Text(p);
-            if p == libre_effects_core::TextParam::StrokeWidth {
-                assert_eq!(super::graph_units(path, false), "px");
-                assert_eq!(super::graph_units(path, true), "px/s");
-            } else {
-                assert_eq!(super::graph_units(path, false), "RGB 0–255");
-                assert_eq!(super::graph_units(path, true), "RGB units/s");
-            }
+            let expected = match p {
+                TextParam::FontSize | TextParam::StrokeWidth => ("px", "px/s"),
+                TextParam::Tracking => ("1/1000 em", "(1/1000 em)/s"),
+                TextParam::Leading => ("ratio", "ratio/s"),
+                _ => ("RGB 0–255", "RGB units/s"),
+            };
+            assert_eq!(super::graph_units(path, false), expected.0);
+            assert_eq!(super::graph_units(path, true), expected.1);
         }
         assert_eq!(
             super::graph_units(libre_effects_core::Property::Opacity.into(), true),

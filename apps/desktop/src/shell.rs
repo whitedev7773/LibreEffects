@@ -684,8 +684,14 @@ impl Render for Shell {
                 s.load_queue(cx);
                 s.load_presets(cx);
             });
+            let pointer_window = window.window_handle().window_id();
+            cx.on_release(move |_, cx| {
+                crate::color_edit::release_input_pointer(pointer_window, cx);
+            })
+            .detach();
             let weak = cx.entity().downgrade();
             window.on_window_should_close(cx, move |window, cx| {
+                crate::color_edit::cancel_input_pointer(window, cx);
                 let _ = weak.update(cx, |s, cx| {
                     s.state.update(cx, |state, cx| {
                         state.gradient_editor = None;
@@ -721,6 +727,7 @@ impl Render for Shell {
                 .detach();
             cx.observe_window_activation(window, |this, window, cx| {
                 if !window.is_window_active() {
+                    crate::color_edit::cancel_input_pointer(window, cx);
                     this.state.update(cx, |state, cx| {
                         state.discard_vertex_editor();
                         cx.notify();
@@ -778,8 +785,7 @@ impl Render for Shell {
         let status = state.status.clone();
         let video_job = state.video_job.clone();
         let exporting = state.exporting;
-        let mut root = div()
-            .id("editor-workspace")
+        let mut root = crate::color_edit::input_pointer_root(div().id("editor-workspace"), &self.state)
             .track_focus(&self.focus)
             .relative()
             .flex()

@@ -1,5 +1,16 @@
 use super::*;
 
+// These schema48 regressions intentionally exercise the original seven paint tracks.
+const PAINT_PARAMETERS: [TextParam; 7] = [
+    TextParam::FillRed,
+    TextParam::FillGreen,
+    TextParam::FillBlue,
+    TextParam::StrokeRed,
+    TextParam::StrokeGreen,
+    TextParam::StrokeBlue,
+    TextParam::StrokeWidth,
+];
+
 fn scene() -> Editor {
     let mut e = Editor::default();
     e.execute(Command::AddContent {
@@ -170,7 +181,7 @@ fn text_animation_rgb_groups_have_one_undo_preserve_base_and_roundtrip_native_v1
 
 #[test]
 fn text_animation_all_seven_tracks_linear_hold_and_bezier_overshoot_are_bounded() {
-    for parameter in TextParam::ALL {
+    for parameter in PAINT_PARAMETERS {
         let mut e = scene();
         let path = PropertyPath::Text(parameter);
         let (min, max) = parameter.bounds();
@@ -280,7 +291,7 @@ fn text_animation_partial_channel_keys_seed_rgb_baselines_and_toggle_only_existi
 #[test]
 fn text_animation_invalid_bounds_frames_and_batches_are_atomic() {
     let mut e = scene();
-    for parameter in TextParam::ALL {
+    for parameter in PAINT_PARAMETERS {
         for value in [-1., parameter.bounds().1 + 1., f64::NAN, f64::INFINITY] {
             assert_rejected(
                 &mut e,
@@ -361,7 +372,7 @@ fn text_animation_invalid_bounds_frames_and_batches_are_atomic() {
 
 fn animated_scene() -> Editor {
     let mut e = scene();
-    for parameter in TextParam::ALL {
+    for parameter in PAINT_PARAMETERS {
         edit(&mut e, parameter, TrackEdit::ToggleKey { frame: 10 });
         edit(
             &mut e,
@@ -396,7 +407,10 @@ fn animated_scene() -> Editor {
 #[test]
 fn text_animation_generic_copy_move_delete_scale_and_temporal_metadata() {
     let mut e = animated_scene();
-    let paths: Vec<_> = TextParam::ALL.into_iter().map(PropertyPath::Text).collect();
+    let paths: Vec<_> = PAINT_PARAMETERS
+        .into_iter()
+        .map(PropertyPath::Text)
+        .collect();
     let refs = |frame| {
         paths
             .iter()
@@ -423,7 +437,7 @@ fn text_animation_generic_copy_move_delete_scale_and_temporal_metadata() {
         delta: 10,
     })
     .unwrap();
-    for parameter in TextParam::ALL {
+    for parameter in PAINT_PARAMETERS {
         let t = &e.selected_layer().unwrap().text_parameters[&parameter];
         assert_eq!(t.keys[&70], original[&parameter].keys[&10]);
     }
@@ -437,7 +451,7 @@ fn text_animation_generic_copy_move_delete_scale_and_temporal_metadata() {
         },
     })
     .unwrap();
-    for parameter in TextParam::ALL {
+    for parameter in PAINT_PARAMETERS {
         let t = &e.selected_layer().unwrap().text_parameters[&parameter];
         let mut expected = original[&parameter].keys[&10].clone();
         expected.value *= 0.5;
@@ -510,7 +524,7 @@ fn text_animation_generic_copy_move_delete_scale_and_temporal_metadata() {
         target: Some(2),
     })
     .unwrap();
-    for parameter in TextParam::ALL {
+    for parameter in PAINT_PARAMETERS {
         assert_eq!(
             e.selected_layer().unwrap().text_parameters[&parameter].keys[&20],
             original[&parameter].keys[&10]
@@ -610,7 +624,7 @@ fn text_animation_duplicate_split_shift_paste_across_fps_and_precompose_preserve
         delta: 5,
     })
     .unwrap();
-    for parameter in TextParam::ALL {
+    for parameter in PAINT_PARAMETERS {
         let t = &e
             .project()
             .composition()
@@ -633,7 +647,7 @@ fn text_animation_duplicate_split_shift_paste_across_fps_and_precompose_preserve
     e.execute(Command::PasteLayers(clipboard)).unwrap();
     let pasted = e.selected_layer().unwrap().id();
     let pasted_tracks = e.selected_layer().unwrap().text_parameters.clone();
-    for parameter in TextParam::ALL {
+    for parameter in PAINT_PARAMETERS {
         let t = &pasted_tracks[&parameter];
         let mut expected = tracks[&parameter].keys[&10].clone();
         expected.temporal.outgoing.as_mut().unwrap().slope *= 0.5;
@@ -686,7 +700,7 @@ fn text_animation_schema_disguise_inactive_compositions_invalid_keys_and_replace
         .remove("text_style");
     malformed.push(nontext);
     let mut unknown = value.clone();
-    unknown["other_compositions"]["1"]["layers"][0]["text_parameters"]["FontSize"] =
+    unknown["other_compositions"]["1"]["layers"][0]["text_parameters"]["UnknownTextParameter"] =
         serde_json::json!({"value": 30., "keys": {}});
     malformed.push(unknown);
     for field in ["value", "key", "time", "interpolation", "temporal"] {
@@ -871,7 +885,7 @@ fn text_animation_color_draft_helpers_are_pure_and_static_override_baselines_are
 
 #[test]
 fn text_animation_untouched_base_value_edits_are_exact_noops_without_materializing_tracks() {
-    for parameter in TextParam::ALL {
+    for parameter in PAINT_PARAMETERS {
         let mut e = scene();
         // Historical higher schemas must survive semantic no-ops unchanged.
         let mut imported = e.project().clone();

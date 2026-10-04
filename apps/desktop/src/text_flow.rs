@@ -20,13 +20,14 @@ pub(crate) fn composed_count(lines: &[Line], height: f64) -> usize {
 pub(crate) fn convert(
     layer: &libre_effects_core::Layer,
     paragraph: bool,
+    frame: libre_effects_core::Frame,
 ) -> libre_effects_core::Command {
     use libre_effects_core::{Command, Content};
     let mut style = layer.text_style();
     let mut commands = vec![];
     if style.paragraph && !paragraph {
         if let Content::Text { text, font_size } = layer.content() {
-            let flow = lines(text, *font_size, layer.width(), &style);
+            let flow = layer_lines(layer, frame).unwrap();
             let text = flow
                 .iter()
                 .take(composed_count(&flow, layer.height()))
@@ -48,6 +49,31 @@ pub(crate) fn convert(
         style,
     });
     Command::Batch(commands)
+}
+/// Shape the current frame without turning evaluated typography into edit data.
+pub(crate) fn layer_lines(
+    layer: &libre_effects_core::Layer,
+    frame: libre_effects_core::Frame,
+) -> Option<Arc<Vec<Line>>> {
+    let libre_effects_core::Content::Text { text, .. } = layer.content() else {
+        return None;
+    };
+    let typography = layer.text_typography_at(frame)?;
+    let mut style = layer.text_style();
+    typography.apply_to_style(&mut style);
+    Some(lines(text, typography.font_size, layer.width(), &style))
+}
+pub(crate) fn fit_height(
+    layer: &libre_effects_core::Layer,
+    frame: libre_effects_core::Frame,
+) -> Option<f64> {
+    layer.text_style().paragraph.then_some(())?;
+    Some(
+        layer_lines(layer, frame)?
+            .iter()
+            .map(|line| line.bottom)
+            .fold(1.0, f64::max),
+    )
 }
 struct Cache {
     text: String,
@@ -242,7 +268,7 @@ mod tests {
             .map(|l| &draft.buffer.text[l.range.start..l.visible_end])
             .collect::<Vec<_>>()
             .join("\n");
-        e.execute(convert(layer, false)).unwrap();
+        e.execute(convert(layer, false, 0)).unwrap();
         assert!(!e.selected_layer().unwrap().text_style().paragraph);
         assert!(
             matches!(e.selected_layer().unwrap().content(),Content::Text{text,..} if text==&expected)

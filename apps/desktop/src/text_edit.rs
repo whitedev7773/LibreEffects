@@ -218,6 +218,7 @@ pub(crate) struct Session {
     pub id: LayerId,
     pub frame: Frame,
     pub world: Affine,
+    /// Frozen playhead geometry. Existing source commits use `base_font_size`.
     pub font_size: f64,
     pub width: f64,
     pub height: f64,
@@ -227,6 +228,7 @@ pub(crate) struct Session {
     base: Project,
     seed: Vec<Command>,
     revision: u64,
+    base_font_size: Option<f64>,
 }
 impl Session {
     pub fn line_edge(&mut self, end: bool, document: bool, extend: bool) {
@@ -311,6 +313,7 @@ impl Session {
     ) -> Result<Self, String> {
         let mut temporary = Editor::default();
         temporary.replace_project(project.clone())?;
+        let existing = id.is_some();
         let mut seed = vec![];
         let id = if let Some(id) = id {
             id
@@ -364,20 +367,24 @@ impl Session {
             .world_transform(id, frame)
             .filter(|m| m.inverse().is_some())
             .ok_or("Text transform cannot be edited at zero scale")?;
+        let typography = layer.text_typography_at(frame).unwrap();
+        let mut style = layer.text_style();
+        typography.apply_to_style(&mut style);
         Ok(Self {
             buffer: Buffer::new(text.clone()),
             id,
             frame,
             world,
-            font_size: *font_size,
+            font_size: typography.font_size,
             width: layer.width(),
             height: layer.height(),
-            style: layer.text_style(),
+            style,
             preferred_x: None,
             caret_hint: None,
             base: project.clone(),
             seed,
             revision,
+            base_font_size: existing.then_some(*font_size),
         })
     }
     pub fn valid(&self, project: &Project, revision: u64, frame: Frame) -> bool {
@@ -400,7 +407,9 @@ impl Session {
             id: self.id,
             content: Content::Text {
                 text: self.buffer.text.clone(),
-                font_size: self.font_size,
+                // Source editing must never bake a sampled animation value
+                // into the persisted fallback, even at an existing keyframe.
+                font_size: self.base_font_size.unwrap_or(self.font_size),
             },
         });
         if self.style.paragraph {
@@ -423,6 +432,10 @@ impl Session {
 #[cfg(test)]
 #[path = "text_paint_session_tests.rs"]
 mod paint_tests;
+
+#[cfg(test)]
+#[path = "text_typography_session_tests.rs"]
+mod typography_tests;
 
 #[cfg(test)]
 mod tests {

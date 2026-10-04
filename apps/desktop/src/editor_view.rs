@@ -1045,6 +1045,11 @@ mod tests {
                             .track(property)
                             .is_none()
                     );
+                    let view_before = s.capture_views();
+                    let view_bytes_before = view_before.encode_native(&source).unwrap();
+                    let native_before =
+                        crate::project_io::encode_native_project(&source, Some(&view_before))
+                            .unwrap();
                     assert!(s.graph_activate_property(target, true));
                     assert_eq!(s.editor.selected(), Some(2));
                     assert_eq!(s.selected_layers, layers);
@@ -1057,9 +1062,29 @@ mod tests {
                     assert!(s.graph_included_channels().is_empty());
                     assert!(s.graph_pin_channel(target).is_err());
                     let views = s.capture_views();
-                    let value: serde_json::Value =
-                        serde_json::from_slice(&views.encode_native(s.editor.project()).unwrap())
+                    let view_bytes = views.encode_native(s.editor.project()).unwrap();
+                    assert_eq!(view_bytes, view_bytes_before);
+                    let value: serde_json::Value = serde_json::from_slice(&view_bytes).unwrap();
+                    let text = std::str::from_utf8(&view_bytes).unwrap();
+                    for name in ["FontSize", "Tracking", "Leading"] {
+                        assert!(
+                            !text.contains(name),
+                            "sparse address leaked into VIEW: {name}"
+                        );
+                    }
+                    let native =
+                        crate::project_io::encode_native_project(s.editor.project(), Some(&views))
                             .unwrap();
+                    assert_eq!(native, native_before);
+                    let opened = crate::project_io::decode_project(&native).unwrap();
+                    assert_eq!(opened.project, source);
+                    assert_eq!(
+                        opened.views.encode_native(&source).unwrap(),
+                        view_bytes_before
+                    );
+                    let project_json: serde_json::Value =
+                        serde_json::from_str(&source.to_json().unwrap()).unwrap();
+                    assert!(project_json["version"].as_u64().unwrap() <= 48);
                     assert_eq!(value["version"], 1);
                     assert!(value["compositions"]["1"].get("graph_channels").is_none());
                     for p in TextParam::ALL {
@@ -1116,6 +1141,11 @@ mod tests {
                     let keys = s.selected_keys.clone();
                     let property = PropertyPath::Text(parameter);
                     let target = GraphChannel { id: 2, property };
+                    let view_before = s.capture_views();
+                    let view_bytes_before = view_before.encode_native(&source).unwrap();
+                    let native_before =
+                        crate::project_io::encode_native_project(&source, Some(&view_before))
+                            .unwrap();
                     assert!(s.graph_activate_property(target, true));
                     assert_eq!(s.editor.selected(), Some(2));
                     assert_eq!(s.selected_layers, layers);
@@ -1128,9 +1158,29 @@ mod tests {
                     assert!(!s.graph_activate_channel(target, true));
                     assert!(s.graph_pin_channel(target).is_err());
                     let views = s.capture_views();
-                    let value: serde_json::Value =
-                        serde_json::from_slice(&views.encode_native(s.editor.project()).unwrap())
+                    let view_bytes = views.encode_native(s.editor.project()).unwrap();
+                    assert_eq!(view_bytes, view_bytes_before);
+                    let value: serde_json::Value = serde_json::from_slice(&view_bytes).unwrap();
+                    let text = std::str::from_utf8(&view_bytes).unwrap();
+                    for name in ["FontSize", "Tracking", "Leading"] {
+                        assert!(
+                            !text.contains(name),
+                            "sparse address leaked into VIEW: {name}"
+                        );
+                    }
+                    let native =
+                        crate::project_io::encode_native_project(s.editor.project(), Some(&views))
                             .unwrap();
+                    assert_eq!(native, native_before);
+                    let opened = crate::project_io::decode_project(&native).unwrap();
+                    assert_eq!(opened.project, source);
+                    assert_eq!(
+                        opened.views.encode_native(&source).unwrap(),
+                        view_bytes_before
+                    );
+                    let project_json: serde_json::Value =
+                        serde_json::from_str(&source.to_json().unwrap()).unwrap();
+                    assert!(project_json["version"].as_u64().unwrap() <= 48);
                     assert_eq!(value["version"], 2);
                     assert_eq!(s.graph_channels, channels);
                     for p in TextParam::ALL {

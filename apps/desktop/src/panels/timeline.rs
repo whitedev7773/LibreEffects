@@ -18,6 +18,10 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::{cell::Cell, rc::Rc};
 
+fn parse_scalar(text: &str) -> Result<f64, std::num::ParseFloatError> {
+    text.trim().parse::<f64>()
+}
+
 fn text_groups(layer: &libre_effects_core::Layer) -> Vec<(String, Vec<PropertyPath>)> {
     if !matches!(layer.content(), libre_effects_core::Content::Text { .. }) {
         return vec![];
@@ -37,6 +41,18 @@ fn text_groups(layer: &libre_effects_core::Layer) -> Vec<(String, Vec<PropertyPa
         (
             "Stroke Width".into(),
             vec![PropertyPath::Text(TextParam::StrokeWidth)],
+        ),
+        (
+            "Font Size".into(),
+            vec![PropertyPath::Text(TextParam::FontSize)],
+        ),
+        (
+            "Tracking".into(),
+            vec![PropertyPath::Text(TextParam::Tracking)],
+        ),
+        (
+            "Leading".into(),
+            vec![PropertyPath::Text(TextParam::Leading)],
         ),
     ]
 }
@@ -1272,12 +1288,35 @@ impl Render for Timeline {
                                             {
                                                 return;
                                             }
-                                            if let Ok(value) = text.parse::<f64>() {
-                                                if matches!(property, PropertyPath::Text(_))
-                                                    && s.editor.selected_layer().and_then(|l| {
-                                                        l.track_value(property, s.frame)
-                                                    }) == Some(value)
-                                                {
+                                            if let Ok(value) = parse_scalar(text) {
+                                                if let PropertyPath::Text(parameter) = property {
+                                                    s.finish_text(true, cx);
+                                                    if !captured
+                                                        .borrow()
+                                                        .as_ref()
+                                                        .is_some_and(|t| t.same_context(s))
+                                                    {
+                                                        return;
+                                                    }
+                                                    let command = s
+                                                        .editor
+                                                        .selected_layer()
+                                                        .unwrap()
+                                                        .text_value_command(
+                                                            parameter, value, s.frame,
+                                                        );
+                                                    match command {
+                                                        Ok(Some(command)) => s.dispatch(
+                                                            &Action::Edit(command),
+                                                            window,
+                                                            cx,
+                                                        ),
+                                                        Ok(None) => {}
+                                                        Err(error) => {
+                                                            s.status = error;
+                                                            cx.notify();
+                                                        }
+                                                    }
                                                     return;
                                                 }
                                                 s.dispatch(
@@ -1327,7 +1366,11 @@ impl Render for Timeline {
                                 ui::text_button(
                                     SharedString::from(format!("channel-{id}-{property:?}")),
                                     if let PropertyPath::Text(p) = property {
-                                        TextPaint::component_label(p).unwrap_or("px")
+                                        match p {
+                                            TextParam::Tracking => "‰ em",
+                                            TextParam::Leading => "×",
+                                            _ => TextPaint::component_label(p).unwrap_or("px"),
+                                        }
                                     } else if let PropertyPath::Shape(p) = property {
                                         libre_effects_core::ShapePaint::component_label(p)
                                             .unwrap_or("")
@@ -2224,6 +2267,67 @@ mod tests {
         Command, Content, Editor, PropertyPath, TextPaint, TextParam, TrackEdit,
     };
     #[test]
+    fn typography_timeline_numeric_formatting_is_noop_at_interpolated_frames() {
+        let mut e = Editor::default();
+        e.execute(Command::AddContent {
+            content: Content::Text {
+                text: "Title".into(),
+                font_size: 48.,
+            },
+            width: 400.,
+            height: 120.,
+            name: "Text".into(),
+        })
+        .unwrap();
+        for (parameter, value) in [
+            (TextParam::FontSize, 91.123456789),
+            (TextParam::Tracking, 135.987654321),
+            (TextParam::Leading, 2.987654321),
+        ] {
+            e.execute(Command::EditText {
+                id: 1,
+                parameter,
+                edit: TrackEdit::ToggleAnimation { frame: 0 },
+            })
+            .unwrap();
+            let command = e
+                .selected_layer()
+                .unwrap()
+                .text_value_command(parameter, value, 60)
+                .unwrap()
+                .unwrap();
+            e.execute(command).unwrap();
+            let sample = e
+                .selected_layer()
+                .unwrap()
+                .text_value_at(parameter, 17)
+                .unwrap();
+            let before = e.project().clone();
+            for input in [format!("  {sample}  "), format!("\t{sample:e}\n")] {
+                let parsed = super::parse_scalar(&input).unwrap();
+                assert_eq!(parsed, sample);
+                assert!(
+                    e.selected_layer()
+                        .unwrap()
+                        .text_value_command(parameter, parsed, 17)
+                        .unwrap()
+                        .is_none()
+                );
+            }
+            assert_eq!(e.project(), &before);
+            assert!(
+                !e.selected_layer()
+                    .unwrap()
+                    .track(PropertyPath::Text(parameter))
+                    .unwrap()
+                    .keys()
+                    .contains_key(&17)
+            );
+        }
+        assert!(super::parse_scalar("invalid").is_err());
+    }
+
+    #[test]
     fn text_paint_timeline_groups_keep_sparse_baselines_and_animated_filter_coherent() {
         let mut e = Editor::default();
         e.execute(Command::AddContent {
@@ -2242,7 +2346,14 @@ mod tests {
                 .iter()
                 .map(|(s, p)| (s.as_str(), p.len()))
                 .collect::<Vec<_>>(),
-            [("Fill Color", 3), ("Stroke Color", 3), ("Stroke Width", 1)]
+            [
+                ("Fill Color", 3),
+                ("Stroke Color", 3),
+                ("Stroke Width", 1),
+                ("Font Size", 1),
+                ("Tracking", 1),
+                ("Leading", 1)
+            ]
         );
         assert_eq!(
             groups

@@ -368,14 +368,14 @@ paint creates or updates keys at the playhead; an unanimated paint remains stati
 Changing only HEX formatting, accepting an unchanged picker or cancelling it does
 not create keys or history. A changed picker transaction is one Undo step.
 
-Expand the Timeline's Text group for the seven channels and use the shared key
+Expand the Timeline's Text group for these seven paint channels and use the shared key
 editing controls or Value/Speed Graph. RGB values use 0–255 units and width uses
 0–1000 px; graph speed units are RGB units/s and px/s respectively. Evaluation
 clamps Bezier overshoot to those bounds. Disabling animation retains the current
 sampled color or width. Partially animated RGB edits preserve existing channels
 and seed missing channel baselines before adding the current-frame color.
 
-The tracks are saved only when needed, in project schema 48. Older static text
+Paint-only tracks are saved only when needed, in project schema 48. Older static text
 keeps its existing schema, and the native LEP container stays version 1. Source,
 font, paragraph, spacing and paint-switch/order edits retain the paint tracks;
 rendering evaluates paint without changing glyph advances, caret positions or
@@ -384,6 +384,44 @@ frame or Graph key selection changes. Fill picker alpha still edits whole-layer
 opacity; it is not a separate text-fill alpha track. Typography, Source Text,
 per-character styles, paint switches/order and compound text animation remain
 outside this seven-channel milestone.
+
+### Animated text typography
+
+Font Size, Tracking and Leading are three additional layer-wide scalar channels.
+Font Size uses 1–2048 source pixels; Tracking uses −1000–10000 thousandths of an
+em; Leading uses a 0.1–10 font-size multiplier. Leading is an explicit ratio,
+not Auto or absolute pixel spacing. Both letter spacing and line spacing use the
+current sampled font size. Character displays sampled values with independent
+stopwatches; Properties exposes sampled Font Size. Timeline and Value/Speed Graph
+use px / px/s, 1/1000 em / (1/1000 em)/s, and ratio / ratio/s respectively.
+
+Editing a typography scalar with no track changes its static source value.
+Once that particular track exists, edits address it at the playhead while keeping
+the original static field intact. Explicit keys or stopwatches materialize tracks.
+Unchanged full-precision input creates no key or history and preserves its exact
+legacy source version. Changed static edits still use the existing feature-based
+version recalculation, so an overdeclared schema can reduce to the version required
+by the actual remaining features. Unmodified load/save does not do that.
+Disabling animation retains the bounded current sample. Existing key easing survives replacement and
+new keys use the established Linear policy. Sampling clamps curve overshoot.
+
+Rendering, effect bounds, text hit testing, caret/selection geometry and paragraph
+flow share sampled typography. Direct Source Text edits keep static typography
+and all animation tracks. Paragraph overflow and Fit box height use the current
+frame. Paragraph-to-Point conversion retains only the currently composed visible
+lines, changing Source Text for every frame; it does not bake typography samples.
+Project Fonts checks the active composition at its captured local frame and other
+compositions at frame 0, labels those frames, and invalidates results on a frame
+or composition change. This is not whole-animation glyph coverage.
+
+Any materialized typography track requires project schema 49, including a keyless
+override or an inactive composition's track. Paint-only maps keep schema 48;
+untouched legacy text stays sparse. LEP v1, VIEW v1/v2 and typed Graph address v1
+remain unchanged. Sparse Graph focus does not leak new addresses into old files.
+Readers limited to project schema 48 cannot open projects containing typography
+tracks; old static and paint-only projects remain supported.
+Per-character styles, Source Text animation, Text Animator, absolute/Auto leading,
+kerning modes and animated font identity/weight remain separate work.
 
 ### Canvas text editing
 
@@ -518,7 +556,7 @@ future work.
   and Escape cancels. Each completed drag is one undo step. Properties controls
   fill, stroke RGB/width, corner roundness, points and star inner radius.
 - Z zooms in at the viewer; Alt-click zooms out. Ctrl+T selects the Text tool.
-  Character edits font size, leading in pixels, tracking in thousandths
+  Character edits font size in pixels, leading as a font-size multiplier, tracking in thousandths
   of an em and color. Paragraph aligns within the text layer's source width.
   These are whole-layer settings; per-character styles are not implemented.
   Shape/text styling uses the same preview/export renderer.
@@ -1896,6 +1934,22 @@ moon run desktop:test
 moon run desktop:test-media
 cargo fmt --all --check
 ~~~
+
+For constrained local test builds, this optional command strips debugger metadata
+from only the desktop test executable. It leaves optimization, assertions,
+features and release builds unchanged, but removes debug-file/line information
+from debugger/backtrace symbolication. It is a command-line override, not a
+repository or toolchain setting:
+
+~~~sh
+cargo --config 'profile.test.package.libre-effects-desktop.strip="debuginfo"' test --workspace --locked
+cargo --config 'profile.test.package.libre-effects-desktop.strip="debuginfo"' test -p libre-effects-desktop --locked -- --ignored --skip device_clock_minute
+~~~
+
+The recorded typography gate used this override after an unstripped build took
+30m18s. The corrected test-only rebuild took 40.66s and its focused execution
+17.58s. These are observed local runs with different test/profile/cache state,
+not a controlled performance guarantee. Omit the override for ordinary debugging.
 
 Optional FFmpeg integration checks encode and decode MP4/ProRes, check work-area
 timing and alpha, and cancel an active encoder while preserving the destination:

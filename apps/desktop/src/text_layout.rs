@@ -101,6 +101,23 @@ struct Key {
 }
 thread_local! { static LAST_LAYOUT: RefCell<Option<(Key,Arc<Layout>)>> = const {RefCell::new(None)}; }
 impl Layout {
+    pub fn for_layer(
+        layer: &libre_effects_core::Layer,
+        frame: libre_effects_core::Frame,
+    ) -> Option<Arc<Self>> {
+        let libre_effects_core::Content::Text { text, .. } = layer.content() else {
+            return None;
+        };
+        let typography = layer.text_typography_at(frame)?;
+        let mut style = layer.text_style();
+        typography.apply_to_style(&mut style);
+        Some(Self::shape(
+            text,
+            typography.font_size,
+            layer.width(),
+            &style,
+        ))
+    }
     pub fn new(session: &Session) -> Arc<Self> {
         Self::shape(
             &session.buffer.text,
@@ -215,8 +232,15 @@ impl Layout {
             p[0] >= c.x1.min(c.x2)
                 && p[0] <= c.x1.max(c.x2)
                 && p[1] >= c.y
-                && p[1] <= c.y + self.size * 1.2
+                && p[1] <= c.y + self.line_height()
         })
+    }
+    /// Shared logical height for hit regions, selections, carets and IME anchors.
+    pub fn line_height(&self) -> f64 {
+        self.size * 1.2
+    }
+    pub fn caret_rect(&self, at: [f64; 2]) -> [f64; 4] {
+        [at[0], at[1], 1.0, self.line_height()]
     }
     pub fn hit_character(&self, p: [f64; 2]) -> usize {
         self.cells
@@ -225,7 +249,7 @@ impl Layout {
                 p[0] >= c.x1.min(c.x2)
                     && p[0] <= c.x1.max(c.x2)
                     && p[1] >= c.y
-                    && p[1] <= c.y + self.size * 1.2
+                    && p[1] <= c.y + self.line_height()
             })
             .min_by(|a, b| {
                 (a.y + self.size * 0.5 - p[1])

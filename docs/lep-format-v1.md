@@ -3,9 +3,21 @@
 `.lep` is the native Libre Effects Project file extension. It is a bounded binary
 container for portable project metadata, optional editor view state, and embedded
 images. The container version is **1**. The project's JSON schema version remains
-independent (currently **48**); choosing this format does not upgrade that schema.
-Schema 48 adds optional layer-wide text-paint tracks. Documents without those
-tracks retain their otherwise required schema, including legacy static text.
+independent (currently **49**); choosing this format does not upgrade that schema.
+Schema 48 adds optional layer-wide text-paint tracks. Schema 49 adds sparse
+`FontSize`, `Tracking` and `Leading` tracks in the same text-parameter map. Any
+materialized typography track, including a keyless override or an inactive
+composition's track, requires schema 49; paint-only maps still require only 48.
+Documents without those tracks retain their otherwise required schema, including
+legacy static text. Merely inspecting or focusing a sparse typography property
+does not materialize a track or upgrade its project schema. Readers that only
+support project schema 48 reject typography-track projects; the unchanged LEP
+container version does not grant forward model compatibility.
+The codec retains the project's declared version on unmodified load/save.
+Existing generic edit commands may recalculate the version required by the
+resulting features; a changed static edit can therefore lower an overdeclared
+version without losing data. This is distinct from container conversion and from
+the no-op paths that preserve the exact source and history.
 Existing `.lfe.json` files and `Project::to_json` / `Project::from_json` stay supported.
 
 All integer fields are unsigned and **little-endian**. Lengths count bytes, not
@@ -125,6 +137,12 @@ metadata when no saved composition needs channel state, or version 2 when any
 composition retains pins, an explicit active channel or per-channel ranges.
 Inactive compositions participate in this choice. Save does not remove live
 unavailable pins retained for Undo, and there is no sticky “once version 2” flag.
+Typography channel addresses use the existing text-parameter address enum and
+require an existing typography track, whose project schema is at least 49.
+Runtime sparse property focus is not serialized; unavailable typography pins and
+ranges are removed from the saved copy in active and inactive compositions. Thus
+ordinary legacy project saves cannot emit the new typography addresses merely
+because a user focused one of those rows. No new VIEW or LEP version is needed.
 
 Older desktop readers that only understand view metadata v1 reject native files
 containing v2 view metadata, even when their render-project data is unchanged.

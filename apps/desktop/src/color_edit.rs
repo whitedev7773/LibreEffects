@@ -36,10 +36,17 @@ impl InputTarget {
         })
     }
     pub fn current(&self, s: &crate::editor::EditorState) -> bool {
+        self.same_context(s)
+            && self.revision == s.document_revision
+            && self.origin.as_ref() == s.editor.project()
+    }
+    /// Use only after `current` was checked immediately before synchronously
+    /// committing a pending field, then replan from the resulting document.
+    pub fn same_context(&self, s: &crate::editor::EditorState) -> bool {
         self.revision == s.document_revision
             && self.frame == s.frame
             && Self::eligible_layer(s) == Some(self.layer)
-            && self.origin.as_ref() == s.editor.project()
+            && self.origin.active_composition_id() == s.editor.project().active_composition_id()
     }
     pub fn refresh(previous: &mut Option<Self>, s: &crate::editor::EditorState) {
         let Some(layer) = Self::eligible_layer(s) else {
@@ -68,6 +75,239 @@ impl InputTarget {
             self.revision,
             self.frame
         )
+    }
+}
+
+/// A press is armed before descendant outside-down handlers can commit fields.
+/// The native click still owns activation, so releasing outside cancels normally.
+#[derive(Clone)]
+struct InputPress {
+    control: String,
+    target: InputTarget,
+    down: gpui::MouseDownEvent,
+    bounds: gpui::Bounds<gpui::Pixels>,
+}
+impl InputPress {
+    fn after_flush(
+        control: String,
+        before: &InputTarget,
+        down: gpui::MouseDownEvent,
+        bounds: gpui::Bounds<gpui::Pixels>,
+        state: &crate::editor::EditorState,
+    ) -> Option<Self> {
+        // A synchronous input commit may change only the document contents, not
+        // its epoch, composition, layer, time, playback or lock eligibility.
+        before.same_context(state).then_some(())?;
+        Some(Self {
+            control,
+            target: InputTarget::new(state)?,
+            down,
+            bounds,
+        })
+    }
+    fn matches(
+        &self,
+        control: &str,
+        click: &gpui::MouseClickEvent,
+        state: &crate::editor::EditorState,
+    ) -> bool {
+        self.control == control
+            && click.down.button == gpui::MouseButton::Left
+            && click.up.button == gpui::MouseButton::Left
+            && self.down.position == click.down.position
+            && self.down.button == click.down.button
+            && self.down.modifiers == click.down.modifiers
+            && self.down.click_count == click.down.click_count
+            && self.down.first_mouse == click.down.first_mouse
+            && self.bounds.contains(&click.up.position)
+            && self.target.current(state)
+    }
+}
+#[derive(Clone)]
+struct InputButton {
+    control: String,
+    target: InputTarget,
+    hitbox: gpui::Hitbox,
+}
+#[derive(Default)]
+struct InputPointerWindow {
+    buttons: Vec<InputButton>,
+    press: Option<InputPress>,
+    generation: u64,
+}
+#[derive(Default)]
+struct InputPointers(std::collections::HashMap<u64, InputPointerWindow>);
+impl gpui::Global for InputPointers {}
+
+/// Install once on the workspace ancestor. Its capture handler is registered
+/// before any child TextField/Preview outside-down listener. The first child's
+/// prepaint clears registrations; each visible button renews its masked hitbox
+/// during prepaint. These workspace views do not use GPUI's opt-in `.cached()`.
+pub(crate) fn input_pointer_root(
+    root: gpui::Stateful<gpui::Div>,
+    state: &gpui::Entity<crate::editor::EditorState>,
+) -> gpui::Stateful<gpui::Div> {
+    use gpui::prelude::*;
+    let state = state.clone();
+    let draw_state = state.clone();
+    root.capture_any_mouse_down(move |event, window, cx| {
+        let id = window.window_handle().window_id().as_u64();
+        let candidate = {
+            let pointers = cx.default_global::<InputPointers>();
+            let entry = pointers.0.entry(id).or_default();
+            entry.press = None;
+            entry.generation = entry.generation.wrapping_add(1);
+            (event.button == gpui::MouseButton::Left)
+                .then(|| {
+                    entry
+                        .buttons
+                        .iter()
+                        .rev()
+                        .find(|b| b.hitbox.is_hovered(window))
+                        .cloned()
+                })
+                .flatten()
+        };
+        let Some(button) = candidate.filter(|b| b.target.current(state.read(cx))) else {
+            return;
+        };
+        crate::components::TextField::commit_active(window, cx);
+        state.update(cx, |s, cx| {
+            if button.target.same_context(s) {
+                s.finish_text(true, cx);
+            }
+        });
+        let press = InputPress::after_flush(
+            button.control,
+            &button.target,
+            event.clone(),
+            button.hitbox.bounds,
+            state.read(cx),
+        );
+        cx.default_global::<InputPointers>()
+            .0
+            .entry(id)
+            .or_default()
+            .press = press;
+    })
+    .capture_any_mouse_up(|_, window, cx| {
+        // Run after native on_click. No click (including drag-out) leaves
+        // no receipt that a later release or keyboard event could reuse.
+        let id = window.window_handle().window_id().as_u64();
+        let generation = cx
+            .default_global::<InputPointers>()
+            .0
+            .entry(id)
+            .or_default()
+            .generation;
+        cx.defer(move |cx| {
+            if let Some(entry) = cx.default_global::<InputPointers>().0.get_mut(&id)
+                && entry.generation == generation
+            {
+                entry.press = None;
+            }
+        });
+    })
+    .on_mouse_up_out(gpui::MouseButton::Left, |_, window, cx| {
+        let id = window.window_handle().window_id().as_u64();
+        if let Some(entry) = cx.default_global::<InputPointers>().0.get_mut(&id) {
+            entry.press = None;
+        }
+    })
+    .child(
+        gpui::canvas(
+            move |_, window, cx| {
+                let id = window.window_handle().window_id().as_u64();
+                let current = cx
+                    .try_global::<InputPointers>()
+                    .and_then(|p| p.0.get(&id))
+                    .and_then(|p| p.press.as_ref())
+                    .is_none_or(|p| p.target.current(draw_state.read(cx)));
+                let entry = cx
+                    .default_global::<InputPointers>()
+                    .0
+                    .entry(id)
+                    .or_default();
+                entry.buttons.clear();
+                if !current {
+                    entry.press = None;
+                }
+            },
+            |_, _, _, _| (),
+        )
+        .absolute()
+        .size_full(),
+    )
+}
+
+pub(crate) fn cancel_input_pointer(window: &gpui::Window, cx: &mut gpui::App) {
+    release_input_pointer(window.window_handle().window_id(), cx);
+}
+
+pub(crate) fn release_input_pointer(window: gpui::WindowId, cx: &mut gpui::App) {
+    cx.default_global::<InputPointers>()
+        .0
+        .remove(&window.as_u64());
+}
+
+pub(crate) fn input_pointer_button(
+    button: gpui::Stateful<gpui::Div>,
+    control: String,
+    target: Option<InputTarget>,
+) -> gpui::Stateful<gpui::Div> {
+    use gpui::prelude::*;
+    button.relative().child(
+        gpui::canvas(
+            move |bounds, window, cx| {
+                if let Some(target) = target.as_ref() {
+                    let hitbox = window.insert_hitbox(bounds, gpui::HitboxBehavior::Normal);
+                    let id = window.window_handle().window_id().as_u64();
+                    cx.default_global::<InputPointers>()
+                        .0
+                        .entry(id)
+                        .or_default()
+                        .buttons
+                        .push(InputButton {
+                            control: control.clone(),
+                            target: target.clone(),
+                            hitbox,
+                        });
+                }
+            },
+            |_, _, _, _| (),
+        )
+        .absolute()
+        .size_full(),
+    )
+}
+
+pub(crate) fn input_click_target(
+    control: &str,
+    event: &gpui::ClickEvent,
+    rendered: &Option<InputTarget>,
+    state: &gpui::Entity<crate::editor::EditorState>,
+    window: &gpui::Window,
+    cx: &mut gpui::App,
+) -> Option<InputTarget> {
+    if !window.is_window_active() {
+        return None;
+    }
+    match event {
+        gpui::ClickEvent::Keyboard(_) => rendered.clone().filter(|t| t.current(state.read(cx))),
+        gpui::ClickEvent::Mouse(click) => {
+            let id = window.window_handle().window_id().as_u64();
+            let (press, visible) = {
+                let entry = cx.default_global::<InputPointers>().0.get_mut(&id)?;
+                (
+                    entry.press.take()?,
+                    entry
+                        .buttons
+                        .iter()
+                        .any(|b| b.control == control && b.hitbox.is_hovered(window)),
+                )
+            };
+            (visible && press.matches(control, click, state.read(cx))).then_some(press.target)
+        }
     }
 }
 
@@ -1644,5 +1884,165 @@ mod text_paint_controls_tests {
         assert!(!target.current(&s));
         s.editor.clear_selection();
         assert!(InputTarget::new(&s).is_none());
+    }
+}
+
+#[cfg(test)]
+mod typography_pointer_tests {
+    use super::*;
+    use crate::editor::EditorState;
+    use gpui::{MouseButton, MouseClickEvent, MouseDownEvent, MouseUpEvent, point, px, size};
+    use libre_effects_core::{TextParam, TrackEdit};
+
+    fn scene() -> EditorState {
+        let mut state = EditorState::default();
+        state
+            .editor
+            .execute(Command::AddContent {
+                content: Content::Text {
+                    text: "Pending".into(),
+                    font_size: 48.,
+                },
+                width: 400.,
+                height: 120.,
+                name: "Text".into(),
+            })
+            .unwrap();
+        state.frame = 17;
+        state
+    }
+    fn down() -> MouseDownEvent {
+        MouseDownEvent {
+            button: MouseButton::Left,
+            position: point(px(20.), px(20.)),
+            click_count: 1,
+            ..Default::default()
+        }
+    }
+    fn bounds() -> gpui::Bounds<gpui::Pixels> {
+        gpui::Bounds::new(point(px(10.), px(10.)), size(px(100.), px(30.)))
+    }
+    fn click(down: &MouseDownEvent) -> MouseClickEvent {
+        MouseClickEvent {
+            down: down.clone(),
+            up: MouseUpEvent {
+                button: MouseButton::Left,
+                position: down.position,
+                click_count: 1,
+                ..Default::default()
+            },
+        }
+    }
+    #[test]
+    fn typography_pointer_down_flush_and_up_work_without_intermediate_repaint() {
+        let mut state = scene();
+        let rendered = InputTarget::new(&state).unwrap();
+        let down = down();
+        assert!(rendered.current(&state)); // workspace capture, before descendants
+        let command = state
+            .editor
+            .selected_layer()
+            .unwrap()
+            .text_value_command(TextParam::FontSize, 72.125, state.frame)
+            .unwrap()
+            .unwrap();
+        state.editor.execute(command).unwrap(); // pending Character/Inspector field
+        state
+            .editor
+            .execute(Command::SetContent {
+                id: 1,
+                content: Content::Text {
+                    text: "Committed source".into(),
+                    font_size: 72.125,
+                },
+            })
+            .unwrap(); // pending canvas source
+        let press = InputPress::after_flush(
+            "font-watch".into(),
+            &rendered,
+            down.clone(),
+            bounds(),
+            &state,
+        )
+        .unwrap();
+        assert!(!rendered.current(&state)); // no render refreshes the old closure
+        assert!(press.matches("font-watch", &click(&down), &state));
+        // The matched release plans from the exact post-flush document.
+        state
+            .editor
+            .execute(Command::EditText {
+                id: 1,
+                parameter: TextParam::FontSize,
+                edit: TrackEdit::ToggleAnimation { frame: state.frame },
+            })
+            .unwrap();
+        assert_eq!(
+            state
+                .editor
+                .selected_layer()
+                .unwrap()
+                .text_value_at(TextParam::FontSize, 17),
+            Some(72.125)
+        );
+        assert_eq!(
+            state.editor.selected_layer().unwrap().content(),
+            &Content::Text {
+                text: "Committed source".into(),
+                font_size: 72.125
+            }
+        );
+    }
+    #[test]
+    fn typography_pointer_release_rejects_drag_out_other_control_and_intervening_edits() {
+        let mut state = scene();
+        let rendered = InputTarget::new(&state).unwrap();
+        let down = down();
+        let press =
+            InputPress::after_flush("fit".into(), &rendered, down.clone(), bounds(), &state)
+                .unwrap();
+        let valid = click(&down);
+        assert!(press.matches("fit", &valid, &state));
+        assert!(!press.matches("point", &valid, &state));
+        let mut outside = valid.clone();
+        outside.up.position = point(px(400.), px(200.));
+        assert!(!press.matches("fit", &outside, &state));
+        let mut other_press = valid.clone();
+        other_press.down.position.x += px(1.);
+        assert!(!press.matches("fit", &other_press, &state));
+        state
+            .editor
+            .execute(Command::RenameLayer {
+                id: 1,
+                name: "Arbitrary mutation".into(),
+            })
+            .unwrap();
+        assert!(!press.matches("fit", &valid, &state));
+        assert!(!rendered.current(&state)); // stale render cannot arm a new press
+    }
+    #[test]
+    fn typography_pointer_flush_rejects_epoch_time_selection_lock_and_playback_changes() {
+        for change in 0..5 {
+            let mut state = scene();
+            let rendered = InputTarget::new(&state).unwrap();
+            let press =
+                InputPress::after_flush("leading".into(), &rendered, down(), bounds(), &state)
+                    .unwrap();
+            match change {
+                0 => state.document_revision += 1,
+                1 => state.frame += 1,
+                2 => {
+                    state.editor.execute(Command::AddSolid).unwrap();
+                }
+                3 => {
+                    state.editor.execute(Command::ToggleLocked(1)).unwrap();
+                }
+                _ => state.playing = true,
+            }
+            assert!(
+                InputPress::after_flush("leading".into(), &rendered, down(), bounds(), &state)
+                    .is_none()
+            );
+            assert!(!press.matches("leading", &click(&down()), &state));
+        }
     }
 }

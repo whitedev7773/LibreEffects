@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-const PROJECT_VERSION: u32 = 48;
+const PROJECT_VERSION: u32 = 49;
 pub type Frame = u32;
 pub type LayerId = u64;
 pub type CompositionId = u64;
@@ -79,9 +79,11 @@ mod shapes;
 pub use shape_stroke::{ShapeStroke, StrokeCap, StrokeJoin};
 mod text_animation;
 mod text_style;
-pub use text_animation::{TextPaint, TextParam};
+pub use text_animation::{TextPaint, TextParam, TextTypography};
 #[cfg(test)]
 mod text_animation_tests;
+#[cfg(test)]
+mod text_typography_tests;
 pub use shapes::{Shape, ShapeKind};
 pub use text_style::{TextAlign, TextFont, TextStrokeJoin, TextStyle};
 mod temporal;
@@ -1648,13 +1650,16 @@ impl Editor {
                 .unwrap_or(44);
             next.project.version = next.project.version.max(version);
         }
-        if next
+        if let Some(version) = next
             .project
             .compositions()
             .into_iter()
-            .any(|(_, c)| c.layers.iter().any(|l| !l.text_parameters.is_empty()))
+            .flat_map(|(_, c)| &c.layers)
+            .flat_map(|layer| layer.text_parameters.keys())
+            .map(|parameter| if parameter.is_typography() { 49 } else { 48 })
+            .max()
         {
-            next.project.version = next.project.version.max(48);
+            next.project.version = next.project.version.max(version);
         }
         self.accept_candidate(next)
     }

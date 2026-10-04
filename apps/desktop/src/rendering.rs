@@ -276,14 +276,16 @@ impl Renderer {
         let id = format!("{prefix}-{}", l.id());
         let mut svg = String::new();
         let e = l.effects();
-        // Sample paint once for both measurement and painting. Keep typography
-        // and the source layer untouched, including during in-between frames.
+        // Sample geometry and paint once for both measurement and painting.
+        // Keep the source layer untouched, including during in-between frames.
         let text_paint = matches!(l.content(), Content::Text { .. }).then(|| {
             let mut style = l.text_style();
+            let typography = l.text_typography_at(frame).unwrap();
+            typography.apply_to_style(&mut style);
             style.stroke_color = l.text_color_at(TextPaint::Stroke, frame).unwrap();
             style.stroke_width = l.text_value_at(TextParam::StrokeWidth, frame).unwrap();
             let fill = format!("#{:06x}", l.text_color_at(TextPaint::Fill, frame).unwrap());
-            (fill, style)
+            (fill, style, typography.font_size)
         });
         let mut effect_bounds = [0.0, 0.0, l.width(), l.height()];
         if matches!(
@@ -299,9 +301,9 @@ impl Renderer {
                 l.height(),
                 match l.content() {
                     Content::ShapeContents(c) => c.svg_at(frame),
-                    Content::Text { text, font_size } => layer_text_svg(
+                    Content::Text { text, .. } => layer_text_svg(
                         text,
-                        *font_size,
+                        text_paint.as_ref().unwrap().2,
                         &text_paint.as_ref().unwrap().0,
                         l.width(),
                         l.height(),
@@ -391,8 +393,8 @@ impl Renderer {
             Content::ShapeContents(contents) => {
                 svg.push_str(&contents.svg_at_with_prefix(frame, &id))
             }
-            Content::Text { text, font_size } => {
-                let (fill, style) = text_paint.as_ref().unwrap();
+            Content::Text { text, .. } => {
+                let (fill, style, font_size) = text_paint.as_ref().unwrap();
                 svg.push_str(&layer_text_svg(
                     text,
                     *font_size,

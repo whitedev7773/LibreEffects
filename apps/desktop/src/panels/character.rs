@@ -22,14 +22,9 @@ fn field_command(
     if layer.locked() {
         return Err("Unlock the text layer before editing".into());
     }
-    let Content::Text {
-        text: content,
-        font_size,
-    } = layer.content()
-    else {
+    if !matches!(layer.content(), Content::Text { .. }) {
         return Err("Select a text layer".into());
-    };
-    let id = layer.id();
+    }
     if index == 3 || index == 5 {
         return crate::color_edit::text_hex_command(
             layer,
@@ -42,47 +37,85 @@ fn field_command(
             text,
         );
     }
+    let parameter = field_parameter(index).ok_or("Unknown text field")?;
     let value = text
         .trim()
         .parse::<f64>()
         .map_err(|_| "Enter a finite number")?;
-    if !value.is_finite() {
-        return Err("Enter a finite number".into());
+    layer.text_value_command(parameter, value, frame)
+}
+
+fn field_parameter(index: usize) -> Option<TextParam> {
+    match index {
+        0 => Some(TextParam::FontSize),
+        1 => Some(TextParam::Leading),
+        2 => Some(TextParam::Tracking),
+        4 => Some(TextParam::StrokeWidth),
+        _ => None,
     }
-    if index == 4 {
-        let (lo, hi) = TextParam::StrokeWidth.bounds();
-        if !(lo..=hi).contains(&value) {
-            return Err("Stroke width must be from 0 to 1000 px".into());
-        }
-        return Ok(
-            (layer.text_value_at(TextParam::StrokeWidth, frame) != Some(value)).then_some(
-                Command::EditText {
-                    id,
-                    parameter: TextParam::StrokeWidth,
-                    edit: TrackEdit::Value { frame, value },
-                },
-            ),
-        );
+}
+
+fn scalar_animation_command(layer: &Layer, parameter: TextParam, frame: Frame) -> Command {
+    Command::EditText {
+        id: layer.id(),
+        parameter,
+        edit: TrackEdit::ToggleAnimation { frame },
     }
-    if index == 0 {
-        return Ok((*font_size != value).then_some(Command::SetContent {
-            id,
-            content: Content::Text {
-                text: content.clone(),
-                font_size: value,
-            },
-        }));
-    }
-    // Typography edits always clone the base style, never evaluated paint.
-    let mut style = layer.text_style();
-    if index == 1 {
-        style.leading = value / font_size;
-    } else if index == 2 {
-        style.tracking = value;
-    } else {
-        return Err("Unknown text field".into());
-    }
-    Ok((style != layer.text_style()).then_some(Command::SetTextStyle { id, style }))
+}
+
+/// Flush pending input before sampling the scalar's independent stopwatch.
+/// The frozen target rejects stale controls; only that synchronous field commit
+/// may change the document before we replan against the current base and tracks.
+pub(super) fn scalar_watch(
+    state: &Entity<EditorState>,
+    layer: &Layer,
+    parameter: TextParam,
+    target: Option<InputTarget>,
+    scope: &'static str,
+) -> impl IntoElement {
+    let control = format!("{scope}-{parameter:?}-watch");
+    let id = layer.id();
+    let state = state.clone();
+    let button = ui::tool(
+        SharedString::from(control.clone()),
+        "stopwatch",
+        format!("Toggle {} animation", parameter.label()),
+        layer
+            .track(PropertyPath::Text(parameter))
+            .is_some_and(|t| !t.keys().is_empty()),
+    );
+    crate::color_edit::input_pointer_button(button, control.clone(), target.clone()).on_click(
+        move |event, w, cx| {
+            cx.stop_propagation();
+            let Some(target) =
+                crate::color_edit::input_click_target(&control, event, &target, &state, w, cx)
+            else {
+                return;
+            };
+            if state.read(cx).editor.selected() != Some(id) {
+                return;
+            }
+            TextField::commit_active(w, cx);
+            state.update(cx, |s, cx| {
+                if !target.same_context(s) {
+                    return;
+                }
+                s.finish_text(true, cx);
+                if !target.same_context(s) {
+                    return;
+                }
+                let Some(layer) = s
+                    .editor
+                    .selected_layer()
+                    .filter(|l| matches!(l.content(), Content::Text { .. }))
+                else {
+                    return;
+                };
+                let command = scalar_animation_command(layer, parameter, s.frame);
+                s.dispatch(&Action::Edit(command), w, cx);
+            });
+        },
+    )
 }
 
 pub(super) fn color_watch(
@@ -129,6 +162,10 @@ impl Character {
                     TextField::new(cx, move |text, w, cx| {
                         state.update(cx, |s, cx| {
                             if !target.borrow().as_ref().is_some_and(|t| t.current(s)) {
+                                return;
+                            }
+                            s.finish_text(true, cx);
+                            if !target.borrow().as_ref().is_some_and(|t| t.same_context(s)) {
                                 return;
                             }
                             let Some(l) = s.editor.selected_layer() else {
@@ -250,7 +287,7 @@ impl Render for Character {
         let Some(l) = self.state.read(cx).editor.selected_layer().cloned() else {
             return panel.child("Select a text layer.");
         };
-        let Content::Text { font_size, .. } = l.content() else {
+        let Some(typography) = l.text_typography_at(frame) else {
             return panel.child("Select a text layer.");
         };
         InputTarget::refresh(&mut self.input_source, self.state.read(cx));
@@ -376,9 +413,9 @@ impl Render for Character {
         let fill_color = l.text_color_at(TextPaint::Fill, frame).unwrap();
         let stroke_color = l.text_color_at(TextPaint::Stroke, frame).unwrap();
         let values = [
-            font_size.to_string(),
-            format!("{:.2}", l.text_style().leading * font_size),
-            l.text_style().tracking.to_string(),
+            typography.font_size.to_string(),
+            typography.leading.to_string(),
+            typography.tracking.to_string(),
             format!("{fill_color:06X}"),
             l.text_value_at(TextParam::StrokeWidth, frame)
                 .unwrap()
@@ -387,8 +424,8 @@ impl Render for Character {
         ];
         for (i, label) in [
             "Font size (px)",
-            "Leading (px)",
-            "Tracking",
+            "Leading (× font size)",
+            "Tracking (1/1000 em)",
             "Fill (hex)",
             "Stroke (px)",
             "Stroke (hex)",
@@ -397,14 +434,19 @@ impl Render for Character {
         .enumerate()
         {
             *self.input_targets[i].borrow_mut() = self.input_source.clone();
-            self.fields[i].update(cx, |f, _| f.sync(binding.clone(), values[i].clone(), w));
+            self.fields[i].update(cx, |f, _| {
+                if field_parameter(i).is_some() {
+                    f.set_numeric();
+                }
+                f.sync(binding.clone(), values[i].clone(), w);
+            });
             panel = panel.child(
                 div()
                     .flex()
                     .items_center()
                     .child(
                         div()
-                            .w(px(108.0))
+                            .w(px(155.0))
                             .flex()
                             .items_center()
                             .when(!l.locked() && (i == 3 || i == 5), |d| {
@@ -419,19 +461,13 @@ impl Render for Character {
                                     frame,
                                 ))
                             })
-                            .when(!l.locked() && i == 4, |d| {
-                                d.child(ui::action_tool(
-                                    "text-stroke-width-watch",
-                                    "stopwatch",
-                                    "Toggle stroke width animation",
+                            .when(!l.locked() && field_parameter(i).is_some(), |d| {
+                                d.child(scalar_watch(
                                     &self.state,
-                                    Action::Edit(Command::EditText {
-                                        id: l.id(),
-                                        parameter: TextParam::StrokeWidth,
-                                        edit: TrackEdit::ToggleAnimation { frame },
-                                    }),
-                                    l.track(PropertyPath::Text(TextParam::StrokeWidth))
-                                        .is_some_and(|t| !t.keys().is_empty()),
+                                    &l,
+                                    field_parameter(i).unwrap(),
+                                    self.input_source.clone(),
+                                    "character",
                                 ))
                             })
                             .child(label),
@@ -556,20 +592,117 @@ impl Render for Character {
             )
     }
 }
+#[derive(Clone, Copy)]
+enum ParagraphEdit {
+    Align(TextAlign),
+    Mode(bool),
+    FitHeight,
+}
+
+fn paragraph_command(
+    layer: &Layer,
+    frame: Frame,
+    edit: ParagraphEdit,
+) -> Result<Option<Command>, String> {
+    if layer.locked() || !matches!(layer.content(), Content::Text { .. }) {
+        return Err("Select an unlocked text layer".into());
+    }
+    match edit {
+        ParagraphEdit::Align(align) => {
+            let mut style = layer.text_style();
+            if style.align == align {
+                return Ok(None);
+            }
+            style.align = align;
+            Ok(Some(Command::SetTextStyle {
+                id: layer.id(),
+                style,
+            }))
+        }
+        ParagraphEdit::Mode(paragraph) => Ok((layer.text_style().paragraph != paragraph)
+            .then(|| crate::text_flow::convert(layer, paragraph, frame))),
+        ParagraphEdit::FitHeight => {
+            let height = crate::text_flow::fit_height(layer, frame)
+                .ok_or("Select paragraph text to fit its box")?
+                .ceil();
+            if !height.is_finite() || !(1.0..=16384.0).contains(&height) {
+                return Err("Fitted text height must be from 1 to 16384 px".into());
+            }
+            Ok((height != layer.height()).then_some(Command::SetTextBox {
+                id: layer.id(),
+                width: layer.width(),
+                height,
+            }))
+        }
+    }
+}
+
+fn dispatch_paragraph(
+    state: &Entity<EditorState>,
+    target: &Option<InputTarget>,
+    edit: ParagraphEdit,
+    control: &str,
+    event: &gpui::ClickEvent,
+    window: &mut Window,
+    cx: &mut gpui::App,
+) {
+    let Some(target) =
+        crate::color_edit::input_click_target(control, event, target, state, window, cx)
+    else {
+        return;
+    };
+    TextField::commit_active(window, cx);
+    state.update(cx, |s, cx| {
+        if !target.same_context(s) {
+            return;
+        }
+        s.finish_text(true, cx);
+        if !target.same_context(s) {
+            return;
+        }
+        let Some(layer) = s.editor.selected_layer() else {
+            return;
+        };
+        match paragraph_command(layer, s.frame, edit) {
+            Ok(Some(command)) => s.dispatch(&Action::Edit(command), window, cx),
+            Ok(None) => {}
+            Err(error) => {
+                s.status = error;
+                cx.notify();
+            }
+        }
+    });
+}
+
 pub(crate) struct Paragraph {
     state: Entity<EditorState>,
     fields: Vec<Entity<TextField>>,
+    input_source: Option<InputTarget>,
+    input_targets: Vec<Rc<RefCell<Option<InputTarget>>>>,
 }
 impl Paragraph {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
+        let input_targets: Vec<Rc<RefCell<Option<InputTarget>>>> =
+            (0..2).map(|_| Default::default()).collect();
         let fields = (0..2)
             .map(|index| {
                 let state = state.clone();
+                let target = input_targets[index].clone();
                 cx.new(|cx| {
                     TextField::new(cx, move |text, w, cx| {
                         state.update(cx, |s, cx| {
-                            let Some(layer) = s.editor.selected_layer() else {
+                            if !target.borrow().as_ref().is_some_and(|t| t.current(s)) {
+                                return;
+                            }
+                            s.finish_text(true, cx);
+                            if !target.borrow().as_ref().is_some_and(|t| t.same_context(s)) {
+                                return;
+                            }
+                            let Some(layer) = s.editor.selected_layer().filter(|l| {
+                                matches!(l.content(), Content::Text { .. })
+                                    && l.text_style().paragraph
+                            }) else {
                                 return;
                             };
                             let Ok(value) = text.trim().parse::<f64>() else {
@@ -585,17 +718,29 @@ impl Paragraph {
                             s.dispatch(&Action::Edit(command), w, cx);
                         })
                     })
+                    .numeric()
                 })
             })
             .collect();
-        Self { state, fields }
+        Self {
+            state,
+            fields,
+            input_source: None,
+            input_targets,
+        }
     }
 }
 impl Render for Paragraph {
     fn render(&mut self, w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let layer = self
-            .state
-            .read(cx)
+        let state = self.state.read(cx);
+        InputTarget::refresh(&mut self.input_source, state);
+        let binding = self
+            .input_source
+            .as_ref()
+            .map(InputTarget::binding)
+            .unwrap_or_default();
+        let frame = state.frame;
+        let layer = state
             .editor
             .selected_layer()
             .filter(|l| matches!(l.content(), Content::Text { .. }))
@@ -610,23 +755,25 @@ impl Render for Paragraph {
             (TextAlign::Center, "text-align-center", "Center text"),
             (TextAlign::Right, "text-align-right", "Align text right"),
         ] {
-            let mut style = l.text_style();
-            style.align = align;
-            let id = l.id();
             let state = self.state.clone();
+            let target = self.input_source.clone();
             alignment = alignment.child(
-                ui::tool(icon, icon, label, l.text_style().align == align).when(!l.locked(), |b| {
-                    b.on_click(move |_, w, cx| {
-                        state.update(cx, |s, cx| {
-                            s.dispatch(
-                                &Action::Edit(Command::SetTextStyle {
-                                    id,
-                                    style: style.clone(),
-                                }),
-                                w,
-                                cx,
-                            )
-                        })
+                crate::color_edit::input_pointer_button(
+                    ui::tool(icon, icon, label, l.text_style().align == align),
+                    icon.into(),
+                    target.clone(),
+                )
+                .when(!l.locked(), |b| {
+                    b.on_click(move |event, w, cx| {
+                        dispatch_paragraph(
+                            &state,
+                            &target,
+                            ParagraphEdit::Align(align),
+                            icon,
+                            event,
+                            w,
+                            cx,
+                        )
                     })
                 }),
             );
@@ -634,20 +781,30 @@ impl Render for Paragraph {
         panel = panel.child(alignment);
         let mut modes = div().flex().gap_2();
         for (paragraph, label) in [(false, "Point text"), (true, "Paragraph text")] {
-            let command = crate::text_flow::convert(&l, paragraph);
             let state = self.state.clone();
+            let target = self.input_source.clone();
             modes = modes.child(
-                ui::text_button(label, label)
-                    .when(l.text_style().paragraph == paragraph, |b| {
-                        b.text_color(rgb(ui::BLUE))
+                crate::color_edit::input_pointer_button(
+                    ui::text_button(label, label),
+                    label.into(),
+                    target.clone(),
+                )
+                .when(l.text_style().paragraph == paragraph, |b| {
+                    b.text_color(rgb(ui::BLUE))
+                })
+                .when(!l.locked(), |b| {
+                    b.on_click(move |event, w, cx| {
+                        dispatch_paragraph(
+                            &state,
+                            &target,
+                            ParagraphEdit::Mode(paragraph),
+                            label,
+                            event,
+                            w,
+                            cx,
+                        )
                     })
-                    .when(!l.locked(), |b| {
-                        b.on_click(move |_, w, cx| {
-                            state.update(cx, |s, cx| {
-                                s.dispatch(&Action::Edit(command.clone()), w, cx)
-                            })
-                        })
-                    }),
+                }),
             );
         }
         panel = panel.child(modes);
@@ -656,9 +813,8 @@ impl Render for Paragraph {
                 (0, "Box width (px)", l.width()),
                 (1, "Box height (px)", l.height()),
             ] {
-                self.fields[i].update(cx, |f, _| {
-                    f.sync(l.id().to_string(), format!("{value:.2}"), w)
-                });
+                *self.input_targets[i].borrow_mut() = self.input_source.clone();
+                self.fields[i].update(cx, |f, _| f.sync(binding.clone(), value.to_string(), w));
                 panel = panel.child(
                     div()
                         .flex()
@@ -668,49 +824,44 @@ impl Render for Paragraph {
                             div()
                                 .flex_1()
                                 .min_w_0()
-                                .when(l.locked(), |d| d.child(format!("{value:.1}")))
+                                .when(l.locked(), |d| d.child(value.to_string()))
                                 .when(!l.locked(), |d| d.child(self.fields[i].clone())),
                         ),
                 );
             }
-            if let Content::Text { text, font_size } = l.content() {
-                let lines = crate::text_flow::lines(text, *font_size, l.width(), &l.text_style());
-                let needed = lines.iter().map(|l| l.bottom).fold(1.0, f64::max);
+            if let Some(lines) = crate::text_flow::layer_lines(&l, frame) {
+                let needed = crate::text_flow::fit_height(&l, frame).unwrap().ceil();
                 if crate::text_flow::composed_count(&lines, l.height()) < lines.len() {
                     let state = self.state.clone();
-                    let id = l.id();
-                    let width = l.width();
+                    let target = self.input_source.clone();
                     panel = panel
                         .child(
                             div()
                                 .text_color(rgb(0xffaa88))
                                 .child("Overflow: Point conversion removes hidden text"),
                         )
-                        .when(
-                            needed.ceil() > l.height() && needed.ceil() <= 16384.0,
-                            |panel| {
-                                panel.child(
-                                    ui::text_button("fit-text-height", "Fit box height").when(
-                                        !l.locked(),
-                                        |b| {
-                                            b.on_click(move |_, w, cx| {
-                                                state.update(cx, |s, cx| {
-                                                    s.dispatch(
-                                                        &Action::Edit(Command::SetTextBox {
-                                                            id,
-                                                            width,
-                                                            height: needed.ceil(),
-                                                        }),
-                                                        w,
-                                                        cx,
-                                                    )
-                                                })
-                                            })
-                                        },
-                                    ),
+                        .when(needed > l.height() && needed <= 16384.0, |panel| {
+                            panel.child(
+                                crate::color_edit::input_pointer_button(
+                                    ui::text_button("fit-text-height", "Fit box height"),
+                                    "fit-text-height".into(),
+                                    target.clone(),
                                 )
-                            },
-                        );
+                                .when(!l.locked(), |b| {
+                                    b.on_click(move |event, w, cx| {
+                                        dispatch_paragraph(
+                                            &state,
+                                            &target,
+                                            ParagraphEdit::FitHeight,
+                                            "fit-text-height",
+                                            event,
+                                            w,
+                                            cx,
+                                        )
+                                    })
+                                }),
+                            )
+                        });
                 }
             }
         }
@@ -841,7 +992,7 @@ mod text_paint_controls_tests {
                     .clone()
             })
             .collect();
-        for (index, text) in [(0, "60"), (1, "80"), (2, "20")] {
+        for (index, text) in [(0, "60"), (1, "1.3333333333333333"), (2, "20")] {
             let command = field_command(e.selected_layer().unwrap(), 30, index, text)
                 .unwrap()
                 .unwrap();
@@ -857,5 +1008,309 @@ mod text_paint_controls_tests {
         assert!(field_command(l, 30, 3, " #102030 ").unwrap().is_none());
         e.execute(Command::AddSolid).unwrap();
         assert!(field_command(e.selected_layer().unwrap(), 30, 3, "abcdef").is_err());
+    }
+    #[test]
+    fn typography_fields_share_sparse_scalar_planning_and_full_precision_noops() {
+        let mut e = scene();
+        for (index, parameter, value) in [
+            (0, TextParam::FontSize, 53.125),
+            (1, TextParam::Leading, 1.375),
+            (2, TextParam::Tracking, -12.125),
+        ] {
+            assert_eq!(field_parameter(index), Some(parameter));
+            let command = field_command(e.selected_layer().unwrap(), 17, index, &value.to_string())
+                .unwrap()
+                .unwrap();
+            e.execute(command).unwrap();
+            assert_eq!(
+                e.selected_layer().unwrap().text_value_at(parameter, 17),
+                Some(value)
+            );
+            assert!(
+                e.selected_layer()
+                    .unwrap()
+                    .track(PropertyPath::Text(parameter))
+                    .is_none()
+            );
+        }
+        let base = e.project().clone();
+        for (index, parameter, end) in [
+            (0, TextParam::FontSize, 91.987654321),
+            (1, TextParam::Leading, 2.987654321),
+            (2, TextParam::Tracking, 134.987654321),
+        ] {
+            let command = scalar_animation_command(e.selected_layer().unwrap(), parameter, 0);
+            e.execute(command).unwrap();
+            let command = field_command(e.selected_layer().unwrap(), 60, index, &end.to_string())
+                .unwrap()
+                .unwrap();
+            e.execute(command).unwrap();
+            let sample = e
+                .selected_layer()
+                .unwrap()
+                .text_value_at(parameter, 17)
+                .unwrap();
+            let before = e.project().clone();
+            for input in [sample.to_string(), format!("  {sample:e}  ")] {
+                assert!(
+                    field_command(e.selected_layer().unwrap(), 17, index, &input)
+                        .unwrap()
+                        .is_none()
+                );
+            }
+            assert_eq!(e.project(), &before);
+            assert!(
+                !e.selected_layer()
+                    .unwrap()
+                    .track(PropertyPath::Text(parameter))
+                    .unwrap()
+                    .keys()
+                    .contains_key(&17)
+            );
+        }
+        assert_eq!(
+            e.selected_layer().unwrap().content(),
+            base.composition().layer(1).unwrap().content()
+        );
+        assert_eq!(
+            e.selected_layer().unwrap().text_style(),
+            base.composition().layer(1).unwrap().text_style()
+        );
+    }
+
+    #[test]
+    fn typography_field_ranges_are_specific_finite_and_stopwatches_are_independent() {
+        let mut e = scene();
+        for (index, parameter, invalid) in [
+            (0, TextParam::FontSize, ["0.999", "2048.001"]),
+            (1, TextParam::Leading, ["0.0999", "10.001"]),
+            (2, TextParam::Tracking, ["-1000.001", "10000.001"]),
+        ] {
+            for value in invalid.into_iter().chain(["NaN", "inf", "-inf", "bad"]) {
+                assert!(field_command(e.selected_layer().unwrap(), 0, index, value).is_err());
+            }
+            let (min, max) = parameter.bounds();
+            for value in [min, max] {
+                assert!(
+                    field_command(e.selected_layer().unwrap(), 0, index, &value.to_string())
+                        .is_ok()
+                );
+            }
+            // Disabling a stopwatch retains its materialized, keyless track.
+            // Preserve every other channel exactly, whether sparse or retained.
+            let other_tracks: Vec<_> =
+                [TextParam::FontSize, TextParam::Tracking, TextParam::Leading]
+                    .into_iter()
+                    .filter(|p| *p != parameter)
+                    .map(|p| {
+                        (
+                            p,
+                            e.selected_layer()
+                                .unwrap()
+                                .track(PropertyPath::Text(p))
+                                .cloned(),
+                        )
+                    })
+                    .collect();
+            let sampled = e.selected_layer().unwrap().text_value_at(parameter, 7);
+            e.execute(scalar_animation_command(
+                e.selected_layer().unwrap(),
+                parameter,
+                7,
+            ))
+            .unwrap();
+            assert!(
+                e.selected_layer()
+                    .unwrap()
+                    .track(PropertyPath::Text(parameter))
+                    .unwrap()
+                    .keys()
+                    .contains_key(&7)
+            );
+            for (other, before) in &other_tracks {
+                assert_eq!(
+                    e.selected_layer()
+                        .unwrap()
+                        .track(PropertyPath::Text(*other)),
+                    before.as_ref()
+                );
+            }
+            e.execute(scalar_animation_command(
+                e.selected_layer().unwrap(),
+                parameter,
+                7,
+            ))
+            .unwrap();
+            assert!(
+                e.selected_layer()
+                    .unwrap()
+                    .track(PropertyPath::Text(parameter))
+                    .unwrap()
+                    .keys()
+                    .is_empty()
+            );
+            assert_eq!(
+                e.selected_layer().unwrap().text_value_at(parameter, 7),
+                sampled
+            );
+            for (other, before) in &other_tracks {
+                assert_eq!(
+                    e.selected_layer()
+                        .unwrap()
+                        .track(PropertyPath::Text(*other)),
+                    before.as_ref()
+                );
+            }
+        }
+        e.execute(Command::ToggleLocked(1)).unwrap();
+        for index in 0..3 {
+            assert!(field_command(e.selected_layer().unwrap(), 0, index, "2").is_err());
+        }
+    }
+
+    #[test]
+    fn paragraph_planning_samples_current_frame_and_rechecks_pending_changes_and_bounds() {
+        let mut e = scene();
+        let command = paragraph_command(e.selected_layer().unwrap(), 0, ParagraphEdit::Mode(true))
+            .unwrap()
+            .unwrap();
+        e.execute(command).unwrap();
+        for (parameter, value) in [
+            (TextParam::FontSize, 120.),
+            (TextParam::Leading, 2.25),
+            (TextParam::Tracking, 20.),
+        ] {
+            e.execute(scalar_animation_command(
+                e.selected_layer().unwrap(),
+                parameter,
+                0,
+            ))
+            .unwrap();
+            let command = e
+                .selected_layer()
+                .unwrap()
+                .text_value_command(parameter, value, 60)
+                .unwrap()
+                .unwrap();
+            e.execute(command).unwrap();
+        }
+        let base_style = e.selected_layer().unwrap().text_style();
+        let base_content = e.selected_layer().unwrap().content().clone();
+        let tracks = [TextParam::FontSize, TextParam::Tracking, TextParam::Leading].map(|p| {
+            e.selected_layer()
+                .unwrap()
+                .track(PropertyPath::Text(p))
+                .unwrap()
+                .clone()
+        });
+        let at_0 = crate::text_flow::fit_height(e.selected_layer().unwrap(), 0)
+            .unwrap()
+            .ceil();
+        let at_60 = crate::text_flow::fit_height(e.selected_layer().unwrap(), 60)
+            .unwrap()
+            .ceil();
+        assert_ne!(at_0, at_60);
+        let command = paragraph_command(e.selected_layer().unwrap(), 60, ParagraphEdit::FitHeight)
+            .unwrap()
+            .unwrap();
+        e.execute(command).unwrap();
+        assert_eq!(e.selected_layer().unwrap().height(), at_60);
+        assert!(
+            paragraph_command(e.selected_layer().unwrap(), 60, ParagraphEdit::FitHeight)
+                .unwrap()
+                .is_none()
+        );
+        let command = paragraph_command(
+            e.selected_layer().unwrap(),
+            60,
+            ParagraphEdit::Align(TextAlign::Right),
+        )
+        .unwrap()
+        .unwrap();
+        e.execute(command).unwrap();
+        assert_eq!(e.selected_layer().unwrap().content(), &base_content);
+        assert_eq!(
+            e.selected_layer().unwrap().text_style().tracking,
+            base_style.tracking
+        );
+        assert_eq!(
+            e.selected_layer().unwrap().text_style().leading,
+            base_style.leading
+        );
+        for (p, track) in [TextParam::FontSize, TextParam::Tracking, TextParam::Leading]
+            .into_iter()
+            .zip(tracks)
+        {
+            assert_eq!(
+                e.selected_layer().unwrap().track(PropertyPath::Text(p)),
+                Some(&track)
+            );
+        }
+        // A pending source edit can make a previously offered Fit invalid.
+        e.execute(Command::SetContent {
+            id: 1,
+            content: Content::Text {
+                text: "X\n".repeat(200),
+                font_size: 48.,
+            },
+        })
+        .unwrap();
+        assert!(
+            paragraph_command(e.selected_layer().unwrap(), 60, ParagraphEdit::FitHeight).is_err()
+        );
+        let before = e.project().clone();
+        e.execute(Command::ToggleLocked(1)).unwrap();
+        assert!(
+            paragraph_command(e.selected_layer().unwrap(), 60, ParagraphEdit::Mode(false)).is_err()
+        );
+        assert_eq!(
+            before.composition().layer(1).unwrap().height(),
+            e.selected_layer().unwrap().height()
+        );
+    }
+
+    #[test]
+    fn typography_and_paragraph_targets_reject_stale_context_but_allow_synchronous_replanning() {
+        let mut state = EditorState::default();
+        state.editor = scene();
+        let target = InputTarget::new(&state).unwrap();
+        let command = field_command(state.editor.selected_layer().unwrap(), 0, 0, "72")
+            .unwrap()
+            .unwrap();
+        assert!(target.current(&state));
+        state.editor.execute(command).unwrap();
+        assert!(!target.current(&state));
+        assert!(target.same_context(&state));
+        let command = paragraph_command(
+            state.editor.selected_layer().unwrap(),
+            state.frame,
+            ParagraphEdit::Mode(true),
+        )
+        .unwrap()
+        .unwrap();
+        state.editor.execute(command).unwrap();
+        assert_eq!(
+            state
+                .editor
+                .selected_layer()
+                .unwrap()
+                .text_typography_at(0)
+                .unwrap()
+                .font_size,
+            72.
+        );
+        let target = InputTarget::new(&state).unwrap();
+        state.frame = 1;
+        assert!(!target.current(&state));
+        assert!(!target.same_context(&state));
+        state.frame = 0;
+        state.playing = true;
+        assert!(!target.same_context(&state));
+        state.playing = false;
+        state.editor.execute(Command::ToggleLocked(1)).unwrap();
+        assert!(!target.same_context(&state));
+        state.editor.execute(Command::ToggleLocked(1)).unwrap();
+        state.editor.execute(Command::AddSolid).unwrap();
+        assert!(!target.same_context(&state));
     }
 }

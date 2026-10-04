@@ -575,7 +575,7 @@ impl Preview {
                 .layers()
                 .iter()
                 .find(|l| {
-                    let libre_effects_core::Content::Text { text, font_size } = l.content() else {
+                    let libre_effects_core::Content::Text { text, .. } = l.content() else {
                         return false;
                     };
                     !l.locked()
@@ -589,13 +589,8 @@ impl Preview {
                                     (0.0..=l.width()).contains(&local[0])
                                         && (0.0..=l.height()).contains(&local[1])
                                 } else {
-                                    crate::text_edit::layout::Layout::shape(
-                                        text,
-                                        *font_size,
-                                        l.width(),
-                                        &l.text_style(),
-                                    )
-                                    .contains(m.point(p))
+                                    crate::text_edit::layout::Layout::for_layer(l, frame)
+                                        .is_some_and(|layout| layout.contains(m.point(p)))
                                 }
                             })
                 })

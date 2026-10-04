@@ -46,9 +46,17 @@ fn animated_text(paragraph: bool) -> Editor {
             },
         })
         .unwrap();
-    for (parameter, value) in TextParam::ALL
-        .into_iter()
-        .zip([224., 192., 160., 48., 112., 224., 48.])
+    for (parameter, value) in [
+        TextParam::FillRed,
+        TextParam::FillGreen,
+        TextParam::FillBlue,
+        TextParam::StrokeRed,
+        TextParam::StrokeGreen,
+        TextParam::StrokeBlue,
+        TextParam::StrokeWidth,
+    ]
+    .into_iter()
+    .zip([224., 192., 160., 48., 112., 224., 48.])
     {
         editor
             .execute(Command::EditText {
@@ -294,8 +302,11 @@ fn text_paint_survives_point_paragraph_conversion_and_actual_font_replacement() 
     let mut editor = animated_text(false);
     let before = editor.project().clone();
     for paragraph in [true, false] {
-        let command =
-            crate::text_flow::convert(editor.project().composition().layer(1).unwrap(), paragraph);
+        let command = crate::text_flow::convert(
+            editor.project().composition().layer(1).unwrap(),
+            paragraph,
+            30,
+        );
         editor.execute(command).unwrap();
         unchanged_paint(&before, editor.project());
         assert_eq!(

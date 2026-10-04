@@ -1,11 +1,12 @@
 //! Caller-triggered, bounded inspection of the renderer's final positioned glyphs.
 //!
 //! This is paint-independent shaping: hidden layers and disabled Fill/Stroke are
-//! examined once, using the same composed point/paragraph geometry as rendering.
+//! examined once at a captured composition-local frame, using the same composed
+//! point/paragraph geometry as rendering. This never checks a whole animation.
 //! Overflow glyphs are not inspected. A zero glyph-ID-0 count does not guarantee
 //! emoji/variation support or of color/bitmap glyph painting. No source ranges or
 //! caret positions are inferred from usvg's possibly-empty cluster fragments.
-use libre_effects_core::{Content, Layer};
+use libre_effects_core::{Content, Frame, Layer};
 use resvg::usvg::{self, fontdb};
 use std::collections::{BTreeMap, HashMap};
 
@@ -60,6 +61,8 @@ pub(crate) enum Status {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Report {
+    /// Composition-local frame whose typography produced these glyphs.
+    pub checked_frame: Frame,
     pub primary: Option<Face>,
     pub faces: Vec<FaceUsage>,
     pub unresolved_glyphs: usize,
@@ -72,8 +75,9 @@ pub(crate) struct Report {
     pub truncated: bool,
 }
 impl Report {
-    fn new(primary: Option<Face>) -> Self {
+    fn new(primary: Option<Face>, checked_frame: Frame) -> Self {
         Self {
+            checked_frame,
             primary,
             faces: vec![],
             unresolved_glyphs: 0,
@@ -92,10 +96,10 @@ fn bounded(text: &str, limit: usize) -> String {
 
 /// Read-only one-layer operation. Callers can cancel between bounded layers.
 /// It is intentionally absent from project Open, preflight and frame rendering.
-pub(crate) fn analyze(layer: &Layer) -> Report {
+pub(crate) fn analyze(layer: &Layer, frame: Frame) -> Report {
     let primary = matches!(layer.content(), Content::Text { .. })
         .then(|| crate::fonts::matched(&layer.text_style()));
-    let mut report = analyze_with_options(layer, &crate::fonts::render_options(), primary);
+    let mut report = analyze_with_options(layer, frame, &crate::fonts::render_options(), primary);
     report.truncated |= primary.is_some_and(font_name_limited);
     report
 }
@@ -109,12 +113,13 @@ fn font_name_limited(info: &fontdb::FaceInfo) -> bool {
 
 fn analyze_with_options(
     layer: &Layer,
+    frame: Frame,
     options: &usvg::Options<'_>,
     primary: Option<&fontdb::FaceInfo>,
 ) -> Report {
     let primary_id = primary.map(|face| face.id);
-    let mut report = Report::new(primary.map(Face::from_info));
-    let Content::Text { text, font_size } = layer.content() else {
+    let mut report = Report::new(primary.map(Face::from_info), frame);
+    let Content::Text { text, .. } = layer.content() else {
         report.status = Status::Unsupported;
         return report;
     };
@@ -125,7 +130,14 @@ fn analyze_with_options(
         report.truncated = true;
         return report;
     }
-    let style = layer.text_style();
+    let mut style = layer.text_style();
+    // Sample only into temporary geometry inputs. Font identity and all stored
+    // source/style values remain untouched, including existing typography keys.
+    let typography = layer
+        .text_typography_at(frame)
+        .expect("Text content checked");
+    typography.apply_to_style(&mut style);
+    let font_size = typography.font_size;
     let mut expected = BTreeMap::new();
     let mut expected_nodes = 0;
     let mut add_line = |line: &str| {
@@ -140,7 +152,7 @@ fn analyze_with_options(
         }
     };
     if style.paragraph {
-        let lines = crate::text_flow::lines(text, *font_size, layer.width(), &style);
+        let lines = crate::text_flow::lines(text, font_size, layer.width(), &style);
         report.composed_lines = crate::text_flow::composed_count(&lines, layer.height());
         report.overflow_lines = lines.len() - report.composed_lines;
         // Wrapping can create more lines than explicit source newlines.
@@ -160,7 +172,7 @@ fn analyze_with_options(
     // paint switches. This calls the same helper as the renderer's paint passes.
     let geometry = crate::rendering::text_geometry_svg(
         text,
-        *font_size,
+        font_size,
         "white",
         layer.width(),
         layer.height(),
@@ -317,7 +329,7 @@ fn inspect_svg(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use libre_effects_core::{Command, Editor, TextStyle};
+    use libre_effects_core::{Command, Editor, TextParam, TextStyle, TrackEdit};
     use std::sync::Arc;
 
     const FIXTURE: &[u8] =
@@ -374,7 +386,7 @@ mod tests {
         (options, primary, fallback_id)
     }
     fn inspect(layer: &Layer, options: &usvg::Options<'_>, primary: fontdb::ID) -> Report {
-        analyze_with_options(layer, options, options.fontdb.face(primary))
+        analyze_with_options(layer, 0, options, options.fontdb.face(primary))
     }
     fn tree_ids(group: &usvg::Group, ids: &mut Vec<(fontdb::ID, u16, String)>) {
         for node in group.children() {
@@ -561,6 +573,124 @@ mod tests {
     }
 
     #[test]
+    fn animated_typography_drives_composition_overflow_and_actual_glyphs_at_checked_frame() {
+        for (parameter, end, source, width, height) in [
+            (TextParam::FontSize, 192.0, "AAA AAA AAA", 300.0, 120.0),
+            (
+                TextParam::Tracking,
+                1000.0,
+                "one two three four five six",
+                220.0,
+                200.0,
+            ),
+            (TextParam::Leading, 4.0, "A\nB\nC", 600.0, 120.0),
+        ] {
+            let mut e = editor(
+                source,
+                TextStyle {
+                    paragraph: true,
+                    ..Default::default()
+                },
+                width,
+                height,
+            );
+            let id = e.selected().unwrap();
+            for edit in [
+                TrackEdit::ToggleAnimation { frame: 0 },
+                TrackEdit::Value {
+                    frame: 40,
+                    value: end,
+                },
+            ] {
+                e.execute(Command::EditText {
+                    id,
+                    parameter,
+                    edit,
+                })
+                .unwrap();
+            }
+            let original = e.project().clone();
+            let layer = e.selected_layer().unwrap();
+            let first = analyze(layer, 0);
+            let last = analyze(layer, 40);
+            assert_eq!(first.checked_frame, 0);
+            assert_eq!(last.checked_frame, 40);
+            for report in [&first, &last] {
+                let typography = layer.text_typography_at(report.checked_frame).unwrap();
+                let mut style = layer.text_style();
+                typography.apply_to_style(&mut style);
+                let lines = crate::text_flow::lines(source, typography.font_size, width, &style);
+                assert_eq!(
+                    report.composed_lines,
+                    crate::text_flow::composed_count(&lines, height)
+                );
+                assert_eq!(report.overflow_lines, lines.len() - report.composed_lines);
+                let geometry = crate::rendering::text_geometry_svg(
+                    source,
+                    typography.font_size,
+                    "white",
+                    width,
+                    height,
+                    &style,
+                );
+                let svg = format!(
+                    "<svg xmlns='http://www.w3.org/2000/svg' width='{width}' height='{height}'>{geometry}</svg>"
+                );
+                let tree = usvg::Tree::from_str(&svg, &crate::fonts::render_options()).unwrap();
+                let mut ids = vec![];
+                tree_ids(tree.root(), &mut ids);
+                assert_eq!(report.glyphs, ids.len());
+                assert_eq!(
+                    report.unresolved_glyphs,
+                    ids.iter().filter(|glyph| glyph.1 == 0).count()
+                );
+            }
+            assert_ne!(
+                (first.composed_lines, first.overflow_lines),
+                (last.composed_lines, last.overflow_lines),
+                "{parameter:?}"
+            );
+            assert_ne!(first.glyphs, last.glyphs, "{parameter:?}");
+            assert_eq!(e.project(), &original);
+        }
+    }
+
+    #[test]
+    fn animated_wrapping_preserves_line_limit_and_reports_the_requested_frame() {
+        let mut e = editor(
+            &"A ".repeat(MAX_SOURCE_LINES + 1),
+            TextStyle {
+                paragraph: true,
+                ..Default::default()
+            },
+            600.0,
+            200.0,
+        );
+        let id = e.selected().unwrap();
+        for edit in [
+            TrackEdit::ToggleAnimation { frame: 0 },
+            TrackEdit::Value {
+                frame: 40,
+                value: 10000.0,
+            },
+        ] {
+            e.execute(Command::EditText {
+                id,
+                parameter: TextParam::Tracking,
+                edit,
+            })
+            .unwrap();
+        }
+        let report = analyze(e.selected_layer().unwrap(), 40);
+        assert_eq!(report.checked_frame, 40);
+        assert_eq!(report.glyphs, 0);
+        assert!(report.truncated);
+        assert!(
+            matches!(report.status, Status::Incomplete(ref reason) if reason.contains("line analysis limit"))
+        );
+    }
+
+    #[test]
     fn dropped_nodes_negative_tracking_empty_failed_and_unsupported_are_not_clean() {
         let (options, primary, _) = isolated(true, false);
         let e = editor(
@@ -582,7 +712,7 @@ mod tests {
         );
         let no_fonts = usvg::Options::default();
         let e = editor("A", TextStyle::default(), 600.0, 200.0);
-        let report = analyze_with_options(e.selected_layer().unwrap(), &no_fonts, None);
+        let report = analyze_with_options(e.selected_layer().unwrap(), 0, &no_fonts, None);
         assert_eq!(report.glyphs, 0);
         assert!(matches!(report.status, Status::Incomplete(_)));
         let report = inspect_svg(
@@ -591,7 +721,7 @@ mod tests {
             BTreeMap::new(),
             0,
             None,
-            Report::new(None),
+            Report::new(None, 0),
         );
         assert!(matches!(report.status, Status::Incomplete(ref s) if s.contains("parsed")));
         let mut e = e;
@@ -601,7 +731,7 @@ mod tests {
         })
         .unwrap();
         assert_eq!(
-            analyze(e.selected_layer().unwrap()).status,
+            analyze(e.selected_layer().unwrap(), 0).status,
             Status::Unsupported
         );
     }
@@ -672,7 +802,7 @@ mod tests {
         let pixels = renderer.render(&before, 0, 480).unwrap();
         let flow = crate::text_flow::lines("office 한글\nA\tB", 48.0, 600.0, &TextStyle::default());
         let history = (e.can_undo(), e.can_redo());
-        let report = analyze(e.selected_layer().unwrap());
+        let report = analyze(e.selected_layer().unwrap(), 0);
         assert_eq!(report.status, Status::Complete);
         assert_eq!(e.project(), &before);
         assert_eq!(e.project().to_json().unwrap(), serialized);
@@ -692,7 +822,7 @@ mod tests {
             },
         })
         .unwrap();
-        assert_eq!(analyze(e.selected_layer().unwrap()), report);
+        assert_eq!(analyze(e.selected_layer().unwrap(), 0), report);
         e.execute(Command::SetTextStyle {
             id,
             style: TextStyle {
@@ -703,11 +833,11 @@ mod tests {
         })
         .unwrap();
         e.execute(Command::ToggleVisible(id)).unwrap();
-        assert_eq!(analyze(e.selected_layer().unwrap()), report);
+        assert_eq!(analyze(e.selected_layer().unwrap(), 0), report);
         e.undo();
         let redo = e.project().clone();
         let history = (e.can_undo(), e.can_redo());
-        analyze(e.selected_layer().unwrap());
+        analyze(e.selected_layer().unwrap(), 0);
         assert_eq!(e.project(), &redo);
         assert_eq!((e.can_undo(), e.can_redo()), history);
         e.redo();

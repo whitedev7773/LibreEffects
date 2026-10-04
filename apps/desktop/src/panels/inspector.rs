@@ -5,8 +5,45 @@ use crate::{
     ui,
 };
 use gpui::{Context, Entity, Window, div, prelude::*, px, rgb};
-use libre_effects_core::{Command, Content, Mask, Property, PropertyPath, TextPaint, TrackEdit};
+use libre_effects_core::{
+    Command, Content, Frame, Layer, Mask, Property, PropertyPath, TextPaint, TextParam, TrackEdit,
+};
 use std::{cell::RefCell, rc::Rc};
+
+fn text_field_command(
+    layer: &Layer,
+    frame: Frame,
+    index: usize,
+    value: &str,
+) -> Result<Option<Command>, String> {
+    if layer.locked() {
+        return Err("Unlock the text layer before editing".into());
+    }
+    let Content::Text { text, font_size } = layer.content() else {
+        return Err("Select a text layer".into());
+    };
+    match index {
+        // Source Text is static and always retains the base font size. Existing
+        // typography tracks are independent of this content replacement.
+        0 => Ok((text != value).then(|| Command::SetContent {
+            id: layer.id(),
+            content: Content::Text {
+                text: value.into(),
+                font_size: *font_size,
+            },
+        })),
+        1 => layer.text_value_command(
+            TextParam::FontSize,
+            value
+                .trim()
+                .parse::<f64>()
+                .map_err(|_| "Enter a finite number")?,
+            frame,
+        ),
+        2 => crate::color_edit::text_hex_command(layer, TextPaint::Fill, frame, value),
+        _ => Err("Unknown text field".into()),
+    }
+}
 
 pub(crate) struct Inspector {
     matte: Option<(
@@ -160,17 +197,16 @@ impl Inspector {
                             if !target.borrow().as_ref().is_some_and(|t| t.current(s)) {
                                 return;
                             }
+                            s.finish_text(true, cx);
+                            if !target.borrow().as_ref().is_some_and(|t| t.same_context(s)) {
+                                return;
+                            }
                             let Some(l) = s.editor.selected_layer() else {
                                 return;
                             };
                             let id = l.id();
-                            if index == 2 && matches!(l.content(), Content::Text { .. }) {
-                                match crate::color_edit::text_hex_command(
-                                    l,
-                                    TextPaint::Fill,
-                                    s.frame,
-                                    text,
-                                ) {
+                            if index <= 2 && matches!(l.content(), Content::Text { .. }) {
+                                match text_field_command(l, s.frame, index, text) {
                                     Ok(Some(command)) => {
                                         s.dispatch(&Action::Edit(command), window, cx)
                                     }
@@ -184,34 +220,7 @@ impl Inspector {
                             }
                             let number = text.parse::<f64>().ok();
                             let command = match index {
-                                0 => {
-                                    if let Content::Text { font_size, .. } = l.content() {
-                                        Some(Command::SetContent {
-                                            id,
-                                            content: Content::Text {
-                                                text: text.into(),
-                                                font_size: *font_size,
-                                            },
-                                        })
-                                    } else {
-                                        None
-                                    }
-                                }
-                                1 => {
-                                    if let (Content::Text { text, .. }, Some(font_size)) =
-                                        (l.content(), number)
-                                    {
-                                        Some(Command::SetContent {
-                                            id,
-                                            content: Content::Text {
-                                                text: text.clone(),
-                                                font_size,
-                                            },
-                                        })
-                                    } else {
-                                        None
-                                    }
-                                }
+                                0 | 1 => None,
                                 2 => u32::from_str_radix(text.trim().trim_start_matches('#'), 16)
                                     .ok()
                                     .and_then(|color| {
@@ -471,9 +480,19 @@ impl Render for Inspector {
             _ => layer.color(),
         };
         let mut entries = vec![(2, "Fill (hex)", format!("{fill_color:06X}"))];
-        if let Content::Text { text, font_size } = layer.content() {
+        if let Content::Text { text, .. } = layer.content() {
             entries.insert(0, (0, "Text", text.clone()));
-            entries.insert(1, (1, "Font size", font_size.to_string()));
+            entries.insert(
+                1,
+                (
+                    1,
+                    "Font size (px)",
+                    layer
+                        .text_value_at(TextParam::FontSize, frame)
+                        .unwrap()
+                        .to_string(),
+                ),
+            );
         }
         if matches!(
             layer.content(),
@@ -777,6 +796,20 @@ impl Render for Inspector {
                             .w(px(105.0))
                             .flex()
                             .items_center()
+                            .when(
+                                index == 1
+                                    && !locked
+                                    && matches!(layer.content(), Content::Text { .. }),
+                                |d| {
+                                    d.child(super::character::scalar_watch(
+                                        &self.state,
+                                        &layer,
+                                        TextParam::FontSize,
+                                        self.extra_source.clone(),
+                                        "inspector",
+                                    ))
+                                },
+                            )
                             .when(index == 2, |d| {
                                 if let Content::Shape(shape) = layer.content() {
                                     d.child(super::shape_values::color_watch(
@@ -1053,5 +1086,96 @@ impl Render for Inspector {
         contents = contents.child(div().mt_3().text_size(px(10.0)).text_color(rgb(ui::MUTED)).child(if locked { "Layer locked. Unlock it in the timeline to edit." } else { "Enter to apply · Escape to cancel\nStopwatch toggles animation; diamond toggles a key." }));
         panel = panel.child(contents);
         panel
+    }
+}
+
+#[cfg(test)]
+mod typography_tests {
+    use super::*;
+    use libre_effects_core::Editor;
+
+    #[test]
+    fn inspector_font_size_and_source_text_keep_the_base_and_animated_tracks_separate() {
+        let mut e = Editor::default();
+        e.execute(Command::AddContent {
+            content: Content::Text {
+                text: "Before".into(),
+                font_size: 48.,
+            },
+            width: 400.,
+            height: 120.,
+            name: "Text".into(),
+        })
+        .unwrap();
+        assert!(
+            text_field_command(e.selected_layer().unwrap(), 0, 0, "Before")
+                .unwrap()
+                .is_none()
+        );
+        let command = text_field_command(e.selected_layer().unwrap(), 0, 1, " 52.25 ")
+            .unwrap()
+            .unwrap();
+        e.execute(command).unwrap();
+        assert!(
+            e.selected_layer()
+                .unwrap()
+                .track(PropertyPath::Text(TextParam::FontSize))
+                .is_none()
+        );
+        for parameter in [TextParam::FontSize, TextParam::Tracking, TextParam::Leading] {
+            e.execute(Command::EditText {
+                id: 1,
+                parameter,
+                edit: TrackEdit::ToggleAnimation { frame: 0 },
+            })
+            .unwrap();
+        }
+        let command = text_field_command(e.selected_layer().unwrap(), 60, 1, "120.123456789")
+            .unwrap()
+            .unwrap();
+        e.execute(command).unwrap();
+        let sample = e
+            .selected_layer()
+            .unwrap()
+            .text_value_at(TextParam::FontSize, 17)
+            .unwrap();
+        assert!(
+            text_field_command(e.selected_layer().unwrap(), 17, 1, &sample.to_string())
+                .unwrap()
+                .is_none()
+        );
+        let tracks = [TextParam::FontSize, TextParam::Tracking, TextParam::Leading].map(|p| {
+            e.selected_layer()
+                .unwrap()
+                .track(PropertyPath::Text(p))
+                .unwrap()
+                .clone()
+        });
+        let command = text_field_command(e.selected_layer().unwrap(), 17, 0, "After")
+            .unwrap()
+            .unwrap();
+        e.execute(command).unwrap();
+        assert_eq!(
+            e.selected_layer().unwrap().content(),
+            &Content::Text {
+                text: "After".into(),
+                font_size: 52.25
+            }
+        );
+        for (p, track) in [TextParam::FontSize, TextParam::Tracking, TextParam::Leading]
+            .into_iter()
+            .zip(tracks)
+        {
+            assert_eq!(
+                e.selected_layer().unwrap().track(PropertyPath::Text(p)),
+                Some(&track)
+            );
+        }
+        for invalid in ["NaN", "inf", "0", "2049", "bad"] {
+            assert!(text_field_command(e.selected_layer().unwrap(), 17, 1, invalid).is_err());
+        }
+        e.execute(Command::ToggleLocked(1)).unwrap();
+        assert!(text_field_command(e.selected_layer().unwrap(), 17, 0, "Hidden").is_err());
+        assert!(text_field_command(e.selected_layer().unwrap(), 17, 1, "90").is_err());
     }
 }

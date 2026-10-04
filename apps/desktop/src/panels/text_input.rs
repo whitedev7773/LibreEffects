@@ -283,11 +283,12 @@ impl EntityInputHandler for Preview {
         } else {
             layout.caret(index)
         };
+        let [x, y, width, height] = layout.caret_rect(at);
         let corners = [
-            at,
-            [at[0] + 1.0, at[1]],
-            [at[0] + 1.0, at[1] + s.font_size * 1.2],
-            [at[0], at[1] + s.font_size * 1.2],
+            [x, y],
+            [x + width, y],
+            [x + width, y + height],
+            [x, y + height],
         ]
         .map(|p| s.world.point(p));
         let min = corners
@@ -371,7 +372,7 @@ pub(super) fn paint(
                 cell.x1,
                 cell.x2,
                 cell.y,
-                session.font_size * 1.2,
+                layout.line_height(),
                 gpui::rgba(0x3388ee55).into(),
             );
         }
@@ -384,7 +385,7 @@ pub(super) fn paint(
             quad(
                 cell.x1,
                 cell.x2,
-                cell.y + session.font_size * 1.12,
+                cell.y + layout.size * 1.12,
                 1.5 / zoom as f64,
                 rgb(ui::BLUE).into(),
             );
@@ -395,7 +396,7 @@ pub(super) fn paint(
         p[0],
         p[0] + 1.5 / zoom as f64,
         p[1],
-        session.font_size * 1.2,
+        layout.line_height(),
         rgb(0xffffff).into(),
     );
     if session.style.paragraph {

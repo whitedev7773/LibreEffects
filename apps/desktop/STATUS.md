@@ -4,7 +4,7 @@ Updated 2026-10-04 for the resumed-work, I01 output-preflight and
 E04/E02 editing, D03 time-box, animated path-order, native LEP, Pen marquee and
 Contents sibling-tree, layer-wide text-paint, numeric-vertex, font-diagnostic and
 Speed Graph endpoint-velocity, multi-channel Graph, multi-vertex transform and
-C09 layer-command / Linux image-retirement checkpoints.
+C09 layer-command / Linux image-retirement and F03 typography checkpoints.
 This is the current checkpoint inventory;
 [DEVELOPMENT_BACKLOG.md](DEVELOPMENT_BACKLOG.md) retains the original audit and
 its dated implementation/test history. Older “remaining” lists and test counts
@@ -150,9 +150,23 @@ does not establish a complete native editing workflow.
   drafts without cloning the project on every unchanged render. Rendering uses
   the same sampled paint for text and effect bounds; outward-rounded text filter
   extents prevent a fractional antialiased edge from being clipped. Project
-  schema 48 is required only when text tracks exist; LEP remains container v1.
+  schema 48 is required by paint-only tracks; LEP remains container v1.
   Typography/source/per-character animation and animated switches/order remain
   outside this slice.
+- **Animated text typography:** three additional sparse channels sample Font Size
+  (px), Tracking (1/1000 em) and Leading (font-size ratio) across Character,
+  Properties, Timeline and unit-separated Value/Speed Graph lanes. Unmaterialized
+  scalar fields edit static bases; existing tracks edit the current frame. No-op,
+  key metadata, one-step commands and independent stopwatches preserve unrelated
+  channels. Render/effect bounds, point hit tests, caret/selection and paragraph
+  flow use the same sampled geometry. Direct text edits retain source typography
+  and tracks; paragraph conversion/Fit use the current frame without baking it.
+  A narrow root pointer transaction commits pending input before capture handlers,
+  then requires an exact post-commit target on click, retaining drag-out, stale
+  context and window-lifetime guards. Any materialized typography track requires
+  schema 49, including keyless/inactive tracks; legacy sparse focus and VIEW v1/v2
+  behavior remain unchanged. Automated, release and exact CLI pixel gates pass;
+  all ten bounded first-pin native cases also pass.
 - **Actual text-font diagnostics:** Manage project fonts has an explicit
   read-only background glyph check. It separates requested/primary identity from
   final positioned-glyph faces using the parsed tree's font database, including
@@ -161,8 +175,11 @@ does not establish a complete native editing workflow.
   hidden/locked/paint-disabled layers, report at most 256 layers and bound each
   layer's source/lines/glyphs/faces/samples. Source snapshots, serials and a single
   retained worker slot reject stale results and overlapping checks; cancellation
-  is cooperative between layers. Existing replacement locks/one-Undo semantics,
-  layout, rendering, schema and strict-export policy are unchanged. These are
+  is cooperative between layers. Each check freezes the active composition's
+  current local frame and frame 0 for inactive compositions, samples typography,
+  labels those frames and rejects changed frame/composition context. This is not
+  whole-animation glyph coverage. Replacement retains static typography/tracks
+  and existing lock/one-Undo rules; strict-export missing-family policy is unchanged. These are
   shaping diagnostics, not semantic emoji/color-font assurance or a total
   process-memory bound. Variable axes and cross-machine qualification remain.
 - **Project save budget:** a bounded streaming JSON counter checks each final
@@ -214,22 +231,24 @@ selected-group creation, Speed Graph time scaling, whole-track path ordering and
 native `.lep` storage integration, same-path marquee/Ctrl+A, the sibling tree,
 seven-channel text paint, the numeric vertex transaction, actual font diagnostics,
 vertical Speed endpoint editing, multi-channel Graph integration, selected-vertex
-transforms, C09 layer commands and Linux image retirement.
-Formatting, type checking, all 965 default
+transforms, C09 layer commands, Linux image retirement and F03 typography.
+Formatting, type checking, all 1010 default
 tests, the explicit 30-test media suite
 and the optimized release build passed. Native checks are listed separately with
 their tested build and coverage; automated tests do not imply native acceptance.
 
 | Check | Result and boundary |
 | --- | --- |
-| Core tests | 284 passed, including 17 layer-command planning/animation/atomicity/no-op/fit-precision regressions; 16 endpoint-velocity/mode/atomicity/precision/no-op/schema regressions, 13 text-paint track/lifecycle/legacy/no-op/budget regressions, 11 Contents permutation/preservation regressions, 16 codec and one native-budget regression plus prior save-budget, group-space and path-order tests. |
-| Desktop default tests on Linux | 681 passed. C09 adds 12 action/menu/search and 6 independent render tests; Linux image retirement adds 10 lifecycle models. Multi-vertex transformation adds 46 (19 transaction/math, 12 Pen, 6 Preview, 4 modal UI and 5 independent render tests); four existing I/O tests now cover both single- and multi-vertex modes. Multi-channel integration adds 53 across state/VIEW/I/O and Graph planning/routing/legacy regressions, including the three sparse-Text corrections. Vertical Speed editing adds 13 (12 transaction/geometry tests and one invalid-snap regression). Font diagnostics adds 25 (9 final-glyph/fixture tests and 16 lifecycle/snapshot tests). The numeric milestone adds 41: 14 session, 14 Pen/Preview including the two pointer-release regressions, 4 UI/routing, 4 file-I/O, 1 tree-modal and 4 independent render tests. Earlier text/tree/native-file/marquee/editing/focus/I01 tests remain included; 30 FFmpeg tests are ignored by default. |
+| Core tests | 294 passed, including 10 sparse typography/range/schema/no-op/metadata/lifecycle regressions; 17 layer-command planning/animation/atomicity/no-op/fit-precision regressions; 16 endpoint-velocity/mode/atomicity/precision/no-op/schema regressions, 13 text-paint track/lifecycle/legacy/no-op/budget regressions, 11 Contents permutation/preservation regressions, 16 codec and one native-budget regression plus prior save-budget, group-space and path-order tests. |
+| Desktop default tests on Linux | 716 passed. Typography adds 35: 10 independent render, 4 text geometry/session, 9 diagnostic/lifecycle, 7 control/unit, 2 VIEW and 3 pointer-transaction tests. Two existing sparse-focus tests now exercise all ten text parameters. C09 adds 12 action/menu/search and 6 independent render tests; Linux image retirement adds 10 lifecycle models. Multi-vertex transformation adds 46 (19 transaction/math, 12 Pen, 6 Preview, 4 modal UI and 5 independent render tests); four existing I/O tests now cover both single- and multi-vertex modes. Multi-channel integration adds 53 across state/VIEW/I/O and Graph planning/routing/legacy regressions, including the three sparse-Text corrections. Vertical Speed editing adds 13 (12 transaction/geometry tests and one invalid-snap regression). Font diagnostics adds 25 (9 final-glyph/fixture tests and 16 lifecycle/snapshot tests). The numeric milestone adds 41: 14 session, 14 Pen/Preview including the two pointer-release regressions, 4 UI/routing, 4 file-I/O, 1 tree-modal and 4 independent render tests. Earlier text/tree/native-file/marquee/editing/focus/I01 tests remain included; 30 FFmpeg tests are ignored by default. |
+| Test build configuration | Final workspace/media gates used temporary `profile.test.package.libre-effects-desktop.strip="debuginfo"` for the desktop test executable only. Optimization, assertions and features are unchanged; the ordinary optimized release has no override. The initial unstripped build took 30m18s; a corrected test-only rebuild took 40.66s. This is an observed comparison, not a controlled speedup guarantee. Debugger/backtrace file-line metadata is omitted from that test executable; repository profiles/toolchain configuration are untouched. |
 | Explicit FFmpeg integration suite | All 30 ignored media tests were explicitly run and passed. They are not included in the default pass count. |
 | Focused editing regressions | 16 modal-transaction tests, 89 Pen tests (including 26 marquee, 8 frozen-view, 14 group-creation and 14 path-order tests), 3 Preview tests (one new view snapshot), 17 Speed-box tests, 5 path-order rendering tests, 3 shell-focus tests and the prior 20 gradient-draft/endpoint tests passed within the desktop suite; do not add these counts a second time. |
 | Release build | `cargo build -p libre-effects-desktop --release --locked` succeeded after the final review fixes. The earlier interrupted-build blocker is closed. |
 | Task runner boundary | Direct pinned `cargo check -p libre-effects-desktop --locked` and `cargo fmt --all --check` pass. Earlier Moon wrapper attempts could not set up the proto toolchain; the no-actions retry failed in its plugin with `entity not found`. Current checks use the direct pinned Cargo tasks. These wrapper attempts are not recorded as passes. No application dependency or toolchain version was changed to work around them. |
 | Native/legacy CLI equivalence | The pinned LEP release rendered both formats at frames 0, 30 and 60 with exact equality across 691,200 RGBA pixels. Future-version, corrupt-image and truncated inputs exited 1 while preserving existing output bytes. Linked-media native rendering also passed. |
-| Text/diagnostic release pixels | The final C09/image-retirement pin, as well as the multi-vertex transform and the earlier corrected Graph/vertical-Speed/font/text/numeric pins, preserves all 27 legacy text-example frame outputs (9 projects × 0/30/60) from the pre-change release. Five new animated native frames (0/15/30/45/60) exactly match independently constructed static documents rendered by both releases. All 28,440,800 RGBA pixels match; original fixture/source hashes remain unchanged. The deliberately restored fractional filter-edge pixel is covered separately by the exact identity-effect unit regression. |
+| Text/diagnostic release pixels | The final typography pin, as well as the C09/image-retirement, the multi-vertex transform and the earlier corrected Graph/vertical-Speed/font/text/numeric pins, preserves all 27 legacy text-example frame outputs (9 projects × 0/30/60) from the pre-change release. Five new animated native frames (0/15/30/45/60) exactly match independently constructed static documents rendered by both releases. All 28,440,800 RGBA pixels match; original fixture/source hashes remain unchanged. The deliberately restored fractional filter-edge pixel is covered separately by the exact identity-effect unit regression. |
+| Typography release pixels | Five fixed 0/15/30/45/60 geometry samples match pre-change C09 static, current static and current animated-native CLI output exactly: 3,500,000 RGBA pixels. Ten independent renderer tests cover individual/combined channels, Hold/Smooth, Unicode, clipping, masks/effects/matte and nested reversed source time. An initial colored identity-filter-versus-unfiltered oracle exposed a pre-existing single interior antialias pixel difference, reproduced on C09 and with zero-offset filtering. Production stays unchanged: the corrected no-crop check uses an oversized same-filter reference with exact RGBA plus exact unfiltered alpha-support/extents, without numeric tolerance. |
 | Native LEP workflow | Pinned release passed legacy import/native-copy Save with unchanged originals, default .lep names, shared images/view state, edited Save/reopen, rejected Open with state/history preserved, normalized-path collision rejection and imported-original PNG protection. Actual five-second autosave, legacy JSON recovery and corrupt-current/valid-previous fallback each passed Restore/Save/reopen with exact project/image data. Collect Files produced project.lep plus Media; after moving the entire new folder, native Open retained frame 1/100% view and Manage project media showed the moved video Online with 0 missing. CLI rendering matched all 57,600 RGBA pixels before/after collection. Native queue-restart/video-export protection, Windows, OS association, IME and DPI were not exercised in this LEP session; queue/video guard logic is regression-tested. |
 | Vendored grid | Debug and release each passed 215 unit tests and 43 doc tests with all features. |
 | Web/API Moon CI targets | `web:build`, `web:test` and `api:build` passed locally; web has 3 passing tests. API validation is a deployment dry run, not a deployment. |
@@ -251,6 +270,7 @@ their tested build and coverage; automated tests do not imply native acceptance.
 | Native multi-channel Graph | Corrected final pin passed all 20 bounded cases: legacy VIEW v1 save; cross-lane marquee and retained selection; mixed time-only drag/box/numeric timing; exact Undo/Redo; atomic collision/locked-member rejection; grouped Ease/Delete; active-only value and rational-FPS velocity; offscreen Ctrl+A and lane-local Select All; 16 pins plus one active transient with explicit limit; stable Contents/effect/mask identities and raw units; lane-local ranges/shared time; delete→Save pruning then live Undo restoration; scoped clipboard rejection and real free-frame insertion; per-composition state; static Text focus without track creation; actual Open/resave with exact PROJ/VIEW. All 54 consolidated assertions and 38 official-codec/CRC-valid native files pass; 44 original CUA screenshots are archived. Three hardcoded 20-channel samples plus ten planned retiming samples match 4,160,000 RGBA pixels exactly. The earlier unpainted startup has no feature acceptance and no proven source cause. Held-input interruption, real IME, Windows/DPI, Alt-wheel (intercepted by the desktop), optional ID-reuse UI and a final-pin rerun of the older single-channel vertical Speed workflow remain unverified natively. The prior Speed evidence is not relabeled. |
 | Native multi-vertex transform | Final pin passed all 12 bounded cases: singleton/multi toolbar and Shift+V entry, exact local pivot/live preview, complete selection return, seven-field combined reflected/nonuniform transform, mouse OK/Cancel, one Undo/Redo, unchanged and Reset-to-identity no-ops preserving the saved file and Redo, invalid/bounds fields and Escape, Reset pending/error clearing and drag-out cancellation, reflection and zero-scale collapse with the pair retained. Native editing of nested/reflected Contents2, Add Mask7 and Subtract Mask42 matches independently authored complete projects exactly, without numerical tolerance; group transforms, paint, unselected geometry and the independent background mask stay unchanged. Frame30 adds exactly the planned evaluated pose and Linear key; unchanged/Cancel add nothing, and one Undo/Redo is exact. Existing eased60 retains Bezier metadata and prior keys/poses. Actual Open of another file then reopen/resave preserves the entire final LEP byte-for-byte, including PROJ/VIEW. All 47 post-hoc assertions and 30 official-codec/CRC native files pass; 86 original CUA captures are archived. Selection used Shift-click; this run did not repeat marquee, manual away-and-back field retyping or arbitrary-angle interaction. Real IME, Windows/DPI, held-pointer intermediate observation and every asynchronous/context permutation remain outside native coverage. |
 | Native layer transform commands / Linux retirement | Eight bounded cases pass with build attribution retained: initial Reset, both Flips, Fit and no-op/history checks; final-pin crash replay, four rapid history cycles, channel/thumbnail updates, static/animated Center, current-frame root-only Reset/Fit, eased-key preservation, exact Undo/Redo, field/modal containment, locked/Audio/Null availability, zero-scale no-op and collapsed/singular Fit rejection, plus singular-parent Center. Final animated native Open/resave at frame 60 preserves the entire LEP byte-for-byte. All 73 posthoc assertions pass, including 19 complete-project comparisons, 5 independent affine/fit checks and 22 exact-byte pairs; 45 files pass independent framing/CRC and official codec checks. 117 CUA captures are archived: 80 final-pin, 35 preliminary-pin including the original crash, and 2 prior-milestone close captures. The final startup log is clean. Vertical Flip single-operation evidence belongs to the preliminary pin, whose nine C09 feature-source hashes match final; no relabeling or exhaustive platform/input claim is made. Windows/macOS, alternate DPI, real IME and held-pointer intermediate states remain unverified. |
+| Native typography animation | Final pin passed all ten bounded cases: sparse static base edits; point/paragraph Character samples at 0/30/60 and dedicated Inspector sample at 30; one middle Font Size key, unchanged re-entry, exact Undo/Redo; independent Tracking disable; pending numeric draft→stopwatch with separate field/toggle history and drag-out cancellation; ten Timeline channels and three typed Value/Speed lanes/pins; direct point/paragraph source edits with original newlines, base values and tracks preserved; current-frame Fit, pending-size→Fit, drag-out and predicted Point conversion with Undo; frame-labelled font checks; locked/read-only and simple-field input containment; exact final native PROJ/VIEW reopening. Twenty exact saved-data reports and 26 CRC/official-codec containers pass, including 20 saved working copies. Sixty original F03 screenshots plus two separately attributed prior-C09 captures are archived. Changed static schema47→34 exactly matches replayed pre-F03 commands; it is not masked or treated as a new regression. Static no-op, out-of-bound curve clamping, arbitrary Unicode/caret/IME/DPI and Windows/macOS are not independently established by this native session. Diagnostics prove close/seek/recheck, not frame invalidation with a live modal worker. File-chooser return required timeline refocus for global Undo. The final Inspector read-only observation follows, and does not replace, the saved VIEW comparison. |
 | Windows CI and device behavior | Fresh remote CI has not run: the requested checkpoint is local commits only, with no push or PR. Historical Windows native/device results remain in the backlog; the Windows-only audio-device test was not run on Linux. |
 
 Linux native startup needs a working Vulkan driver, and Open/Save needs a running
@@ -318,7 +338,7 @@ Every original A01–L05 ID appears once below. The labels are deliberately boun
 
 | ID | Status | Current scope and remaining boundary |
 | --- | --- | --- |
-| D01 | Partial | Shared addresses/tracks/history for transforms, effects, audio, masks, paths, shapes, text paint and Contents paint, including RGB and scalar gradient channels. Rich text/string and general compound-property animation remain. |
+| D01 | Partial | Shared addresses/tracks/history for transforms, effects, audio, masks, paths, shapes, text paint/typography and Contents paint, including RGB and scalar gradient channels. Rich text/string and general compound-property animation remain. |
 | D02 | Partial | Independent incoming/outgoing scalar speed/influence, Auto/Continuous modes, pointer handles and directional Easy Ease. Path-time/multidimensional semantics and full AE interpolation equivalence are not established. |
 | D03 | Partial | Unit-separated pinned-channel lanes, cross-lane selection/atomic retiming, scoped numeric/clipboard/temporal edits and saved ranges extend the Value/Speed tools. Corrected-pin bounded native multi-channel acceptance passes. Overlaid/normalized axes, mixed-channel vertical and Speed corner transforms, spatial speed and broader native qualification remain. |
 | D04 | Not implemented | Spatial position Bezier motion paths, spatial tangents and roving keys. Scalar X/Y animation is available. |
@@ -343,7 +363,7 @@ Every original A01–L05 ID appears once below. The labels are deliberately boun
 | --- | --- | --- |
 | F01 | Partial | Direct canvas point/paragraph text, selection, paste, wrapping, resize, commit/cancel and Undo. Real Korean IME composition/candidate and full native gesture/focus coverage remain. |
 | F02 | Partial | Installed family/real-style selection, shared preview/output resolution, missing-font reporting, project-wide replacement and explicit bounded final-glyph/fallback diagnostics. Variable axes, runtime catalog refresh, semantic/color-font assurance and cross-machine portability testing remain. |
-| F03 | Partial | Layer-wide alignment, spacing, wrapping, Fill/Stroke and paint order, plus seven scalar Fill/Stroke RGB and Stroke Width animation tracks. Per-character rich text, typography/source animation and full kerning/paragraph controls remain. |
+| F03 | Partial | Layer-wide alignment, spacing, wrapping, Fill/Stroke and paint order, plus ten scalar Fill/Stroke RGB, Stroke Width, Font Size, Tracking and Leading channels. Sampled renderer/editing/diagnostic geometry and schema49/legacy/VIEW boundaries pass automated/release and ten-case bounded native acceptance. Per-character rich text, Source Text animation and full kerning/paragraph controls remain. |
 | F04 | Not implemented | Text Animator and character/word/line Range Selectors. |
 | F05 | Not implemented | Text on paths, Source Text animation and reusable per-instance text controls. |
 
@@ -444,14 +464,18 @@ This does not close the broader A04 backup-management or other backlog extension
    remains tool-limited. Remote Windows CI remains unrun while delivery is local
    commits only.
 2. The bounded C09 layer-command and causal Linux image-retirement checkpoint
-   now passes automated, release and native gates. Next, extend F03 layer-wide
-   animation with Font Size, Tracking and Leading as three sparse scalar tracks.
-   Sample text rendering, caret/hit geometry, paragraph operations and font
-   diagnostics consistently; preserve static bases, legacy files and exact no-op
-   behavior. Use parameter-specific project schema requirements and retain the
-   existing LEP container and VIEW versions. Per-character styling, Source Text
+   now passes automated, release and native gates. F03 Font Size, Tracking and
+   Leading now pass automated/release and all ten bounded native cases.
+   Sampled rendering, caret/hit geometry, paragraph operations and font diagnostics
+   preserve static bases and exact no-ops. Parameter-specific schema requirements
+   retain the existing LEP container and VIEW versions. Per-character styling, Source Text
    animation, Text Animator, Auto Orient/Skew and full-animation anchor compensation
-   remain separate; E02 cross-path and E04 cross-parent edits need their own design.
+   remain separate; E02 cross-path and E04 cross-parent edits need their own design. The next
+   bounded candidate is E05 Trim Paths. Specify geometry-before-paint evaluation,
+   each paint's original path scope, contour/fragment identity, numerical precision
+   and derived-work bounds before implementation; preserve exact no-operator
+   rendering. Adobe's documented broad order does not specify every endpoint,
+   wrapping or recursive-group detail, so those need explicit LibreEffects rules.
 3. Extend D02/D03 beyond unit-separated lanes and endpoint-velocity transforms
    to deliberately designed mixed-channel vertical/Speed corner operations; specify
    spatial path/time semantics before adding roving/spatial interpolation.

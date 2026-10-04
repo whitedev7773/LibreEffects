@@ -30,6 +30,7 @@ impl FontManager {
                 state.document_revision,
                 this.selected.as_ref(),
                 state.fonts_open,
+                state.frame,
             );
             if !state.fonts_open {
                 this.revision = None;
@@ -121,6 +122,7 @@ impl Render for FontManager {
             state.document_revision,
             self.selected.as_ref(),
             state.fonts_open,
+            state.frame,
         );
         if self.inventory_dirty || self.revision != Some(state.document_revision) {
             let newly_opened = self.revision.is_none();
@@ -346,7 +348,7 @@ impl Render for FontManager {
         let count = group.map_or(0, Group::editable);
         root = root.child(self.coverage_panel(cx));
         let enabled = count > 0 && self.replacement.is_some() && self.replacement != self.selected;
-        root=root.child("Replacement preserves text, spacing, paint, paragraph boxes and animation. Fonts are not embedded.")
+        root=root.child("Replacement changes only the static font identity; text, spacing, paint, paragraph boxes and typography/paint animation are preserved. Fonts are not embedded.")
             .child(div().text_color(rgb(ui::MUTED)).child("Glyph checks do not change export policy. Strict export still checks missing families/substituted primary faces. Restart after installing fonts."));
         if !self.message.is_empty() {
             root = root.child(self.message.clone());
@@ -385,10 +387,12 @@ impl FontManager {
         if !state.fonts_open {
             return;
         }
-        let job = match self
-            .coverage
-            .start(state.editor.project(), state.document_revision, &font)
-        {
+        let job = match self.coverage.start(
+            state.editor.project(),
+            state.document_revision,
+            &font,
+            state.frame,
+        ) {
             Ok(job) => job,
             Err(error) => {
                 self.message = error;
@@ -413,7 +417,8 @@ impl FontManager {
                             return Err("Glyph check cancelled.".into());
                         }
                         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            crate::font_coverage::analyze(&pending.snapshot.layers[index].layer)
+                            let frozen = &pending.snapshot.layers[index];
+                            crate::font_coverage::analyze(&frozen.layer, frozen.checked_frame)
                         }))
                         .map_err(|_| "Glyph analysis failed for this layer.".to_string())
                     })
@@ -426,6 +431,7 @@ impl FontManager {
                             state.document_revision,
                             this.selected.as_ref(),
                             state.fonts_open,
+                            state.frame,
                         );
                         let accepted = this.coverage.accept(job.serial, index, report);
                         cx.notify();
@@ -443,6 +449,7 @@ impl FontManager {
                     state.document_revision,
                     this.selected.as_ref(),
                     state.fonts_open,
+                    state.frame,
                 );
                 this.coverage.finish(job.serial);
                 cx.notify();
@@ -495,7 +502,7 @@ impl FontManager {
             return panel.child(if busy {
                 "Previous glyph check is stopping after its current layer."
             } else {
-                "Check this font's current source across all compositions, including locked layers. Nothing is edited."
+                "Check this font at the active composition’s current local frame and frame 0 in every inactive composition. Single-frame samples only; not whole-animation coverage. Nothing is edited."
             });
         };
         let reported = check.reports.len();
@@ -519,7 +526,9 @@ impl FontManager {
                 format!("Check failed · {reported}/{total} layer(s) reported · {error}")
             }
         };
-        panel = panel.child(phase);
+        panel = panel
+            .child(phase)
+            .child(coverage_scope_label(&check.snapshot));
         let glyphs: usize = check.reports.iter().map(|r| r.glyphs).sum();
         let unresolved: usize = check.reports.iter().map(|r| r.unresolved_glyphs).sum();
         let affected = check
@@ -652,7 +661,7 @@ impl FontManager {
             rows = rows.child(row);
         }
         panel.child(rows).child(div().text_size(px(10.0)).text_color(rgb(ui::MUTED)).child(
-            "Reports cover composed source glyph metadata, not caret ranges, overflow text, semantic emoji support or color-font painting. Zero glyph-ID 0 is not a guarantee of complete text support."
+            "Reports cover composed source glyph metadata only at the checked local frames, not whole-animation coverage, caret ranges, overflow text, semantic emoji support or color-font painting. Zero glyph-ID 0 is not a guarantee of complete text support."
         ))
     }
 }
@@ -667,11 +676,66 @@ fn face_label(face: &crate::font_coverage::Face) -> String {
         }
     )
 }
+fn coverage_scope_label(snapshot: &crate::font_usage::CoverageSnapshot) -> String {
+    format!(
+        "Captured active composition {} at local frame {}; inactive compositions at local frame 0. Single-frame samples only; not whole-animation coverage.",
+        snapshot.active_composition_id, snapshot.active_frame
+    )
+}
 fn report_status(report: &crate::font_coverage::Report) -> String {
-    match &report.status {
+    let status: String = match &report.status {
         crate::font_coverage::Status::Complete => "Composed source examined".into(),
         crate::font_coverage::Status::Empty => "Empty: no composed source glyphs to examine".into(),
         crate::font_coverage::Status::Unsupported => "Unsupported source".into(),
         crate::font_coverage::Status::Incomplete(reason) => format!("Incomplete: {reason}"),
+    };
+    format!("Checked local frame {} · {status}", report.checked_frame)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use libre_effects_core::{Command, Content, Editor, TextStyle};
+
+    #[test]
+    fn glyph_result_labels_use_captured_frame_and_explicit_single_frame_scope() {
+        let mut editor = Editor::default();
+        editor
+            .execute(Command::AddContent {
+                content: Content::Text {
+                    text: "Frame label".into(),
+                    font_size: 32.0,
+                },
+                width: 300.0,
+                height: 100.0,
+                name: "Text".into(),
+            })
+            .unwrap();
+        editor.execute(Command::DuplicateComposition).unwrap();
+        let mut session = CoverageSession::default();
+        let job = session
+            .start(
+                editor.project(),
+                7,
+                &TextFont::of(&TextStyle::default()),
+                37,
+            )
+            .unwrap();
+        let scope = coverage_scope_label(&job.snapshot);
+        assert!(scope.contains(&format!(
+            "active composition {} at local frame 37",
+            editor.project().active_composition_id()
+        )));
+        assert!(scope.contains("inactive compositions at local frame 0"));
+        assert!(scope.contains("not whole-animation coverage"));
+        for frozen in &job.snapshot.layers {
+            let report = crate::font_coverage::analyze(&frozen.layer, frozen.checked_frame);
+            assert!(
+                report_status(&report)
+                    .starts_with(&format!("Checked local frame {} · ", frozen.checked_frame))
+            );
+        }
+        session.cancel();
+        session.finish(job.serial);
     }
 }

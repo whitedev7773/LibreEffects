@@ -54,6 +54,8 @@ mod text_paint_render_tests;
 mod theme;
 #[cfg(test)]
 mod time_remap_render;
+#[cfg(test)]
+mod typography_render_tests;
 mod ui;
 mod video_decoder;
 mod video_export;
