@@ -1278,6 +1278,29 @@ pub enum Command {
 }
 
 impl Command {
+    /// A dedicated preservation route for cross-parent moves and optional
+    /// Contents permutations. Path reorders and empty/mixed batches retain their
+    /// existing routes; at least one nonempty sibling move must be present.
+    fn contents_sibling_moves_only(&self) -> bool {
+        fn classify(command: &Command) -> Option<bool> {
+            match command {
+                Command::Contents {
+                    edit: ContentsEdit::MoveSiblings { items, .. },
+                    ..
+                } if !items.is_empty() => Some(true),
+                Command::Contents {
+                    edit: ContentsEdit::Reorder { .. },
+                    ..
+                } => Some(false),
+                Command::Batch(commands) if !commands.is_empty() => commands
+                    .iter()
+                    .try_fold(false, |found, command| Some(found | classify(command)?)),
+                _ => None,
+            }
+        }
+        classify(self) == Some(true)
+    }
+
     fn reorders_only(&self) -> bool {
         match self {
             Self::ReorderPath { .. }
@@ -1381,6 +1404,7 @@ impl Editor {
         // Apply to a candidate so invalid commands never partially mutate the project.
         let mut next = self.current.clone();
         let reorder_only = command.reorders_only();
+        let contents_sibling_moves_only = command.contents_sibling_moves_only();
         let text_values_only = text_animation::value_edits_only(&command)
             || source_text_animation::value_edits_only(&command);
         let trim_values_only = shape_contents::trim_value_edits_only(&command);
@@ -1388,7 +1412,16 @@ impl Editor {
         let velocity_scales_only = key_velocity_scale::edits_only(&command);
         let layer_transforms_only = layer_transform::edits_only(&command);
         let path_transforms_only = path_transform::edits_only(&command);
+        if contents_sibling_moves_only {
+            // Validate the source too: a hierarchy edit must not repair invalid
+            // historical schemas, excessive nesting or an oversized document.
+            self.current.project.validate()?;
+            document::validate_budget(&self.current.project)?;
+        }
         apply(&mut next, command)?;
+        if contents_sibling_moves_only {
+            return self.accept_candidate(next);
+        }
         if (text_values_only || trim_values_only || luma_values_only) && next == self.current {
             return Ok(());
         }

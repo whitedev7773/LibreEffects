@@ -22,6 +22,8 @@ mod tree_selection;
 use gradient_ramp::RampDrag;
 use tree_selection::Selection;
 
+const MOVE_HELP: &str = "Keeps local values; placement and paint scope may change.";
+
 const TRIM_HELP: &str = "Trims each source contour above this item. Start and End are percentages; Offset moves the interval in degrees. Source paths remain editable.";
 
 #[derive(Clone, Copy)]
@@ -81,6 +83,9 @@ pub(crate) struct ContentsControls {
     selected: Option<u64>,
     selection: Selection,
     owner_revision: u64,
+    move_context: Option<tree::MoveContext>,
+    move_input: Option<crate::color_edit::InputTarget>,
+    move_serial: u64,
     tree_drag: Option<tree::Drag>,
     tree_focus: FocusHandle,
     tree_rows: Rc<RefCell<std::collections::BTreeMap<u64, tree::RowBounds>>>,
@@ -132,6 +137,9 @@ impl ContentsControls {
             selected: None,
             selection: Selection::default(),
             owner_revision: 0,
+            move_context: None,
+            move_input: None,
+            move_serial: 0,
             tree_drag: None,
             tree_focus: cx.focus_handle(),
             tree_rows: Default::default(),
@@ -168,13 +176,16 @@ impl ContentsControls {
         self.owner = Some((composition, layer));
         self.selected = Some(item);
         self.state.update(cx, |s, cx| {
-            s.contents_selection = Some((composition, layer, item));
-            if matches!(
-                s.gradient_controls,
-                Some(crate::color_edit::GradientTarget::Contents(..))
-            ) {
+            let identity = Some((composition, layer, item));
+            if s.contents_selection != identity
+                && matches!(
+                    s.gradient_controls,
+                    Some(crate::color_edit::GradientTarget::Contents(..))
+                )
+            {
                 s.gradient_controls = None;
             }
+            s.contents_selection = identity;
             cx.notify();
         });
         self.add_open = false;
@@ -503,6 +514,7 @@ impl Render for ContentsControls {
                     }),
             );
         }
+        tree = tree.child(self.hierarchy_actions(cx));
         root = root
             .child(tree)
             .child(div().text_size(px(11.)).child(format!(
@@ -522,6 +534,14 @@ impl Render for ContentsControls {
                     .text_color(rgb(ui::MUTED))
                     .child("Drag labels between siblings · order may change paint scope"),
             );
+        if !self.selection.items.is_empty() {
+            root = root.child(
+                div()
+                    .text_size(px(10.))
+                    .text_color(rgb(ui::MUTED))
+                    .child(MOVE_HELP),
+            );
+        }
         let Some(item) = self.selected else {
             return root.child(
                 div()
@@ -628,73 +648,6 @@ impl Render for ContentsControls {
             ));
         }
         root = root.child(actions);
-        let mut parenting = div().flex().flex_col().gap_1();
-        if parent != 0 {
-            let grand = contents
-                .rows()
-                .into_iter()
-                .find(|(_, _, n)| n.id == parent)
-                .map(|(_, p, _)| p)
-                .unwrap();
-            let group = if grand == 0 {
-                &contents.items
-            } else {
-                let ContentsKind::Group(v) = &contents.node(grand).unwrap().kind else {
-                    unreachable!()
-                };
-                v
-            };
-            let to = group.iter().position(|n| n.id == parent).unwrap() + 1;
-            let state = self.state.clone();
-            parenting = parenting.child(
-                ui::text_button("contents-outdent", "Move out of group").when(!locked, |b| {
-                    b.on_click(move |_, w, cx| {
-                        state.update(cx, |s, cx| {
-                            s.dispatch(
-                                &Action::Edit(Command::Contents {
-                                    id,
-                                    edit: ContentsEdit::Move {
-                                        item,
-                                        parent: grand,
-                                        index: to,
-                                    },
-                                }),
-                                w,
-                                cx,
-                            )
-                        })
-                    })
-                }),
-            );
-        }
-        if index > 0
-            && let ContentsKind::Group(v) = &siblings[index - 1].kind
-        {
-            let target = siblings[index - 1].id;
-            let to = v.len();
-            let state = self.state.clone();
-            parenting = parenting.child(
-                ui::text_button("contents-indent", "Move into group above").when(!locked, |b| {
-                    b.on_click(move |_, w, cx| {
-                        state.update(cx, |s, cx| {
-                            s.dispatch(
-                                &Action::Edit(Command::Contents {
-                                    id,
-                                    edit: ContentsEdit::Move {
-                                        item,
-                                        parent: target,
-                                        index: to,
-                                    },
-                                }),
-                                w,
-                                cx,
-                            )
-                        })
-                    })
-                }),
-            );
-        }
-        root = root.child(parenting);
         if matches!(node.kind, ContentsKind::TrimPaths) {
             root = root.child(
                 div()

@@ -1596,6 +1596,93 @@ pub(crate) fn action_button(
 mod tests {
     use super::*;
     #[test]
+    fn contents_cross_parent_move_retains_keys_until_history_and_keeps_graph_identity() {
+        use crate::view_state::{GraphChannel, GraphRanges};
+        use libre_effects_core::{ContentsEdit, ContentsKind, ContentsParam, TrackEdit};
+        let mut state = EditorState::default();
+        state
+            .editor
+            .execute(Command::AddContent {
+                content: Content::ShapeContents(Default::default()),
+                width: 200.,
+                height: 120.,
+                name: "Contents key identity".into(),
+            })
+            .unwrap();
+        for parent in [0, 0, 1] {
+            state
+                .editor
+                .execute(Command::Contents {
+                    id: 1,
+                    edit: ContentsEdit::Add {
+                        parent,
+                        kind: ContentsKind::Group(vec![]),
+                    },
+                })
+                .unwrap();
+        }
+        let keys = [Property::PositionX, Property::Rotation].map(|property| KeyRef {
+            id: 1,
+            property: PropertyPath::Contents {
+                item: 3,
+                parameter: ContentsParam::Transform(property),
+            },
+            frame: 0,
+        });
+        for key in keys {
+            state
+                .editor
+                .execute(Command::EditTrack {
+                    id: key.id,
+                    property: key.property,
+                    edit: TrackEdit::ToggleKey { frame: key.frame },
+                })
+                .unwrap();
+            let channel = GraphChannel::from(key);
+            state.graph_channels.pin(channel).unwrap();
+            state.graph_channels.ranges.insert(
+                channel,
+                GraphRanges {
+                    value: Some([-75., 125.]),
+                    speed: Some([-300., 300.]),
+                },
+            );
+        }
+        state.graph_channels.activate(keys[1].into());
+        state.graph_key = Some(keys[1]);
+        state.selected_keys = keys.into();
+        state.selected_layers.insert(1);
+        state.normalize();
+        let before = state.editor.project().clone();
+        let pins = state.graph_channels.clone();
+        state.apply_edit(&Command::Contents {
+            id: 1,
+            edit: ContentsEdit::MoveSiblings {
+                source_parent: 1,
+                items: vec![3],
+                parent: 2,
+                index: 0,
+            },
+        });
+        assert_eq!(state.status, "Edited");
+        state.normalize();
+        let after = state.editor.project().clone();
+        assert_ne!(before, after);
+        assert_eq!(state.selected_keys, keys.into());
+        assert_eq!(state.graph_key, Some(keys[1]));
+        assert_eq!(state.graph_channels, pins);
+        for redo in [false, true] {
+            state.selected_keys = keys.into();
+            state.graph_key = Some(keys[1]);
+            state.step_history(redo);
+            assert_eq!(state.editor.project(), if redo { &after } else { &before });
+            assert!(state.selected_keys.is_empty());
+            assert_eq!(state.graph_key, None);
+            assert_eq!(state.graph_channels, pins);
+            assert_eq!(state.selected_layers, [1].into());
+        }
+    }
+    #[test]
     fn text_opacity_picker_open_rejects_stale_context_before_stopping_playback() {
         use crate::color_edit::Target;
         use libre_effects_core::TextPaint;

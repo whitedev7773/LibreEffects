@@ -7,8 +7,8 @@ Speed Graph endpoint-velocity, multi-channel Graph, multi-vertex transform and
 C09 layer-command / Linux image-retirement, F03 typography and B01 Project-list
 label, E05 Trim Paths, automatic About build identity and the G06 Luma Key
 headless checkpoint, independent Text Fill/Stroke opacity and Hold-only Source
-Text animation and all-stored-pose vertex transforms (native validation pending
-for these four newest feature slices).
+Text animation, all-stored-pose vertex transforms and cross-parent Contents
+buttons/keyboard (native validation pending for these five newest feature slices).
 This is the current checkpoint inventory;
 [DEVELOPMENT_BACKLOG.md](DEVELOPMENT_BACKLOG.md) retains the original audit and
 its dated implementation/test history. Older “remaining” lists and test counts
@@ -18,6 +18,48 @@ Libre Effects is an **early 2D motion-graphics and compositing editor**. It is n
 an After Effects replacement, an AE pixel-equivalent renderer, or an AEP/Adobe
 script-compatible application. A working control or passing model test alone
 does not establish a complete native editing workflow.
+
+## E04 cross-parent sibling moves — headless gates passed, native pending
+
+Move Into/Out and tree-owned Ctrl+Right/Left now move singleton or noncontiguous
+sibling blocks atomically. Into appends to the unselected Group immediately before
+the earliest selected sibling; Out inserts after the old parent in the grandparent.
+Source order wins over click/ID order. Whole subtrees, stable IDs, local transforms,
+all keys/unused poses and empty source Groups remain. Destination transforms,
+paint/Trim scope and isolation intentionally apply; world appearance is not preserved.
+There is no coordinate compensation, baking or schema/LEP/VIEW/address bump.
+
+The dedicated command rejects stale/mixed/empty selection, duplicate IDs, cycles,
+invalid indices, locks and actual 256-node/eight-group limits. Original and final
+metadata budgets are validated, allowing an exact-return transaction with temporary
+intermediate growth. Pure move batches optionally containing Contents Reorder keep
+historical schema/assets and exact no-op history; legacy Move/mixed routes are unchanged.
+Successful UI moves reveal required ancestors and retain valid selection identities.
+Graph pins/ranges and ordinary selected keys survive; Undo/Redo keep their existing
+key-selection clearing. Pen/gradient snapshots invalidate and overlays re-evaluate
+new ancestry. Hierarchy buttons alone opt into pre-flush marked-IME rejection;
+other pointer-button policies are unchanged. These are model-level guard results.
+
+Final gates pass 1327 default tests (450 core, 871 desktop, six helpers), all 32 media
+tests, formatting/all-target checks and normal optimized release. New coverage is
+16 core + 18 desktop. Initial failures were test fixtures: imported-layer indexing,
+a one-byte history setup increase at the metadata limit, and prepended Group order;
+assertions/contracts were retained. Independent review found and closed the IME
+capture-order gap. The first format gate only required module-order correction.
+Build `20261004.103158-c32f11f49609c815` matches all 339 frozen source inputs.
+
+The pinned CLI passes eight samples/40 exact RGBA comparisons (1,536,000 pixels)
+against independently constructed trees, baked geometry and the prior renderer.
+Animated/reflected/singular ancestry, changed paint scope, child Multiply isolation,
+parent Trim and codecs are covered. All 31,940,800 retained text/reference pixels,
+21 Trim frames, 18 Luma frames, 46 opacity renders, 28 all-pose comparisons
+(25,804,800 pixels) and Source Text's 28 renders/21 comparisons/12 preserving
+rejections remain exact. Generated LEP files are headless codec evidence.
+
+Eight native cases are unrun, in addition to the prior 33. The supported state check
+at 10:23:57 UTC still failed with the missing native pipe; no reboot or alternate
+control was attempted. E04 remains Partial. Cross-parent drag, compound Colors and
+bulk field editing remain; the next bounded stage is explicit guarded drag targets.
 
 ## E02 Base + all stored poses — headless gates passed, native pending
 
@@ -68,8 +110,8 @@ route; no reboot was performed. The committed Source Text branch history and all
 then-current WIP files/release were saved in a verified recovery snapshot before
 development resumed. Screen access still fails on the native pipe. E02 remains
 Partial: cross-path selection, canvas affine handles and topology-changing animation
-are separate work. The next bounded E04 stage is atomic cross-parent sibling-block
-moves with explicit buttons/keyboard; guarded cross-parent dragging is a later stage.
+are separate work. The E04 button/keyboard stage is recorded above; guarded cross-parent dragging
+remains a later stage.
 
 ## F05 Source Text Hold animation — headless gates passed, native pending
 
@@ -601,7 +643,7 @@ Every original A01–L05 ID appears once below. The labels are deliberately boun
 | E01 | Partial | Drag-created rectangle, rounded rectangle, ellipse, polygon and star; open lines can be drawn with Pen. Dedicated parametric line/tool-default controls and wider native regression remain. |
 | E02 | Partial | Open/closed Bezier Pen, insert/delete/convert points, handles, parametric conversion, same-path marquee/Ctrl+A, multi-vertex moves/static deletion, animated-safe Reverse/Set First, single-vertex numeric editing and same-path multi-vertex translation/rotation/scale/pivot transactions. Current-frame bulk transform automated and 12-case bounded native gates pass. Base+all-stored-pose transforms now pass headless gates with native scope acceptance pending. Cross-path selection, affine canvas handles and topology-changing animation remain; earlier singleton native mouse acceptance is recorded separately. |
 | E03 | Partial | Animated scalar/RGB/opacity paint, cap/join/miter/dash controls, fractional Points and Contents linear/radial Gradient Fill/Stroke. Remaining parametric details, topology editing and complete native coverage are not done. |
-| E04 | Partial | Nested Contents tree, paths/paints, animated group transforms/Skew, Composite ordering, 16 paint blend modes, gradient drafts/endpoints/modal editor, selected-group Pen and same-parent sibling multi-selection/block ordering. Compound Colors animation, cross-parent block dragging and bulk field editing remain; bounded native acceptance is recorded above. |
+| E04 | Partial | Nested Contents tree, paths/paints, animated group transforms/Skew, Composite ordering, 16 paint blend modes, gradient drafts/endpoints/modal editor, selected-group Pen, same-parent sibling multi-selection/block ordering and atomic cross-parent Move Into/Out/buttons/Ctrl+arrows. The cross-parent stage has headless gates only and eight native cases pending. Compound Colors animation, cross-parent block dragging and bulk field editing remain. |
 | E05 | Partial | Fixed-topology shape/mask path animation and bounded per-source-contour Contents Trim Paths with animated Start/End/Offset, ordered scope, unchanged editable paths and explicit precision/work errors. Automated/release gates and all ten bounded native scenarios pass. Repeater, Merge/Offset Paths, compound/distributed modes and topology-changing interpolation remain. |
 | E06 | Not implemented | SVG import with editable element conversion and unsupported-element reporting. Internal SVG rendering is not an SVG importer. |
 

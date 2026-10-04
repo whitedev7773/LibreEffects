@@ -18,9 +18,19 @@
 
 - **구현·검증됨:** 다중 컴포지션/프리컴포지션, 공유 자산·폴더·썸네일·다중 파일/이미지 시퀀스 가져오기·FPS/알파 해석, 저장·복구·미디어 수집/재연결, 유리수 FPS, Null/Solid/Adjustment, 레이어 복사·마커·스냅·다중 정렬/분배·부모 Pick Whip, 변형/효과 키 편집, 영상·프리컴포지션 Time Remap, 순서 있는 효과 스택, 5종 블렌딩·4종 Track Matte, Curves/Gradient 등 기본 효과, 배경색 MP4·알파 MOV/PNG, 뷰 상태 저장·눈금자/가이드/채널/픽셀 정보, 스냅샷 기반 렌더 큐·다중 출력·재시도·출력 크기/FPS/채널/인코딩 설정, 독립/영상 오디오 메타데이터·파형·중첩 믹싱·AAC/PCM 영상 출력, 좌우 레벨·팬·페이드 애니메이션·오디오 스위치·구간 미터, Windows 기본 장치 재생·100ms 스크럽·장치 시계 기반 플레이헤드·재생 블록 미터, 지속 영상 디코더·제한된 순차 프리페치·비동기 합성과 오래된 요청 취소. 상세 제약은 아래 표에 남긴다.
 - **다음 핵심 개발(2026-10-02 사용자 우선순위 변경):** 실제 AE 첫 작업 화면을 기준으로 편집 도구·효과·텍스트·마스크와 관련 UI를 우선한다. J02 디스크 캐시/J03 증분 평가, 고급 출력·GPU·HDR·장치/코덱 확장은 뒤로 미룬다.
-- **정교한 편집에 남은 기능:** D02/D03 공간 보간·혼합 채널 수직/Speed corner 변형, E02/E03 경로 토폴로지·교차 경로/캔버스 affine 편집, E04 부모 간 트리 이동·복합 Colors 애니메이션, G01 가변 Feather·로토베지어, F01–F05 실제 IME 검증·문자별 스타일·Text Animator·경로 위 텍스트/인스턴스 컨트롤, B01/B05/B07 배치 회귀·단축키/접근성. 스칼라 양방향 시간 보간·Speed Graph, Contents·도형 속성 애니메이션, 직접 텍스트 편집과 B06 공통 색 선택기는 아래 이력의 범위로 이미 구현됐다.
+- **정교한 편집에 남은 기능:** D02/D03 공간 보간·혼합 채널 수직/Speed corner 변형, E02/E03 경로 토폴로지·교차 경로/캔버스 affine 편집, E04 부모 간 guarded drag·복합 Colors 애니메이션, G01 가변 Feather·로토베지어, F01–F05 실제 IME 검증·문자별 스타일·Text Animator·경로 위 텍스트/인스턴스 컨트롤, B01/B05/B07 배치 회귀·단축키/접근성. 스칼라 양방향 시간 보간·Speed Graph, Contents·도형 속성 애니메이션, 직접 텍스트 편집과 B06 공통 색 선택기는 아래 이력의 범위로 이미 구현됐다.
 - **후속 고급 기능:** 패널 도킹·소스 뷰어·최근 프로젝트, 타임라인 고급 시간 편집/검색/가상화, 공간 경로·프리셋·표현식, Shape 연산/SVG·Text Animator, 추가 효과·모션 블러, 고정밀 색/HDR·Proxy/GPU, 템플릿, 설치/업데이트·한글화와 UI 회귀 자동화.
 - **별도 대형 단계:** 3D/카메라/라이트·모델, 추적·로토/Puppet, 플러그인/교환 포맷 연구, 웹/API 제품 범위. AEP/MOGRT 호환은 구현되지 않았다.
+
+### E04 부모 간 형제 묶음 이동 stage1 — 2026-10-04, headless 검증 완료·native 대기
+
+- 단일/다중 형제 선택의 Move Into/Out와 트리 소유 Ctrl+Right/Left를 연결했다. Into는 가장 앞선 선택 항목 바로 위의 비선택 Group 끝에, Out은 grandparent에서 기존 parent 바로 뒤에 넣는다. 비연속 선택도 클릭/ID가 아닌 원본 형제 순서로 옮기며 빈 원본 Group을 유지한다. 기존 같은 부모 drag/Reorder는 그대로이고 cross-parent drag는 다음 stage다.
+- 원자적 MoveSiblings command는 subtree 전체 ID·local geometry/transform·모든 key/unused pose·paint/Trim·enabled·next_id를 보존한다. 새 parent의 transform/paint scope/isolation을 따르므로 화면 배치와 색은 바뀔 수 있다. inverse/좌표 보상/baking은 없고 reflected/zero-scale parent도 구조적으로 유효하다. 저장 형식 버전 변화가 없다.
+- source/destination/중복·누락 ID/순환/오래된 index/잠금과 실제 256 node·8-group 한도를 검사한다. 원본 및 최종 metadata budget을 검증하며 중간 comma 증가 후 정확히 원복하는 batch는 허용한다. 새 pure move(+Contents Reorder) 경로만 역사적 schema/assets/no-op/Redo를 보존하고 기존 singleton Move 및 mixed/empty 정책을 바꾸지 않는다.
+- 현재 source/context를 재검증한 후 성공할 때만 destination ancestor를 펼치고 선택 ID/유효 anchor/cursor를 유지한다. singleton Pen/Gradient와 numeric Graph의 stable ID/pin/range를 유지하며 Undo/Redo의 기존 key-selection 초기화는 그대로다. 이전 Pen/Gradient gesture는 취소되고 overlay는 새 ancestry에서 계산한다. 리뷰에서 발견한 marked IME capture-order 문제는 hierarchy 버튼에만 opt-in 사전 거부를 넣어 수정했다. 실제 IME/native event 검증으로 주장하지 않는다.
+- 신규 core 16 + desktop 18개, 전체 기본 1327개(Core450/Desktop871/helper6), media32, fmt/all-target check와 일반 optimized release가 통과했다. 최초 실패는 imported layer index·16MiB history 준비의1byte 증가·Group Add prepend 순서를 잘못 가정한 fixture여서 준비 데이터만 고쳤다. 첫 formatter gate는 module 선언 순서만 수정했다. 빌드 20261004.103158-c32f11f49609c815와 source339개를 대조했다.
+- 고정 release CLI는 독립 literal tree/baked geometry와 기존 renderer를 사용한8sample/40 exact RGBA 비교(1,536,000 pixel)를 통과했다. 애니메이션/반사/0배율 조상, paint scope, child Multiply isolation·parent Trim 및 공식 codec을 검사했다. 이전 text/reference31,940,800 pixel, Trim21/Luma18/opacity46, all-pose28비교25,804,800 pixel와 Source Text28render/21비교/12출력보존 거부도 유지됐다.
+- 10:23:57 UTC의 지원된 화면 상태 확인은 같은 native pipe missing 오류였다. 새 native8case와 이전33개는 모두 미실행이다. 재부팅/대체 제어를 하지 않았다. E04는 Partial이며 다음 stage는 Before/After/Into/Root의 명확한 target과 clipping/source/focus/최종 release 검증을 갖춘 교차 부모 drag다. Compound Colors/bulk field는 별도 남은 범위다.
 
 ### E02 base + 모든 stored pose 정점 변형 — 2026-10-04, headless 검증 완료·native 대기
 

@@ -442,3 +442,139 @@ fn whole_pose_identity_rejects_oversized_input_instead_of_skipping_budget_valida
         Command::Batch(vec![Command::Batch(vec![whole_pose_shift(0.)])]),
     );
 }
+
+fn contents_move_budget_editor(spare: usize) -> Editor {
+    let mut shape = Editor::default();
+    shape
+        .execute(Command::AddContent {
+            content: Content::Shape(Shape::default()),
+            width: 10.,
+            height: 10.,
+            name: "Contents budget".into(),
+        })
+        .unwrap();
+    for edit in [
+        ContentsEdit::Promote,
+        ContentsEdit::Add {
+            parent: 0,
+            kind: ContentsKind::Group(vec![]),
+        },
+    ] {
+        shape.execute(Command::Contents { id: 1, edit }).unwrap();
+    }
+    let mut project = budget_project(8192);
+    project.version = PROJECT_VERSION;
+    let mut layer = shape.project().composition.layer(1).unwrap().clone();
+    layer.id = 181;
+    project.composition.layers.push(layer);
+    project.next_layer_id = 182;
+    let padding = MAX_METADATA_BYTES - metadata_size(&project) - spare;
+    let Content::Text { text, .. } = &mut project.composition.layers[0].content else {
+        unreachable!()
+    };
+    text.push_str(&"x".repeat(padding));
+    assert!(text.len() <= 16384);
+    assert_eq!(metadata_size(&project), MAX_METADATA_BYTES - spare);
+    let mut editor = Editor::default();
+    editor.replace_project(project).unwrap();
+    // Seed Redo with a shrinking edit: toggling true to false would itself
+    // consume an extra byte and fail before the move boundary is exercised.
+    editor
+        .execute(Command::RenameLayer {
+            id: 2,
+            name: "T".into(),
+        })
+        .unwrap();
+    editor.undo();
+    editor.select(181);
+    assert!(editor.can_undo() && editor.can_redo());
+    editor
+}
+
+fn contents_budget_move(source_parent: u64, items: &[u64], parent: u64, index: usize) -> Command {
+    Command::Contents {
+        id: 181,
+        edit: ContentsEdit::MoveSiblings {
+            source_parent,
+            items: items.to_vec(),
+            parent,
+            index,
+        },
+    }
+}
+
+#[test]
+fn contents_move_siblings_exact_metadata_boundary_and_candidate_growth_are_atomic() {
+    // Emptying a populated source into an already populated destination adds
+    // exactly one serialized comma, even though every node payload is unchanged.
+    let command = contents_budget_move(1, &[4, 2, 3], 0, 0);
+    let mut boundary = contents_move_budget_editor(1);
+    let before = boundary.current.clone();
+    let undo = boundary.undo.clone();
+    boundary.execute(command.clone()).unwrap();
+    assert_eq!(metadata_size(boundary.project()), MAX_METADATA_BYTES);
+    assert_eq!(boundary.undo.len(), undo.len() + 1);
+    assert!(boundary.redo.is_empty());
+    let after = boundary.current.clone();
+    boundary.undo();
+    assert_eq!(boundary.current, before);
+    assert_eq!(boundary.undo, undo);
+    boundary.redo();
+    assert_eq!(boundary.current, after);
+    let bytes = project_file::encode(boundary.project(), None).unwrap();
+    assert_eq!(
+        project_file::decode(&bytes).unwrap().project,
+        *boundary.project()
+    );
+
+    let mut full = contents_move_budget_editor(0);
+    assert_rejected(&mut full, command.clone());
+    assert_rejected(
+        &mut full,
+        Command::Batch(vec![Command::Batch(vec![command])]),
+    );
+}
+
+#[test]
+fn contents_move_siblings_exact_roundtrip_at_metadata_limit_preserves_both_histories() {
+    let mut editor = contents_move_budget_editor(0);
+    let before = editor.current.clone();
+    let undo = editor.undo.clone();
+    let redo = editor.redo.clone();
+    // Intermediate metadata can exceed the budget; the transaction validates
+    // its original source and final candidate, with no partial publication.
+    editor
+        .execute(Command::Batch(vec![
+            contents_budget_move(1, &[4, 2, 3], 0, 0),
+            Command::Batch(vec![contents_budget_move(0, &[4, 3, 2], 1, 0)]),
+        ]))
+        .unwrap();
+    assert_eq!(editor.current, before);
+    assert_eq!(editor.undo, undo);
+    assert_eq!(editor.redo, redo);
+    assert_eq!(metadata_size(editor.project()), MAX_METADATA_BYTES);
+}
+
+#[test]
+fn contents_move_siblings_rejects_oversized_source_even_when_move_would_repair_its_budget() {
+    let mut editor = contents_move_budget_editor(0);
+    // Moving one of several children into an empty group removes one comma.
+    let shrinking = contents_budget_move(1, &[2], 5, 0);
+    let mut candidate = editor.current.clone();
+    apply(&mut candidate, shrinking.clone()).unwrap();
+    assert_eq!(metadata_size(&candidate.project), MAX_METADATA_BYTES - 1);
+    editor.current.project.composition.name.push('x');
+    assert_eq!(metadata_size(editor.project()), MAX_METADATA_BYTES + 1);
+    assert_rejected(&mut editor, shrinking.clone());
+    assert_rejected(
+        &mut editor,
+        Command::Batch(vec![Command::Batch(vec![shrinking])]),
+    );
+    assert_rejected(
+        &mut editor,
+        Command::Batch(vec![
+            contents_budget_move(1, &[2], 5, 0),
+            contents_budget_move(5, &[2], 1, 0),
+        ]),
+    );
+}

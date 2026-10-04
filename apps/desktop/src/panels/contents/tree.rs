@@ -48,6 +48,77 @@ fn blocked(s: &EditorState) -> bool {
         || s.close_after_save
         || s.playing
 }
+/// Tree-owned transient context, separate from the full source snapshot in
+/// InputTarget. A pointer receipt may survive its synchronous field commit but
+/// may never adopt another selection, tool, layer set, disclosure state or time.
+#[derive(Clone, PartialEq, Eq)]
+pub(super) struct MoveContext {
+    composition: CompositionId,
+    layer: u64,
+    revision: u64,
+    frame: u32,
+    tool: crate::editor::Tool,
+    gradient_controls: Option<crate::color_edit::GradientTarget>,
+    selected_layers: BTreeSet<u64>,
+    selection: Selection,
+    collapsed: BTreeSet<u64>,
+}
+impl MoveContext {
+    fn new(s: &EditorState, selection: &Selection, collapsed: &BTreeSet<u64>) -> Option<Self> {
+        if blocked(s) || selection.items.is_empty() {
+            return None;
+        }
+        let layer = s.editor.selected_layer().filter(|l| !l.locked())?;
+        let Content::ShapeContents(contents) = layer.content() else {
+            return None;
+        };
+        let composition = s.editor.project().active_composition_id();
+        if s.contents_selection
+            != selection
+                .singleton()
+                .map(|item| (composition, layer.id(), item))
+        {
+            return None;
+        }
+        let order = sibling_order(contents, selection.parent?)?;
+        let visible = visible_rows(contents, collapsed);
+        if !selection
+            .items
+            .iter()
+            .all(|id| order.contains(id) && visible.iter().any(|(_, _, n)| n == id))
+        {
+            return None;
+        }
+        Some(Self {
+            composition,
+            layer: layer.id(),
+            revision: s.document_revision,
+            frame: s.frame,
+            tool: s.tool,
+            gradient_controls: s.gradient_controls,
+            selected_layers: s.selected_layers.clone(),
+            selection: selection.clone(),
+            collapsed: collapsed.clone(),
+        })
+    }
+    fn current(&self, s: &EditorState, selection: &Selection, collapsed: &BTreeSet<u64>) -> bool {
+        Self::new(s, selection, collapsed).as_ref() == Some(self)
+    }
+    fn plan(
+        &self,
+        s: &EditorState,
+        selection: &Selection,
+        collapsed: &BTreeSet<u64>,
+        direction: MoveDirection,
+    ) -> Option<MovePlan> {
+        self.current(s, selection, collapsed).then_some(())?;
+        let Content::ShapeContents(contents) = s.editor.selected_layer()?.content() else {
+            return None;
+        };
+        plan_move(contents, selection, direction)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum KeyRoute {
     Bubble,
@@ -220,7 +291,8 @@ impl ContentsControls {
             self.paint_menu = None;
             self.gradient_stop = None;
         } else if let Some((_, contents)) = &current {
-            self.selection.reconcile(contents, &self.collapsed);
+            self.selection
+                .reconcile_reparented(contents, &mut self.collapsed);
         }
         let expected = owner.and_then(|(composition, layer)| {
             self.selection
@@ -260,6 +332,144 @@ impl ContentsControls {
         });
         cx.notify();
     }
+    fn hierarchy_context(&self, cx: &Context<Self>) -> Option<MoveContext> {
+        let s = self.state.read(cx);
+        let context = MoveContext::new(s, &self.selection, &self.collapsed)?;
+        (self.owner == Some((context.composition, context.layer))
+            && self.owner_revision == context.revision)
+            .then_some(context)
+    }
+
+    /// Native buttons remain in the tree focus domain, including Tab/Enter.
+    /// Register with the workspace's pointer-before-blur mechanism; its receipt
+    /// validates the entire project before and after flushing pending input.
+    pub(super) fn hierarchy_actions(&mut self, cx: &mut Context<Self>) -> gpui::Div {
+        let context = self.hierarchy_context(cx);
+        if context != self.move_context {
+            self.move_serial = self.move_serial.wrapping_add(1);
+            self.move_context = context.clone();
+        }
+        let mut actions = div().flex().flex_col().gap_1();
+        let Some(context) = context else {
+            self.move_input = None;
+            return actions;
+        };
+        let target = crate::color_edit::InputTarget::new(self.state.read(cx));
+        self.move_input = target.clone();
+        for (direction, label) in [
+            (MoveDirection::Into, "Move Into · Ctrl+Right"),
+            (MoveDirection::Out, "Move Out · Ctrl+Left"),
+        ] {
+            if context
+                .plan(
+                    self.state.read(cx),
+                    &self.selection,
+                    &self.collapsed,
+                    direction,
+                )
+                .is_none()
+            {
+                continue;
+            }
+            let control = format!("contents-hierarchy-{}-{direction:?}", self.move_serial);
+            let context = context.clone();
+            let target = target.clone();
+            let button = ui::text_button(gpui::SharedString::from(control.clone()), label)
+                .tooltip(|_, cx| cx.new(|_| ui::Tip(super::MOVE_HELP.into())).into());
+            actions = actions.child(
+                crate::color_edit::input_pointer_button_preserving_ime(button, control.clone(), target.clone())
+                    .on_click(cx.listener(move |this, event: &gpui::ClickEvent, w, cx| {
+                        cx.stop_propagation();
+                        if event.modifiers().modified()
+                            || matches!(event, gpui::ClickEvent::Mouse(click) if click.down.modifiers.modified())
+                            || TextField::is_composing(w, cx)
+                            || !context.current(
+                                this.state.read(cx),
+                                &this.selection,
+                                &this.collapsed,
+                            )
+                        {
+                            return;
+                        }
+                        let Some(input) = crate::color_edit::input_click_target(
+                            &control,
+                            event,
+                            &target,
+                            &this.state,
+                            w,
+                            cx,
+                        ) else {
+                            return;
+                        };
+                        TextField::commit_active(w, cx);
+                        if input.same_context(this.state.read(cx)) {
+                            this.move_hierarchy(direction, &context, w, cx);
+                        }
+                    })),
+            );
+        }
+        actions
+    }
+
+    fn move_hierarchy(
+        &mut self,
+        direction: MoveDirection,
+        context: &MoveContext,
+        w: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !w.is_window_active()
+            || TextField::is_composing(w, cx)
+            || self.hierarchy_context(cx).as_ref() != Some(context)
+        {
+            return;
+        }
+        let Some(plan) = context.plan(
+            self.state.read(cx),
+            &self.selection,
+            &self.collapsed,
+            direction,
+        ) else {
+            return;
+        };
+        let before = self.state.read(cx).editor.project().clone();
+        let command = Command::Contents {
+            id: context.layer,
+            edit: plan.edit(),
+        };
+        self.state
+            .update(cx, |s, cx| s.dispatch(&Action::Edit(command), w, cx));
+        let current = self.state.read(cx).editor.project();
+        if current == &before {
+            return;
+        }
+        // A failed transaction must not expand a group or discard its selection.
+        let Some(contents) = self.state.read(cx).editor.selected_layer().and_then(|l| {
+            if l.id() != context.layer {
+                return None;
+            }
+            let Content::ShapeContents(contents) = l.content() else {
+                return None;
+            };
+            let destination = sibling_order(contents, plan.parent)?;
+            (plan.items.iter().all(|id| destination.contains(id))).then(|| contents.clone())
+        }) else {
+            return;
+        };
+        self.tree_drag = None;
+        self.cancel_ramp(cx);
+        self.paint_menu = None;
+        self.selection
+            .reconcile_reparented(&contents, &mut self.collapsed);
+        self.publish_tree_selection(cx);
+        self.state.update(cx, |s, cx| {
+            s.status = super::MOVE_HELP.into();
+            cx.notify();
+        });
+        w.focus(&self.tree_focus);
+        cx.notify();
+    }
+
     pub(super) fn tree_down(
         &mut self,
         layer: u64,
@@ -389,6 +599,20 @@ impl ContentsControls {
         }
         cx.stop_propagation();
         if route == KeyRoute::Consume {
+            return;
+        }
+        if matches!(key, TreeKey::MoveInto | TreeKey::MoveOut) {
+            // Never reconcile a stale tree into a newly active layer before an edit.
+            // Held chords and extra modifiers are consumed, never layer shortcuts.
+            if let Some(direction) = key.move_direction(e.is_held)
+                && self
+                    .move_input
+                    .as_ref()
+                    .is_some_and(|input| input.current(self.state.read(cx)))
+                && let Some(context) = self.move_context.clone()
+            {
+                self.move_hierarchy(direction, &context, w, cx);
+            }
             return;
         }
         self.reconcile_tree(cx);
@@ -536,6 +760,180 @@ mod tests {
             })
             .collect()
     }
+    fn hierarchy_scene() -> EditorState {
+        let mut s = scene();
+        // Add places non-paint items at the front. This fixture deliberately puts
+        // the unselected destination immediately before the selected root block.
+        edit(
+            &mut s,
+            ContentsEdit::Reorder {
+                parent: 0,
+                order: vec![1, 5, 6],
+            },
+        );
+        s.editor.clear_history();
+        s
+    }
+    #[test]
+    fn hierarchy_context_rejects_stale_owner_selection_focus_domains_and_blocked_states() {
+        let mut s = hierarchy_scene();
+        let selected = selection(&mut s, 0, &[5, 6]);
+        let collapsed = [1].into();
+        let context = MoveContext::new(&s, &selected, &collapsed).unwrap();
+        let input = crate::color_edit::InputTarget::new(&s).unwrap();
+        assert!(
+            context
+                .plan(&s, &selected, &collapsed, MoveDirection::Into)
+                .is_some()
+        );
+        let gates: &[fn(&mut EditorState)] = &[
+            |s| s.playing = true,
+            |s| s.queue_open = true,
+            |s| s.media_open = true,
+            |s| s.fonts_open = true,
+            |s| s.new_composition_requested = true,
+            |s| s.close_after_save = true,
+            |s| s.frame += 1,
+            |s| s.document_revision += 1,
+            |s| s.tool = crate::editor::Tool::Pen,
+            |s| {
+                s.selected_layers.insert(77);
+            },
+            |s| s.contents_selection = Some((s.editor.project().active_composition_id(), 1, 5)),
+            |s| s.gradient_controls = Some(crate::color_edit::GradientTarget::Contents(1, 1, 5)),
+            |s| {
+                s.editor.execute(Command::ToggleLocked(1)).unwrap();
+            },
+            |s| s.editor.clear_selection(),
+            |s| {
+                s.editor.execute(Command::NewComposition).unwrap();
+            },
+        ];
+        for mutate in gates {
+            let mut candidate = hierarchy_scene();
+            let selection = selection(&mut candidate, 0, &[5, 6]);
+            mutate(&mut candidate);
+            assert!(!context.current(&candidate, &selection, &collapsed));
+            assert!(
+                context
+                    .plan(&candidate, &selection, &collapsed, MoveDirection::Into)
+                    .is_none()
+            );
+        }
+        let mut other = selected.clone();
+        other.one(0, 5);
+        assert!(!context.current(&s, &other, &collapsed));
+        assert!(!context.current(&s, &selected, &BTreeSet::new()));
+        // Unrelated source mutations also invalidate the full pointer/key snapshot.
+        edit(
+            &mut s,
+            ContentsEdit::Rename {
+                item: 2,
+                name: "Changed while pressed".into(),
+            },
+        );
+        assert!(!input.current(&s));
+        assert!(context.current(&s, &selected, &collapsed));
+        s.editor.undo();
+        assert!(input.current(&s));
+    }
+    #[test]
+    fn hierarchy_replans_after_authorized_pending_field_flush_without_captured_indices() {
+        let mut s = hierarchy_scene();
+        let selected = selection(&mut s, 0, &[5, 6]);
+        let collapsed = [1].into();
+        let context = MoveContext::new(&s, &selected, &collapsed).unwrap();
+        let input = crate::color_edit::InputTarget::new(&s).unwrap();
+        let old = context
+            .plan(&s, &selected, &collapsed, MoveDirection::Into)
+            .unwrap();
+        assert_eq!(old.index, 5);
+        assert!(input.current(&s)); // Workspace receipt checks this before flushing.
+        edit(
+            &mut s,
+            ContentsEdit::Rename {
+                item: 5,
+                name: "Pending new name".into(),
+            },
+        );
+        assert!(!input.current(&s));
+        assert!(input.same_context(&s));
+        assert!(context.current(&s, &selected, &collapsed));
+        let flushed = crate::color_edit::InputTarget::new(&s).unwrap();
+        let plan = context
+            .plan(&s, &selected, &collapsed, MoveDirection::Into)
+            .unwrap();
+        assert_eq!(plan, old);
+        let source = s.editor.project().clone();
+        edit(&mut s, plan.edit());
+        assert_eq!(contents(&s).node(5).unwrap().name, "Pending new name");
+        assert_eq!(sibling_order(contents(&s), 1).unwrap()[5..], [5, 6]);
+        assert!(!flushed.current(&s));
+        let mut retained = selected.clone();
+        let mut disclosure = collapsed.clone();
+        retained.reconcile_reparented(contents(&s), &mut disclosure);
+        assert_eq!(retained.items, selected.items);
+        assert_eq!(retained.parent, Some(1));
+        assert_eq!(retained.singleton(), None);
+        assert!(!disclosure.contains(&1));
+        s.editor.undo();
+        assert_eq!(s.editor.project(), &source);
+        retained.reconcile_reparented(contents(&s), &mut disclosure);
+        assert_eq!(retained.parent, Some(0));
+        assert_eq!(retained.items, selected.items);
+        // Planning again reads the actual destination size; no old index is reused.
+        edit(
+            &mut s,
+            ContentsEdit::Add {
+                parent: 1,
+                kind: ContentsKind::Group(vec![]),
+            },
+        );
+        assert_eq!(
+            context
+                .plan(&s, &selected, &collapsed, MoveDirection::Into)
+                .unwrap()
+                .index,
+            6
+        );
+    }
+    #[test]
+    fn hierarchy_commands_never_reuse_same_parent_drag_geometry_or_mutate_on_planning() {
+        let mut s = hierarchy_scene();
+        let selected = selection(&mut s, 0, &[5, 6]);
+        let collapsed = [1].into();
+        let context = MoveContext::new(&s, &selected, &collapsed).unwrap();
+        let before = s.editor.project().clone();
+        let plan = context
+            .plan(&s, &selected, &collapsed, MoveDirection::Into)
+            .unwrap();
+        assert!(matches!(
+            plan.edit(),
+            ContentsEdit::MoveSiblings {
+                source_parent: 0,
+                parent: 1,
+                ..
+            }
+        ));
+        assert_eq!(s.editor.project(), &before);
+        assert_eq!(collapsed, [1].into());
+        assert!(!s.editor.can_undo());
+        let order = sibling_order(contents(&s), 0).unwrap();
+        let map = rows(&order, 0);
+        let mut drag =
+            Drag::new(&s, &selected, &collapsed, 5, point(px(50.), px(40.)), true).unwrap();
+        let command = drag.release(point(px(50.), px(1.)), &map).unwrap();
+        assert!(matches!(
+            command,
+            Command::Contents {
+                edit: ContentsEdit::Reorder { parent: 0, .. },
+                ..
+            }
+        ));
+        edit(&mut s, plan.edit());
+        assert!(!drag.current(&s, &selected, &collapsed));
+    }
+
     #[test]
     fn root_and_nested_drags_only_commit_final_release_gap_once() {
         for parent in [0, 1] {
@@ -747,6 +1145,8 @@ mod tests {
             ("down", false),
             ("left", false),
             ("right", false),
+            ("left", true),
+            ("right", true),
             ("d", true),
             ("a", true),
         ] {
@@ -836,6 +1236,8 @@ mod tests {
             TreeKey::Previous,
             TreeKey::Next,
             TreeKey::SelectAll,
+            TreeKey::MoveInto,
+            TreeKey::MoveOut,
         ] {
             assert_eq!(key_route(key, &s), KeyRoute::Consume);
         }

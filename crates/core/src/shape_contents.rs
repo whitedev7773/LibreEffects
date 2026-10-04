@@ -1044,6 +1044,16 @@ pub enum ContentsEdit {
         parent: u64,
         index: usize,
     },
+    /// Move a nonempty block of immediate siblings to another root/group parent.
+    /// Root is zero. Source order wins over `items` order; local values and whole
+    /// subtrees remain unchanged, so destination transform and paint scope apply.
+    /// `index` addresses the destination before detachment and is never clamped.
+    MoveSiblings {
+        source_parent: u64,
+        items: Vec<u64>,
+        parent: u64,
+        index: usize,
+    },
     /// Reorder complete immediate children without reparenting or changing payloads.
     /// A parent of zero selects the root; `order` must be a complete permutation.
     Reorder {
@@ -1255,6 +1265,45 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                     return Err("Contents order is outside the group".into());
                 }
                 dest.insert(*index, n);
+            }
+            ContentsEdit::MoveSiblings {
+                source_parent,
+                items,
+                parent,
+                index,
+            } => {
+                if source_parent == parent {
+                    return Err("Choose a different Contents parent".into());
+                }
+                let selected = items.iter().copied().collect::<BTreeSet<_>>();
+                if selected.is_empty() || selected.len() != items.len() {
+                    return Err("Choose nonempty, distinct Contents siblings".into());
+                }
+                let source = contents.group_mut(*source_parent)?;
+                if source.iter().filter(|n| selected.contains(&n.id)).count() != items.len() {
+                    return Err("Choose immediate siblings of the source Contents group".into());
+                }
+                // Reject cycles while the complete source tree is still attached.
+                // A destination may be an ancestor, but never a selected node or
+                // any descendant of a selected subtree, including disabled ones.
+                if source.iter().filter(|n| selected.contains(&n.id)).any(|n| {
+                    n.id == *parent
+                        || matches!(&n.kind, ContentsKind::Group(v) if find(v, *parent).is_some())
+                }) {
+                    return Err("Cannot move Contents into their own subtree".into());
+                }
+                if *index > contents.group_mut(*parent)?.len() {
+                    return Err("Contents order is outside the group".into());
+                }
+                let source = contents.group_mut(*source_parent)?;
+                let (moved, remaining): (Vec<_>, Vec<_>) = std::mem::take(source)
+                    .into_iter()
+                    .partition(|node| selected.contains(&node.id));
+                *source = remaining;
+                contents.group_mut(*parent)?.splice(*index..*index, moved);
+                // The editor validates the complete candidate in its declared
+                // schema, without introducing newer properties or baking values.
+                return Ok(());
             }
             ContentsEdit::Reorder { parent, order } => {
                 let children = contents.group_mut(*parent)?;

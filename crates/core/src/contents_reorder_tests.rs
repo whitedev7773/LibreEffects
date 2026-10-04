@@ -1,4 +1,6 @@
 use super::*;
+#[path = "contents_move_tests.rs"]
+mod move_siblings;
 
 fn reorder(parent: u64, order: &[u64]) -> Command {
     Command::Contents {
@@ -689,6 +691,12 @@ fn contents_reorder_classifier_excludes_every_other_contents_variant_and_empty_b
         ContentsEdit::Move {
             item: 1,
             parent: 0,
+            index: 0,
+        },
+        ContentsEdit::MoveSiblings {
+            source_parent: 0,
+            items: vec![1],
+            parent: 7,
             index: 0,
         },
         ContentsEdit::Rename {

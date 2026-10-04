@@ -21,6 +21,9 @@ mod preview_render;
 mod shape_gesture;
 use preview_render::Request;
 use shape_gesture::ShapeGesture;
+#[cfg(test)]
+#[path = "contents_cross_parent_gesture_tests.rs"]
+mod contents_cross_parent_gesture_tests;
 #[path = "gradient_gesture.rs"]
 mod gradient_gesture;
 #[path = "text_box.rs"]

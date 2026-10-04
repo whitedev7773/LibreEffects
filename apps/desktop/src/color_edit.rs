@@ -128,6 +128,10 @@ struct InputButton {
     control: String,
     target: InputTarget,
     hitbox: gpui::Hitbox,
+    preserve_ime: bool,
+}
+fn pointer_preserves_composition(preserve_ime: bool, composing: bool) -> bool {
+    preserve_ime && composing
 }
 #[derive(Default)]
 struct InputPointerWindow {
@@ -171,6 +175,16 @@ pub(crate) fn input_pointer_root(
         let Some(button) = candidate.filter(|b| b.target.current(state.read(cx))) else {
             return;
         };
+        if pointer_preserves_composition(
+            button.preserve_ime,
+            crate::components::TextField::is_composing(window, cx),
+        ) {
+            // Hierarchy controls must not commit marked text or acquire focus.
+            // Receipt was already cleared above; a later release cannot activate.
+            window.prevent_default();
+            cx.stop_propagation();
+            return;
+        }
         crate::components::TextField::commit_active(window, cx);
         state.update(cx, |s, cx| {
             if button.target.same_context(s) {
@@ -255,6 +269,25 @@ pub(crate) fn input_pointer_button(
     control: String,
     target: Option<InputTarget>,
 ) -> gpui::Stateful<gpui::Div> {
+    input_pointer_button_policy(button, control, target, false)
+}
+
+/// Opt-in hierarchy policy; existing picker and typography controls retain their
+/// previous flush behavior. Test composition before the workspace commits input.
+pub(crate) fn input_pointer_button_preserving_ime(
+    button: gpui::Stateful<gpui::Div>,
+    control: String,
+    target: Option<InputTarget>,
+) -> gpui::Stateful<gpui::Div> {
+    input_pointer_button_policy(button, control, target, true)
+}
+
+fn input_pointer_button_policy(
+    button: gpui::Stateful<gpui::Div>,
+    control: String,
+    target: Option<InputTarget>,
+    preserve_ime: bool,
+) -> gpui::Stateful<gpui::Div> {
     use gpui::prelude::*;
     button.relative().child(
         gpui::canvas(
@@ -271,6 +304,7 @@ pub(crate) fn input_pointer_button(
                             control: control.clone(),
                             target: target.clone(),
                             hitbox,
+                            preserve_ime,
                         });
                 }
             },
@@ -2402,6 +2436,36 @@ mod typography_pointer_tests {
             },
         }
     }
+    #[test]
+    fn hierarchy_pointer_policy_preserves_marked_ime_before_any_flush_or_receipt() {
+        let mut state = scene();
+        state.editor.clear_history();
+        let rendered = InputTarget::new(&state).unwrap();
+        let source = state.editor.project().clone();
+        let mut flushes = 0;
+        let mut receipt = None;
+        // This is the workspace capture ordering, before TextField blur can erase
+        // the marked-text signal. A blocked down leaves no activatable receipt.
+        if !pointer_preserves_composition(true, true) {
+            flushes += 1;
+            receipt =
+                InputPress::after_flush("hierarchy".into(), &rendered, down(), bounds(), &state);
+        }
+        assert_eq!(flushes, 0);
+        assert!(receipt.is_none());
+        assert_eq!(state.editor.project(), &source);
+        assert!(!state.editor.can_undo());
+        assert!(!pointer_preserves_composition(true, false));
+        // Existing input buttons deliberately keep their old composition policy.
+        assert!(!pointer_preserves_composition(false, true));
+        assert!(!pointer_preserves_composition(false, false));
+        state.frame += 1;
+        assert!(
+            InputPress::after_flush("hierarchy".into(), &rendered, down(), bounds(), &state)
+                .is_none()
+        );
+    }
+
     #[test]
     fn typography_pointer_down_flush_and_up_work_without_intermediate_repaint() {
         let mut state = scene();

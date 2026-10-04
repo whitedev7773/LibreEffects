@@ -2596,21 +2596,45 @@ Drag a selected label to move the selected sibling block before/after the
 insertion marker. The selected items retain their original order, as do all
 unselected siblings. An unselected label first becomes the sole selection. A
 Group's after-marker follows its whole subtree, including collapsed children.
-Dragging does **not** reparent items; the existing singleton indent/outdent
-controls remain separate. Hover and selection do not edit the document. A valid
+Dragging does **not** reparent items; the explicit Move Into/Out controls below
+remain separate. Hover and selection do not edit the document. A valid
 release is one Undo; an unchanged order or canceled drag preserves Undo/Redo.
 Source, document, composition, layer, frame, lock or hidden-row changes, focus
 loss and window deactivation cancel a stale drag instead of applying its old target.
 
-Rename, numeric/paint controls, duplicate/delete and indent/outdent require one
+Rename, numeric/paint controls and duplicate/delete require one
 selected item. Add uses the selected Group or the existing singleton parent;
 with no selection it adds at root, and with multiple selections it is disabled.
 Only a singleton selection is shared with Pen group creation and gradient
 endpoint controls. Multi-selection never chooses one of its Groups implicitly.
 
+**Move Into** appends a singleton or selected sibling block to the unselected
+Group immediately before its earliest selected sibling. **Move Out** inserts the
+block immediately after its old parent in the grandparent's list. Noncontiguous
+items retain source order, not click or numeric-ID order. Empty source Groups
+remain. Destination ancestors expand only after a successful move, keeping the
+selected IDs and valid anchor/cursor. These transient tree selections and
+disclosure choices are not saved in VIEW metadata.
+
+The move preserves whole subtrees, local geometry/transforms, IDs, enabled state,
+keys and all stored/unused poses. **Placement and paint scope may change** because
+the destination's transforms, paints, Trim and group isolation now apply. No
+inverse transform, coordinate compensation or animation baking is performed;
+reflected and zero-scale destinations are valid. Cycles, stale/mixed-parent
+selections, invalid destination indices, locks, eight-group/256-node limits and
+original/final metadata limits are checked atomically. A successful edit is one
+Undo step. Graph pins/ranges keep stable IDs; ordinary valid selected keys remain,
+while Undo/Redo retain their existing key-selection clearing policy.
+
+The cross-parent button/keyboard stage has passed model, renderer, codec and CLI
+gates. Its eight native interaction cases remain pending because the supported
+desktop transport is unavailable; see [STATUS.md](STATUS.md).
+
 With the tree focused, Ctrl+A selects its active sibling list; Up/Down navigates
 visible rows, Shift+Up/Down extends a sibling range, and Left/Right collapses or
-expands one Group. Delete/Backspace and Ctrl+D affect one Contents item only;
+expands one Group. Ctrl+Right moves the selected block into the preceding Group;
+Ctrl+Left moves it out. Extra modifiers and repeats do not trigger these moves.
+Delete/Backspace and Ctrl+D affect one Contents item only;
 they do nothing for multi-selection. Unsupported Contents clipboard,
 pre-compose, layer trim and time-remap shortcuts are consumed here, rather than
 editing whole layers or old Timeline keys. Select the layer/Timeline to use
