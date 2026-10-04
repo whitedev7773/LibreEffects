@@ -7,6 +7,8 @@ editor, not a complete After Effects replacement or an AEP-compatible applicatio
 See [current implementation status](STATUS.md) for all backlog IDs, the latest
 verification results and remaining milestones. Dated test counts later in this
 guide and the backlog are historical checkpoints.
+For the paused recovery checkpoint and next development contract, read
+[engineering handoff](HANDOFF.md) and the [shared Contents field plan](CONTENTS_BULK_FIELDS_PLAN.md).
 
 Only one editor runs per user, including builds launched from different folders
 or executable names. Launching again requests that the previous editor stop its
