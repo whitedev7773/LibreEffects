@@ -8,6 +8,27 @@ use gpui::{Context, Entity, SharedString, Window, div, img, prelude::*, px, rgb}
 use libre_effects_core::{Command, Content, FolderId, Project, ProjectItem};
 use std::{collections::BTreeSet, sync::Arc};
 
+fn item_name(item: ProjectItem, name: String) -> gpui::Stateful<gpui::Div> {
+    let name = SharedString::from(name);
+    div()
+        .id(SharedString::from(format!("project-name-{item:?}")))
+        .flex_1()
+        .min_w_0()
+        // GPUI 0.2.2 caches text measurements by wrap width, not truncation width.
+        // `truncate()` sets nowrap, reusing the intrinsic-width line after flex
+        // shrink and hiding its ellipsis. Keep width-sensitive measurement, then
+        // clamp to one line so the final available width gets a visible ellipsis.
+        .whitespace_normal()
+        .text_ellipsis()
+        .line_clamp(1)
+        // Keep the complete name available without changing the model or row actions.
+        .tooltip({
+            let name = name.clone();
+            move |_, cx| cx.new(|_| ui::Tip(name.clone())).into()
+        })
+        .child(name)
+}
+
 pub(crate) struct Browser {
     state: Entity<EditorState>,
     search: Entity<TextField>,
@@ -133,16 +154,20 @@ impl Browser {
         let state = self.state.clone();
         let mut element = ui::text_button(SharedString::from(format!("project-{item:?}")), "")
             .w_full()
+            .min_w_0()
             .h(px(29.0))
+            .flex_none()
             .gap_2()
             .justify_start()
             .pl(px(12.0 + depth as f32 * 12.0))
             .pr_2()
             .when(item == selected, |s| s.bg(rgb(0x343434)))
             .child(ui::icon(icon))
-            .child(div().flex_1().overflow_hidden().child(name))
+            .child(item_name(item, name))
             .child(
                 div()
+                    .flex_none()
+                    .whitespace_nowrap()
                     .text_size(px(10.0))
                     .text_color(rgb(ui::MUTED))
                     .child(kind),
@@ -212,6 +237,32 @@ impl Browser {
             }
         }
         element
+    }
+}
+
+#[cfg(test)]
+mod row_label_tests {
+    use super::*;
+    use gpui::{Overflow, TextOverflow, WhiteSpace};
+
+    #[test]
+    fn project_name_remeasures_at_flex_width_and_clamps_to_one_ellipsized_line() {
+        let mut label = item_name(
+            ProjectItem::Composition(1),
+            "A very long composition name with spaces and Unicode — 日本語".into(),
+        );
+        let style = label.style();
+        assert_eq!(style.min_size.width, Some(px(0.0).into()));
+        assert_eq!(style.flex_grow, Some(1.0));
+        assert_eq!(style.flex_shrink, Some(1.0));
+        assert_eq!(style.overflow.x, Some(Overflow::Hidden));
+        assert_eq!(style.overflow.y, Some(Overflow::Hidden));
+        let text = style.text.as_ref().expect("project name text style");
+        // Nowrap leaves GPUI's wrap-width cache key at None, so flex shrink
+        // would reuse the untruncated intrinsic measurement and only clip it.
+        assert_eq!(text.white_space, Some(WhiteSpace::Normal));
+        assert_eq!(text.line_clamp, Some(1));
+        assert_eq!(text.text_overflow, Some(TextOverflow::Truncate("…".into())));
     }
 }
 impl Render for Browser {

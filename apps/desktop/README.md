@@ -19,6 +19,15 @@ Command-line renders remain independent of the interactive editor.
 
 ![Libre Effects workspace with the Content and Motion Study sample](screenshots/workspace.png)
 
+## Project list names
+
+Long composition, footage and folder names stay on one line and show an ellipsis
+when the Project pane is narrow. Hover over the name to see its full text. The
+stored name is unchanged, and Project search still uses the complete name.
+Type labels and row action buttons retain their width instead of wrapping into
+the next row. This correction is separate from the broader cross-DPI layout and
+accessibility acceptance work.
+
 ## Keyboard menus
 
 Use **Ctrl+Shift+P** or Help → Find command to search workspace commands without

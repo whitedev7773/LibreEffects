@@ -22,6 +22,14 @@
 - **후속 고급 기능:** 패널 도킹·소스 뷰어·최근 프로젝트, 타임라인 고급 시간 편집/검색/가상화, 공간 경로·프리셋·표현식, Shape 연산/SVG·Text Animator, 추가 효과·모션 블러, 고정밀 색/HDR·Proxy/GPU, 템플릿, 설치/업데이트·한글화와 UI 회귀 자동화.
 - **별도 대형 단계:** 3D/카메라/라이트·모델, 추적·로토/Puppet, 플러그인/교환 포맷 연구, 웹/API 제품 범위. AEP/MOGRT 호환은 구현되지 않았다.
 
+### B01 Project 목록 긴 이름 표시 — 2026-10-04
+
+- 좁은 Project 패널에서 긴 이름이 고정 높이 행을 넘어 줄바꿈되던 표시를 수정했다. 이름은 한 줄의 ellipsis로 줄어들며 hover는 원문 전체를 보여준다. type label과 행 action은 줄바꿈/축소하지 않는다. 원본 이름·ID·검색·기존 callback은 바꾸지 않았다.
+- 실제 GPUI helper style을 검사하는 회귀 1개를 추가했다. fmt, test typecheck, Core 294 + Desktop 717 (기본 1011), explicit FFmpeg 30이 통과했다. 첫 일반 release build는 14분 42초 후 rustc SIGKILL로 종료했으며 source diagnostic은 없었다. 원인은 확정하지 않았다. 이전 clean editor를 정상 종료한 뒤 동일 optimized profile의 Cargo -j 1 재시도는 2분 7초에 통과했다. 저장소 profile/toolchain은 변경하지 않았다.
+- 고정된 B01 release에서 기존 32 text frame의 28,440,800 RGBA pixel과 typography 5 sample의 3,500,000 RGBA pixel을 별도 report로 다시 비교했고 모두 정확히 일치했다.
+- 초기 native에서 행 겹침은 해결됐지만 ellipsis 대신 hard clipping이 보이는 GPUI 0.2.2 nowrap measurement-cache 문제를 발견했다. width-sensitive text shaping과 명시적 one-line clamp로 수정한 최종 source에서도 기본 1011 + FFmpeg 30, fmt/check와 일반 optimized release(2분 5초)가 다시 통과했다. GPUI dependency나 다른 패널은 바꾸지 않았다.
+- 최종 고정 release의 실제 네 가지 bounded 검사(좁은/일반 폭에서 보이는 ellipsis와 겹침 없음, composition/folder full-name hover, 전체 이름 suffix 검색/선택, composition Add→one Undo→Save/reopen)가 통과했다. Add는 원래 이름의 정확한 composition을 참조했고 Undo는 원본 PROJ를 복원했다. baseline/Undo/reopen 파일의 bytes와 PROJ·VIEW가 같으며 최종 5개 fixture/save 파일이 공식 codec 왕복 검사를 통과했다. 최종 release에서도 위 두 CLI pixel report를 별도 재검증했다. B01 전체 DPI/배치 기준·접근성 완료를 의미하지 않는다.
+
 ### F03 레이어 전체 Typography 애니메이션 — 2026-10-04
 
 - Font Size 1–2048 px, Tracking −1000–10000 (1/1000 em), Leading 0.1–10 (font-size ratio)의 세 sparse scalar를 추가했다. Character와 Properties는 현재 frame을 표시하고, 독립 stopwatch와 Timeline/Text의 총 10개 channel, Value/Speed Graph의 px·1/1000 em·ratio 및 초당 단위를 연결한다. Leading은 명시적인 배율이며 Auto 또는 절대 px 간격이 아니다.
