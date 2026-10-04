@@ -3430,6 +3430,7 @@ mod tests {
                 TextParam::FontSize | TextParam::StrokeWidth => ("px", "px/s"),
                 TextParam::Tracking => ("1/1000 em", "(1/1000 em)/s"),
                 TextParam::Leading => ("ratio", "ratio/s"),
+                TextParam::FillOpacity | TextParam::StrokeOpacity => ("%", "%/s"),
                 _ => ("RGB 0–255", "RGB units/s"),
             };
             assert_eq!(super::graph_units(path, false), expected.0);

@@ -54,7 +54,24 @@ fn text_groups(layer: &libre_effects_core::Layer) -> Vec<(String, Vec<PropertyPa
             "Leading".into(),
             vec![PropertyPath::Text(TextParam::Leading)],
         ),
+        (
+            "Fill Opacity".into(),
+            vec![PropertyPath::Text(TextParam::FillOpacity)],
+        ),
+        (
+            "Stroke Opacity".into(),
+            vec![PropertyPath::Text(TextParam::StrokeOpacity)],
+        ),
     ]
+}
+
+fn text_channel_label(parameter: TextParam) -> &'static str {
+    match parameter {
+        TextParam::FillOpacity | TextParam::StrokeOpacity => "%",
+        TextParam::Tracking => "‰ em",
+        TextParam::Leading => "×",
+        _ => TextPaint::component_label(parameter).unwrap_or("px"),
+    }
 }
 
 fn group_animated(layer: &libre_effects_core::Layer, properties: &[PropertyPath]) -> bool {
@@ -1366,11 +1383,7 @@ impl Render for Timeline {
                                 ui::text_button(
                                     SharedString::from(format!("channel-{id}-{property:?}")),
                                     if let PropertyPath::Text(p) = property {
-                                        match p {
-                                            TextParam::Tracking => "‰ em",
-                                            TextParam::Leading => "×",
-                                            _ => TextPaint::component_label(p).unwrap_or("px"),
-                                        }
+                                        text_channel_label(p)
                                     } else if let PropertyPath::Shape(p) = property {
                                         libre_effects_core::ShapePaint::component_label(p)
                                             .unwrap_or("")
@@ -2283,6 +2296,8 @@ mod tests {
             (TextParam::FontSize, 91.123456789),
             (TextParam::Tracking, 135.987654321),
             (TextParam::Leading, 2.987654321),
+            (TextParam::FillOpacity, 37.123456789),
+            (TextParam::StrokeOpacity, 86.987654321),
         ] {
             e.execute(Command::EditText {
                 id: 1,
@@ -2352,7 +2367,9 @@ mod tests {
                 ("Stroke Width", 1),
                 ("Font Size", 1),
                 ("Tracking", 1),
-                ("Leading", 1)
+                ("Leading", 1),
+                ("Fill Opacity", 1),
+                ("Stroke Opacity", 1)
             ]
         );
         assert_eq!(
@@ -2433,6 +2450,79 @@ mod tests {
         );
         e.execute(Command::AddSolid).unwrap();
         assert!(super::text_groups(e.selected_layer().unwrap()).is_empty());
+    }
+
+    #[test]
+    fn text_opacity_timeline_has_independent_percentage_groups_and_watches() {
+        let mut e = Editor::default();
+        e.execute(Command::AddContent {
+            content: Content::Text {
+                text: "Opacity".into(),
+                font_size: 48.,
+            },
+            width: 400.,
+            height: 120.,
+            name: "Text".into(),
+        })
+        .unwrap();
+        let source = e.project().clone();
+        let groups = super::text_groups(e.selected_layer().unwrap());
+        assert_eq!(groups.iter().flat_map(|(_, paths)| paths).count(), 12);
+        for (paint, index) in [(TextPaint::Fill, 6), (TextPaint::Stroke, 7)] {
+            let parameter = paint.opacity();
+            let paths = &groups[index].1;
+            assert_eq!(paths, &[PropertyPath::Text(parameter)]);
+            assert_eq!(super::text_channel_label(parameter), "%");
+            assert_eq!(
+                e.selected_layer().unwrap().track_value(paths[0], 30),
+                Some(100.)
+            );
+            assert!(e.selected_layer().unwrap().track(paths[0]).is_none());
+            assert!(!super::group_animated(e.selected_layer().unwrap(), paths));
+        }
+        assert_eq!(e.project(), &source);
+        let fill = &groups[6].1;
+        let stroke = &groups[7].1;
+        e.execute(super::group_watch(e.selected_layer().unwrap(), fill, 30))
+            .unwrap();
+        assert!(super::group_animated(e.selected_layer().unwrap(), fill));
+        assert!(!super::group_animated(e.selected_layer().unwrap(), stroke));
+        assert!(
+            !e.selected_layer()
+                .unwrap()
+                .text_color_animated(TextPaint::Fill)
+        );
+        assert!(
+            !e.selected_layer()
+                .unwrap()
+                .text_color_animated(TextPaint::Stroke)
+        );
+        assert!(super::group_visible(
+            e.selected_layer().unwrap(),
+            fill,
+            Some(super::PropertyFilter::Animated)
+        ));
+        e.execute(super::group_watch(e.selected_layer().unwrap(), stroke, 40))
+            .unwrap();
+        let stroke_before = e.selected_layer().unwrap().track(stroke[0]).cloned();
+        e.execute(super::group_watch(e.selected_layer().unwrap(), fill, 50))
+            .unwrap();
+        assert!(!super::group_animated(e.selected_layer().unwrap(), fill));
+        assert_eq!(
+            e.selected_layer().unwrap().track(stroke[0]),
+            stroke_before.as_ref()
+        );
+        assert!(!super::group_visible(
+            e.selected_layer().unwrap(),
+            fill,
+            Some(super::PropertyFilter::Opacity)
+        ));
+        assert_eq!(
+            e.selected_layer()
+                .unwrap()
+                .track_value(libre_effects_core::Property::Opacity.into(), 30),
+            Some(100.)
+        );
     }
 
     use super::*;

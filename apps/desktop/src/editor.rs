@@ -738,6 +738,15 @@ impl EditorState {
                 self.status = "Gradient edit canceled".into();
             }
             Action::OpenColor(target) => {
+                // A stale Text swatch must not become valid merely because
+                // opening a generic picker normally stops playback.
+                if !color_open_context_matches(*target, self.editor.selected(), self.playing) {
+                    self.status =
+                        "Select the original text layer and stop playback before editing its paint"
+                            .into();
+                    cx.notify();
+                    return;
+                }
                 self.stop();
                 match crate::color_edit::Session::new(
                     *target,
@@ -770,10 +779,12 @@ impl EditorState {
             }
             Action::SampleColor(rgba) => {
                 if let Some(session) = &mut self.colors.session {
-                    match session.validate(
+                    match session.validate_context(
                         self.editor.project(),
                         self.document_revision,
                         self.frame,
+                        self.editor.selected(),
+                        self.playing,
                     ) {
                         Ok(()) => {
                             self.status = format!(
@@ -795,7 +806,13 @@ impl EditorState {
                     let result = if !session.error.is_empty() {
                         Err(session.error.clone())
                     } else {
-                        session.validate(self.editor.project(), self.document_revision, self.frame)
+                        session.validate_context(
+                            self.editor.project(),
+                            self.document_revision,
+                            self.frame,
+                            self.editor.selected(),
+                            self.playing,
+                        )
                     };
                     if let Err(error) = result {
                         session.error = error;
@@ -1534,6 +1551,17 @@ impl EditorState {
     }
 }
 
+fn color_open_context_matches(
+    target: crate::color_edit::Target,
+    selected: Option<LayerId>,
+    playing: bool,
+) -> bool {
+    match target {
+        crate::color_edit::Target::Text(id, _) => !playing && selected == Some(id),
+        _ => true,
+    }
+}
+
 pub(crate) fn action_button(
     id: impl Into<ElementId>,
     label: impl Into<SharedString>,
@@ -1552,6 +1580,23 @@ pub(crate) fn action_button(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn text_opacity_picker_open_rejects_stale_context_before_stopping_playback() {
+        use crate::color_edit::Target;
+        use libre_effects_core::TextPaint;
+        for paint in [TextPaint::Fill, TextPaint::Stroke] {
+            let target = Target::Text(7, paint);
+            assert!(color_open_context_matches(target, Some(7), false));
+            for selected in [None, Some(8)] {
+                assert!(!color_open_context_matches(target, selected, false));
+            }
+            assert!(!color_open_context_matches(target, Some(7), true));
+        }
+        // Generic pickers retain the prior stop-on-open behavior.
+        assert!(color_open_context_matches(Target::Fill(7), None, true));
+        assert!(color_open_context_matches(Target::Stroke(7), Some(8), true));
+    }
+
     #[test]
     fn vertex_modal_only_routes_its_own_accept_and_cancel() {
         assert!(Action::ApplyVertex.allowed_in_vertex_editor());

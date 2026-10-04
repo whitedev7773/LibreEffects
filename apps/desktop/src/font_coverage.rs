@@ -843,4 +843,72 @@ mod tests {
         e.redo();
         assert!(!e.selected_layer().unwrap().visible());
     }
+
+    #[test]
+    fn text_opacity_never_hides_shaping_diagnostics_or_changes_source() {
+        for paragraph in [false, true] {
+            let mut e = editor(
+                "office 한글\nA\tB",
+                TextStyle {
+                    paragraph,
+                    stroke_enabled: true,
+                    stroke_width: 8.,
+                    tracking: -150.,
+                    leading: 0.6,
+                    ..Default::default()
+                },
+                180.,
+                140.,
+            );
+            let initial = e.project().clone();
+            let id = e.selected().unwrap();
+            let baseline = analyze(e.selected_layer().unwrap(), 0);
+            assert!(baseline.glyphs > 0);
+            for parameter in [TextParam::FillOpacity, TextParam::StrokeOpacity] {
+                e.execute(Command::EditText {
+                    id,
+                    parameter,
+                    edit: TrackEdit::ToggleAnimation { frame: 0 },
+                })
+                .unwrap();
+                e.execute(Command::EditText {
+                    id,
+                    parameter,
+                    edit: TrackEdit::Value {
+                        frame: 60,
+                        value: 0.,
+                    },
+                })
+                .unwrap();
+            }
+            for disabled in [false, true] {
+                if disabled {
+                    let mut style = e.selected_layer().unwrap().text_style();
+                    style.fill_enabled = false;
+                    style.stroke_enabled = false;
+                    style.stroke_width = 0.;
+                    e.execute(Command::SetTextStyle { id, style }).unwrap();
+                }
+                let snapshot = e.project().clone();
+                let json = snapshot.to_json().unwrap();
+                let history = (e.can_undo(), e.can_redo());
+                for frame in [0, 15, 30, 45, 60] {
+                    let mut expected = baseline.clone();
+                    expected.checked_frame = frame;
+                    assert_eq!(
+                        analyze(e.selected_layer().unwrap(), frame),
+                        expected,
+                        "paragraph={paragraph} disabled={disabled} frame={frame}"
+                    );
+                }
+                assert_eq!(e.project(), &snapshot);
+                assert_eq!(e.project().to_json().unwrap(), json);
+                assert_eq!((e.can_undo(), e.can_redo()), history);
+                assert_eq!(
+                    e.selected_layer().unwrap().content(),
+                    initial.composition().layer(id).unwrap().content()
+                );
+            }
+        }
+    }
 }

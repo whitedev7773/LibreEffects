@@ -51,6 +51,8 @@ fn field_parameter(index: usize) -> Option<TextParam> {
         1 => Some(TextParam::Leading),
         2 => Some(TextParam::Tracking),
         4 => Some(TextParam::StrokeWidth),
+        6 => Some(TextParam::FillOpacity),
+        7 => Some(TextParam::StrokeOpacity),
         _ => None,
     }
 }
@@ -122,19 +124,46 @@ pub(super) fn color_watch(
     state: &Entity<EditorState>,
     layer: &Layer,
     paint: TextPaint,
-    frame: Frame,
+    target: Option<InputTarget>,
+    scope: &'static str,
 ) -> impl IntoElement {
-    ui::action_tool(
-        SharedString::from(format!("text-{paint:?}-color-watch")),
+    let control = format!("{scope}-{paint:?}-color-watch");
+    let id = layer.id();
+    let state = state.clone();
+    let button = ui::tool(
+        SharedString::from(control.clone()),
         "stopwatch",
-        "Toggle text color animation",
-        state,
-        Action::Edit(
-            layer
-                .text_color_animation_command(paint, frame)
-                .unwrap_or_else(|_| Command::Batch(vec![])),
-        ),
+        "Toggle text RGB color animation",
         layer.text_color_animated(paint),
+    );
+    crate::color_edit::input_pointer_button(button, control.clone(), target.clone()).on_click(
+        move |event, w, cx| {
+            cx.stop_propagation();
+            let Some(target) =
+                crate::color_edit::input_click_target(&control, event, &target, &state, w, cx)
+            else {
+                return;
+            };
+            if state.read(cx).editor.selected() != Some(id) {
+                return;
+            }
+            TextField::commit_active(w, cx);
+            state.update(cx, |s, cx| {
+                if !target.same_context(s) {
+                    return;
+                }
+                s.finish_text(true, cx);
+                if !target.same_context(s) {
+                    return;
+                }
+                let Some(layer) = s.editor.selected_layer() else {
+                    return;
+                };
+                if let Ok(command) = layer.text_color_animation_command(paint, s.frame) {
+                    s.dispatch(&Action::Edit(command), w, cx);
+                }
+            });
+        },
     )
 }
 
@@ -153,8 +182,8 @@ impl Character {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
         let input_targets: Vec<Rc<RefCell<Option<InputTarget>>>> =
-            (0..6).map(|_| Default::default()).collect();
-        let fields = (0..6)
+            (0..8).map(|_| Default::default()).collect();
+        let fields = (0..8)
             .map(|i| {
                 let state = state.clone();
                 let target = input_targets[i].clone();
@@ -421,18 +450,23 @@ impl Render for Character {
                 .unwrap()
                 .to_string(),
             format!("{stroke_color:06X}"),
+            l.text_value_at(TextParam::FillOpacity, frame)
+                .unwrap()
+                .to_string(),
+            l.text_value_at(TextParam::StrokeOpacity, frame)
+                .unwrap()
+                .to_string(),
         ];
         for (i, label) in [
-            "Font size (px)",
-            "Leading (× font size)",
-            "Tracking (1/1000 em)",
-            "Fill (hex)",
-            "Stroke (px)",
-            "Stroke (hex)",
-        ]
-        .into_iter()
-        .enumerate()
-        {
+            (0, "Font size (px)"),
+            (1, "Leading (× font size)"),
+            (2, "Tracking (1/1000 em)"),
+            (3, "Fill (hex)"),
+            (6, "Fill opacity (%)"),
+            (4, "Stroke (px)"),
+            (5, "Stroke (hex)"),
+            (7, "Stroke opacity (%)"),
+        ] {
             *self.input_targets[i].borrow_mut() = self.input_source.clone();
             self.fields[i].update(cx, |f, _| {
                 if field_parameter(i).is_some() {
@@ -458,7 +492,8 @@ impl Render for Character {
                                     } else {
                                         TextPaint::Stroke
                                     },
-                                    frame,
+                                    self.input_source.clone(),
+                                    "character",
                                 ))
                             })
                             .when(!l.locked() && field_parameter(i).is_some(), |d| {
@@ -473,20 +508,22 @@ impl Render for Character {
                             .child(label),
                     )
                     .when(i == 3, |d| {
-                        d.child(super::color_picker::swatch(
+                        d.child(super::color_picker::text_swatch(
                             "text-fill-color",
                             fill_color,
-                            crate::color_edit::Target::Fill(l.id()),
-                            l.locked(),
+                            l.id(),
+                            TextPaint::Fill,
+                            self.input_source.clone(),
                             &self.state,
                         ))
                     })
                     .when(i == 5, |d| {
-                        d.child(super::color_picker::swatch(
+                        d.child(super::color_picker::text_swatch(
                             "text-stroke-color",
                             stroke_color,
-                            crate::color_edit::Target::Stroke(l.id()),
-                            l.locked(),
+                            l.id(),
+                            TextPaint::Stroke,
+                            self.input_source.clone(),
                             &self.state,
                         ))
                     })
@@ -1312,5 +1349,121 @@ mod text_paint_controls_tests {
         state.editor.execute(Command::ToggleLocked(1)).unwrap();
         state.editor.execute(Command::AddSolid).unwrap();
         assert!(!target.same_context(&state));
+    }
+    #[test]
+    fn text_opacity_fields_are_sparse_precise_bounded_and_independently_animated() {
+        let mut e = scene();
+        let mut style = e.selected_layer().unwrap().text_style();
+        style.fill_enabled = false;
+        style.stroke_enabled = false;
+        style.stroke_width = 0.;
+        e.execute(Command::SetTextStyle { id: 1, style }).unwrap();
+        e.clear_history();
+        e.execute(Command::RenameLayer {
+            id: 1,
+            name: "Redo".into(),
+        })
+        .unwrap();
+        e.undo();
+        let source = e.project().clone();
+        for (index, parameter) in [(6, TextParam::FillOpacity), (7, TextParam::StrokeOpacity)] {
+            assert_eq!(field_parameter(index), Some(parameter));
+            for spelling in ["100", "100.000", " 1e2 "] {
+                assert!(
+                    field_command(e.selected_layer().unwrap(), 17, index, spelling)
+                        .unwrap()
+                        .is_none()
+                );
+            }
+            for bad in ["NaN", "inf", "-0.0001", "100.0001", "bad"] {
+                assert!(field_command(e.selected_layer().unwrap(), 17, index, bad).is_err());
+            }
+        }
+        assert_eq!(e.project(), &source);
+        assert!(!e.can_undo());
+        assert!(e.can_redo());
+        for (index, parameter, end) in [
+            (6, TextParam::FillOpacity, 20.123456789012345),
+            (7, TextParam::StrokeOpacity, 60.98765432109876),
+        ] {
+            let command = scalar_animation_command(e.selected_layer().unwrap(), parameter, 0);
+            e.execute(command).unwrap();
+            let command = field_command(e.selected_layer().unwrap(), 60, index, &end.to_string())
+                .unwrap()
+                .unwrap();
+            e.execute(command).unwrap();
+            let sample = e
+                .selected_layer()
+                .unwrap()
+                .text_value_at(parameter, 17)
+                .unwrap();
+            assert!(
+                field_command(e.selected_layer().unwrap(), 17, index, &sample.to_string())
+                    .unwrap()
+                    .is_none()
+            );
+            let other = if parameter == TextParam::FillOpacity {
+                TextParam::StrokeOpacity
+            } else {
+                TextParam::FillOpacity
+            };
+            let other_track = e
+                .selected_layer()
+                .unwrap()
+                .track(PropertyPath::Text(other))
+                .cloned();
+            let command = scalar_animation_command(e.selected_layer().unwrap(), parameter, 17);
+            e.execute(command).unwrap();
+            let layer = e.selected_layer().unwrap();
+            assert_eq!(layer.text_value_at(parameter, 0), Some(sample));
+            assert!(
+                layer
+                    .track(PropertyPath::Text(parameter))
+                    .unwrap()
+                    .keys()
+                    .is_empty()
+            );
+            assert_eq!(layer.track(PropertyPath::Text(other)), other_track.as_ref());
+            for paint in [TextPaint::Fill, TextPaint::Stroke] {
+                assert!(!layer.text_color_animated(paint));
+            }
+            assert_eq!(
+                layer.text_style(),
+                source.composition().layer(1).unwrap().text_style()
+            );
+            assert_eq!(
+                layer
+                    .property(libre_effects_core::Property::Opacity)
+                    .value_at(17),
+                100.
+            );
+        }
+        for paint in [TextPaint::Fill, TextPaint::Stroke] {
+            let before_alpha = e
+                .selected_layer()
+                .unwrap()
+                .track(PropertyPath::Text(paint.opacity()))
+                .cloned();
+            let command = e
+                .selected_layer()
+                .unwrap()
+                .text_color_animation_command(paint, 17)
+                .unwrap();
+            e.execute(command).unwrap();
+            assert_eq!(
+                e.selected_layer()
+                    .unwrap()
+                    .track(PropertyPath::Text(paint.opacity())),
+                before_alpha.as_ref()
+            );
+        }
+        e.execute(Command::ToggleLocked(1)).unwrap();
+        for index in [6, 7] {
+            assert!(field_command(e.selected_layer().unwrap(), 17, index, "50").is_err());
+        }
+        e.execute(Command::AddSolid).unwrap();
+        for index in [6, 7] {
+            assert!(field_command(e.selected_layer().unwrap(), 17, index, "50").is_err());
+        }
     }
 }

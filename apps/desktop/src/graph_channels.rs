@@ -745,3 +745,129 @@ mod luma_channel_tests {
         assert!(state.ranges.is_empty());
     }
 }
+
+#[cfg(test)]
+mod text_opacity_channel_tests {
+    use super::*;
+    use libre_effects_core::{Command, Content, Editor, TrackEdit};
+
+    #[test]
+    fn text_opacity_typed_addresses_do_not_alias_transform_or_shape_opacity() {
+        let paths = [
+            PropertyPath::Text(TextParam::FillOpacity),
+            PropertyPath::Text(TextParam::StrokeOpacity),
+            Property::Opacity.into(),
+            PropertyPath::Shape(ShapeParam::FillOpacity),
+        ];
+        let mut state = GraphChannels::default();
+        for property in paths {
+            let channel = GraphChannel { id: 3, property };
+            state.pin(channel).unwrap();
+            state.activate(channel);
+            state.ranges.insert(
+                channel,
+                GraphRanges {
+                    value: Some([0., 100.]),
+                    speed: Some([-50., 50.]),
+                },
+            );
+        }
+        let bytes = serde_json::to_vec(&state).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["version"], 1);
+        assert_eq!(
+            value["pinned"][0]["property"],
+            serde_json::json!({"kind":"text","parameter":"FillOpacity"})
+        );
+        assert_eq!(
+            value["pinned"][1]["property"],
+            serde_json::json!({"kind":"text","parameter":"StrokeOpacity"})
+        );
+        assert_eq!(value["pinned"][2]["property"]["kind"], "transform");
+        assert_eq!(value["pinned"][3]["property"]["kind"], "shape");
+        assert_eq!(state.pinned.len(), 4);
+        assert_eq!(
+            serde_json::from_slice::<GraphChannels>(&bytes).unwrap(),
+            state
+        );
+    }
+
+    #[test]
+    fn text_opacity_pins_keep_disabled_paint_and_keyless_overrides_until_source_removal() {
+        let mut editor = Editor::default();
+        editor
+            .execute(Command::AddContent {
+                content: Content::Text {
+                    text: "Opacity".into(),
+                    font_size: 48.,
+                },
+                width: 320.,
+                height: 100.,
+                name: "Text".into(),
+            })
+            .unwrap();
+        let channels =
+            [TextParam::FillOpacity, TextParam::StrokeOpacity].map(|parameter| GraphChannel {
+                id: 1,
+                property: PropertyPath::Text(parameter),
+            });
+        for parameter in [TextParam::FillOpacity, TextParam::StrokeOpacity] {
+            editor
+                .execute(Command::EditText {
+                    id: 1,
+                    parameter,
+                    edit: TrackEdit::ToggleAnimation { frame: 0 },
+                })
+                .unwrap();
+        }
+        let mut state = GraphChannels::default();
+        for channel in channels {
+            state.pin(channel).unwrap();
+        }
+        state.activate(channels[1]);
+        state.reconcile(Some(editor.project().composition()), false);
+        let mut style = editor.selected_layer().unwrap().text_style().clone();
+        style.fill_enabled = false;
+        style.stroke_enabled = false;
+        editor
+            .execute(Command::SetTextStyle { id: 1, style })
+            .unwrap();
+        for parameter in [TextParam::FillOpacity, TextParam::StrokeOpacity] {
+            editor
+                .execute(Command::EditText {
+                    id: 1,
+                    parameter,
+                    edit: TrackEdit::ToggleAnimation { frame: 30 },
+                })
+                .unwrap();
+        }
+        state.reconcile(Some(editor.project().composition()), false);
+        assert_eq!(state.included(), channels);
+        for channel in channels {
+            assert!(
+                editor
+                    .selected_layer()
+                    .unwrap()
+                    .track(channel.property)
+                    .unwrap()
+                    .keys()
+                    .is_empty()
+            );
+        }
+        let before = editor.project().clone();
+        state.prune(editor.project().composition());
+        assert_eq!(state.pinned, channels);
+        assert_eq!(editor.project(), &before);
+        editor.execute(Command::RemoveLayer(1)).unwrap();
+        state.reconcile(Some(editor.project().composition()), false);
+        assert!(state.included().is_empty());
+        let live = state.clone();
+        let mut saved = state.clone();
+        saved.prune(editor.project().composition());
+        assert!(saved.is_legacy() && saved.pinned.is_empty());
+        assert_eq!(state, live);
+        editor.undo();
+        state.reconcile(Some(editor.project().composition()), true);
+        assert_eq!(state.included(), channels);
+    }
+}

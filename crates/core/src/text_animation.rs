@@ -13,9 +13,11 @@ pub enum TextParam {
     FontSize,
     Tracking,
     Leading,
+    FillOpacity,
+    StrokeOpacity,
 }
 impl TextParam {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 12] = [
         Self::FillRed,
         Self::FillGreen,
         Self::FillBlue,
@@ -26,6 +28,8 @@ impl TextParam {
         Self::FontSize,
         Self::Tracking,
         Self::Leading,
+        Self::FillOpacity,
+        Self::StrokeOpacity,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -39,6 +43,8 @@ impl TextParam {
             Self::FontSize => "Font Size",
             Self::Tracking => "Tracking",
             Self::Leading => "Leading",
+            Self::FillOpacity => "Fill Opacity",
+            Self::StrokeOpacity => "Stroke Opacity",
         }
     }
     pub fn bounds(self) -> (f64, f64) {
@@ -47,7 +53,16 @@ impl TextParam {
             Self::Tracking => (-1000., 10000.),
             Self::Leading => (0.1, 10.),
             Self::StrokeWidth => (0., 1000.),
+            Self::FillOpacity | Self::StrokeOpacity => (0., 100.),
             _ => (0., 255.),
+        }
+    }
+    /// Minimum project schema that can represent this parameter.
+    pub const fn required_version(self) -> u32 {
+        match self {
+            Self::FillOpacity | Self::StrokeOpacity => 52,
+            Self::FontSize | Self::Tracking | Self::Leading => 49,
+            _ => 48,
         }
     }
     pub(super) fn is_typography(self) -> bool {
@@ -71,6 +86,7 @@ impl TextParam {
             },
             Self::Tracking => layer.text_style.tracking,
             Self::Leading => layer.text_style.leading,
+            Self::FillOpacity | Self::StrokeOpacity => 100.,
         }
     }
 }
@@ -97,6 +113,13 @@ pub enum TextPaint {
     Stroke,
 }
 impl TextPaint {
+    /// Independent paint opacity; deliberately excluded from RGB channel helpers.
+    pub const fn opacity(self) -> TextParam {
+        match self {
+            Self::Fill => TextParam::FillOpacity,
+            Self::Stroke => TextParam::StrokeOpacity,
+        }
+    }
     pub fn from_parameter(parameter: TextParam) -> Option<Self> {
         [Self::Fill, Self::Stroke]
             .into_iter()
@@ -139,7 +162,7 @@ impl Layer {
             leading: self.text_value_at(TextParam::Leading, frame)?,
         })
     }
-    /// Plan a scalar edit without materializing an untouched typography track.
+    /// Plan a scalar edit without materializing an unchanged sparse track.
     /// Existing tracks keep their source baseline, and explicit track/key commands
     /// remain available when the caller intends to enable animation.
     ///
@@ -323,8 +346,12 @@ pub(super) fn validate(layer: &Layer, duration: Frame, version: u32) -> Result<(
         return Err("Text tracks require a text layer and project version 48 or later".into());
     }
     for (&parameter, track) in &layer.text_parameters {
-        if parameter.is_typography() && version < 49 {
-            return Err("Text typography tracks require project version 49".into());
+        if version < parameter.required_version() {
+            return Err(format!(
+                "{} tracks require project version {}",
+                parameter.label(),
+                parameter.required_version()
+            ));
         }
         if !parameter.accepts(track.value)
             || track.keys.len() > 10_000

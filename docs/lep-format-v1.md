@@ -3,11 +3,11 @@
 `.lep` is the native Libre Effects Project file extension. It is a bounded binary
 container for portable project metadata, optional editor view state, and embedded
 images. The container version is **1**. The project's JSON schema version remains
-independent (currently **51**); choosing this format does not upgrade that schema.
+independent (currently **52**); choosing this format does not upgrade that schema.
 Schema 48 adds optional layer-wide text-paint tracks. Schema 49 adds sparse
 `FontSize`, `Tracking` and `Leading` tracks in the same text-parameter map. Any
 materialized typography track, including a keyless override or an inactive
-composition's track, requires schema 49; paint-only maps still require only 48.
+composition's track, requires schema 49; RGB/Stroke Width-only maps still require only 48.
 Documents without those tracks retain their otherwise required schema, including
 legacy static text. Merely inspecting or focusing a sparse typography property
 does not materialize a track or upgrade its project schema. Readers that only
@@ -31,6 +31,14 @@ preserve exact source/history/assets rather than materializing a key or normaliz
 an older declaration. No new LEP chunk, VIEW version or property-address shape is
 needed; older readers reject the unsupported model. Luma-containing effect presets
 separately use preset version 4; that is not a project/container version change.
+Text `FillOpacity` and `StrokeOpacity` are independent 0–100 scalar tracks in the
+existing sparse `text_parameters` map. Absence means 100% without changing
+TextStyle storage. Any materialized entry requires project schema 52, including
+keyless 100%, disabled paint or an inactive composition. Existing RGB/Stroke Width
+tracks still require 48 and typography 49. An unchanged default-value edit does
+not materialize a track or upgrade schema. LEP 1, VIEW 1/2 and typed address 1 remain
+unchanged; saved opacity pins require their corresponding materialized track.
+
 A numeric project schema newer than this reader's supported maximum is rejected
 with both version numbers before model deserialization or asset resolution. This
 also covers future model variants and large unsigned version values. Native

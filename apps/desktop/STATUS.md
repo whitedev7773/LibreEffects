@@ -6,7 +6,8 @@ Contents sibling-tree, layer-wide text-paint, numeric-vertex, font-diagnostic an
 Speed Graph endpoint-velocity, multi-channel Graph, multi-vertex transform and
 C09 layer-command / Linux image-retirement, F03 typography and B01 Project-list
 label, E05 Trim Paths, automatic About build identity and the G06 Luma Key
-headless checkpoint (native validation pending).
+headless checkpoint and independent Text Fill/Stroke opacity
+(native validation pending for the two newest feature slices).
 This is the current checkpoint inventory;
 [DEVELOPMENT_BACKLOG.md](DEVELOPMENT_BACKLOG.md) retains the original audit and
 its dated implementation/test history. Older “remaining” lists and test counts
@@ -16,6 +17,48 @@ Libre Effects is an **early 2D motion-graphics and compositing editor**. It is n
 an After Effects replacement, an AE pixel-equivalent renderer, or an AEP/Adobe
 script-compatible application. A working control or passing model test alone
 does not establish a complete native editing workflow.
+
+## F03 / D01 Text paint opacity — headless gates passed, native pending
+
+Fill Opacity and Stroke Opacity extend the Text group to twelve independent
+layer-wide scalars. Each is a sparse 0–100 percentage with absent fallback 100%;
+materialized entries require schema 52 while existing RGB/Width 48, typography 49,
+TextStyle, LEP 1, VIEW 1/2 and address 1 remain unchanged. Precise Character/Properties
+fields, independent watches, Timeline and typed Value/Speed lanes are connected.
+Explicit Text color dialogs now address that paint's alpha, keeping Transform
+Opacity independent and combined RGB/alpha acceptance in one Undo transaction.
+Shared picker callbacks also reject stale serial/source/frame and hidden sampling
+contexts; generic target alpha and selection/playback policy are unchanged.
+
+Opacity applies once to each complete fill/stroke pass. Exactly 100% retains the
+old SVG path; zero retains editing, layout, glyph diagnostics and enabled geometry
+for filter allocation. All 385 core tests, integrated desktop test compilation
+and 24 focused opacity tests pass. The initial oversized-filter pixel reference
+was invalid at tight legacy raster edges: the immutable pre-change executable
+reproduced the same width-dependent discrepancy at opaque 100%. The corrected
+integration reference keeps the original opaque filter surfaces, substitutes only
+independently constructed complete paint groups, and compares every pixel exactly.
+Separate arithmetic tests prove attenuation/order; exact retained geometry and
+filter-rectangle checks prove allocation invariance. A frozen negative control
+records the inherited artifact. There is no tolerance, repaired/excluded pixel or
+production workaround, nor a claim of generalized oversized/no-clipping proof.
+The final aggregate passes all 1201 default tests (385 core, 810 desktop and six
+build helpers), all 32 explicit media tests, formatting and all-target checking.
+The normal optimized release passes (162.6 seconds), with build number
+`20261004.082259-052c0f12653666f8` and all 327 watched source hashes verified.
+The release retains all 31,940,800 prior text/reference RGBA pixels, 21 prior Trim
+frames and 18 prior Luma frames exactly. The new prepared-fixture gate passes
+48 checks: 25 exact RGBA comparisons across 46 renders, independent Transform
+Opacity behavior, and 11 future/down-declared/container/old-reader rejections
+preserving existing outputs and leaving no temporary files. Its baked static
+samples are same-renderer consistency checks; independent pixel arithmetic is
+proved separately in the unit suite. Python-authored LEPs are not native saves.
+The new slice adds 18 core and 33 desktop tests; these are included in the total,
+not additional passes. Test compilation used the documented temporary desktop-only
+debug=0/strip overrides; the release profile and repository settings are unchanged.
+Native eight-case acceptance is unrun: the supported 08:26 UTC recheck still
+reports a missing cloud native pipe;
+this milestone does not close Luma's separate eight-case native gap.
 
 ## Project-version diagnostic checkpoint
 
@@ -294,8 +337,8 @@ or a controlled memory/performance comparison. See README for the scoped command
 - **Output path protection:** canonical-parent alias comparison now covers
   destinations that do not yet exist, with alias and offline-source regression
   cases. The previous Windows CI failure at `52ab32d` was addressed locally.
-  This checkpoint is local-commit-only: no push or PR was requested, so fresh
-  remote Windows CI has not run and is not scheduled by this checkpoint.
+  Delivery is currently local-commit-only under the owner’s latest instruction.
+  Fresh remote Windows CI has not run for the current changes.
 - **Dependency maintenance:** the vendored `grid` 0.18 compatibility backport
   uses upstream checked dimension arithmetic. The application still has the
   GPUI/Taffy-compatible API. See [backport provenance and removal criteria](../../vendor/grid/README.libreeffects.md).
@@ -465,7 +508,7 @@ Every original A01–L05 ID appears once below. The labels are deliberately boun
 | --- | --- | --- |
 | F01 | Partial | Direct canvas point/paragraph text, selection, paste, wrapping, resize, commit/cancel and Undo. Real Korean IME composition/candidate and full native gesture/focus coverage remain. |
 | F02 | Partial | Installed family/real-style selection, shared preview/output resolution, missing-font reporting, project-wide replacement and explicit bounded final-glyph/fallback diagnostics. Variable axes, runtime catalog refresh, semantic/color-font assurance and cross-machine portability testing remain. |
-| F03 | Partial | Layer-wide alignment, spacing, wrapping, Fill/Stroke and paint order, plus ten scalar Fill/Stroke RGB, Stroke Width, Font Size, Tracking and Leading channels. Sampled renderer/editing/diagnostic geometry and schema49/legacy/VIEW boundaries pass automated/release and ten-case bounded native acceptance. Per-character rich text, Source Text animation and full kerning/paragraph controls remain. |
+| F03 | Partial | Layer-wide alignment, spacing, wrapping, Fill/Stroke and paint order. Ten original scalar RGB, Stroke Width, Font Size, Tracking and Leading channels pass automated/release and bounded native acceptance. Independent Fill/Stroke Opacity adds two schema 52 percentage channels; automated/release/CLI gates pass and native acceptance remains pending as described above. Per-character rich text, Source Text animation and full kerning/paragraph controls remain. |
 | F04 | Not implemented | Text Animator and character/word/line Range Selectors. |
 | F05 | Not implemented | Text on paths, Source Text animation and reusable per-instance text controls. |
 
@@ -573,8 +616,9 @@ This does not close the broader A04 backup-management or other backlog extension
    retain the existing LEP container and VIEW versions. Per-character styling, Source Text
    animation, Text Animator, Auto Orient/Skew and full-animation anchor compensation
    remain separate; E02 cross-path and E04 cross-parent edits need their own design.
-   The B01 Project-list correction now passes its four bounded native cases. Next
-   is E05 Trim Paths with Start/End/Offset on each source contour, group-local
+   The B01 Project-list correction passes its four bounded native cases. E05 Trim
+   Paths now passes its bounded automated/release/native gates, with Start/End/Offset
+   on each source contour, group-local
    lengths and geometry-before-paint retaining original path scope. Parent
    operators affect exported child geometry, while child-painted output stays
    isolated. Successive operators measure the combined surviving fragments of

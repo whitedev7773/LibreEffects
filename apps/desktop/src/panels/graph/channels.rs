@@ -57,6 +57,7 @@ pub(super) fn text_unit(parameter: TextParam) -> Unit {
         TextParam::FontSize | TextParam::StrokeWidth => Unit::Pixels,
         TextParam::Tracking => Unit::ThousandthsEm,
         TextParam::Leading => Unit::Ratio,
+        TextParam::FillOpacity | TextParam::StrokeOpacity => Unit::Percent,
         TextParam::FillRed
         | TextParam::FillGreen
         | TextParam::FillBlue
@@ -284,6 +285,7 @@ mod typography_units_tests {
                 TextParam::FontSize | TextParam::StrokeWidth => ("px", "px/s"),
                 TextParam::Tracking => ("1/1000 em", "(1/1000 em)/s"),
                 TextParam::Leading => ("ratio", "ratio/s"),
+                TextParam::FillOpacity | TextParam::StrokeOpacity => ("%", "%/s"),
                 _ => ("RGB 0–255", "RGB units/s"),
             };
             assert_eq!(descriptor.channel, channel);

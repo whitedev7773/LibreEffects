@@ -22,6 +22,16 @@
 - **후속 고급 기능:** 패널 도킹·소스 뷰어·최근 프로젝트, 타임라인 고급 시간 편집/검색/가상화, 공간 경로·프리셋·표현식, Shape 연산/SVG·Text Animator, 추가 효과·모션 블러, 고정밀 색/HDR·Proxy/GPU, 템플릿, 설치/업데이트·한글화와 UI 회귀 자동화.
 - **별도 대형 단계:** 3D/카메라/라이트·모델, 추적·로토/Puppet, 플러그인/교환 포맷 연구, 웹/API 제품 범위. AEP/MOGRT 호환은 구현되지 않았다.
 
+### F03 / D01 독립 Text Fill·Stroke Opacity — 2026-10-04, headless 검증 완료·native 대기
+
+- Fill Opacity와 Stroke Opacity를 기존 10개 Text scalar 뒤에 추가해 총 12개로 확장했다. 각각 0–100%이며 sparse entry가 없으면 100%다. Character/Properties의 정밀 숫자·독립 stopwatch, Timeline, % 및 %/s Graph와 typed pin을 연결했다. RGB watch는 여전히 RGB 세 채널만 바꾸고 Transform Opacity는 별도다.
+- 실제 Text swatch는 전용 picker target을 사용한다. 6자리 HEX는 RGB만, 8자리 HEX·alpha·recent/sample은 해당 paint만 바꾸며 RGB+alpha는 한 Undo다. no-op/Cancel/edit-away-back은 source/history/Redo를 보존한다. 모든 picker의 stale serial/source/frame/hidden callback 방어도 보강했고 generic target의 alpha 및 selection/playback 정책은 유지했다. helper 검증과 실제 native event 증거를 구분한다.
+- 각 fill/stroke 전체 pass에 float opacity를 한 번만 적용한다. 정확한 100%는 기존 SVG를 그대로 사용하고 0%도 편집·layout·glyph 진단·활성 geometry의 effect allocation을 보존한다. 기존 TextStyle, LEP 1, VIEW 1/2, address 1은 그대로다. 새 entry는 keyless 100%, disabled paint, inactive composition에도 schema 52를 요구한다. 이전 RGB/Width는 48, typography는 49이며 untouched legacy는 sparse 상태와 버전을 보존한다.
+- 초기 oversized-filter pixel oracle은 기존 renderer의 tight filter edge 동작 때문에 실패했다. 고정된 이전 release에서도 width 확장 시 같은 edge 차이를 재현했다. per-pixel 예외는 제거했고 opaque legacy filter surface를 유지한 독립 paint-group reference로 integration을 비교한다. 별도 float 산술 test는 모든 pixel을 정확히 확인하고, geometry·filter rectangle은 allocation 불변성을 확인한다. tolerance나 production workaround는 없으며 일반적인 모든 방향 no-clipping 증명이라고 주장하지 않는다.
+- 집중 opacity 24개, 전체 기본 1201개(Core 385 + Desktop 810 + helper 6), explicit media 32개, fmt/all-target check와 일반 optimized release가 통과했다. 새 core 18개와 desktop 33개는 이 합계에 포함된다. 빌드 번호 20261004.082259-052c0f12653666f8과 watched source 327개의 fingerprint를 검증했다. 테스트에만 기존 임시 desktop debug=0/strip 설정을 사용했고 release/repository profile은 바꾸지 않았다.
+- 실제 고정 release CLI에서 이전 text/reference 31,940,800 RGBA pixel, Trim 21 frame, Luma 18 frame이 정확히 유지됐다. 새 fixture gate는 46 render의 25개 exact RGBA 비교와 독립 layer opacity, 미래·하향 선언·container·이전 reader의 11개 거부/출력 보존을 포함한 48개 검사를 통과했다. 정적 sample 비교는 같은 renderer의 evaluation/serialization 일관성 증거이며 별도 pixel 산술 oracle과 구별한다. Python 생성 LEP를 실제 UI Save로 표현하지 않는다.
+- 08:26 UTC 지원 CUA 재확인도 native pipe 부재로 실패했다. Text opacity 8-case와 앞선 Luma 8-case는 실제 화면 검증 전이며 우회 제어·다른 컴퓨터 사용은 하지 않았다. 자동화 gate가 끝난 local checkpoint와 native 미완료를 분리한다. 다음 bounded 편집 항목은 F05 레이어 전체 Source Text의 Hold animation이며 rich text/Text Animator 전체 완료를 뜻하지 않는다.
+
 ### A05 미래 project version 진단 보강 — 2026-10-04
 
 - JSON/native metadata가 숫자로 선언한 미래 project version을 asset/model decoding 전에 확인하고 “Unsupported project version {version}; this build supports up to version {maximum}”으로 거부한다. u64::MAX도 모델의 좁은 version 타입으로 변환하지 않고 명확히 보고한다. schema/serialization/migration/rendering/UI control은 바꾸지 않았다.

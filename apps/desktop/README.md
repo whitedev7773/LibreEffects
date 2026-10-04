@@ -424,15 +424,14 @@ clamps Bezier overshoot to those bounds. Disabling animation retains the current
 sampled color or width. Partially animated RGB edits preserve existing channels
 and seed missing channel baselines before adding the current-frame color.
 
-Paint-only tracks are saved only when needed, in project schema 48. Older static text
+RGB/Stroke Width tracks are saved only when needed, in project schema 48. Older static text
 keeps its existing schema, and the native LEP container stays version 1. Source,
 font, paragraph, spacing and paint-switch/order edits retain the paint tracks;
 rendering evaluates paint without changing glyph advances, caret positions or
 wrapping. Pending field drafts are discarded after their source document, layer,
-frame or Graph key selection changes. Fill picker alpha still edits whole-layer
-opacity; it is not a separate text-fill alpha track. Typography, Source Text,
-per-character styles, paint switches/order and compound text animation remain
-outside this seven-channel milestone.
+frame or Graph key selection changes. The explicit Text color dialogs now edit
+the independent paint opacity described below. Source Text, per-character styles,
+paint switches/order and compound text animation remain outside this milestone.
 
 ### Animated text typography
 
@@ -464,13 +463,48 @@ compositions at frame 0, labels those frames, and invalidates results on a frame
 or composition change. This is not whole-animation glyph coverage.
 
 Any materialized typography track requires project schema 49, including a keyless
-override or an inactive composition's track. Paint-only maps keep schema 48;
+override or an inactive composition's track. RGB/Stroke Width-only maps keep schema 48;
 untouched legacy text stays sparse. LEP v1, VIEW v1/v2 and typed Graph address v1
 remain unchanged. Sparse Graph focus does not leak new addresses into old files.
 Readers limited to project schema 48 cannot open projects containing typography
 tracks; old static and paint-only projects remain supported.
 Per-character styles, Source Text animation, Text Animator, absolute/Auto leading,
 kerning modes and animated font identity/weight remain separate work.
+
+### Independent text paint opacity
+
+Fill Opacity and Stroke Opacity are two additional layer-wide percentage channels,
+bringing the Text group to twelve scalars. Character and Properties show precise
+0–100 values and separate stopwatches, including for disabled paints. Timeline
+and Value/Speed Graph use % and %/s. Transform Opacity remains a distinct property.
+The RGB stopwatches still toggle only their three color channels.
+
+Absent paint-opacity data means exactly 100%. An actual static edit creates a
+sparse keyless override; explicit keys/stopwatches can also materialize a track.
+An unchanged 100% edit does neither. Current-frame edits preserve existing easing,
+new keys use Linear, disabling animation retains the bounded current sample, and
+curve overshoot clamps to 0–100. Disabling a paint or setting Stroke Width to zero
+retains its opacity track. Any materialized opacity entry requires project schema
+52, including keyless 100% or an inactive composition. Static TextStyle storage,
+LEP 1, VIEW 1/2 and typed Graph address 1 are unchanged. Older readers reject schema 52;
+untouched legacy projects retain their exact sparse representation.
+
+Each opacity attenuates its complete fill or stroke pass once, so overlapping
+glyphs within the same pass do not accumulate separate paint alpha. The existing
+paint order then composites the passes. A 100% pass uses the original SVG without
+an extra isolation group. Zero opacity retains enabled geometry, text editing,
+layout, glyph diagnostics and effect allocation bounds. Layer opacity, masks,
+effects, mattes and nesting remain independent. Floating group opacity uses the
+renderer’s existing rounding stages, not an intermediate byte-valued matte.
+
+Text Fill/Stroke color dialogs edit that paint's opacity, not Transform Opacity.
+Six-digit HEX changes only RGB; eight-digit HEX, alpha input, recent colors and
+sampled alpha can change the selected paint opacity. RGB plus alpha is one Undo
+transaction. Cancel, unchanged acceptance and an exact edit-away/back preserve
+source and history. Context-bound fields reject stale source, frame, selection,
+playback or dialog callbacks; normal valid blur still commits its own input.
+Native screen acceptance for these new controls remains pending the cloud native
+transport recovery; automated/CLI evidence is recorded separately in STATUS.md.
 
 ### Canvas text editing
 

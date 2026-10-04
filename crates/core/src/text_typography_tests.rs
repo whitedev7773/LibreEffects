@@ -87,7 +87,11 @@ fn text_typography_sparse_legacy_sampling_and_roundtrip_do_not_materialize_or_up
     let mut e = scene();
     let original = e.project().clone();
     assert_eq!(original.version, 3);
-    assert_eq!(TextParam::ALL.len(), 10);
+    assert_eq!(
+        &TextParam::ALL[7..10],
+        &TYPOGRAPHY,
+        "The original typography positions remain stable"
+    );
     for frame in [0, 25, u32::MAX] {
         let layer = e.selected_layer().unwrap();
         assert_eq!(

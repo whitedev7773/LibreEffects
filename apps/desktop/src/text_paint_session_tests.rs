@@ -54,9 +54,11 @@ fn animated_text(paragraph: bool) -> Editor {
         TextParam::StrokeGreen,
         TextParam::StrokeBlue,
         TextParam::StrokeWidth,
+        TextParam::FillOpacity,
+        TextParam::StrokeOpacity,
     ]
     .into_iter()
-    .zip([224., 192., 160., 48., 112., 224., 48.])
+    .zip([224., 192., 160., 48., 112., 224., 48., 20., 60.])
     {
         editor
             .execute(Command::EditText {
@@ -76,6 +78,8 @@ fn animated_text(paragraph: bool) -> Editor {
     for (parameter, frame, incoming, slope, influence) in [
         (TextParam::FillRed, 0, false, 5., 0.4),
         (TextParam::StrokeWidth, 60, true, 0.3, 0.6),
+        (TextParam::FillOpacity, 0, false, -1.2, 0.4),
+        (TextParam::StrokeOpacity, 60, true, -0.5, 0.6),
     ] {
         editor
             .execute(Command::SetTemporalHandle {
@@ -370,4 +374,96 @@ fn text_paint_survives_point_paragraph_conversion_and_actual_font_replacement() 
         Project::from_json(&replaced.to_json().unwrap()).unwrap(),
         replaced
     );
+}
+
+#[test]
+fn zero_text_opacity_keeps_hit_targets_fit_height_source_and_independent_tracks() {
+    for paragraph in [false, true] {
+        let mut editor = animated_text(paragraph);
+        let before = editor.project().clone();
+        let initial = Session::new(&before, 0, 30, Some(1), [0.; 2]).unwrap();
+        let initial_layout = layout::Layout::new(&initial);
+        let fit = crate::text_flow::fit_height(before.composition().layer(1).unwrap(), 30);
+        let points = [
+            [-20., -20.],
+            [0., 0.],
+            [10., 15.],
+            [100., 48.],
+            [175., 120.],
+            [250., 250.],
+        ];
+        let hit_targets: Vec<_> = points
+            .iter()
+            .map(|p| {
+                (
+                    initial_layout.contains(*p),
+                    initial_layout.hit(*p),
+                    initial_layout.hit_character(*p),
+                    initial_layout.hit_caret(*p),
+                )
+            })
+            .collect();
+        for parameter in [TextParam::FillOpacity, TextParam::StrokeOpacity] {
+            editor
+                .execute(Command::EditText {
+                    id: 1,
+                    parameter,
+                    edit: TrackEdit::Value {
+                        frame: 30,
+                        value: 0.,
+                    },
+                })
+                .unwrap();
+        }
+        let zero = editor.project().clone();
+        for disabled in [false, true] {
+            if disabled {
+                let mut style = editor.selected_layer().unwrap().text_style();
+                style.fill_enabled = false;
+                style.stroke_enabled = false;
+                style.stroke_width = 0.;
+                editor
+                    .execute(Command::SetTextStyle { id: 1, style })
+                    .unwrap();
+            }
+            let snapshot = editor.project().clone();
+            let json = snapshot.to_json().unwrap();
+            let history = (editor.can_undo(), editor.can_redo());
+            let session = Session::new(&snapshot, 0, 30, Some(1), [0.; 2]).unwrap();
+            let current_layout = layout::Layout::new(&session);
+            assert_eq!(geometry(&session), geometry(&initial));
+            assert_eq!(flow(&session), flow(&initial));
+            assert_eq!(
+                crate::text_flow::fit_height(editor.selected_layer().unwrap(), 30),
+                fit
+            );
+            assert_eq!(session.buffer.text, initial.buffer.text);
+            assert_eq!(session.font_size, initial.font_size);
+            for (point, expected) in points.into_iter().zip(&hit_targets) {
+                assert_eq!(
+                    (
+                        current_layout.contains(point),
+                        current_layout.hit(point),
+                        current_layout.hit_character(point),
+                        current_layout.hit_caret(point)
+                    ),
+                    *expected
+                );
+            }
+            for parameter in [TextParam::FillOpacity, TextParam::StrokeOpacity] {
+                assert_eq!(
+                    editor
+                        .selected_layer()
+                        .unwrap()
+                        .track(PropertyPath::Text(parameter)),
+                    zero.composition()
+                        .layer(1)
+                        .unwrap()
+                        .track(PropertyPath::Text(parameter))
+                );
+            }
+            assert_eq!(editor.project().to_json().unwrap(), json);
+            assert_eq!((editor.can_undo(), editor.can_redo()), history);
+        }
+    }
 }

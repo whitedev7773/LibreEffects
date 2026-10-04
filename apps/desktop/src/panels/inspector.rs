@@ -32,8 +32,8 @@ fn text_field_command(
                 font_size: *font_size,
             },
         })),
-        1 => layer.text_value_command(
-            TextParam::FontSize,
+        1 | 11 | 12 => layer.text_value_command(
+            text_field_parameter(index).unwrap(),
             value
                 .trim()
                 .parse::<f64>()
@@ -42,6 +42,15 @@ fn text_field_command(
         ),
         2 => crate::color_edit::text_hex_command(layer, TextPaint::Fill, frame, value),
         _ => Err("Unknown text field".into()),
+    }
+}
+
+fn text_field_parameter(index: usize) -> Option<TextParam> {
+    match index {
+        1 => Some(TextParam::FontSize),
+        11 => Some(TextParam::FillOpacity),
+        12 => Some(TextParam::StrokeOpacity),
+        _ => None,
     }
 }
 
@@ -186,8 +195,8 @@ impl Inspector {
             })
             .collect();
         let extra_targets: Vec<Rc<RefCell<Option<InputTarget>>>> =
-            (0..11).map(|_| Default::default()).collect();
-        let extra = (0..11)
+            (0..13).map(|_| Default::default()).collect();
+        let extra = (0..13)
             .map(|index| {
                 let edit = state.clone();
                 let target = extra_targets[index].clone();
@@ -205,7 +214,9 @@ impl Inspector {
                                 return;
                             };
                             let id = l.id();
-                            if index <= 2 && matches!(l.content(), Content::Text { .. }) {
+                            if (index <= 2 || text_field_parameter(index).is_some())
+                                && matches!(l.content(), Content::Text { .. })
+                            {
                                 match text_field_command(l, s.frame, index, text) {
                                     Ok(Some(command)) => {
                                         s.dispatch(&Action::Edit(command), window, cx)
@@ -493,6 +504,26 @@ impl Render for Inspector {
                         .to_string(),
                 ),
             );
+        }
+        if matches!(layer.content(), Content::Text { .. }) {
+            entries.extend([
+                (
+                    11,
+                    "Fill opacity (%)",
+                    layer
+                        .text_value_at(TextParam::FillOpacity, frame)
+                        .unwrap()
+                        .to_string(),
+                ),
+                (
+                    12,
+                    "Stroke opacity (%)",
+                    layer
+                        .text_value_at(TextParam::StrokeOpacity, frame)
+                        .unwrap()
+                        .to_string(),
+                ),
+            ]);
         }
         if matches!(
             layer.content(),
@@ -793,18 +824,22 @@ impl Render for Inspector {
                     .items_center()
                     .child(
                         div()
-                            .w(px(105.0))
+                            .w(px(if index == 11 || index == 12 {
+                                155.0
+                            } else {
+                                105.0
+                            }))
                             .flex()
                             .items_center()
                             .when(
-                                index == 1
+                                text_field_parameter(index).is_some()
                                     && !locked
                                     && matches!(layer.content(), Content::Text { .. }),
                                 |d| {
                                     d.child(super::character::scalar_watch(
                                         &self.state,
                                         &layer,
-                                        TextParam::FontSize,
+                                        text_field_parameter(index).unwrap(),
                                         self.extra_source.clone(),
                                         "inspector",
                                     ))
@@ -825,7 +860,8 @@ impl Render for Inspector {
                                         &self.state,
                                         &layer,
                                         TextPaint::Fill,
-                                        frame,
+                                        self.extra_source.clone(),
+                                        "inspector",
                                     ))
                                 } else {
                                     d
@@ -833,22 +869,38 @@ impl Render for Inspector {
                             })
                             .child(label),
                     )
-                    .when(index == 2, |d| {
-                        d.child(super::color_picker::swatch(
-                            "layer-fill-color",
-                            fill_color,
-                            if matches!(layer.content(), Content::Shape(_)) {
-                                crate::color_edit::Target::Shape(
-                                    id,
-                                    libre_effects_core::ShapePaint::Fill,
-                                )
-                            } else {
-                                crate::color_edit::Target::Fill(id)
-                            },
-                            locked,
-                            &self.state,
-                        ))
-                    })
+                    .when(
+                        index == 2 && matches!(layer.content(), Content::Text { .. }),
+                        |d| {
+                            d.child(super::color_picker::text_swatch(
+                                "layer-text-fill-color",
+                                fill_color,
+                                id,
+                                TextPaint::Fill,
+                                self.extra_source.clone(),
+                                &self.state,
+                            ))
+                        },
+                    )
+                    .when(
+                        index == 2 && !matches!(layer.content(), Content::Text { .. }),
+                        |d| {
+                            d.child(super::color_picker::swatch(
+                                "layer-fill-color",
+                                fill_color,
+                                if matches!(layer.content(), Content::Shape(_)) {
+                                    crate::color_edit::Target::Shape(
+                                        id,
+                                        libre_effects_core::ShapePaint::Fill,
+                                    )
+                                } else {
+                                    crate::color_edit::Target::Fill(id)
+                                },
+                                locked,
+                                &self.state,
+                            ))
+                        },
+                    )
                     .child(
                         div()
                             .flex_1()
@@ -1177,5 +1229,102 @@ mod typography_tests {
         e.execute(Command::ToggleLocked(1)).unwrap();
         assert!(text_field_command(e.selected_layer().unwrap(), 17, 0, "Hidden").is_err());
         assert!(text_field_command(e.selected_layer().unwrap(), 17, 1, "90").is_err());
+    }
+    #[test]
+    fn inspector_text_opacity_fields_preserve_source_rgb_and_transform_and_precise_noops() {
+        let mut e = Editor::default();
+        e.execute(Command::AddContent {
+            content: Content::Text {
+                text: "Before".into(),
+                font_size: 48.,
+            },
+            width: 400.,
+            height: 120.,
+            name: "Text".into(),
+        })
+        .unwrap();
+        let original_style = e.selected_layer().unwrap().text_style();
+        let original_color = e.selected_layer().unwrap().color();
+        e.clear_history();
+        let before = e.project().clone();
+        for index in [11, 12] {
+            assert!(
+                text_field_command(e.selected_layer().unwrap(), 17, index, "100.000")
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        assert_eq!(e.project(), &before);
+        assert!(!e.can_undo());
+        for (index, parameter, value) in [
+            (11, TextParam::FillOpacity, 23.123456789012345),
+            (12, TextParam::StrokeOpacity, 67.98765432109876),
+        ] {
+            assert_eq!(text_field_parameter(index), Some(parameter));
+            let command =
+                text_field_command(e.selected_layer().unwrap(), 17, index, &value.to_string())
+                    .unwrap()
+                    .unwrap();
+            e.execute(command).unwrap();
+            assert_eq!(
+                e.selected_layer().unwrap().text_value_at(parameter, 17),
+                Some(value)
+            );
+            assert!(
+                e.selected_layer()
+                    .unwrap()
+                    .track(PropertyPath::Text(parameter))
+                    .unwrap()
+                    .keys()
+                    .is_empty()
+            );
+            assert!(
+                text_field_command(e.selected_layer().unwrap(), 17, index, &value.to_string())
+                    .unwrap()
+                    .is_none()
+            );
+            for bad in ["NaN", "inf", "-1", "100.0001", "bad"] {
+                assert!(text_field_command(e.selected_layer().unwrap(), 17, index, bad).is_err());
+            }
+        }
+        let tracks = [TextParam::FillOpacity, TextParam::StrokeOpacity].map(|p| {
+            e.selected_layer()
+                .unwrap()
+                .track(PropertyPath::Text(p))
+                .unwrap()
+                .clone()
+        });
+        let command = text_field_command(e.selected_layer().unwrap(), 17, 0, "After")
+            .unwrap()
+            .unwrap();
+        e.execute(command).unwrap();
+        for (parameter, track) in [TextParam::FillOpacity, TextParam::StrokeOpacity]
+            .into_iter()
+            .zip(tracks)
+        {
+            assert_eq!(
+                e.selected_layer()
+                    .unwrap()
+                    .track(PropertyPath::Text(parameter)),
+                Some(&track)
+            );
+        }
+        assert_eq!(e.selected_layer().unwrap().text_style(), original_style);
+        assert_eq!(e.selected_layer().unwrap().color(), original_color);
+        assert_eq!(
+            e.selected_layer()
+                .unwrap()
+                .property(Property::Opacity)
+                .value_at(17),
+            100.
+        );
+        e.execute(Command::ToggleLocked(1)).unwrap();
+        for index in [11, 12] {
+            assert!(text_field_command(e.selected_layer().unwrap(), 17, index, "50").is_err());
+        }
+        e.execute(Command::AddSolid).unwrap();
+        for index in [11, 12] {
+            assert!(text_field_command(e.selected_layer().unwrap(), 17, index, "50").is_err());
+        }
     }
 }

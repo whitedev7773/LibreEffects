@@ -99,6 +99,8 @@ pub(crate) fn text_svg(
     };
     text.lines().enumerate().map(|(line,s)| format!("<text x='{x}' y='{}' text-anchor='{anchor}' letter-spacing='{}' font-family='{}' font-weight='{}' font-style='{}' font-size='{font_size}' fill='{color}' xml:space='preserve'>{}</text>",font_size * (1.0 + style.leading * line as f64),style.tracking * font_size / 1000.0,xml(crate::fonts::svg_family(&style)),style.weight, if style.italic { "italic" } else { "normal" },xml(s))).collect()
 }
+/// Compose the same complete fill and stroke passes used at full opacity. The
+/// optional second SVG retains their unattenuated geometry for effect bounds.
 fn layer_text_svg(
     text: &str,
     size: f64,
@@ -106,30 +108,62 @@ fn layer_text_svg(
     width: f64,
     height: f64,
     style: libre_effects_core::TextStyle,
-) -> String {
+    opacity: [f64; 2],
+    retain_bounds: bool,
+) -> (String, Option<String>) {
     let fill = if style.fill_enabled {
         text_geometry_svg(text, size, color, width, height, &style)
     } else {
         String::new()
     };
-    if !style.stroke_enabled || style.stroke_width == 0.0 {
-        return fill;
-    }
-    let join = match style.stroke_join {
-        libre_effects_core::TextStrokeJoin::Miter => "miter",
-        libre_effects_core::TextStrokeJoin::Round => "round",
-        libre_effects_core::TextStrokeJoin::Bevel => "bevel",
+    let stroke = if style.stroke_enabled && style.stroke_width != 0.0 {
+        let join = match style.stroke_join {
+            libre_effects_core::TextStrokeJoin::Miter => "miter",
+            libre_effects_core::TextStrokeJoin::Round => "round",
+            libre_effects_core::TextStrokeJoin::Bevel => "bevel",
+        };
+        format!(
+            "<g stroke='#{:06x}' stroke-width='{}' stroke-linejoin='{join}' stroke-miterlimit='4'>{}</g>",
+            style.stroke_color,
+            style.stroke_width,
+            text_geometry_svg(text, size, "none", width, height, &style)
+        )
+    } else {
+        String::new()
     };
-    let stroke = format!(
-        "<g stroke='#{:06x}' stroke-width='{}' stroke-linejoin='{join}' stroke-miterlimit='4'>{}</g>",
-        style.stroke_color,
-        style.stroke_width,
-        text_geometry_svg(text, size, "none", width, height, &style)
-    );
-    if style.stroke_over_fill {
+    // Reuse the generated geometry instead of laying out paragraphs again.
+    // At full opacity the paint SVG itself is also the bounds representation.
+    let attenuated =
+        (!fill.is_empty() && opacity[0] != 100.0) || (!stroke.is_empty() && opacity[1] != 100.0);
+    let bounds = (retain_bounds && attenuated).then(|| {
+        if style.stroke_over_fill {
+            format!("{fill}{stroke}")
+        } else {
+            format!("{stroke}{fill}")
+        }
+    });
+    let fill = text_pass_opacity(fill, opacity[0]);
+    let stroke = text_pass_opacity(stroke, opacity[1]);
+    let paint = if stroke.is_empty() {
+        fill
+    } else if style.stroke_over_fill {
         format!("{fill}{stroke}")
     } else {
         format!("{stroke}{fill}")
+    };
+    (paint, bounds)
+}
+
+fn text_pass_opacity(pass: String, percent: f64) -> String {
+    if pass.is_empty() || percent == 100.0 {
+        // A full-opacity group would add no visual intent. Leave the old pass
+        // unchanged, including its existing rasterization and rounding stages.
+        pass
+    } else {
+        // Group opacity attenuates the complete pass exactly once, even where
+        // its glyphs/lines overlap. Do not quantize this float to a byte matte.
+        // Retain zero-opacity geometry, including paragraph clipping.
+        format!("<g opacity='{}'>{pass}</g>", percent / 100.0)
     }
 }
 // Keep paint out of shaping and caret metrics. Separate whole-layer passes also
@@ -363,8 +397,15 @@ impl Renderer {
             style.stroke_color = l.text_color_at(TextPaint::Stroke, frame).unwrap();
             style.stroke_width = l.text_value_at(TextParam::StrokeWidth, frame).unwrap();
             let fill = format!("#{:06x}", l.text_color_at(TextPaint::Fill, frame).unwrap());
-            (fill, style, typography.font_size)
+            let opacity = [TextPaint::Fill, TextPaint::Stroke]
+                .map(|paint| l.text_value_at(paint.opacity(), frame).unwrap());
+            (fill, style, typography.font_size, opacity)
         });
+        let measure_effect_bounds = matches!(
+            l.content(),
+            Content::Text { .. } | Content::ShapeContents(_)
+        ) && l.effect_stack().iter().any(|e| !e.bypassed());
+        let mut text_bounds_svg = None;
         let sampled_svg = match l.content() {
             Content::ShapeContents(contents) => Some(
                 contents
@@ -384,27 +425,32 @@ impl Renderer {
                     })?,
             ),
             Content::Text { text, .. } => {
-                let (fill, style, font_size) = text_paint.as_ref().unwrap();
-                Some(layer_text_svg(
+                let (fill, style, font_size, opacity) = text_paint.as_ref().unwrap();
+                let (paint, bounds) = layer_text_svg(
                     text,
                     *font_size,
                     fill,
                     l.width(),
                     l.height(),
                     style.clone(),
-                ))
+                    *opacity,
+                    measure_effect_bounds,
+                );
+                text_bounds_svg = bounds;
+                Some(paint)
             }
             _ => None,
         };
         let mut effect_bounds = [0.0, 0.0, l.width(), l.height()];
-        if matches!(
-            l.content(),
-            Content::Text { .. } | Content::ShapeContents(_)
-        ) && l.effect_stack().iter().any(|e| !e.bypassed())
-        {
-            // Point text can extend outside the layer's nominal size. Measure the
-            // same shaped glyph paths used by the compositor before filtering.
-            let source = svg_document(sampled_svg.as_deref().unwrap(), l.width(), l.height())?;
+        if measure_effect_bounds {
+            // Point text can extend outside the layer's nominal size. Measure
+            // the same enabled/evaluated glyph geometry before paint opacity so
+            // transparent passes cannot shrink or shift the filter allocation.
+            let geometry = text_bounds_svg
+                .as_deref()
+                .or(sampled_svg.as_deref())
+                .unwrap();
+            let source = svg_document(geometry, l.width(), l.height())?;
             let measured =
                 resvg::usvg::Tree::from_str(&source, &self.options).map_err(|e| e.to_string())?;
             let bounds = measured.root().stroke_bounding_box();
@@ -746,6 +792,10 @@ pub(crate) fn import_image(path: &Path) -> Result<(Content, u32, u32), String> {
     }
     Ok((Content::Image { png: png.into() }, w, h))
 }
+
+#[cfg(test)]
+#[path = "text_opacity_render_tests.rs"]
+mod text_opacity_render_tests;
 
 #[cfg(test)]
 mod tests {

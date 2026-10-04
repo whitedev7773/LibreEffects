@@ -1066,7 +1066,13 @@ mod tests {
                     assert_eq!(view_bytes, view_bytes_before);
                     let value: serde_json::Value = serde_json::from_slice(&view_bytes).unwrap();
                     let text = std::str::from_utf8(&view_bytes).unwrap();
-                    for name in ["FontSize", "Tracking", "Leading"] {
+                    for name in [
+                        "FontSize",
+                        "Tracking",
+                        "Leading",
+                        "FillOpacity",
+                        "StrokeOpacity",
+                    ] {
                         assert!(
                             !text.contains(name),
                             "sparse address leaked into VIEW: {name}"
@@ -1162,7 +1168,13 @@ mod tests {
                     assert_eq!(view_bytes, view_bytes_before);
                     let value: serde_json::Value = serde_json::from_slice(&view_bytes).unwrap();
                     let text = std::str::from_utf8(&view_bytes).unwrap();
-                    for name in ["FontSize", "Tracking", "Leading"] {
+                    for name in [
+                        "FontSize",
+                        "Tracking",
+                        "Leading",
+                        "FillOpacity",
+                        "StrokeOpacity",
+                    ] {
                         assert!(
                             !text.contains(name),
                             "sparse address leaked into VIEW: {name}"

@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-const PROJECT_VERSION: u32 = 51;
+const PROJECT_VERSION: u32 = 52;
 pub type Frame = u32;
 pub type LayerId = u64;
 pub type CompositionId = u64;
@@ -89,6 +89,8 @@ mod text_style;
 pub use text_animation::{TextPaint, TextParam, TextTypography};
 #[cfg(test)]
 mod text_animation_tests;
+#[cfg(test)]
+mod text_opacity_tests;
 #[cfg(test)]
 mod text_typography_tests;
 pub use shapes::{Shape, ShapeKind};
@@ -1676,7 +1678,7 @@ impl Editor {
             .into_iter()
             .flat_map(|(_, c)| &c.layers)
             .flat_map(|layer| layer.text_parameters.keys())
-            .map(|parameter| if parameter.is_typography() { 49 } else { 48 })
+            .map(|parameter| parameter.required_version())
             .max()
         {
             next.project.version = next.project.version.max(version);

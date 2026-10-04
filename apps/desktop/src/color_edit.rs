@@ -466,6 +466,7 @@ impl Color {
 pub(crate) enum Target {
     Fill(LayerId),
     Stroke(LayerId),
+    Text(LayerId, TextPaint),
     Shape(LayerId, ShapePaint),
     Contents(LayerId, u64),
     GradientStop(LayerId, u64, u64),
@@ -475,18 +476,28 @@ impl Target {
     pub fn alpha(self) -> bool {
         matches!(
             self,
-            Self::Fill(_) | Self::Shape(_, _) | Self::Contents(_, _)
+            Self::Fill(_) | Self::Text(_, _) | Self::Shape(_, _) | Self::Contents(_, _)
         )
     }
     pub fn title(self) -> &'static str {
         match self {
             Self::Fill(_) => "Layer color",
             Self::Stroke(_) => "Stroke color",
+            Self::Text(_, TextPaint::Fill) => "Text fill color",
+            Self::Text(_, TextPaint::Stroke) => "Text stroke color",
             Self::Shape(_, ShapePaint::Fill) => "Shape fill color",
             Self::Shape(_, ShapePaint::Stroke) => "Shape stroke color",
             Self::Contents(_, _) => "Contents paint color",
             Self::GradientStop(..) => "Gradient stop color",
             Self::BackgroundDraft(_) => "Composition background",
+        }
+    }
+    pub fn opacity_label(self) -> &'static str {
+        match self {
+            Self::Fill(_) => "Layer opacity %",
+            Self::Text(_, TextPaint::Fill) => "Fill opacity %",
+            Self::Text(_, TextPaint::Stroke) => "Stroke opacity %",
+            _ => "Opacity %",
         }
     }
 }
@@ -564,6 +575,23 @@ impl Session {
                     opacity: shape.value_at(paint.opacity(), frame, layer.color()),
                 }
             }
+            Target::Text(id, paint) => {
+                let layer = project
+                    .composition()
+                    .layer(id)
+                    .ok_or("Layer no longer exists")?;
+                if layer.locked() {
+                    return Err("Unlock the layer before changing its color".into());
+                }
+                Color {
+                    rgb: layer
+                        .text_color_at(paint, frame)
+                        .ok_or("Select a text layer")?,
+                    opacity: layer
+                        .text_value_at(paint.opacity(), frame)
+                        .ok_or("Select a text layer")?,
+                }
+            }
             Target::BackgroundDraft(rgb) => Color {
                 rgb,
                 opacity: 100.0,
@@ -625,6 +653,27 @@ impl Session {
         }
         Ok(())
     }
+    /// Text paint dialogs are bound to the selected, paused layer as well as
+    /// the full source snapshot. Generic targets keep their historical behavior.
+    pub fn validate_context(
+        &self,
+        project: &Project,
+        revision: u64,
+        frame: Frame,
+        selected: Option<LayerId>,
+        playing: bool,
+    ) -> Result<(), String> {
+        self.validate(project, revision, frame)?;
+        if let Target::Text(id, _) = self.target
+            && (playing || selected != Some(id))
+        {
+            return Err(
+                "The selected layer or playback changed. Cancel and reopen the color dialog."
+                    .into(),
+            );
+        }
+        Ok(())
+    }
     pub fn set_color(&mut self, color: Color) {
         if !color.valid() {
             return;
@@ -679,12 +728,15 @@ impl Session {
             color.opacity = text
                 .trim()
                 .parse()
-                .map_err(|_| "Enter layer opacity from 0 to 100")?;
+                .map_err(|_| format!("Enter {} from 0 to 100", self.target.opacity_label()))?;
         } else {
             return Err("Unknown color field".into());
         }
         if !color.valid() {
-            return Err("Layer opacity must be a finite number from 0 to 100".into());
+            return Err(format!(
+                "{} must be a finite number from 0 to 100",
+                self.target.opacity_label()
+            ));
         }
         self.set_color(color);
         Ok(())
@@ -774,6 +826,28 @@ impl Session {
                             },
                         });
                     }
+                }
+            }
+            Target::Text(id, paint) => {
+                let layer = self.origin.composition().layer(id)?;
+                if self.color.rgb != self.original.rgb {
+                    commands.push(
+                        layer
+                            .text_color_command(paint, self.color.rgb, self.frame)
+                            .ok()?,
+                    );
+                }
+                if self.color.opacity != self.original.opacity {
+                    // Opacity is sparse track data, never a second cloned style
+                    // replacement that could overwrite the RGB command above.
+                    commands.push(Command::EditText {
+                        id,
+                        parameter: paint.opacity(),
+                        edit: TrackEdit::Value {
+                            frame: self.frame,
+                            value: self.color.opacity,
+                        },
+                    });
                 }
             }
             Target::Fill(id) => {
@@ -1885,6 +1959,401 @@ mod text_paint_controls_tests {
         s.editor.clear_selection();
         assert!(InputTarget::new(&s).is_none());
     }
+    #[test]
+    fn explicit_text_picker_samples_independent_opacity_on_disabled_paints() {
+        let mut e = scene(true);
+        let mut style = e.selected_layer().unwrap().text_style();
+        style.fill_enabled = false;
+        style.stroke_enabled = false;
+        style.stroke_width = 0.;
+        e.execute(Command::SetTextStyle { id: 1, style }).unwrap();
+        e.execute(Command::SetValue {
+            id: 1,
+            property: Property::Opacity,
+            frame: 0,
+            value: 37.,
+        })
+        .unwrap();
+        for (paint, end) in [(TextPaint::Fill, 20.), (TextPaint::Stroke, 60.)] {
+            for edit in [
+                TrackEdit::ToggleAnimation { frame: 0 },
+                TrackEdit::Value {
+                    frame: 60,
+                    value: end,
+                },
+            ] {
+                e.execute(Command::EditText {
+                    id: 1,
+                    parameter: paint.opacity(),
+                    edit,
+                })
+                .unwrap();
+            }
+        }
+        e.clear_history();
+        let before = e.project().clone();
+        for (paint, expected) in [
+            (TextPaint::Fill, [100., 60., 20.]),
+            (TextPaint::Stroke, [100., 80., 60.]),
+        ] {
+            for (frame, opacity) in [0, 30, 60].into_iter().zip(expected) {
+                let session = Session::new(Target::Text(1, paint), e.project(), 7, frame).unwrap();
+                assert_eq!(session.original.opacity, opacity);
+                assert_eq!(
+                    session.original.rgb,
+                    e.selected_layer()
+                        .unwrap()
+                        .text_color_at(paint, frame)
+                        .unwrap()
+                );
+                assert!(session.target.alpha());
+                assert!(session.command().is_none());
+            }
+        }
+        assert_eq!(e.project(), &before);
+        assert!(!e.can_undo());
+        assert_eq!(
+            e.selected_layer()
+                .unwrap()
+                .property(Property::Opacity)
+                .value_at(30),
+            37.
+        );
+    }
+
+    #[test]
+    fn explicit_text_picker_rgb_alpha_and_combined_are_single_undo_without_style_overwrite() {
+        for paint in [TextPaint::Fill, TextPaint::Stroke] {
+            for animated in [false, true] {
+                for edit_kind in 0..3 {
+                    let mut e = scene(animated);
+                    e.execute(Command::SetValue {
+                        id: 1,
+                        property: Property::Opacity,
+                        frame: 0,
+                        value: 37.,
+                    })
+                    .unwrap();
+                    e.clear_history();
+                    let before = e.project().clone();
+                    let mut session =
+                        Session::new(Target::Text(1, paint), e.project(), 0, 30).unwrap();
+                    if edit_kind != 1 {
+                        session.input(0, "abcdef").unwrap();
+                    }
+                    if edit_kind != 0 {
+                        session.input(4, "12.345678901234567").unwrap();
+                    }
+                    let original = session.original;
+                    let command = session.command().unwrap();
+                    assert!(matches!(command, Command::Batch(_)));
+                    e.execute(command).unwrap();
+                    let after = e.project().clone();
+                    let l = e.selected_layer().unwrap();
+                    assert_eq!(
+                        l.text_color_at(paint, 30),
+                        Some(if edit_kind == 1 {
+                            original.rgb
+                        } else {
+                            0xabcdef
+                        })
+                    );
+                    assert_eq!(
+                        l.text_value_at(paint.opacity(), 30),
+                        Some(if edit_kind == 0 {
+                            100.
+                        } else {
+                            12.345678901234567
+                        })
+                    );
+                    assert_eq!(
+                        l.property(Property::Opacity),
+                        before
+                            .composition()
+                            .layer(1)
+                            .unwrap()
+                            .property(Property::Opacity)
+                    );
+                    let other = if paint == TextPaint::Fill {
+                        TextPaint::Stroke
+                    } else {
+                        TextPaint::Fill
+                    };
+                    assert_eq!(
+                        l.text_color_at(other, 30),
+                        before
+                            .composition()
+                            .layer(1)
+                            .unwrap()
+                            .text_color_at(other, 30)
+                    );
+                    assert!(l.track(PropertyPath::Text(other.opacity())).is_none());
+                    let old_style = before.composition().layer(1).unwrap().text_style();
+                    let mut expected_style = old_style.clone();
+                    if !animated && paint == TextPaint::Stroke && edit_kind != 1 {
+                        expected_style.stroke_color = 0xabcdef;
+                    }
+                    assert_eq!(l.text_style(), expected_style);
+                    if edit_kind == 0 {
+                        assert!(l.track(PropertyPath::Text(paint.opacity())).is_none());
+                    }
+                    e.undo();
+                    assert_eq!(e.project(), &before);
+                    assert!(!e.can_undo());
+                    e.redo();
+                    assert_eq!(e.project(), &after);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn explicit_text_picker_partial_rgb_and_alpha_keep_temporal_keys_and_missing_baselines() {
+        use libre_effects_core::Interpolation;
+        for paint in [TextPaint::Fill, TextPaint::Stroke] {
+            let mut e = scene(false);
+            let red = paint.channels()[0];
+            for parameter in [red, paint.opacity()] {
+                for edit in [
+                    TrackEdit::ToggleAnimation { frame: 0 },
+                    TrackEdit::Value {
+                        frame: 60,
+                        value: if parameter == red { 144. } else { 20. },
+                    },
+                    TrackEdit::Interpolate {
+                        frame: 0,
+                        interpolation: Interpolation::Smooth,
+                    },
+                ] {
+                    e.execute(Command::EditText {
+                        id: 1,
+                        parameter,
+                        edit,
+                    })
+                    .unwrap();
+                }
+            }
+            e.clear_history();
+            let before = e.project().clone();
+            let mut session = Session::new(Target::Text(1, paint), e.project(), 0, 30).unwrap();
+            session.input(0, "abcdef80").unwrap();
+            e.execute(session.command().unwrap()).unwrap();
+            let l = e.selected_layer().unwrap();
+            assert_eq!(l.text_color_at(paint, 30), Some(0xabcdef));
+            assert_eq!(
+                l.text_value_at(paint.opacity(), 30),
+                Some(128. * 100. / 255.)
+            );
+            for parameter in [red, paint.opacity()] {
+                let old = before
+                    .composition()
+                    .layer(1)
+                    .unwrap()
+                    .track(PropertyPath::Text(parameter))
+                    .unwrap();
+                let now = l.track(PropertyPath::Text(parameter)).unwrap();
+                for frame in [0, 60] {
+                    assert_eq!(now.keys().get(&frame), old.keys().get(&frame));
+                }
+                assert_eq!(now.keys()[&30].interpolation, Interpolation::Linear);
+            }
+            for parameter in paint.channels() {
+                assert!(
+                    l.track(PropertyPath::Text(parameter))
+                        .unwrap()
+                        .keys()
+                        .contains_key(&0)
+                );
+                assert!(
+                    l.track(PropertyPath::Text(parameter))
+                        .unwrap()
+                        .keys()
+                        .contains_key(&30)
+                );
+            }
+            assert_eq!(
+                l.text_style(),
+                before.composition().layer(1).unwrap().text_style()
+            );
+            e.undo();
+            assert_eq!(e.project(), &before);
+            assert!(!e.can_undo());
+        }
+    }
+
+    #[test]
+    fn explicit_text_picker_cancel_noop_edit_back_and_numeric_spelling_preserve_redo_and_source() {
+        for paint in [TextPaint::Fill, TextPaint::Stroke] {
+            for opacity in [None, Some(27.123456789012345)] {
+                let mut e = scene(true);
+                if let Some(value) = opacity {
+                    e.execute(Command::EditText {
+                        id: 1,
+                        parameter: paint.opacity(),
+                        edit: TrackEdit::Value { frame: 0, value },
+                    })
+                    .unwrap();
+                }
+                e.clear_history();
+                e.execute(Command::RenameLayer {
+                    id: 1,
+                    name: "Redo survives".into(),
+                })
+                .unwrap();
+                e.undo();
+                let before = e.project().clone();
+                let json = before.to_json().unwrap();
+                let mut session = Session::new(Target::Text(1, paint), e.project(), 2, 17).unwrap();
+                let original = session.original;
+                assert!(session.command().is_none());
+                session.input(0, "abcdef01").unwrap();
+                assert!(session.command().is_some());
+                session
+                    .input(0, &format!(" #{:06x} ", original.rgb))
+                    .unwrap();
+                session
+                    .input(4, &format!("  {:.17e}  ", original.opacity))
+                    .unwrap();
+                assert!(session.command().is_none());
+                for value in [
+                    original.opacity.to_string(),
+                    format!(" {} ", original.opacity),
+                ] {
+                    session.input(4, &value).unwrap();
+                    assert!(session.command().is_none());
+                }
+                session.input(4, "0").unwrap();
+                drop(session); // Draft cancellation has no document command.
+                assert_eq!(e.project(), &before);
+                assert_eq!(e.project().to_json().unwrap(), json);
+                assert!(!e.can_undo());
+                assert!(e.can_redo());
+                e.redo();
+                assert_eq!(e.selected_layer().unwrap().name(), "Redo survives");
+            }
+        }
+    }
+
+    #[test]
+    fn explicit_text_picker_hex_recent_and_sample_alpha_affect_only_selected_paint() {
+        for paint in [TextPaint::Fill, TextPaint::Stroke] {
+            let mut e = scene(false);
+            e.execute(Command::EditText {
+                id: 1,
+                parameter: paint.opacity(),
+                edit: TrackEdit::Value {
+                    frame: 0,
+                    value: 13.123456789012345,
+                },
+            })
+            .unwrap();
+            let mut session = Session::new(Target::Text(1, paint), e.project(), 0, 0).unwrap();
+            let precise = session.original.opacity;
+            session.input(0, "112233").unwrap();
+            assert_eq!(session.color.opacity, precise);
+            session.input(0, "44556640").unwrap();
+            assert_eq!(session.color.opacity, 64. * 100. / 255.);
+            let mut recent = Workflow::default();
+            recent.remember(Color {
+                rgb: 0x123456,
+                opacity: 17.987654321012345,
+            });
+            session.set_color(recent.recent[0]);
+            assert_eq!(session.color, recent.recent[0]);
+            session.set_color(Color::rgba([7, 11, 13, 1]));
+            assert_eq!(session.color, Color::rgba([7, 11, 13, 1]));
+            e.execute(session.command().unwrap()).unwrap();
+            let l = e.selected_layer().unwrap();
+            assert_eq!(l.text_value_at(paint.opacity(), 0), Some(100. / 255.));
+            assert_eq!(l.property(Property::Opacity).value_at(0), 100.);
+            let other = if paint == TextPaint::Fill {
+                TextPaint::Stroke
+            } else {
+                TextPaint::Fill
+            };
+            assert!(l.track(PropertyPath::Text(other.opacity())).is_none());
+        }
+    }
+
+    #[test]
+    fn explicit_text_picker_guards_full_source_frame_revision_selection_lock_and_playback() {
+        for paint in [TextPaint::Fill, TextPaint::Stroke] {
+            let mut e = scene(false);
+            let mut session = Session::new(Target::Text(1, paint), e.project(), 4, 17).unwrap();
+            assert!(
+                session
+                    .validate_context(e.project(), 4, 17, Some(1), false)
+                    .is_ok()
+            );
+            for (revision, frame, selection, playing) in [
+                (5, 17, Some(1), false),
+                (4, 18, Some(1), false),
+                (4, 17, None, false),
+                (4, 17, Some(2), false),
+                (4, 17, Some(1), true),
+            ] {
+                assert!(
+                    session
+                        .validate_context(e.project(), revision, frame, selection, playing)
+                        .is_err()
+                );
+            }
+            let original = session.color;
+            for (index, bad) in [
+                (0, "1234567"),
+                (4, "NaN"),
+                (4, "inf"),
+                (4, "-0.1"),
+                (4, "100.0001"),
+            ] {
+                assert!(session.input(index, bad).is_err());
+                assert_eq!(session.color, original);
+            }
+            e.execute(Command::SetContent {
+                id: 1,
+                content: Content::Text {
+                    text: "Changed source".into(),
+                    font_size: 48.,
+                },
+            })
+            .unwrap();
+            assert!(
+                session
+                    .validate_context(e.project(), 4, 17, Some(1), false)
+                    .is_err()
+            );
+            e.undo();
+            assert!(
+                session
+                    .validate_context(e.project(), 4, 17, Some(1), false)
+                    .is_ok()
+            );
+            e.execute(Command::ToggleLocked(1)).unwrap();
+            assert!(
+                session
+                    .validate_context(e.project(), 4, 17, Some(1), false)
+                    .is_err()
+            );
+            assert!(Session::new(Target::Text(1, paint), e.project(), 4, 17).is_err());
+            e.undo();
+            e.execute(Command::NewComposition).unwrap();
+            assert!(
+                session
+                    .validate_context(e.project(), 4, 17, Some(1), false)
+                    .is_err()
+            );
+        }
+        let mut e = Editor::default();
+        e.execute(Command::AddSolid).unwrap();
+        assert!(Session::new(Target::Text(1, TextPaint::Fill), e.project(), 0, 0).is_err());
+        assert!(Session::new(Target::Text(99, TextPaint::Stroke), e.project(), 0, 0).is_err());
+        let legacy = Session::new(Target::Fill(1), e.project(), 0, 0).unwrap();
+        assert!(
+            legacy
+                .validate_context(e.project(), 0, 0, None, true)
+                .is_ok()
+        );
+    }
 }
 
 #[cfg(test)]
@@ -2043,6 +2512,118 @@ mod typography_pointer_tests {
                     .is_none()
             );
             assert!(!press.matches("leading", &click(&down()), &state));
+        }
+    }
+    #[test]
+    fn text_opacity_pointer_receipt_replans_watch_and_picker_after_pending_flush() {
+        // Helper-level ordering coverage; this does not synthesize native input.
+        for paint in [TextPaint::Fill, TextPaint::Stroke] {
+            let mut state = scene();
+            let rendered = InputTarget::new(&state).unwrap();
+            let parameter = paint.opacity();
+            let command = state
+                .editor
+                .selected_layer()
+                .unwrap()
+                .text_value_command(parameter, 23.123456789012345, state.frame)
+                .unwrap()
+                .unwrap();
+            state.editor.execute(command).unwrap();
+            state
+                .editor
+                .execute(Command::SetContent {
+                    id: 1,
+                    content: Content::Text {
+                        text: "Committed source".into(),
+                        font_size: 48.,
+                    },
+                })
+                .unwrap();
+            assert!(!rendered.current(&state));
+            let control = format!("text-{paint:?}-opacity-watch");
+            let press =
+                InputPress::after_flush(control.clone(), &rendered, down(), bounds(), &state)
+                    .unwrap();
+            assert!(press.matches(&control, &click(&down()), &state));
+            state
+                .editor
+                .execute(Command::EditText {
+                    id: 1,
+                    parameter,
+                    edit: TrackEdit::ToggleAnimation { frame: state.frame },
+                })
+                .unwrap();
+            let layer = state.editor.selected_layer().unwrap();
+            assert_eq!(
+                layer
+                    .track(libre_effects_core::PropertyPath::Text(parameter))
+                    .unwrap()
+                    .keys()[&17]
+                    .value,
+                23.123456789012345
+            );
+            assert!(!layer.text_color_animated(paint));
+            let session = Session::new(
+                Target::Text(1, paint),
+                state.editor.project(),
+                state.document_revision,
+                state.frame,
+            )
+            .unwrap();
+            assert_eq!(session.original.opacity, 23.123456789012345);
+            assert!(session.command().is_none());
+            assert!(
+                session
+                    .validate_context(
+                        state.editor.project(),
+                        state.document_revision,
+                        state.frame,
+                        Some(1),
+                        false
+                    )
+                    .is_ok()
+            );
+        }
+    }
+
+    #[test]
+    fn text_opacity_pointer_receipt_rejects_stale_target_context_and_drag_out() {
+        for parameter in [TextParam::FillOpacity, TextParam::StrokeOpacity] {
+            for change in 0..8 {
+                let mut state = scene();
+                let target = InputTarget::new(&state).unwrap();
+                let control = format!("{parameter:?}");
+                let press =
+                    InputPress::after_flush(control.clone(), &target, down(), bounds(), &state)
+                        .unwrap();
+                let mut released = click(&down());
+                match change {
+                    0 => state.document_revision += 1,
+                    1 => state.frame += 1,
+                    2 => state.editor.clear_selection(),
+                    3 => {
+                        state.editor.execute(Command::ToggleLocked(1)).unwrap();
+                    }
+                    4 => state.playing = true,
+                    5 => {
+                        state
+                            .editor
+                            .execute(Command::SetContent {
+                                id: 1,
+                                content: Content::Text {
+                                    text: "Different".into(),
+                                    font_size: 48.,
+                                },
+                            })
+                            .unwrap();
+                    }
+                    6 => {
+                        state.editor.execute(Command::NewComposition).unwrap();
+                    }
+                    _ => released.up.position = point(px(500.), px(500.)),
+                }
+                assert!(!press.matches(&control, &released, &state));
+            }
         }
     }
 }

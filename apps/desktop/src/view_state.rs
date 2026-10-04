@@ -1370,3 +1370,143 @@ mod luma_view_tests {
         assert_eq!(views, live);
     }
 }
+
+#[cfg(test)]
+mod text_opacity_view_tests {
+    use super::*;
+    use libre_effects_core::{Command, Content, Editor, PropertyPath, TextParam, TrackEdit};
+
+    fn fixture(materialized: bool) -> (Project, Vec<(u64, u64)>) {
+        let mut editor = Editor::default();
+        let mut addresses = Vec::new();
+        for index in 0..2 {
+            if index != 0 {
+                editor.execute(Command::NewComposition).unwrap();
+            }
+            editor
+                .execute(Command::AddContent {
+                    content: Content::Text {
+                        text: "Paint opacity".into(),
+                        font_size: 48.,
+                    },
+                    width: 320.,
+                    height: 100.,
+                    name: "Text".into(),
+                })
+                .unwrap();
+            let id = editor.selected().unwrap();
+            addresses.push((editor.project().active_composition_id(), id));
+            if materialized {
+                for (parameter, value) in [
+                    (TextParam::FillOpacity, 31.25),
+                    (TextParam::StrokeOpacity, 73.875),
+                ] {
+                    editor
+                        .execute(Command::EditText {
+                            id,
+                            parameter,
+                            edit: TrackEdit::Value { frame: 0, value },
+                        })
+                        .unwrap();
+                    editor
+                        .execute(Command::EditText {
+                            id,
+                            parameter,
+                            edit: TrackEdit::ToggleAnimation { frame: 0 },
+                        })
+                        .unwrap();
+                }
+            }
+        }
+        (editor.project().clone(), addresses)
+    }
+
+    fn views_for(addresses: &[(u64, u64)]) -> ProjectViews {
+        let mut views = ProjectViews::default();
+        for &(composition, id) in addresses {
+            let mut view = CompositionView::default();
+            view.frame = if composition == 1 { 30 } else { 60 };
+            view.graph_open = true;
+            view.graph_view.speed = composition == 2;
+            for parameter in [TextParam::FillOpacity, TextParam::StrokeOpacity] {
+                let channel = GraphChannel {
+                    id,
+                    property: PropertyPath::Text(parameter),
+                };
+                view.graph_channels.pin(channel).unwrap();
+                view.graph_channels.activate(channel);
+                view.graph_channels.ranges.insert(
+                    channel,
+                    GraphRanges {
+                        value: Some([0., 100.]),
+                        speed: Some([-80., 80.]),
+                    },
+                );
+            }
+            views.compositions.insert(composition, view);
+        }
+        views
+    }
+
+    #[test]
+    fn text_opacity_active_inactive_native_pins_keep_view2_address1_and_lep1() {
+        let (project, addresses) = fixture(true);
+        let source = project.to_json().unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&source).unwrap()["version"],
+            52
+        );
+        let mut views = views_for(&addresses);
+        views.normalize(&project);
+        let bytes = views.encode_native(&project).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["version"], 2);
+        for (composition, _) in addresses {
+            let graph = &value["compositions"][composition.to_string()]["graph_channels"];
+            assert_eq!(graph["version"], 1);
+            assert_eq!(graph["pinned"].as_array().unwrap().len(), 2);
+            assert_eq!(graph["pinned"][0]["property"]["parameter"], "FillOpacity");
+            assert_eq!(graph["pinned"][1]["property"]["parameter"], "StrokeOpacity");
+        }
+        let native = crate::project_io::encode_native_project(&project, Some(&views)).unwrap();
+        assert_eq!(&native[8..10], &[1, 0]);
+        let opened = crate::project_io::decode_project(&native).unwrap();
+        assert_eq!(opened.project, project);
+        assert_eq!(opened.views, views);
+        assert_eq!(
+            crate::project_io::encode_native_project(&opened.project, Some(&opened.views)).unwrap(),
+            native
+        );
+        assert_eq!(project.to_json().unwrap(), source);
+    }
+
+    #[test]
+    fn text_opacity_sparse_saved_pins_prune_only_copy_without_materializing_tracks() {
+        let (project, addresses) = fixture(false);
+        let source = project.to_json().unwrap();
+        let views = views_for(&addresses);
+        let live = views.clone();
+        let bytes = views.encode_native(&project).unwrap();
+        assert_eq!(views, live);
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["version"], 1);
+        let text = std::str::from_utf8(&bytes).unwrap();
+        assert!(!text.contains("FillOpacity") && !text.contains("StrokeOpacity"));
+        let native = crate::project_io::encode_native_project(&project, Some(&views)).unwrap();
+        let opened = crate::project_io::decode_project(&native).unwrap();
+        assert_eq!(opened.project, project);
+        assert_eq!(opened.views.encode_native(&project).unwrap(), bytes);
+        for &(composition, id) in &addresses {
+            let layer = project
+                .composition_by_id(composition)
+                .unwrap()
+                .layer(id)
+                .unwrap();
+            for parameter in [TextParam::FillOpacity, TextParam::StrokeOpacity] {
+                assert!(layer.track(PropertyPath::Text(parameter)).is_none());
+                assert_eq!(layer.text_value_at(parameter, 30), Some(100.));
+            }
+        }
+        assert_eq!(project.to_json().unwrap(), source);
+    }
+}
