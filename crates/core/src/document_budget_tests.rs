@@ -348,3 +348,97 @@ fn native_metadata_uses_the_same_exact_budget_as_legacy_json() {
             .contains(METADATA_LIMIT_ERROR)
     );
 }
+
+fn whole_pose_budget_editor() -> Editor {
+    let mut project = budget_project(4096);
+    project.version = PROJECT_VERSION;
+    project.composition.layers[0].path_masks = vec![PathMask {
+        id: 1,
+        path: VectorPath {
+            closed: true,
+            vertices: [[0., 0.], [10., 0.], [0., 10.]]
+                .map(PathVertex::corner)
+                .to_vec(),
+        },
+        ..Default::default()
+    }];
+    project.composition.layers[0].next_mask_id = 2;
+    let padding = MAX_METADATA_BYTES - metadata_size(&project);
+    let Content::Text { text, .. } = &mut project.composition.layers[0].content else {
+        unreachable!()
+    };
+    text.push_str(&"x".repeat(padding));
+    assert!(text.len() <= 16384);
+    assert_eq!(metadata_size(&project), MAX_METADATA_BYTES);
+    let mut editor = Editor::default();
+    editor.replace_project(project).unwrap();
+    editor
+        .execute(Command::SetValue {
+            id: 2,
+            property: Property::PositionX,
+            frame: 0,
+            value: 0.,
+        })
+        .unwrap();
+    editor.undo();
+    editor.select(1);
+    assert!(editor.can_undo() && editor.can_redo());
+    editor
+}
+
+fn whole_pose_shift(dx: f64) -> Command {
+    Command::TransformPathPoses {
+        id: 1,
+        target: PathTarget::Mask(1),
+        indices: [0].into(),
+        transform: PathTransformSpec {
+            translation: [dx, 0.],
+            ..Default::default()
+        },
+    }
+}
+
+#[test]
+fn whole_pose_output_metadata_growth_rejects_atomically_and_exact_noop_is_saveable() {
+    let mut editor = whole_pose_budget_editor();
+    let before = editor.current.clone();
+    let undo = editor.undo.clone();
+    let redo = editor.redo.clone();
+    editor.execute(whole_pose_shift(0.)).unwrap();
+    assert_eq!(editor.current, before);
+    assert_eq!(editor.undo, undo);
+    assert_eq!(editor.redo, redo);
+    assert_rejected(&mut editor, whole_pose_shift(0.123456789012345));
+    assert_rejected(
+        &mut editor,
+        Command::Batch(vec![Command::Batch(vec![whole_pose_shift(
+            0.123456789012345,
+        )])]),
+    );
+    // A pure batch that returns exactly to the source is still one atomic no-op.
+    editor
+        .execute(Command::Batch(vec![
+            whole_pose_shift(0.125),
+            whole_pose_shift(-0.125),
+        ]))
+        .unwrap();
+    assert_eq!(editor.current, before);
+    assert_eq!(editor.undo, undo);
+    assert_eq!(editor.redo, redo);
+    let bytes = project_file::encode(editor.project(), None).unwrap();
+    assert_eq!(
+        project_file::decode(&bytes).unwrap().project,
+        *editor.project()
+    );
+}
+
+#[test]
+fn whole_pose_identity_rejects_oversized_input_instead_of_skipping_budget_validation() {
+    let mut editor = whole_pose_budget_editor();
+    editor.current.project.composition.layers[0].name.push('x');
+    assert_rejected(&mut editor, whole_pose_shift(0.));
+    assert_rejected(
+        &mut editor,
+        Command::Batch(vec![Command::Batch(vec![whole_pose_shift(0.)])]),
+    );
+}

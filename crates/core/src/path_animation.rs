@@ -4,6 +4,10 @@ use super::*;
 #[path = "path_order_tests.rs"]
 mod path_order_tests;
 
+#[cfg(test)]
+#[path = "path_pose_transform_tests.rs"]
+mod path_pose_transform_tests;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PathTarget {
     Shape,
@@ -44,6 +48,63 @@ impl PathAnimation {
             .collect::<Result<Vec<_>, _>>()?;
         *base = reordered_base;
         self.poses = reordered_poses;
+        Ok(())
+    }
+    fn transform_poses(
+        &mut self,
+        base: &mut VectorPath,
+        indices: &BTreeSet<usize>,
+        transform: &PathTransformSpec,
+        duration: Frame,
+        version: u32,
+    ) -> Result<(), String> {
+        // Validate the entire source pool before any identity shortcut or output
+        // calculation. Dormant and unreferenced slots are still authored data.
+        if !base.valid() {
+            return Err("Invalid base path geometry".into());
+        }
+        if self.poses.len() > 10000
+            || self
+                .poses
+                .len()
+                .checked_mul(base.vertices.len())
+                .is_none_or(|n| n > 200000)
+            || self.timing.keys.len() > 10000
+        {
+            return Err("Path animation geometry or key limit exceeded".into());
+        }
+        for (index, pose) in self.poses.iter().enumerate() {
+            if !pose.valid() {
+                return Err(format!("Invalid stored pose {index} geometry"));
+            }
+            if pose.closed != base.closed || pose.vertices.len() != base.vertices.len() {
+                return Err(format!(
+                    "Stored pose {index} topology does not match the base path"
+                ));
+            }
+        }
+        self.validate(base, duration, version)?;
+        let transformed_base = transform_path(base, indices, transform)
+            .map_err(|error| format!("Base path: {error}"))?;
+        let transformed_poses = self
+            .poses
+            .iter()
+            .enumerate()
+            .map(|(index, pose)| {
+                transform_path(pose, indices, transform)
+                    .map_err(|error| format!("Stored pose {index}: {error}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        // Prepare every valid output before assignment. References are opaque:
+        // never intern, deduplicate, reindex, or modify timing/temporal metadata.
+        if *base != transformed_base {
+            *base = transformed_base;
+        }
+        for (pose, transformed) in self.poses.iter_mut().zip(transformed_poses) {
+            if *pose != transformed {
+                *pose = transformed;
+            }
+        }
         Ok(())
     }
     pub fn at(&self, base: &VectorPath, frame: Frame) -> VectorPath {
@@ -232,15 +293,26 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
     let (id, target) = match command {
         Command::EditPath { id, target, .. }
         | Command::AnimatePath { id, target, .. }
-        | Command::ReorderPath { id, target, .. } => (*id, *target),
+        | Command::ReorderPath { id, target, .. }
+        | Command::TransformPathPoses { id, target, .. } => (*id, *target),
         _ => return None,
     };
     Some((|| {
         let duration = state.project.composition.duration;
+        let version = state.project.version;
         let layer = editing::editable(state, id)?;
         let (base, animation) = layer
             .path_animation_mut(target)
             .ok_or("Path no longer exists")?;
+        if let Command::TransformPathPoses {
+            indices, transform, ..
+        } = command
+        {
+            if matches!(target, PathTarget::Mask(_)) && !base.closed {
+                return Err("Invalid base mask path: masks must be closed".into());
+            }
+            return animation.transform_poses(base, indices, transform, duration, version);
+        }
         if let Command::ReorderPath { order, .. } = command {
             return animation.reorder(base, *order);
         }

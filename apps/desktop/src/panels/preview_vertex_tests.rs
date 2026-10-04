@@ -467,3 +467,135 @@ fn transform_modal_release_keeps_button_dispatch_intact_for_ok_and_cancel() {
         }
     }
 }
+
+#[test]
+fn whole_pose_overlay_samples_completed_draft_at_frozen_frame_with_same_world_and_selection() {
+    use super::super::vertex_editor::{Request, Session, TransformScope};
+    for kind in 0..3 {
+        let mut state = opened_selection(kind, &[0, 2]);
+        let original = state.vertex_editor.take().unwrap().request().clone();
+        let target = original.target;
+        state
+            .editor
+            .execute(Command::AnimatePath {
+                id: 1,
+                target,
+                edit: TrackEdit::ToggleAnimation { frame: 0 },
+            })
+            .unwrap();
+        let mut next = original.path.clone();
+        for (index, vertex) in next.vertices.iter_mut().enumerate() {
+            vertex.position[0] += 17.123456789012345 + index as f64 * 0.125;
+            vertex.position[1] -= 31.987654321098765;
+            vertex.incoming = [3.123456789012345, -8.5];
+            vertex.outgoing = [-7.25, 4.987654321098765];
+        }
+        state
+            .editor
+            .execute(Command::EditPath {
+                id: 1,
+                target,
+                frame: 20,
+                path: next,
+            })
+            .unwrap();
+        state.frame = 7;
+        state.editor.clear_history();
+        let source = state.editor.project().clone();
+        let (base, animation) = source
+            .composition()
+            .layer(1)
+            .unwrap()
+            .path_animation(target)
+            .unwrap();
+        let opening = animation.at(base, state.frame);
+        let request =
+            Request::for_selection(&state, 1, target, [0, 2].into(), opening, original.world)
+                .unwrap();
+        state.vertex_editor = Some(Session::new(&state, request).unwrap());
+        let serial = state.vertex_editor.as_ref().unwrap().id;
+        assert!(state.switch_vertex_scope(serial, TransformScope::AllPoses, None, false));
+        let session = state.vertex_editor.as_mut().unwrap();
+        for (index, value) in [
+            (0, "0.123456789012345"),
+            (1, "-3.987654321098765"),
+            (2, "33.75"),
+            (3, "-73.125"),
+            (4, "127.5"),
+        ] {
+            session.input(index, value).unwrap();
+        }
+        let (base, animation) = session
+            .project()
+            .composition()
+            .layer(1)
+            .unwrap()
+            .path_animation(target)
+            .unwrap();
+        let rendered_sample = animation.at(base, state.frame);
+        assert_eq!(session.path(), &rendered_sample);
+        let overlay = vertex_overlay(&state);
+        assert_eq!(overlay[0].0, rendered_sample);
+        assert_eq!(overlay[0].1, original.world);
+        assert_eq!(overlay[0].2, kind == 2);
+        assert_eq!(overlay[0].3, [0, 2].into());
+        assert_eq!(state.editor.project(), &source);
+        assert!(!state.editor.can_undo());
+        state.frame += 1;
+        assert!(vertex_overlay(&state).is_empty());
+    }
+}
+
+#[test]
+fn whole_pose_modal_release_and_both_exits_preserve_one_shot_selection_return() {
+    use super::super::vertex_editor::TransformScope;
+    for kind in 0..3 {
+        for accept in [false, true] {
+            let mut state = opened_selection(kind, &[0, 2]);
+            let source = state.editor.project().clone();
+            let first = state.vertex_editor.as_ref().unwrap().id;
+            assert!(state.switch_vertex_scope(
+                first,
+                TransformScope::AllPoses,
+                Some((0, "25.125")),
+                false
+            ));
+            let expected = state.vertex_editor.as_ref().unwrap().project().clone();
+            let mut canvas_releases = 0;
+            route_preview_release(preview_modal_active(&state), || canvas_releases += 1);
+            assert_eq!(canvas_releases, 0);
+            if accept {
+                state.accept_vertex_editor();
+            } else {
+                state.cancel_vertex_editor();
+            }
+            assert!(state.vertex_editor.is_none());
+            assert_eq!(
+                state.editor.project(),
+                if accept { &expected } else { &source }
+            );
+            let mut pen = super::super::pen::Pen::default();
+            assert!(restore_vertex_return(&mut pen, &mut state, true));
+            assert!(state.vertex_return.is_none());
+            let returned = pen.numeric_vertex_request(&state).unwrap();
+            assert_eq!(returned.indices, [0, 2].into());
+            let (base, animation) = state
+                .editor
+                .project()
+                .composition()
+                .layer(1)
+                .unwrap()
+                .path_animation(returned.target)
+                .unwrap();
+            assert_eq!(returned.path, animation.at(base, state.frame));
+            assert!(!restore_vertex_return(&mut pen, &mut state, true));
+            state.vertex_input(first, 0, "999");
+            assert_eq!(
+                state.editor.project(),
+                if accept { &expected } else { &source }
+            );
+            let reopened = super::super::vertex_editor::Session::new(&state, returned).unwrap();
+            assert_eq!(reopened.scope(), TransformScope::ThisFrame);
+        }
+    }
+}

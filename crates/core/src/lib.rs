@@ -59,6 +59,8 @@ pub use assets::{AssetId, AssetLibrary, FolderId, MediaAsset, ProjectFolder, Pro
 mod source_text_animation;
 pub use source_text_animation::SourceTextAnimation;
 mod path_animation;
+mod path_transform;
+pub use path_transform::{PathTransformSpec, transform_path};
 #[cfg(test)]
 mod source_text_tests;
 pub use path_animation::{PathAnimation, PathTarget};
@@ -1124,6 +1126,13 @@ pub enum Command {
         target: PathTarget,
         order: PathOrder,
     },
+    /// Transform selected vertices in the base and every stored pose, without retiming.
+    TransformPathPoses {
+        id: LayerId,
+        target: PathTarget,
+        indices: BTreeSet<usize>,
+        transform: PathTransformSpec,
+    },
     SetPathMasks {
         id: LayerId,
         masks: Vec<PathMask>,
@@ -1378,9 +1387,18 @@ impl Editor {
         let luma_values_only = effects::luma_value_edits_only(&command);
         let velocity_scales_only = key_velocity_scale::edits_only(&command);
         let layer_transforms_only = layer_transform::edits_only(&command);
+        let path_transforms_only = path_transform::edits_only(&command);
         apply(&mut next, command)?;
         if (text_values_only || trim_values_only || luma_values_only) && next == self.current {
             return Ok(());
+        }
+        if path_transforms_only {
+            // Existing geometry only: preserve schema and asset identity even for
+            // old files and exact no-ops. Validate the original metadata budget
+            // too, so a transform cannot repair or silently accept invalid input.
+            self.current.project.validate()?;
+            document::validate_budget(&self.current.project)?;
+            return self.accept_candidate(next);
         }
         if reorder_only || velocity_scales_only || layer_transforms_only {
             // Reindexing, velocity scaling and layer essentials need no unrelated schema/asset migration.

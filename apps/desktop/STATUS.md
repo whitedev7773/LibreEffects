@@ -7,7 +7,8 @@ Speed Graph endpoint-velocity, multi-channel Graph, multi-vertex transform and
 C09 layer-command / Linux image-retirement, F03 typography and B01 Project-list
 label, E05 Trim Paths, automatic About build identity and the G06 Luma Key
 headless checkpoint, independent Text Fill/Stroke opacity and Hold-only Source
-Text animation (native validation pending for these three newest feature slices).
+Text animation and all-stored-pose vertex transforms (native validation pending
+for these four newest feature slices).
 This is the current checkpoint inventory;
 [DEVELOPMENT_BACKLOG.md](DEVELOPMENT_BACKLOG.md) retains the original audit and
 its dated implementation/test history. Older “remaining” lists and test counts
@@ -17,6 +18,58 @@ Libre Effects is an **early 2D motion-graphics and compositing editor**. It is n
 an After Effects replacement, an AE pixel-equivalent renderer, or an AEP/Adobe
 script-compatible application. A working control or passing model test alone
 does not establish a complete native editing workflow.
+
+## E02 Base + all stored poses — headless gates passed, native pending
+
+Transform Vertices has a transient This frame/default or Base + all stored poses
+scope. Multi-selection uses the same seven controls and fixed opening local pivot;
+singleton absolute editing is unchanged. The all-pose command transforms the base
+and every stored slot, including unused and dormant poses, without key iteration,
+interning, deduplication or timing changes. Topology, unselected data, references,
+paints, IDs, transforms, assets and declared schema stay intact. There is no new
+project/LEP/VIEW/address version. Pure nonempty command batches preserve historical
+schema/asset behavior; legacy mixed and empty batch semantics are unchanged.
+
+The shared core arithmetic retains exact identity/cardinal/collapse and small-change
+branches. Source/selection/spec and every output are validated before assignment;
+full original/candidate project and metadata checks remain. No-ops compare the whole
+target/project, including hidden changes that leave the current frame fixed. Stored
+pose validity is not an all-frame overshoot guarantee; the modal separately validates
+its opening evaluated sample. Preview overlay samples the completed draft rather
+than assuming floating-point affine/interpolation operations commute bit-for-bit.
+
+Scope switching stages pending text and candidate scope atomically, retains accepted
+state on failure, and rotates callback serials on success. Reset keeps scope while
+restoring source/pivot/identity. Existing pointer/drag-out/IME/context and one-shot
+selection-return rules remain. The helper tests are not native event evidence.
+
+All 23 new core tests pass (8 math, 13 all-pose, two budget). The initial exact-budget
+fixture tried true→false and exceeded its own limit by one byte; only its history
+setup was corrected. Desktop adds 17 tests (seven scope, four view/preview and six
+independent render cases); the initial authoring estimate of 18 was corrected by
+counting actual tests, with no prior test removed. Focused 107 vertex and eight
+whole-pose matches pass, including two overlapping preview cases. Final gates pass
+1293 default tests (434 core, 853 desktop, six helpers), all 32 media tests, formatting,
+all-target checking and a normal optimized release in 167.3 seconds. Build
+`20261004.094224-dd4e7ca30e13def0` matches all 336 watched source inputs.
+
+An actual core-command/official-codec verifier accepts eight prepared containers,
+checks seven complete output documents against independently authored Decimal
+geometry and verifies atomic hidden-pose rejection with Redo. Release CLI compares
+28 complete RGBA pairs (25,804,800 pixels) plus an independently baked midpoint.
+Arbitrary-angle geometry uses a scale-derived floating error bound, not pixel
+repair/tolerance. All 31,940,800 retained text/reference pixels, 21 Trim frames,
+18 Luma frames, 46 opacity renders and the Source Text 28-render/21-comparison/
+12-output-preserving-rejection gate remain exact. These are headless artifacts,
+not native saves. Nine native cases remain unrun in addition to the prior 24.
+
+The user-requested cloud recovery investigation found no supported host reboot
+route; no reboot was performed. The committed Source Text branch history and all
+then-current WIP files/release were saved in a verified recovery snapshot before
+development resumed. Screen access still fails on the native pipe. E02 remains
+Partial: cross-path selection, canvas affine handles and topology-changing animation
+are separate work. The next bounded E04 stage is atomic cross-parent sibling-block
+moves with explicit buttons/keyboard; guarded cross-parent dragging is a later stage.
 
 ## F05 Source Text Hold animation — headless gates passed, native pending
 
@@ -546,7 +599,7 @@ Every original A01–L05 ID appears once below. The labels are deliberately boun
 | ID | Status | Current scope and remaining boundary |
 | --- | --- | --- |
 | E01 | Partial | Drag-created rectangle, rounded rectangle, ellipse, polygon and star; open lines can be drawn with Pen. Dedicated parametric line/tool-default controls and wider native regression remain. |
-| E02 | Partial | Open/closed Bezier Pen, insert/delete/convert points, handles, parametric conversion, same-path marquee/Ctrl+A, multi-vertex moves/static deletion, animated-safe Reverse/Set First, single-vertex numeric editing and same-path multi-vertex translation/rotation/scale/pivot transactions. Bulk transform automated and 12-case bounded native gates pass. Cross-path selection, whole-track geometry transforms, affine canvas handles and topology-changing animation remain; earlier singleton native mouse acceptance is recorded separately. |
+| E02 | Partial | Open/closed Bezier Pen, insert/delete/convert points, handles, parametric conversion, same-path marquee/Ctrl+A, multi-vertex moves/static deletion, animated-safe Reverse/Set First, single-vertex numeric editing and same-path multi-vertex translation/rotation/scale/pivot transactions. Current-frame bulk transform automated and 12-case bounded native gates pass. Base+all-stored-pose transforms now pass headless gates with native scope acceptance pending. Cross-path selection, affine canvas handles and topology-changing animation remain; earlier singleton native mouse acceptance is recorded separately. |
 | E03 | Partial | Animated scalar/RGB/opacity paint, cap/join/miter/dash controls, fractional Points and Contents linear/radial Gradient Fill/Stroke. Remaining parametric details, topology editing and complete native coverage are not done. |
 | E04 | Partial | Nested Contents tree, paths/paints, animated group transforms/Skew, Composite ordering, 16 paint blend modes, gradient drafts/endpoints/modal editor, selected-group Pen and same-parent sibling multi-selection/block ordering. Compound Colors animation, cross-parent block dragging and bulk field editing remain; bounded native acceptance is recorded above. |
 | E05 | Partial | Fixed-topology shape/mask path animation and bounded per-source-contour Contents Trim Paths with animated Start/End/Offset, ordered scope, unchanged editable paths and explicit precision/work errors. Automated/release gates and all ten bounded native scenarios pass. Repeater, Merge/Offset Paths, compound/distributed modes and topology-changing interpolation remain. |
@@ -648,8 +701,8 @@ rotation, nonuniform/reflected/collapsed scale and an editable pivot, with isola
 preview, one Undo, exact no-op preservation and full selection restoration.
 Automated/release gates cover Shape, nested Contents and stable-ID Mask targets
 without changing unselected geometry or the project/LEP schema; all 12 bounded
-native cases pass. Cross-path editing, topology and whole-track geometry
-transforms are separate. Speed corners and spatial/roving
+native cases pass. Base+all-stored-pose geometry transforms now pass their headless gate with native
+acceptance pending. Cross-path editing and topology remain separate. Speed corners and spatial/roving
 semantics also remain separate.
 Cross-parent tree moves need their own coordinate/paint-scope design.
 This does not close the broader A04 backup-management or other backlog extensions.

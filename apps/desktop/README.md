@@ -179,7 +179,7 @@ With **two or more anchors selected on the same explicit path**, the toolbar and
 Shift+V open **Transform Vertices** instead. Seven full-precision fields provide
 Delta X/Y, Rotation (degrees), Scale X/Y (%) and Pivot X/Y. The initial pivot is
 the selected anchors' path-local bounding-box center, excluding tangent extents;
-it stays fixed until edited. Geometry is recomputed from the opening pose after
+it stays fixed until edited. Geometry is recomputed from the opening source after
 each valid field: scale along local axes, rotate about the pivot, then translate.
 Positive rotation is clockwise in a normal downward-Y canvas; reflected parent
 transforms can change its apparent screen direction. Tangent offsets receive the
@@ -191,13 +191,41 @@ Inputs must be finite and the resulting anchor/tangent coordinates must stay
 within ±1,000,000. Translation/scale/pivot inputs do not themselves use the
 single-vertex coordinate cap. Invalid results retain the last valid parameters
 and preview and block OK. **Reset** restores identity controls, the opening pivot
-and exact source, clearing errors and invalidating old field callbacks. It acts
-on a completed click; dragging out cancels it. Reset, pivot-only changes, complete
-turns and any exact effective no-op preserve keys, legacy data and Redo. Ordinary
-OK/Cancel restores the complete validated vertex selection. This transforms the
-current evaluated pose, not every stored animation pose. Linked tangent controls,
-cross-path selection, topology changes and on-canvas affine handles remain future
-work.
+and exact source, clearing errors and invalidating old field callbacks. It keeps
+the chosen scope and acts on a completed click; dragging out cancels it. Identity,
+whole-turn identity, pivot-only changes to identity controls and exact effective
+no-ops preserve keys, legacy data and Redo. Ordinary OK/Cancel restores the complete
+validated vertex selection. Linked tangent controls, cross-path selection,
+topology changes and on-canvas affine handles remain future work.
+
+Transform Vertices now has a transient **Scope** selector. **This frame** is the
+default and retains the existing evaluated-pose/key behavior. **Base + all stored
+poses** applies the same selected vertex indices, transform and fixed pivot to
+the base and every stored pose slot, including unused slots and dormant keyless
+tracks. It does not iterate over keyframes, intern/deduplicate poses or create a
+current-frame key. Pose order/count, all opaque references, key times, easing,
+temporal data, unselected vertices, IDs, paints and group/layer transforms remain
+unchanged. This is a path-local operation, not animated world-space compensation.
+The singleton absolute-vertex dialog does not expose this scope.
+
+A scope change stages pending numeric text and the new scope together. Invalid
+text or hidden-pose overflow keeps the previous scope, accepted values and draft;
+correct the field or cancel. Successful changes invalidate old field/button
+callbacks. Enter/Space can activate a focused scope button. Scope alone creates no
+history. No-op detection checks the complete target/project: an unchanged visible
+frame can still have a changed base or unused pose and must remain a real edit.
+
+The shared core helper retains the previous exact identity/cardinal/collapse and
+small-change arithmetic. All source paths, selections and finite inputs are checked
+before identity shortcuts; all resulting poses are validated before assignment.
+Existing limits remain 1024 vertices/path, 10,000 stored poses/keys, 200,000 stored
+pose-vertices and the project metadata budget. Stored geometry and the opening
+modal sample must be valid, but easing may overshoot at other frames; this is not
+an unbounded all-frame validation pass. The overlay evaluates the completed draft,
+just like rendering, because floating-point affine/interpolation order is not
+bit-identical at arbitrary angles. No project, LEP, VIEW or address version changes.
+Native scope interaction is pending the cloud screen transport; model/render/CLI
+evidence is recorded separately in STATUS.md.
 
 ### Path order
 
@@ -1229,7 +1257,7 @@ cargo run -p libre-effects-core --example make_animation_study -- examples/curve
 | Ctrl+M | Add active composition/work area to the render queue |
 | Ctrl+Alt+T | Enable / disable selected footage or precomposition Time Remap |
 | V / H / W / Y | Selection / Hand / Rotation / Anchor Point tool |
-| G / Shift+V (Pen canvas focused) | Pen tool / Edit the single selected vertex numerically |
+| G / Shift+V (Pen canvas focused) | Pen tool / Edit one vertex or transform selected vertices numerically |
 | Ctrl+Shift+D | Split selected layers at the playhead |
 | Alt+[ / Alt+] | Trim selected layers' In / Out to the playhead |
 | Arrow keys / Shift+Arrow | Move selected layers 1 / 10 composition pixels |

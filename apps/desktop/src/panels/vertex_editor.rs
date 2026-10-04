@@ -1,8 +1,8 @@
 //! Explicit Pen vertices, edited on an isolated, frozen source transaction.
 use crate::editor::{EditorState, Tool};
 use libre_effects_core::{
-    Affine, Command, CompositionId, Content, Editor, Frame, LayerId, PathTarget, Project,
-    VectorPath,
+    Affine, Command, CompositionId, Content, Editor, Frame, LayerId, PathTarget, PathTransformSpec,
+    Project, VectorPath,
 };
 use std::{collections::BTreeSet, sync::Arc};
 
@@ -143,19 +143,28 @@ impl Request {
 
 /// Use the same enabled Contents traversal and coordinate spaces as Pen hit testing.
 fn evaluated(s: &EditorState, id: LayerId, target: PathTarget) -> Option<(VectorPath, Affine)> {
-    let comp = s.editor.project().composition();
-    if s.frame >= comp.duration() {
+    evaluated_at(s.editor.project(), id, target, s.frame)
+}
+
+fn evaluated_at(
+    project: &Project,
+    id: LayerId,
+    target: PathTarget,
+    frame: Frame,
+) -> Option<(VectorPath, Affine)> {
+    let comp = project.composition();
+    if frame >= comp.duration() {
         return None;
     }
     let layer = comp.layer(id).filter(|layer| !layer.locked())?;
-    let world = comp.world_transform(id, s.frame)?;
+    let world = comp.world_transform(id, frame)?;
     world.inverse()?;
     if let PathTarget::Contents(item) = target {
         let Content::ShapeContents(contents) = layer.content() else {
             return None;
         };
         let (_, path, local) = contents
-            .editable_paths(s.frame)
+            .editable_paths(frame)
             .into_iter()
             .find(|(candidate, _, _)| *candidate == item)?;
         let world = world.compose(local);
@@ -163,10 +172,26 @@ fn evaluated(s: &EditorState, id: LayerId, target: PathTarget) -> Option<(Vector
         Some((path, world))
     } else {
         let (path, animation) = layer.path_animation(target)?;
-        Some((animation.at(path, s.frame), world))
+        Some((animation.at(path, frame), world))
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum TransformScope {
+    #[default]
+    ThisFrame,
+    AllPoses,
+}
+impl TransformScope {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ThisFrame => "This frame",
+            Self::AllPoses => "Base + all stored poses",
+        }
+    }
+}
+
+#[derive(Clone)]
 pub(crate) struct Session {
     pub id: u64,
     pub frame: Frame,
@@ -177,6 +202,7 @@ pub(crate) struct Session {
     path: VectorPath,
     project: Project,
     transform: Option<[f64; 7]>,
+    scope: TransformScope,
     errors: [Option<String>; 7],
     pub error: String,
     pub input_error: Option<usize>,
@@ -195,6 +221,7 @@ impl Session {
             path: request.path.clone(),
             project: request.origin.as_ref().clone(),
             transform: (request.indices.len() >= 2).then(|| transform_defaults(&request)),
+            scope: TransformScope::ThisFrame,
             request,
             errors: Default::default(),
             error: String::new(),
@@ -215,6 +242,9 @@ impl Session {
     }
     pub fn is_transform(&self) -> bool {
         self.transform.is_some()
+    }
+    pub fn scope(&self) -> TransformScope {
+        self.scope
     }
     pub fn field_count(&self) -> usize {
         if self.is_transform() { 7 } else { 6 }
@@ -255,20 +285,71 @@ impl Session {
             path,
         }
     }
+    fn all_poses_command(&self, values: [f64; 7]) -> Command {
+        Command::TransformPathPoses {
+            id: self.layer,
+            target: self.target,
+            indices: self.request.indices.clone(),
+            transform: PathTransformSpec::from(values),
+        }
+    }
     pub fn command(&self) -> Result<Option<Command>, String> {
         if self.input_error.is_some() {
             return Err(self.error.clone());
         }
+        if self.scope == TransformScope::AllPoses {
+            // A visible fixed point can still change the base or an unused pose.
+            return Ok((self.project != *self.request.origin)
+                .then(|| self.all_poses_command(self.transform.expect("transform-only scope"))));
+        }
         Ok((self.path != self.request.path).then(|| self.edit_command(self.path.clone())))
+    }
+    fn project_for_path(&self, path: &VectorPath) -> Result<Project, String> {
+        // Avoid even a nominal EditPath for exact current-frame no-ops: it can
+        // create a middle key or migrate an otherwise unchanged legacy project.
+        if *path == self.request.path {
+            return Ok(self.request.origin.as_ref().clone());
+        }
+        let mut draft = Editor::default();
+        draft.replace_project(self.request.origin.as_ref().clone())?;
+        draft.execute(self.edit_command(path.clone()))?;
+        Ok(draft.project().clone())
+    }
+    fn transformed_draft(
+        &self,
+        scope: TransformScope,
+        values: [f64; 7],
+    ) -> Result<(VectorPath, Project), String> {
+        if scope == TransformScope::ThisFrame {
+            let path = transform_path(&self.request.path, &self.request.indices, &values)?;
+            let project = self.project_for_path(&path)?;
+            return Ok((path, project));
+        }
+        // Every edit starts at the immutable opening source. The core command
+        // validates/transforms base + every stored slot atomically, without keys
+        // being interned, reindexed, or visited one frame at a time.
+        let mut draft = Editor::default();
+        draft.replace_project(self.request.origin.as_ref().clone())?;
+        draft.execute(self.all_poses_command(values))?;
+        let project = draft.project();
+        let (path, _) = evaluated_at(project, self.layer, self.target, self.frame)
+            .ok_or("The transformed path is no longer available at the opening frame")?;
+        if !path.valid() {
+            return Err("The transformed path at the opening frame must be finite and within -1000000 to 1000000".into());
+        }
+        // The renderer samples this completed draft too. Transforming the opening
+        // evaluated geometry separately can disagree because f64 blending and
+        // affine arithmetic do not commute bit-for-bit.
+        Ok((path, project.clone()))
     }
     fn set_value(&mut self, index: usize, value: f64) -> Result<(), String> {
         let mut transform = self.transform;
-        let path = if let Some(values) = &mut transform {
+        let (path, project) = if let Some(values) = &mut transform {
             if !value.is_finite() {
                 return Err("Enter a finite numeric value".into());
             }
             values[index] = value;
-            transform_path(&self.request.path, &self.request.indices, values)?
+            self.transformed_draft(self.scope, *values)?
         } else {
             if !value.is_finite() || value.abs() > 1_000_000.0 {
                 return Err("Enter a finite value from -1000000 to 1000000".into());
@@ -281,23 +362,10 @@ impl Session {
                 4..=5 => vertex.outgoing[index - 4] = value,
                 _ => return Err("This vertex field no longer exists".into()),
             }
-            path
+            let project = self.project_for_path(&path)?;
+            (path, project)
         };
-        // Rebuild from the opening source, never the previous preview. Thus exactly
-        // one EditPath reaches the draft and no historical pose slots accumulate.
-        // Do not execute even a nominal EditPath for exact no-ops: it can create a
-        // middle key or upgrade a legacy project despite unchanged evaluated geometry.
-        let project = if path == self.request.path {
-            self.request.origin.as_ref().clone()
-        } else if path == self.path {
-            self.project.clone()
-        } else {
-            let mut draft = Editor::default();
-            draft.replace_project(self.request.origin.as_ref().clone())?;
-            draft.execute(self.edit_command(path.clone()))?;
-            draft.project().clone()
-        };
-        self.path = if path == self.request.path {
+        self.path = if self.scope == TransformScope::ThisFrame && path == self.request.path {
             self.request.path.clone()
         } else {
             path
@@ -305,6 +373,47 @@ impl Session {
         self.project = project;
         // Accept the field only after geometry and the complete draft are valid.
         self.transform = transform;
+        Ok(())
+    }
+    fn switch_scope(
+        &mut self,
+        scope: TransformScope,
+        pending: Option<(usize, &str)>,
+    ) -> Result<(), String> {
+        if !self.is_transform() {
+            return Err("Transform scope requires multiple selected vertices".into());
+        }
+        // Stage the same pending field validation as OK, then stage the new
+        // scope. A rejected scope must not partially accept pending old-scope
+        // geometry or values. Its text stays in the focused field for correction.
+        let mut candidate = self.clone();
+        let result = (|| {
+            if let Some((index, text)) = pending {
+                candidate.input(index, text)?;
+            }
+            if candidate.input_error.is_some() {
+                return Err(candidate.error.clone());
+            }
+            let (path, project) = candidate
+                .transformed_draft(scope, candidate.transform.expect("transform-only scope"))?;
+            candidate.path = path;
+            candidate.project = project;
+            candidate.scope = scope;
+            candidate.id = crate::color_edit::next_gradient_gesture();
+            candidate.errors = Default::default();
+            candidate.update_error();
+            Ok(())
+        })();
+        if let Err(error) = result {
+            if let Some((index, _)) = pending.filter(|(index, _)| *index < self.field_count()) {
+                self.errors[index] = Some(error.clone());
+                self.update_error();
+            } else {
+                self.error = error.clone();
+            }
+            return Err(error);
+        }
+        *self = candidate;
         Ok(())
     }
     fn reset(&mut self) {
@@ -369,116 +478,14 @@ fn transform_defaults(request: &Request) -> [f64; 7] {
     ]
 }
 
-/// Scale local axes, then rotate clockwise in the normal downward-Y canvas,
-/// then translate anchors. Requested geometry need not itself be invertible.
+/// Keep the seven UI fields and existing desktop regressions on the shared core
+/// precision-preserving implementation; no second affine implementation lives here.
 fn transform_path(
     source: &VectorPath,
     indices: &BTreeSet<usize>,
     values: &[f64; 7],
 ) -> Result<VectorPath, String> {
-    if values.iter().any(|value| !value.is_finite()) {
-        return Err("Enter finite numeric values".into());
-    }
-    let [dx, dy, rotation, sx, sy, px, py] = *values;
-    // Signed remainder preserves tiny negative turns that adding 360 would round
-    // away. Exact cardinal coefficients avoid trigonometric no-op drift.
-    let angle = rotation % 360.;
-    let (sin, cos) = match angle {
-        0. => (0., 1.),
-        90. | -270. => (1., 0.),
-        180. | -180. => (0., -1.),
-        270. | -90. => (-1., 0.),
-        _ => angle.to_radians().sin_cos(),
-    };
-    let matrix = [
-        [cos * (sx / 100.), -sin * (sy / 100.)],
-        [sin * (sx / 100.), cos * (sy / 100.)],
-    ];
-    if matrix == [[1., 0.], [0., 1.]] && dx == 0. && dy == 0. {
-        return Ok(source.clone());
-    }
-    let mut path = source.clone();
-    for &index in indices {
-        let original = source.vertices[index];
-        let vertex = &mut path.vertices[index];
-        for axis in 0..2 {
-            let row = matrix[axis];
-            let position =
-                transform_anchor_component(row, axis, original.position, [px, py], [dx, dy][axis]);
-            if position != original.position[axis] {
-                vertex.position[axis] = position;
-            }
-            for (before, after) in [
-                (original.incoming, &mut vertex.incoming),
-                (original.outgoing, &mut vertex.outgoing),
-            ] {
-                let value = linear_component(row, before);
-                if value != before[axis] {
-                    after[axis] = value;
-                }
-            }
-        }
-    }
-    if !path.valid() {
-        return Err("Resulting anchor and tangent coordinates must be finite and within -1000000 to 1000000".into());
-    }
-    Ok(path)
-}
-
-fn transform_anchor_component(
-    row: [f64; 2],
-    axis: usize,
-    source: [f64; 2],
-    pivot: [f64; 2],
-    translation: f64,
-) -> f64 {
-    if row == [0., 0.] {
-        // Exact collapse must not leave cancellation residue per vertex.
-        return pivot[axis] + translation;
-    }
-    let signed_axis = match row {
-        [1., 0.] => Some((0, 1.)),
-        [-1., 0.] => Some((0, -1.)),
-        [0., 1.] => Some((1, 1.)),
-        [0., -1.] => Some((1, -1.)),
-        _ => None,
-    };
-    if let Some((component, sign)) = signed_axis {
-        if source[component] == pivot[component] {
-            // At this row's exact fixed component, avoid subtracting large pivot
-            // terms that could erase the other, much smaller pivot component.
-            return pivot[axis] + translation;
-        }
-        // Identity rows and cardinal swaps retain tiny source components even
-        // with equal, enormous pivots. No source component is canceled back out.
-        return sign * source[component] + (pivot[axis] - sign * pivot[component]) + translation;
-    }
-    let relative = [source[0] - pivot[0], source[1] - pivot[1]];
-    let correction = [
-        row[0] - if axis == 0 { 1. } else { 0. },
-        row[1] - if axis == 1 { 1. } else { 0. },
-    ];
-    if correction.iter().all(|value| value.abs() <= 0.5) {
-        // Near identity, a correction retains small motion about a large pivot.
-        // This condition only chooses arithmetic: no coefficient or result is
-        // treated as zero. Away from identity, subtraction of the original
-        // component could erase a genuine tiny scale or swapped coordinate.
-        source[axis] + (linear_component(correction, relative) + translation)
-    } else {
-        pivot[axis] + linear_component(row, relative) + translation
-    }
-}
-
-fn linear_component(row: [f64; 2], point: [f64; 2]) -> f64 {
-    // Zero coefficients also avoid unnecessary 0 × overflow intermediates.
-    match row {
-        [0., 0.] => 0.,
-        [1., 0.] => point[0],
-        [0., 1.] => point[1],
-        [a, 0.] => a * point[0],
-        [0., b] => b * point[1],
-        [a, b] => a * point[0] + b * point[1],
-    }
+    libre_effects_core::transform_path(source, indices, &PathTransformSpec::from(*values))
 }
 
 impl EditorState {
@@ -490,6 +497,22 @@ impl EditorState {
         {
             let _ = session.input(index, text);
         }
+    }
+    pub(crate) fn switch_vertex_scope(
+        &mut self,
+        serial: u64,
+        scope: TransformScope,
+        pending: Option<(usize, &str)>,
+        composing: bool,
+    ) -> bool {
+        self.invalidate_vertex_editor();
+        let Some(session) = self.vertex_editor.as_mut().filter(|s| s.id == serial) else {
+            return false;
+        };
+        if composing {
+            return false;
+        }
+        session.switch_scope(scope, pending).is_ok()
     }
     pub(crate) fn reset_vertex_editor(&mut self, serial: u64) -> bool {
         self.invalidate_vertex_editor();
@@ -1414,3 +1437,7 @@ mod tests {
 #[cfg(test)]
 #[path = "vertex_transform_tests.rs"]
 mod transform_tests;
+
+#[cfg(test)]
+#[path = "vertex_scope_tests.rs"]
+mod scope_tests;

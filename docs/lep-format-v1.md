@@ -53,6 +53,12 @@ unreferenced pool storage can be reused. Every nondefault animation requires sch
 LEP 1 and VIEW 1/2 remain unchanged. Source Text is a nonnumeric property and cannot
 be serialized as a numeric Graph address; existing pins/ranges retain address 1.
 
+The base/all-stored-pose vertex transform changes only existing VectorPath data.
+Its scope is transient editor state, not a serialized field or version change.
+All pose slots/references/timing and the declared project version remain intact;
+LEP, VIEW and property-address versions are unchanged. Unused/dormant poses remain
+authored data and are validated/transformed rather than dropped or re-interned.
+
 A numeric project schema newer than this reader's supported maximum is rejected
 with both version numbers before model deserialization or asset resolution. This
 also covers future model variants and large unsigned version values. Native

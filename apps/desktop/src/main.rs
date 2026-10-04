@@ -62,6 +62,8 @@ mod video_decoder;
 mod video_export;
 mod view_state;
 mod viewer_tools;
+#[cfg(test)]
+mod whole_pose_render_tests;
 
 use shell::Shell;
 

@@ -18,9 +18,19 @@
 
 - **구현·검증됨:** 다중 컴포지션/프리컴포지션, 공유 자산·폴더·썸네일·다중 파일/이미지 시퀀스 가져오기·FPS/알파 해석, 저장·복구·미디어 수집/재연결, 유리수 FPS, Null/Solid/Adjustment, 레이어 복사·마커·스냅·다중 정렬/분배·부모 Pick Whip, 변형/효과 키 편집, 영상·프리컴포지션 Time Remap, 순서 있는 효과 스택, 5종 블렌딩·4종 Track Matte, Curves/Gradient 등 기본 효과, 배경색 MP4·알파 MOV/PNG, 뷰 상태 저장·눈금자/가이드/채널/픽셀 정보, 스냅샷 기반 렌더 큐·다중 출력·재시도·출력 크기/FPS/채널/인코딩 설정, 독립/영상 오디오 메타데이터·파형·중첩 믹싱·AAC/PCM 영상 출력, 좌우 레벨·팬·페이드 애니메이션·오디오 스위치·구간 미터, Windows 기본 장치 재생·100ms 스크럽·장치 시계 기반 플레이헤드·재생 블록 미터, 지속 영상 디코더·제한된 순차 프리페치·비동기 합성과 오래된 요청 취소. 상세 제약은 아래 표에 남긴다.
 - **다음 핵심 개발(2026-10-02 사용자 우선순위 변경):** 실제 AE 첫 작업 화면을 기준으로 편집 도구·효과·텍스트·마스크와 관련 UI를 우선한다. J02 디스크 캐시/J03 증분 평가, 고급 출력·GPU·HDR·장치/코덱 확장은 뒤로 미룬다.
-- **정교한 편집에 남은 기능:** D02/D03 공간 보간·혼합 채널 수직/Speed corner 변형, E02/E03 경로 토폴로지·교차 경로/전체 pose 편집, E04 부모 간 트리 이동·복합 Colors 애니메이션, G01 가변 Feather·로토베지어, F01–F05 실제 IME 검증·문자별 스타일·Text Animator·경로 위 텍스트/인스턴스 컨트롤, B01/B05/B07 배치 회귀·단축키/접근성. 스칼라 양방향 시간 보간·Speed Graph, Contents·도형 속성 애니메이션, 직접 텍스트 편집과 B06 공통 색 선택기는 아래 이력의 범위로 이미 구현됐다.
+- **정교한 편집에 남은 기능:** D02/D03 공간 보간·혼합 채널 수직/Speed corner 변형, E02/E03 경로 토폴로지·교차 경로/캔버스 affine 편집, E04 부모 간 트리 이동·복합 Colors 애니메이션, G01 가변 Feather·로토베지어, F01–F05 실제 IME 검증·문자별 스타일·Text Animator·경로 위 텍스트/인스턴스 컨트롤, B01/B05/B07 배치 회귀·단축키/접근성. 스칼라 양방향 시간 보간·Speed Graph, Contents·도형 속성 애니메이션, 직접 텍스트 편집과 B06 공통 색 선택기는 아래 이력의 범위로 이미 구현됐다.
 - **후속 고급 기능:** 패널 도킹·소스 뷰어·최근 프로젝트, 타임라인 고급 시간 편집/검색/가상화, 공간 경로·프리셋·표현식, Shape 연산/SVG·Text Animator, 추가 효과·모션 블러, 고정밀 색/HDR·Proxy/GPU, 템플릿, 설치/업데이트·한글화와 UI 회귀 자동화.
 - **별도 대형 단계:** 3D/카메라/라이트·모델, 추적·로토/Puppet, 플러그인/교환 포맷 연구, 웹/API 제품 범위. AEP/MOGRT 호환은 구현되지 않았다.
+
+### E02 base + 모든 stored pose 정점 변형 — 2026-10-04, headless 검증 완료·native 대기
+
+- 기존 Transform Vertices에 This frame(default) / Base + all stored poses의 transient scope를 추가했다. 같은 선택 index와 고정 opening local pivot을 base와 모든 pose slot에 적용하며 unused/dormant slot도 포함한다. singleton 절대 좌표 6-field는 그대로다. key별 EditPath 반복·pose interning/deduplication·새 현재 key를 하지 않고 timing/참조/순서/토폴로지/비선택 데이터·paint/ID/부모 transform을 유지한다.
+- 검증된 기존 7-value 수치 helper를 core로 공유해 identity/cardinal/collapse/미세 변형의 계산 분기를 유지한다. 모든 source/selection/유한 입력과 결과, 원본·후보 project 및 metadata budget을 검증하고 전부 준비한 뒤 대입한다. pure nonempty batch는 별도 no-migration 경로로 schema/assets/history를 보존하며 mixed/empty batch의 기존 정책은 바꾸지 않는다. 저장 형식 버전 증가는 없다.
+- 현재 보이는 path가 같아도 base/다른/unused pose가 달라질 수 있어 전체 draft/target으로 no-op를 판단한다. overlay는 완성된 draft를 같은 frame에서 평가하며 float 연산 순서의 bit-level 가환성을 가정하지 않는다. 저장 pose 범위와 opening sample은 검사하지만 모든 overshoot frame을 무한 순회하거나 보장하지 않는다.
+- scope 전환은 pending text와 새 scope를 함께 stage하여 실패 시 이전 accepted scope/values/draft를 보존한다. 성공하면 serial을 교체하고 오래된 callback을 막는다. Reset은 scope를 유지한 채 원본·pivot·identity를 복구한다. 실제 pointer/IME/focus 검증과 model/helper 증거를 구분한다.
+- 새 core 23개(수학 8 + 모든 pose 13 + budget 2)와 desktop 17개(scope 7 + view/preview 4 + render 6)를 추가했다. 최초 작성 추정 18은 실제 test 수 17로 정정했으며 기존 test를 삭제하지 않았다. 집중 vertex 107개와 whole-pose 8개(Preview 2개 중복 포함), 전체 기본 1293개(Core 434 + Desktop 853 + helper 6), media 32개, fmt/all-target check 및 일반 optimized release가 통과했다. exact-budget fixture가 true→false의 1 byte 증가로 먼저 실패하여 fixture history setup만 고쳤다.
+- 빌드 번호 20261004.094224-dd4e7ca30e13def0와 source input 336개를 확인했다. 실제 core command/official codec으로 Python 입력 8개를 검증했고, 7개 전체 출력은 독립 Decimal geometry 문서와 같았으며 hidden-pose overflow는 source/Redo를 보존했다. 고정 release CLI의 28 RGBA 비교(25,804,800 pixel)와 독립 baked midpoint가 통과했다. 이전 text/reference 31,940,800 pixel, Trim 21 frame, Luma 18 frame, opacity 46 render 및 Source Text 28 render/21비교/12거부 gate도 유지됐다.
+- 사용자 요청의 cloud 복구 조사 중 지원된 host 재부팅 경로가 없어 재부팅하지 않았다. 직전 정상 commit 전체 이력, 당시 WIP 9개, QA 입력과 정확한 Linux release를 hash/readback 검증한 snapshot으로 보존한 후 재개했다. native pipe는 계속 차단이고 새 9-case는 이전 24개와 별도로 미실행이다. E02는 Partial이다. 다음 E04는 cross-parent sibling block의 원자적 command와 explicit Move Into/Out·keyboard를 먼저 구현하고, guarded drag target은 다음 별도 acceptance stage로 진행한다.
 
 ### F05 레이어 전체 Source Text Hold animation — 2026-10-04, headless 검증 완료·native 대기
 

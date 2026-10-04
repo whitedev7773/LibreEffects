@@ -1,4 +1,5 @@
 //! Numeric editing stays in a private, serial-bound path transaction.
+use super::TransformScope;
 use crate::{
     components::TextField,
     editor::{Action, EditorState},
@@ -31,6 +32,36 @@ fn release_reset_press(
     let pressed = press.take()?;
     Some(pressed == serial && bounds.is_some_and(|bounds| bounds.hit(serial, position)))
 }
+
+#[derive(Clone, Copy)]
+struct ScopeBounds {
+    serial: u64,
+    scope: TransformScope,
+    bounds: Bounds<Pixels>,
+}
+impl ScopeBounds {
+    fn hit(self, serial: u64, position: Point<Pixels>) -> bool {
+        self.serial == serial && self.bounds.contains(&position)
+    }
+}
+fn release_scope_press(
+    press: &mut Option<(u64, TransformScope)>,
+    serial: u64,
+    bounds: [Option<ScopeBounds>; 2],
+    position: Point<Pixels>,
+) -> Option<Option<TransformScope>> {
+    let (pressed, scope) = press.take()?;
+    Some(
+        (pressed == serial
+            && bounds
+                .into_iter()
+                .flatten()
+                .any(|bounds| bounds.scope == scope && bounds.hit(serial, position)))
+        .then_some(scope),
+    )
+}
+
+const TRANSFORM_SCOPES: [TransformScope; 2] = [TransformScope::ThisFrame, TransformScope::AllPoses];
 
 struct FieldRow {
     label: &'static str,
@@ -90,10 +121,13 @@ pub(crate) struct VertexEditor {
     state: Entity<EditorState>,
     focus: FocusHandle,
     cancel_focus: FocusHandle,
+    scope_focus: [FocusHandle; 2],
     fields: Vec<Entity<TextField>>,
     serial: Option<u64>,
     reset_bounds: Rc<Cell<Option<ResetBounds>>>,
     reset_press: Option<u64>,
+    scope_bounds: Rc<Cell<[Option<ScopeBounds>; 2]>>,
+    scope_press: Option<(u64, TransformScope)>,
     watches: Option<Vec<gpui::Subscription>>,
 }
 impl VertexEditor {
@@ -111,10 +145,13 @@ impl VertexEditor {
             state,
             focus: cx.focus_handle(),
             cancel_focus: cx.focus_handle(),
+            scope_focus: [cx.focus_handle(), cx.focus_handle()],
             fields: vec![],
             serial: None,
             reset_bounds: Default::default(),
             reset_press: None,
+            scope_bounds: Default::default(),
+            scope_press: None,
             watches: None,
         }
     }
@@ -160,6 +197,8 @@ impl VertexEditor {
         self.serial = Some(serial);
         self.reset_bounds.set(None);
         self.reset_press = None;
+        self.scope_bounds.set([None; 2]);
+        self.scope_press = None;
         self.fields = self.make_fields(serial, values.len(), cx);
         for (index, value) in values.into_iter().enumerate() {
             self.fields[index].update(cx, |field, _| {
@@ -187,6 +226,44 @@ impl VertexEditor {
         }
     }
 
+    fn switch_scope(
+        &mut self,
+        serial: u64,
+        scope: TransformScope,
+        w: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !matching_session(self.state.read(cx), serial) || TextField::is_composing(w, cx) {
+            return;
+        }
+        let pending = self.fields.iter().enumerate().find_map(|(index, field)| {
+            let field = field.read(cx);
+            (field.has_focus(w) && field.has_pending_edit())
+                .then(|| (index, field.value().to_owned()))
+        });
+        let changed = self.state.update(cx, |state, cx| {
+            // Stage the focused text with the same parser/validation as OK. Do
+            // not commit_active first: a failed new scope must also roll back
+            // that pending old-scope candidate. Rebinding after success makes
+            // the old field's later submit/blur callback stale before focus moves.
+            let changed = state.switch_vertex_scope(
+                serial,
+                scope,
+                pending
+                    .as_ref()
+                    .map(|(index, text)| (*index, text.as_str())),
+                false,
+            );
+            cx.notify();
+            changed
+        });
+        if changed {
+            let next = self.state.read(cx).vertex_editor.as_ref().unwrap().id;
+            self.rebind_fields(next, w, cx);
+        }
+        cx.notify();
+    }
+
     fn pointer_down(
         &mut self,
         serial: u64,
@@ -194,18 +271,30 @@ impl VertexEditor {
         w: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if e.button != MouseButton::Left
-            || !self
-                .reset_bounds
-                .get()
-                .is_some_and(|bounds| bounds.hit(serial, e.position))
-        {
+        if e.button != MouseButton::Left {
             return;
         }
-        // TextField submits outside mouse-down during capture, before normal
-        // button handlers. Consume only a Reset press before those callbacks;
-        // keep the focused field and draft untouched until a matching release.
-        self.reset_press = Some(serial);
+        if self
+            .reset_bounds
+            .get()
+            .is_some_and(|bounds| bounds.hit(serial, e.position))
+        {
+            // Capture before TextField's outside mouse-down. Reset never submits
+            // pending text; a scope change stages it only on matching release.
+            self.reset_press = Some(serial);
+            self.scope_press = None;
+        } else if let Some(bounds) = self
+            .scope_bounds
+            .get()
+            .into_iter()
+            .flatten()
+            .find(|bounds| bounds.hit(serial, e.position))
+        {
+            self.scope_press = Some((serial, bounds.scope));
+            self.reset_press = None;
+        } else {
+            return;
+        }
         cx.stop_propagation();
         w.prevent_default();
     }
@@ -220,18 +309,28 @@ impl VertexEditor {
         if e.button != MouseButton::Left {
             return;
         }
-        let Some(apply) = release_reset_press(
+        if let Some(apply) = release_reset_press(
             &mut self.reset_press,
             serial,
             self.reset_bounds.get(),
             e.position,
-        ) else {
+        ) {
+            if apply {
+                self.reset(serial, w, cx);
+            }
+        } else if let Some(scope) = release_scope_press(
+            &mut self.scope_press,
+            serial,
+            self.scope_bounds.get(),
+            e.position,
+        ) {
+            if let Some(scope) = scope {
+                self.switch_scope(serial, scope, w, cx);
+            }
+        } else {
             return;
-        };
-        if apply {
-            self.reset(serial, w, cx);
         }
-        // Release outside Reset cancels the press, including outside the dialog.
+        // Release outside the pressed control cancels, including outside the dialog.
         // The consumed mouse-down cannot produce an additional native click.
         cx.stop_propagation();
         w.prevent_default();
@@ -400,6 +499,8 @@ impl Render for VertexEditor {
                         this.serial = None;
                         this.reset_press = None;
                         this.reset_bounds.set(None);
+                        this.scope_press = None;
+                        this.scope_bounds.set([None; 2]);
                     }
                 }),
                 cx.on_focus_out(&self.focus.clone(), w, |this, _, w, cx| {
@@ -433,6 +534,8 @@ impl Render for VertexEditor {
             self.serial = None;
             self.reset_press = None;
             self.reset_bounds.set(None);
+            self.scope_press = None;
+            self.scope_bounds.set([None; 2]);
             return root;
         };
         if self.serial != Some(id) {
@@ -450,6 +553,7 @@ impl Render for VertexEditor {
             );
         let session = self.state.read(cx).vertex_editor.as_ref().unwrap();
         let transform = session.is_transform();
+        let scope = session.scope();
         let selection = if transform {
             format!("{} selected vertices", session.request().indices.len())
         } else {
@@ -477,6 +581,41 @@ impl Render for VertexEditor {
             } else {
                 "Path-local pixels (px). Incoming and outgoing offsets are relative to the anchor; handles edit independently."
             }));
+        if transform {
+            let scope_bounds = self.scope_bounds.clone();
+            let mut scopes = div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap_2()
+                .on_children_prepainted(move |bounds, _, _| {
+                    scope_bounds.set(std::array::from_fn(|index| {
+                        bounds.get(index).copied().map(|bounds| ScopeBounds {
+                            serial: id,
+                            scope: TRANSFORM_SCOPES[index],
+                            bounds,
+                        })
+                    }));
+                });
+            for (index, choice) in TRANSFORM_SCOPES.into_iter().enumerate() {
+                scopes = scopes.child(
+                    ui::text_button(("vertex-transform-scope", index), choice.label())
+                        .track_focus(&self.scope_focus[index])
+                        .when(scope == choice, |button| button.bg(rgb(ui::BLUE)))
+                        .on_click(
+                            cx.listener(move |this, _, w, cx| this.switch_scope(id, choice, w, cx)),
+                        )
+                        .on_key_down(cx.listener(move |this, e: &KeyDownEvent, w, cx| {
+                            if matches!(e.keystroke.key.as_str(), "enter" | "space") {
+                                this.switch_scope(id, choice, w, cx);
+                                cx.stop_propagation();
+                                w.prevent_default();
+                            }
+                        })),
+                );
+            }
+            root = root.child(div().flex().flex_col().gap_1().child("Scope").child(scopes));
+        }
         for row in field_rows(transform) {
             let mut controls = div()
                 .flex()
@@ -514,7 +653,11 @@ impl Render for VertexEditor {
         }
         let reset_bounds = self.reset_bounds.clone();
         root.child(div().text_size(px(11.)).text_color(rgb(ui::MUTED)).child(if transform {
-                "Enter or Tab previews. Negative and zero scale are allowed; resulting geometry must be finite within ±1,000,000. Animated paths update at this frame only; static paths stay static."
+                if scope == TransformScope::AllPoses {
+                    "Enter or Tab previews. The same fixed transform changes the base and every stored pose, including unused poses. Timing and pose slots stay unchanged. Negative and zero scale are allowed."
+                } else {
+                    "Enter or Tab previews. Negative and zero scale are allowed; resulting geometry must be finite within ±1,000,000. Animated paths update at this frame only; static paths stay static."
+                }
             } else {
                 "Enter or Tab previews each value. Animated paths update at this frame; static paths stay static. Values must be finite and between −1,000,000 and 1,000,000."
             }))
@@ -823,6 +966,76 @@ mod tests {
         assert!(state.vertex_return.is_none());
         assert!(!state.editor.can_undo());
         assert!(!state.editor.can_redo());
+    }
+
+    #[test]
+    fn transform_scope_labels_default_and_singleton_exclusion_are_stable() {
+        assert_eq!(
+            TRANSFORM_SCOPES.map(TransformScope::label),
+            ["This frame", "Base + all stored poses"]
+        );
+        for indices in [&[0][..], &[0, 1][..]] {
+            let mut state = opened_selection(indices);
+            let session = state.vertex_editor.as_ref().unwrap();
+            let serial = session.id;
+            assert_eq!(session.scope(), TransformScope::ThisFrame);
+            assert_eq!(session.is_transform(), indices.len() > 1);
+            assert_eq!(
+                state.switch_vertex_scope(serial, TransformScope::AllPoses, None, false),
+                indices.len() > 1
+            );
+        }
+    }
+
+    #[test]
+    fn scope_pointer_release_requires_matching_control_serial_and_bounds_and_consumes_once() {
+        let left = gpui::point(px(20.), px(15.));
+        let right = gpui::point(px(100.), px(15.));
+        let outside = gpui::point(px(300.), px(150.));
+        let bounds = [
+            Some(ScopeBounds {
+                serial: 4,
+                scope: TransformScope::ThisFrame,
+                bounds: Bounds::new(gpui::point(px(10.), px(10.)), gpui::size(px(50.), px(25.))),
+            }),
+            Some(ScopeBounds {
+                serial: 4,
+                scope: TransformScope::AllPoses,
+                bounds: Bounds::new(gpui::point(px(80.), px(10.)), gpui::size(px(100.), px(25.))),
+            }),
+        ];
+        for position in [left, outside] {
+            let mut press = Some((4, TransformScope::AllPoses));
+            assert_eq!(
+                release_scope_press(&mut press, 4, bounds, position),
+                Some(None)
+            );
+            assert!(press.is_none());
+            assert_eq!(release_scope_press(&mut press, 4, bounds, right), None);
+        }
+        for serial in [3, 5] {
+            let mut press = Some((4, TransformScope::AllPoses));
+            assert_eq!(
+                release_scope_press(&mut press, serial, bounds, right),
+                Some(None)
+            );
+        }
+        let mut press = Some((4, TransformScope::AllPoses));
+        assert_eq!(
+            release_scope_press(&mut press, 4, [None; 2], right),
+            Some(None)
+        );
+        for (scope, position) in [
+            (TransformScope::ThisFrame, left),
+            (TransformScope::AllPoses, right),
+        ] {
+            let mut press = Some((4, scope));
+            assert_eq!(
+                release_scope_press(&mut press, 4, bounds, position),
+                Some(Some(scope))
+            );
+            assert_eq!(release_scope_press(&mut press, 4, bounds, position), None);
+        }
     }
 
     #[test]
