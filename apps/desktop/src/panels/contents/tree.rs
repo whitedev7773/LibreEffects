@@ -3,17 +3,192 @@ use gpui::{KeyDownEvent, MouseDownEvent, Point};
 use libre_effects_core::{CompositionId, Project};
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Clone, Copy)]
-pub(super) struct RowBounds {
-    pub parent: u64,
-    pub bounds: Bounds<Pixels>,
-    pub visible: Bounds<Pixels>,
+/// Registrations are rebuilt for every paint. A layout epoch changes only when
+/// actual geometry changes, so an identical repaint preserves a gesture.
+#[derive(Default)]
+pub(super) struct TreeLayout {
+    generation: u64,
+    pub epoch: u64,
+    owner: Option<(CompositionId, u64)>,
+    visible: Vec<(usize, u64, u64)>,
+    rows: BTreeMap<
+        u64,
+        (
+            Option<(Bounds<Pixels>, Bounds<Pixels>)>,
+            Option<Bounds<Pixels>>,
+        ),
+    >,
+    root: Option<super::tree_drop::RootGeometry>,
+    latest: Option<super::tree_drop::Geometry>,
+    previous: Option<super::tree_drop::Geometry>,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct Gap {
-    pub item: u64,
-    pub after: bool,
-    pub index: usize,
+impl TreeLayout {
+    pub fn begin(&mut self, owner: (CompositionId, u64), visible: Vec<(usize, u64, u64)>) -> u64 {
+        self.generation = self.generation.wrapping_add(1);
+        self.owner = Some(owner);
+        self.visible = visible;
+        self.rows.clear();
+        self.root = None;
+        self.latest = None;
+        self.generation
+    }
+    pub fn row(&mut self, item: u64, bounds: Bounds<Pixels>, clip: Bounds<Pixels>) {
+        self.rows.entry(item).or_default().0 = Some((bounds, clip));
+    }
+    pub fn label(&mut self, item: u64, bounds: Bounds<Pixels>) {
+        self.rows.entry(item).or_default().1 = Some(bounds);
+    }
+    pub fn root(&mut self, bounds: Bounds<Pixels>, clip: Bounds<Pixels>) {
+        self.root = Some(super::tree_drop::RootGeometry { bounds, clip });
+    }
+    pub fn finish(&mut self, groups: &BTreeSet<u64>) {
+        let Some(owner) = self.owner else {
+            return;
+        };
+        let rows = self
+            .visible
+            .iter()
+            .filter_map(|&(depth, parent, item)| {
+                let &(Some((bounds, clip)), Some(label)) = self.rows.get(&item)? else {
+                    return None;
+                };
+                Some(super::tree_drop::RowGeometry {
+                    item,
+                    parent,
+                    depth,
+                    group: groups.contains(&item),
+                    bounds,
+                    label,
+                    clip,
+                })
+            })
+            .collect();
+        let geometry = super::tree_drop::Geometry {
+            owner,
+            visible: self.visible.clone(),
+            rows,
+            root: self.root.clone(),
+        };
+        if self.previous.as_ref() != Some(&geometry) {
+            self.epoch = self.epoch.wrapping_add(1);
+        }
+        self.previous = Some(geometry.clone());
+        self.latest = Some(geometry);
+    }
+    pub fn current(&self) -> Option<&super::tree_drop::Geometry> {
+        self.latest.as_ref()
+    }
+    pub fn invalidate(&mut self) {
+        // Native bounds/scroll can change before paint refreshes hitboxes. A
+        // new press must wait for the next completed generation as well.
+        self.latest = None;
+    }
+    fn invalidate_outside_label(&mut self, position: Point<Pixels>) -> bool {
+        let on_label = self.current().is_some_and(|geometry| {
+            geometry.rows.iter().any(|row| {
+                let visible = row.label.intersect(&row.clip);
+                visible.size.width > px(0.)
+                    && visible.size.height > px(0.)
+                    && position.x >= visible.left()
+                    && position.x < visible.right()
+                    && position.y >= visible.top()
+                    && position.y < visible.bottom()
+            })
+        });
+        if !on_label {
+            self.invalidate();
+        }
+        !on_label
+    }
+}
+
+/// Rendered tree identity is checked before any pending field is allowed to
+/// commit. Unlike MoveContext this also permits empty and locked selections.
+#[derive(Clone)]
+pub(super) struct PressContext {
+    project: std::sync::Arc<Project>,
+    revision: u64,
+    transport_generation: u64,
+    composition: CompositionId,
+    layer: u64,
+    parent: u64,
+    item: u64,
+    locked: bool,
+    frame: u32,
+    tool: crate::editor::Tool,
+    gradient_controls: Option<crate::color_edit::GradientTarget>,
+    selected_layers: BTreeSet<u64>,
+    singleton: Option<(CompositionId, u64, u64)>,
+    selection: Selection,
+    collapsed: BTreeSet<u64>,
+}
+impl PressContext {
+    pub fn new(
+        this: &ContentsControls,
+        parent: u64,
+        item: u64,
+        project: std::sync::Arc<Project>,
+        cx: &Context<ContentsControls>,
+    ) -> Self {
+        Self::capture(
+            this.state.read(cx),
+            &this.selection,
+            &this.collapsed,
+            parent,
+            item,
+            project,
+        )
+    }
+    fn capture(
+        s: &EditorState,
+        selection: &Selection,
+        collapsed: &BTreeSet<u64>,
+        parent: u64,
+        item: u64,
+        project: std::sync::Arc<Project>,
+    ) -> Self {
+        Self {
+            project,
+            revision: s.document_revision,
+            transport_generation: s.transport_generation(),
+            composition: s.editor.project().active_composition_id(),
+            layer: s.editor.selected().unwrap(),
+            parent,
+            item,
+            locked: s.editor.selected_layer().unwrap().locked(),
+            frame: s.frame,
+            tool: s.tool,
+            gradient_controls: s.gradient_controls,
+            selected_layers: s.selected_layers.clone(),
+            singleton: s.contents_selection,
+            selection: selection.clone(),
+            collapsed: collapsed.clone(),
+        }
+    }
+    fn same_context(
+        &self,
+        s: &EditorState,
+        selection: &Selection,
+        collapsed: &BTreeSet<u64>,
+        after_flush: bool,
+    ) -> bool {
+        !blocked(s)
+            && self.revision == s.document_revision
+            && self.composition == s.editor.project().active_composition_id() && s.editor.selected() == Some(self.layer)
+            && self.frame == s.frame && self.tool == s.tool && self.gradient_controls == s.gradient_controls
+            && self.selected_layers == s.selected_layers && self.singleton == s.contents_selection
+            && self.selection == *selection && self.collapsed == *collapsed
+            && (after_flush && !self.locked || (s.editor.project() == self.project.as_ref() && self.transport_generation == s.transport_generation()))
+            && s.editor.selected_layer().is_some_and(|l| l.locked() == self.locked && matches!(l.content(), Content::ShapeContents(c) if sibling_order(c, self.parent).is_some_and(|ids| ids.contains(&self.item))))
+    }
+    pub fn current(&self, this: &ContentsControls, s: &EditorState, after_flush: bool) -> bool {
+        self.same_context(s, &this.selection, &this.collapsed, after_flush)
+            && this.owner == Some((self.composition, self.layer)) && this.owner_revision == self.revision
+            && this.tree_layout.borrow().current().is_some_and(|g| {
+                g.owner == (self.composition, self.layer) && g.visible.iter().any(|&(_, p, id)| p == self.parent && id == self.item)
+                    && s.editor.selected_layer().is_some_and(|l| matches!(l.content(), Content::ShapeContents(c) if g.matches_visible(&visible_rows(c, &this.collapsed))))
+            })
+    }
 }
 
 pub(super) struct Drag {
@@ -27,12 +202,14 @@ pub(super) struct Drag {
     selected_layers: BTreeSet<u64>,
     selection: Selection,
     collapsed: BTreeSet<u64>,
-    order: Vec<u64>,
+    transport_generation: u64,
+    pub(super) pointer_generation: u64,
+    pub(super) geometry: Option<(u64, super::tree_drop::Geometry)>,
     pressed: u64,
     origin: Point<Pixels>,
     plain: bool,
     pub moved: bool,
-    pub gap: Option<Gap>,
+    pub preview: Option<super::tree_drop::DropPreview>,
 }
 fn blocked(s: &EditorState) -> bool {
     s.colors.session.is_some()
@@ -179,12 +356,14 @@ impl Drag {
             selected_layers: s.selected_layers.clone(),
             selection: selection.clone(),
             collapsed: collapsed.clone(),
-            order,
+            transport_generation: s.transport_generation(),
+            pointer_generation: 0,
+            geometry: None,
             pressed,
             origin,
             plain,
             moved: false,
-            gap: None,
+            preview: None,
         })
     }
     pub fn current(
@@ -194,6 +373,7 @@ impl Drag {
         collapsed: &BTreeSet<u64>,
     ) -> bool {
         !blocked(s)
+            && self.transport_generation == s.transport_generation()
             && self.revision == s.document_revision
             && self.composition == s.editor.project().active_composition_id()
             && s.editor.selected() == Some(self.layer)
@@ -208,63 +388,41 @@ impl Drag {
             && s.editor.project() == &self.project
             && s.editor.selected_layer().is_some_and(|l| !l.locked())
     }
-    fn update(&mut self, position: Point<Pixels>, rows: &BTreeMap<u64, RowBounds>) {
+    pub(super) fn geometry_current(&self, layout: &TreeLayout) -> bool {
+        self.geometry.as_ref().is_some_and(|(epoch, geometry)| {
+            *epoch == layout.epoch && layout.current() == Some(geometry)
+        })
+    }
+    fn update(&mut self, position: Point<Pixels>, geometry: &super::tree_drop::Geometry) {
         let delta = position - self.origin;
         self.moved |= f32::from(delta.x).hypot(f32::from(delta.y)) >= 4.;
-        self.gap = self
+        let contents = self.project.composition().layer(self.layer).and_then(|l| {
+            if let Content::ShapeContents(c) = l.content() {
+                Some(c)
+            } else {
+                None
+            }
+        });
+        self.preview = self
             .moved
-            .then(|| gap_at(position, self.selection.parent.unwrap(), &self.order, rows))
+            .then(|| contents.and_then(|c| geometry.resolve(c, &self.selection, position)))
             .flatten();
     }
     fn release(
         &mut self,
         position: Point<Pixels>,
-        rows: &BTreeMap<u64, RowBounds>,
+        geometry: &super::tree_drop::Geometry,
     ) -> Option<Command> {
-        // Always use the release coordinates, including a fast down/up without a move event.
-        self.update(position, rows);
-        let gap = self.gap?;
-        let order = plan_order(&self.order, &self.selection.items, gap.index)?;
+        // Re-resolve all three steps at actual release, never dispatch hover state.
+        self.update(position, geometry);
         Some(Command::Contents {
             id: self.layer,
-            edit: ContentsEdit::Reorder {
-                parent: self.selection.parent?,
-                order,
-            },
+            edit: self.preview.as_ref()?.plan.edit()?,
         })
     }
 }
-fn gap_at(
-    position: Point<Pixels>,
-    parent: u64,
-    order: &[u64],
-    rows: &BTreeMap<u64, RowBounds>,
-) -> Option<Gap> {
-    let (&item, row) = rows
-        .iter()
-        .find(|(_, row)| row.visible.contains(&position))?;
-    if row.parent != parent {
-        return None;
-    }
-    let after = position.y >= row.bounds.top() + row.bounds.size.height / 2.;
-    let index = order.iter().position(|id| *id == item)? + usize::from(after);
-    Some(Gap { item, after, index })
-}
-/// An expanded group travels with its subtree: the after marker belongs below its last visible descendant.
-pub(super) fn marker_row(gap: Gap, visible: &[(usize, u64, u64)]) -> Option<(u64, bool)> {
-    let index = visible.iter().position(|(_, _, item)| *item == gap.item)?;
-    let depth = visible[index].0;
-    let last = if gap.after {
-        visible[index + 1..]
-            .iter()
-            .take_while(|(d, _, _)| *d > depth)
-            .last()
-            .map(|(_, _, id)| *id)
-            .unwrap_or(gap.item)
-    } else {
-        gap.item
-    };
-    Some((last, gap.after))
+fn supported_modifiers(modifiers: gpui::Modifiers) -> bool {
+    !modifiers.alt && !modifiers.platform && !modifiers.function
 }
 
 impl ContentsControls {
@@ -332,7 +490,7 @@ impl ContentsControls {
         });
         cx.notify();
     }
-    fn hierarchy_context(&self, cx: &Context<Self>) -> Option<MoveContext> {
+    pub(super) fn hierarchy_context(&self, cx: &Context<Self>) -> Option<MoveContext> {
         let s = self.state.read(cx);
         let context = MoveContext::new(s, &self.selection, &self.collapsed)?;
         (self.owner == Some((context.composition, context.layer))
@@ -432,27 +590,38 @@ impl ContentsControls {
         ) else {
             return;
         };
+        self.apply_tree_move(context.layer, plan.parent, &plan.items, plan.edit(), w, cx);
+    }
+
+    /// Explicit moves and cross-parent drops share the same success-only reveal,
+    /// stable selection, pin reconciliation and status policy.
+    fn apply_tree_move(
+        &mut self,
+        layer: u64,
+        parent: u64,
+        items: &[u64],
+        edit: ContentsEdit,
+        w: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let before = self.state.read(cx).editor.project().clone();
-        let command = Command::Contents {
-            id: context.layer,
-            edit: plan.edit(),
-        };
-        self.state
-            .update(cx, |s, cx| s.dispatch(&Action::Edit(command), w, cx));
+        self.state.update(cx, |s, cx| {
+            s.dispatch(&Action::Edit(Command::Contents { id: layer, edit }), w, cx)
+        });
         let current = self.state.read(cx).editor.project();
         if current == &before {
             return;
         }
         // A failed transaction must not expand a group or discard its selection.
         let Some(contents) = self.state.read(cx).editor.selected_layer().and_then(|l| {
-            if l.id() != context.layer {
+            if l.id() != layer {
                 return None;
             }
             let Content::ShapeContents(contents) = l.content() else {
                 return None;
             };
-            let destination = sibling_order(contents, plan.parent)?;
-            (plan.items.iter().all(|id| destination.contains(id))).then(|| contents.clone())
+            let destination = sibling_order(contents, parent)?;
+            (items.iter().all(|id| destination.contains(id))).then(|| contents.clone())
         }) else {
             return;
         };
@@ -472,54 +641,88 @@ impl ContentsControls {
 
     pub(super) fn tree_down(
         &mut self,
-        layer: u64,
-        parent: u64,
-        item: u64,
+        control: &str,
+        context: &PressContext,
         e: &MouseDownEvent,
         w: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let m = e.modifiers;
-        if m.alt || m.platform || m.function || blocked(self.state.read(cx)) {
+        self.tree_drag = None;
+        if TextField::is_composing(w, cx) || !context.current(self, self.state.read(cx), true) {
             return;
         }
-        TextField::commit_active(w, cx);
-        self.reconcile_tree(cx);
+        let Some(receipt) =
+            crate::color_edit::input_tree_down_target(control, e, &self.state, w, cx)
+        else {
+            return;
+        };
+        let Some((epoch, geometry)) = self
+            .tree_layout
+            .borrow()
+            .current()
+            .map(|g| (self.tree_layout.borrow().epoch, g.clone()))
+        else {
+            return;
+        };
         let Some(order) = self.state.read(cx).editor.selected_layer().and_then(|l| {
-            if l.id() != layer {
-                return None;
-            }
             let Content::ShapeContents(contents) = l.content() else {
                 return None;
             };
-            sibling_order(contents, parent)
+            sibling_order(contents, context.parent)
         }) else {
             return;
         };
-        w.focus(&self.tree_focus);
-        if self
-            .state
-            .read(cx)
-            .editor
-            .selected_layer()
-            .is_some_and(|l| l.locked())
-        {
+        let m = e.modifiers;
+        let editable = matches!(receipt, crate::color_edit::TreeDownTarget::Editable(_));
+        // A locked label keeps ordinary selection/focus behavior but never acquires
+        // an editable receipt or a drag. Source is rechecked after outside-down.
+        if editable {
             self.selection
-                .click(parent, &order, item, m.control, m.shift);
+                .press(context.parent, &order, context.item, m.control, m.shift);
         } else {
             self.selection
-                .press(parent, &order, item, m.control, m.shift);
+                .click(context.parent, &order, context.item, m.control, m.shift);
         }
+        w.focus(&self.tree_focus);
         self.publish_tree_selection(cx);
-        self.tree_drag = Drag::new(
-            self.state.read(cx),
-            &self.selection,
-            &self.collapsed,
-            item,
-            e.position,
-            !m.control && !m.shift,
-        );
+        if editable {
+            self.tree_drag = Drag::new(
+                self.state.read(cx),
+                &self.selection,
+                &self.collapsed,
+                context.item,
+                e.position,
+                !m.control && !m.shift,
+            );
+            if let Some(drag) = &mut self.tree_drag {
+                drag.geometry = Some((epoch, geometry));
+                drag.pointer_generation = crate::color_edit::input_pointer_generation(w, cx);
+            }
+        }
         cx.stop_propagation();
+        cx.notify();
+    }
+    pub(super) fn tree_pointer_down_capture(
+        &mut self,
+        position: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        let canceled = self.tree_drag.take().is_some();
+        // Scrollbar and splitter drags can move layout without a wheel event.
+        // Only label presses may use this completed generation to start a drag.
+        let invalidated = self
+            .tree_layout
+            .borrow_mut()
+            .invalidate_outside_label(position);
+        if canceled || invalidated {
+            cx.notify();
+        }
+    }
+    pub(crate) fn invalidate_tree_layout(&mut self, cx: &mut Context<Self>) {
+        self.tree_layout.borrow_mut().invalidate();
+        self.tree_drag = None;
+        // Even a zero-delta/header scroll must refresh registrations; otherwise
+        // an idle tree could stay ineligible until an unrelated repaint.
         cx.notify();
     }
     pub(super) fn tree_move(
@@ -531,38 +734,65 @@ impl ContentsControls {
         let Some(drag) = &mut self.tree_drag else {
             return;
         };
-        if !e.dragging()
+        if drag.pointer_generation != crate::color_edit::input_pointer_generation(w, cx)
+            || e.pressed_button != Some(MouseButton::Left)
+            || !supported_modifiers(e.modifiers)
             || !w.is_window_active()
             || !self.tree_focus.is_focused(w)
+            || TextField::is_composing(w, cx)
             || !drag.current(self.state.read(cx), &self.selection, &self.collapsed)
+            || !drag.geometry_current(&self.tree_layout.borrow())
         {
             self.tree_drag = None;
-        } else {
-            drag.update(e.position, &self.tree_rows.borrow());
+        } else if let Some(geometry) = self.tree_layout.borrow().current() {
+            drag.update(e.position, geometry);
         }
         cx.notify();
     }
     pub(super) fn tree_up(
         &mut self,
-        position: Point<Pixels>,
+        e: &gpui::MouseUpEvent,
         w: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Consume first: wrong-button, stale, duplicate and canceled releases
+        // cannot resurrect a receipt or publish a second command.
         let Some(mut drag) = self.tree_drag.take() else {
             return;
         };
-        if w.is_window_active()
+        if drag.pointer_generation == crate::color_edit::input_pointer_generation(w, cx)
+            && e.button == MouseButton::Left
+            && e.click_count == 1
+            && supported_modifiers(e.modifiers)
+            && w.is_window_active()
             && self.tree_focus.is_focused(w)
+            && !TextField::is_composing(w, cx)
             && drag.current(self.state.read(cx), &self.selection, &self.collapsed)
+            && drag.geometry_current(&self.tree_layout.borrow())
         {
-            let command = drag.release(position, &self.tree_rows.borrow());
+            let command = {
+                let layout = self.tree_layout.borrow();
+                drag.release(e.position, layout.current().unwrap())
+            };
             if !drag.moved && drag.plain {
                 self.selection
                     .one(drag.selection.parent.unwrap(), drag.pressed);
                 self.publish_tree_selection(cx);
             } else if let Some(command) = command {
-                self.state
-                    .update(cx, |s, cx| s.dispatch(&Action::Edit(command), w, cx));
+                let plan = &drag.preview.as_ref().unwrap().plan;
+                if plan.source_parent != plan.parent {
+                    self.apply_tree_move(
+                        drag.layer,
+                        plan.parent,
+                        &plan.items,
+                        plan.edit().unwrap(),
+                        w,
+                        cx,
+                    );
+                } else {
+                    self.state
+                        .update(cx, |s, cx| s.dispatch(&Action::Edit(command), w, cx));
+                }
             }
         }
         cx.notify();
@@ -742,23 +972,43 @@ mod tests {
             .map(|id| (s.editor.project().active_composition_id(), 1, id));
         selection
     }
-    fn rows(order: &[u64], parent: u64) -> BTreeMap<u64, RowBounds> {
-        order
+    fn geometry(s: &EditorState, collapsed: &BTreeSet<u64>) -> super::super::tree_drop::Geometry {
+        use super::super::tree_drop::*;
+        let visible = visible_rows(contents(s), collapsed);
+        let clip = Bounds::new(point(px(0.), px(0.)), size(px(300.), px(2000.)));
+        let rows = visible
             .iter()
             .enumerate()
-            .map(|(i, &item)| {
+            .map(|(i, &(depth, parent, item))| {
                 let bounds =
-                    Bounds::new(point(px(10.), px(i as f32 * 30.)), size(px(200.), px(30.)));
-                (
+                    Bounds::new(point(px(0.), px(i as f32 * 26.)), size(px(250.), px(26.)));
+                RowGeometry {
                     item,
-                    RowBounds {
-                        parent,
-                        bounds,
-                        visible: bounds,
-                    },
-                )
+                    parent,
+                    depth,
+                    group: matches!(contents(s).node(item).unwrap().kind, ContentsKind::Group(_)),
+                    bounds,
+                    label: Bounds::new(point(px(50.), bounds.top()), size(px(200.), px(26.))),
+                    clip,
+                }
             })
-            .collect()
+            .collect();
+        Geometry {
+            owner: (s.editor.project().active_composition_id(), 1),
+            root: Some(RootGeometry {
+                bounds: Bounds::new(
+                    point(px(0.), px(visible.len() as f32 * 26.)),
+                    size(px(250.), px(26.)),
+                ),
+                clip,
+            }),
+            visible,
+            rows,
+        }
+    }
+    fn at(geometry: &super::super::tree_drop::Geometry, item: u64, dy: f32) -> Point<Pixels> {
+        let row = geometry.rows.iter().find(|row| row.item == item).unwrap();
+        point(px(80.), row.bounds.top() + px(dy))
     }
     fn hierarchy_scene() -> EditorState {
         let mut s = scene();
@@ -773,6 +1023,83 @@ mod tests {
         );
         s.editor.clear_history();
         s
+    }
+    #[test]
+    fn rendered_press_checks_full_source_before_flush_and_exact_tree_context_afterward() {
+        let mut s = scene();
+        let selected = selection(&mut s, 1, &[2]);
+        let collapsed = BTreeSet::new();
+        let context = PressContext::capture(
+            &s,
+            &selected,
+            &collapsed,
+            1,
+            2,
+            std::sync::Arc::new(s.editor.project().clone()),
+        );
+        assert!(context.same_context(&s, &selected, &collapsed, false));
+        edit(
+            &mut s,
+            ContentsEdit::Rename {
+                item: 2,
+                name: "Authorized pending name".into(),
+            },
+        );
+        assert!(!context.same_context(&s, &selected, &collapsed, false));
+        assert!(context.same_context(&s, &selected, &collapsed, true));
+        let mut changed_selection = selected.clone();
+        changed_selection.one(1, 3);
+        assert!(!context.same_context(&s, &changed_selection, &collapsed, true));
+        assert!(!context.same_context(&s, &selected, &[1].into(), true));
+        s.frame += 1;
+        assert!(!context.same_context(&s, &selected, &collapsed, true));
+        s.frame -= 1;
+        s.selected_layers.insert(999);
+        assert!(!context.same_context(&s, &selected, &collapsed, true));
+        s.selected_layers.clear();
+        s.queue_open = true;
+        assert!(!context.same_context(&s, &selected, &collapsed, true));
+        s.queue_open = false;
+        edit(
+            &mut s,
+            ContentsEdit::MoveSiblings {
+                source_parent: 1,
+                items: vec![2],
+                parent: 0,
+                index: 0,
+            },
+        );
+        assert!(!context.same_context(&s, &selected, &collapsed, true));
+    }
+    #[test]
+    fn locked_press_snapshot_never_rebases_after_a_source_change_or_becomes_editable() {
+        let mut s = scene();
+        s.editor.execute(Command::ToggleLocked(1)).unwrap();
+        let selected = selection(&mut s, 1, &[2]);
+        let collapsed = BTreeSet::new();
+        let context = PressContext::capture(
+            &s,
+            &selected,
+            &collapsed,
+            1,
+            2,
+            std::sync::Arc::new(s.editor.project().clone()),
+        );
+        assert!(context.same_context(&s, &selected, &collapsed, false));
+        assert!(context.same_context(&s, &selected, &collapsed, true));
+        assert!(crate::color_edit::InputTarget::new(&s).is_none());
+        assert!(Drag::new(&s, &selected, &collapsed, 2, point(px(0.), px(0.)), true).is_none());
+        s.editor.execute(Command::ToggleLocked(1)).unwrap();
+        assert!(!context.same_context(&s, &selected, &collapsed, true));
+        edit(
+            &mut s,
+            ContentsEdit::Rename {
+                item: 2,
+                name: "Other source".into(),
+            },
+        );
+        s.editor.execute(Command::ToggleLocked(1)).unwrap();
+        assert!(!context.same_context(&s, &selected, &collapsed, true));
     }
     #[test]
     fn hierarchy_context_rejects_stale_owner_selection_focus_domains_and_blocked_states() {
@@ -918,13 +1245,10 @@ mod tests {
         assert_eq!(s.editor.project(), &before);
         assert_eq!(collapsed, [1].into());
         assert!(!s.editor.can_undo());
-        let order = sibling_order(contents(&s), 0).unwrap();
-        let map = rows(&order, 0);
-        let mut drag =
-            Drag::new(&s, &selected, &collapsed, 5, point(px(50.), px(40.)), true).unwrap();
-        let command = drag.release(point(px(50.), px(1.)), &map).unwrap();
+        let map = geometry(&s, &collapsed);
+        let mut drag = Drag::new(&s, &selected, &collapsed, 5, at(&map, 5, 13.), true).unwrap();
         assert!(matches!(
-            command,
+            drag.release(at(&map, 1, 1.), &map).unwrap(),
             Command::Contents {
                 edit: ContentsEdit::Reorder { parent: 0, .. },
                 ..
@@ -948,21 +1272,25 @@ mod tests {
                 },
             );
             s.editor.clear_history();
-            let moved = [order[0], order[order.len() - 2]];
-            let selected = selection(&mut s, parent, &moved);
+            let selected = selection(&mut s, parent, &[order[0], order[order.len() - 2]]);
             let before = s.editor.project().clone();
-            let map = rows(&order, parent);
-            let origin = point(px(50.), px(10.));
-            let mut drag =
-                Drag::new(&s, &selected, &BTreeSet::new(), order[0], origin, true).unwrap();
-            // Hover can move through several gaps but is wholly transient.
-            for y in [10., 45., 75.] {
-                drag.update(point(px(50.), px(y)), &map);
+            let map = geometry(&s, &BTreeSet::new());
+            let mut drag = Drag::new(
+                &s,
+                &selected,
+                &BTreeSet::new(),
+                order[0],
+                at(&map, order[0], 13.),
+                true,
+            )
+            .unwrap();
+            for &item in &order {
+                drag.update(at(&map, item, 1.), &map);
             }
             assert_eq!(s.editor.project(), &before);
             assert!(!s.editor.can_undo());
             let command = drag
-                .release(point(px(50.), px(order.len() as f32 * 30. - 2.)), &map)
+                .release(at(&map, *order.last().unwrap(), 25.), &map)
                 .unwrap();
             s.editor.execute(command).unwrap();
             let after = s.editor.project().clone();
@@ -1000,14 +1328,14 @@ mod tests {
         s.editor.undo();
         let selected = selection(&mut s, 1, &[order[1]]);
         let before = s.editor.project().clone();
-        let map = rows(&order, 1);
-        let origin = point(px(50.), px(40.));
+        let map = geometry(&s, &BTreeSet::new());
+        let origin = at(&map, order[1], 13.);
         let mut drag = Drag::new(&s, &selected, &BTreeSet::new(), order[1], origin, true).unwrap();
-        assert!(drag.release(point(px(50.), px(58.)), &map).is_none()); // Original after gap.
+        assert!(drag.release(at(&map, order[1], 25.), &map).is_none());
         assert!(drag.moved);
         let mut canceled =
             Drag::new(&s, &selected, &BTreeSet::new(), order[1], origin, true).unwrap();
-        canceled.update(point(px(50.), px(148.)), &map);
+        canceled.update(at(&map, *order.last().unwrap(), 25.), &map);
         drop(canceled);
         assert_eq!(s.editor.project(), &before);
         assert!(!s.editor.can_undo());
@@ -1016,58 +1344,178 @@ mod tests {
         assert_eq!(s.editor.project(), &redo);
         s.editor.undo();
         let mut fast = Drag::new(&s, &selected, &BTreeSet::new(), order[1], origin, true).unwrap();
-        // No MouseMove was delivered; release must still plan the requested last gap.
-        assert!(fast.release(point(px(50.), px(148.)), &map).is_some());
+        assert!(
+            fast.release(at(&map, *order.last().unwrap(), 25.), &map)
+                .is_some()
+        );
     }
     #[test]
-    fn invalid_parent_outside_and_clipped_rows_have_no_drop() {
-        let order = [91, 7, 42];
-        let mut map = rows(&order, 15);
-        let mut other = rows(&[8], 91);
-        let row = other.get_mut(&8).unwrap();
-        row.bounds.origin.y = px(90.);
-        row.visible = row.bounds;
-        map.extend(other);
-        assert!(gap_at(point(px(40.), px(95.)), 15, &order, &map).is_none());
-        assert!(gap_at(point(px(400.), px(30.)), 15, &order, &map).is_none());
+    fn cross_parent_final_release_replans_and_below_threshold_is_plain_click() {
+        let mut s = scene();
+        let selected = selection(&mut s, 1, &[2, 3]);
+        let collapsed = [5].into();
+        let map = geometry(&s, &collapsed);
+        let origin = at(&map, 2, 13.);
+        let mut drag = Drag::new(&s, &selected, &collapsed, 2, origin, true).unwrap();
+        assert!(drag.release(origin + point(px(3.), px(0.)), &map).is_none());
+        assert!(!drag.moved);
+        drag.update(at(&map, 5, 13.), &map);
         assert_eq!(
-            gap_at(point(px(40.), px(1.)), 15, &order, &map)
-                .unwrap()
-                .index,
-            0
+            drag.preview.as_ref().unwrap().plan.target,
+            DropTarget::Into(5)
         );
-        assert_eq!(
-            gap_at(point(px(40.), px(89.)), 15, &order, &map)
-                .unwrap()
-                .index,
-            3
-        );
-        map.get_mut(&91).unwrap().visible =
-            Bounds::new(point(px(10.), px(20.)), size(px(200.), px(10.)));
-        assert!(gap_at(point(px(40.), px(5.)), 15, &order, &map).is_none());
-    }
-    #[test]
-    fn after_markers_follow_expanded_group_subtrees_or_collapsed_header() {
-        let gap = Gap {
-            item: 91,
-            after: true,
-            index: 1,
-        };
-        assert_eq!(
-            marker_row(gap, &[(0, 0, 91), (1, 91, 7), (2, 7, 6), (0, 0, 42)]),
-            Some((6, true))
-        );
-        assert_eq!(marker_row(gap, &[(0, 0, 91), (0, 0, 42)]), Some((91, true)));
-        assert_eq!(
-            marker_row(
-                Gap {
-                    after: false,
-                    ..gap
+        let command = drag
+            .release(map.root.as_ref().unwrap().bounds.center(), &map)
+            .unwrap();
+        assert!(matches!(
+            command,
+            Command::Contents {
+                edit: ContentsEdit::MoveSiblings {
+                    source_parent: 1,
+                    parent: 0,
+                    ..
                 },
-                &[(0, 0, 91), (1, 91, 7)]
-            ),
-            Some((91, false))
+                ..
+            }
+        ));
+        assert_eq!(collapsed, [5].into());
+        assert!(!s.editor.can_undo());
+        assert!(drag.release(point(px(999.), px(999.)), &map).is_none());
+        assert!(drag.moved); // Returning outside never becomes a plain click.
+    }
+    #[test]
+    fn invalid_controls_leaf_centers_and_clipped_rows_have_no_drop() {
+        let mut s = scene();
+        let selected = selection(&mut s, 1, &[3]);
+        let mut map = geometry(&s, &BTreeSet::new());
+        assert!(
+            map.resolve(contents(&s), &selected, at(&map, 2, 13.))
+                .is_none()
         );
+        assert!(
+            map.resolve(contents(&s), &selected, point(px(20.), px(1.)))
+                .is_none()
+        );
+        assert!(
+            map.resolve(contents(&s), &selected, point(px(999.), px(1.)))
+                .is_none()
+        );
+        let row = map.rows.iter_mut().find(|r| r.item == 2).unwrap();
+        row.clip.origin.y = row.bounds.top() + px(8.);
+        assert!(
+            map.resolve(contents(&s), &selected, at(&map, 2, 1.))
+                .is_none()
+        );
+    }
+    #[test]
+    fn generations_drop_old_bounds_and_geometry_changes_cancel_stickily() {
+        let mut s = scene();
+        let selected = selection(&mut s, 1, &[2]);
+        let map = geometry(&s, &BTreeSet::new());
+        let groups: BTreeSet<_> = map
+            .rows
+            .iter()
+            .filter(|r| r.group)
+            .map(|r| r.item)
+            .collect();
+        let paint = |layout: &mut TreeLayout, geometry: &super::super::tree_drop::Geometry| {
+            layout.begin(geometry.owner, geometry.visible.clone());
+            assert!(layout.current().is_none());
+            for row in &geometry.rows {
+                layout.row(row.item, row.bounds, row.clip);
+                layout.label(row.item, row.label);
+            }
+            if let Some(root) = &geometry.root {
+                layout.root(root.bounds, root.clip);
+            }
+            layout.finish(&groups);
+        };
+        let mut layout = TreeLayout::default();
+        paint(&mut layout, &map);
+        let mut drag =
+            Drag::new(&s, &selected, &BTreeSet::new(), 2, at(&map, 2, 13.), true).unwrap();
+        drag.geometry = Some((layout.epoch, map.clone()));
+        assert!(drag.geometry_current(&layout));
+        paint(&mut layout, &map);
+        assert!(drag.geometry_current(&layout));
+        layout.invalidate();
+        assert!(layout.current().is_none());
+        assert!(!drag.geometry_current(&layout));
+        // Source rows staying equal does not authorize a press between native
+        // scroll/resize and the next completed prepaint generation.
+        paint(&mut layout, &map);
+        assert!(layout.current().is_some());
+        let mut moved = map.clone();
+        moved.rows[0].clip.size.width -= px(1.);
+        paint(&mut layout, &moved);
+        assert!(!drag.geometry_current(&layout));
+        paint(&mut layout, &map);
+        assert!(!drag.geometry_current(&layout));
+        layout.begin(map.owner, map.visible.clone());
+        layout.finish(&groups);
+        assert!(layout.current().unwrap().rows.is_empty());
+        assert!(layout.current().unwrap().root.is_none());
+        assert!(!drag.geometry_current(&layout));
+    }
+    #[test]
+    fn outside_label_down_invalidates_scrollbar_and_splitter_geometry_until_next_paint() {
+        let s = scene();
+        let map = geometry(&s, &BTreeSet::new());
+        let mut layout = TreeLayout::default();
+        layout.latest = Some(map.clone());
+        layout.previous = Some(map.clone());
+        assert!(!layout.invalidate_outside_label(at(&map, 2, 13.)));
+        assert_eq!(layout.current(), Some(&map));
+        // Eye/disclosure, root landing, scrollbar and panel chrome are not labels.
+        for position in [
+            point(px(20.), px(1.)),
+            map.root.as_ref().unwrap().bounds.center(),
+            point(px(299.), px(100.)),
+        ] {
+            layout.latest = Some(map.clone());
+            assert!(layout.invalidate_outside_label(position));
+            assert!(layout.current().is_none());
+            assert!(layout.invalidate_outside_label(at(&map, 2, 13.)));
+            assert_eq!(layout.previous.as_ref(), Some(&map));
+        }
+        let groups = map
+            .rows
+            .iter()
+            .filter(|r| r.group)
+            .map(|r| r.item)
+            .collect();
+        layout.begin(map.owner, map.visible.clone());
+        for row in &map.rows {
+            layout.row(row.item, row.bounds, row.clip);
+            layout.label(row.item, row.label);
+        }
+        if let Some(root) = &map.root {
+            layout.root(root.bounds, root.clip);
+        }
+        layout.finish(&groups);
+        assert!(!layout.invalidate_outside_label(at(&map, 2, 13.)));
+    }
+    #[test]
+    fn drag_pointer_modifiers_allow_selection_chords_but_reject_alt_platform_and_function() {
+        for control in [false, true] {
+            for shift in [false, true] {
+                let m = gpui::Modifiers {
+                    control,
+                    shift,
+                    ..Default::default()
+                };
+                assert!(supported_modifiers(m));
+                assert!(!supported_modifiers(gpui::Modifiers { alt: true, ..m }));
+                assert!(!supported_modifiers(gpui::Modifiers {
+                    platform: true,
+                    ..m
+                }));
+                assert!(!supported_modifiers(gpui::Modifiers {
+                    function: true,
+                    ..m
+                }));
+            }
+        }
     }
     #[test]
     fn unsupported_selection_chords_are_consumed_without_stealing_fields_or_global_shortcuts() {

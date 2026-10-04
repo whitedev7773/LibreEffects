@@ -8,7 +8,8 @@ C09 layer-command / Linux image-retirement, F03 typography and B01 Project-list
 label, E05 Trim Paths, automatic About build identity and the G06 Luma Key
 headless checkpoint, independent Text Fill/Stroke opacity and Hold-only Source
 Text animation, all-stored-pose vertex transforms and cross-parent Contents
-buttons/keyboard (native validation pending for these five newest feature slices).
+buttons/keyboard and guarded cross-parent dragging (native validation pending for
+these six newest feature slices).
 This is the current checkpoint inventory;
 [DEVELOPMENT_BACKLOG.md](DEVELOPMENT_BACKLOG.md) retains the original audit and
 its dated implementation/test history. Older “remaining” lists and test counts
@@ -18,6 +19,50 @@ Libre Effects is an **early 2D motion-graphics and compositing editor**. It is n
 an After Effects replacement, an AE pixel-equivalent renderer, or an AEP/Adobe
 script-compatible application. A working control or passing model test alone
 does not establish a complete native editing workflow.
+
+## E04 guarded cross-parent drag — headless gates passed, native pending
+
+Contents label edges now resolve Before/After, Group centers resolve Into, and
+an explicit root landing row appends at root. The same resolver produces the
+semantic destination, drawable marker and final release command. Selected blocks
+keep source order; same-parent targets use Reorder and cross-parent targets use
+one MoveSiblings transaction. No new core, renderer, schema, LEP or VIEW version
+is introduced. Local values remain unchanged; destination placement/paint scope
+applies as in the button/keyboard stage below.
+
+Full label bands use deterministic half-open boundaries and current clipping.
+Expanded Group After marks its visible subtree end at the Group's indentation;
+an offscreen endpoint has no target. Controls, leaf centers and blank space are
+ineligible. Root and feedback rows reserve stable space. Hover never expands or
+scrolls. Scrolling, viewport/layout changes, focus loss, window deactivation,
+Escape, new presses and stale source/context cancel the gesture. Exact one-use
+down receipts protect pending input and marked IME before blur. Final release
+replans from its own position, consumes the gesture first and rechecks button,
+modifiers, focus, source, transport generation and completed geometry.
+
+The focused 61 tests and final 1359 default tests (450 core, 903 desktop, six
+helpers), all 32 media tests, formatting/all-target checks and normal optimized
+release pass. Coverage adds 34 named tests and replaces two obsolete same-parent
+assumptions, a net increase of 32; no acceptance tolerance was relaxed. Two
+independent code reviews found no blocker. They also distinguished planner/core
+integration from actual ContentsControls/native event delivery and selection
+reveal. Native behavior is not inferred from installed GPUI dispatch inspection.
+Build `20261004.110504-c2a6fb77abcf9417` matches all 341 frozen source inputs.
+
+Release CLI passes two samples/12 exact RGBA comparisons (460,800 pixels),
+including independent analytic rectangles, baked geometry and generated codecs.
+The existing stage1 40 comparisons, 31,940,800 text/reference pixels, 21 Trim
+frames, 18 Luma frames, 46 opacity renders, 28 all-pose comparisons (25,804,800
+pixels), and Source Text's 28 renders/21 comparisons/12 preserving rejections
+remain exact. Generated files remain headless evidence. During state recovery,
+a duplicate test pipeline was discovered and interrupted; the original terminal
+workspace success was preserved separately from its overwritten running stats.
+The original media/release completed normally; source hashes stayed unchanged.
+
+Six native drag cases remain unrun, in addition to the prior 41. Screen access
+has not been restored. No auto-scroll, hover expansion, cross-layer moves or
+coordinate compensation is included. E04 remains Partial: compound Colors
+animation, multi-item scalar editing and broader native acceptance remain.
 
 ## E04 cross-parent sibling moves — headless gates passed, native pending
 
@@ -58,8 +103,8 @@ rejections remain exact. Generated LEP files are headless codec evidence.
 
 Eight native cases are unrun, in addition to the prior 33. The supported state check
 at 10:23:57 UTC still failed with the missing native pipe; no reboot or alternate
-control was attempted. E04 remains Partial. Cross-parent drag, compound Colors and
-bulk field editing remain; the next bounded stage is explicit guarded drag targets.
+control was attempted. The subsequent guarded drag stage is recorded above.
+E04 remains Partial; compound Colors and bulk field editing remain.
 
 ## E02 Base + all stored poses — headless gates passed, native pending
 
@@ -110,8 +155,7 @@ route; no reboot was performed. The committed Source Text branch history and all
 then-current WIP files/release were saved in a verified recovery snapshot before
 development resumed. Screen access still fails on the native pipe. E02 remains
 Partial: cross-path selection, canvas affine handles and topology-changing animation
-are separate work. The E04 button/keyboard stage is recorded above; guarded cross-parent dragging
-remains a later stage.
+are separate work. The E04 button/keyboard and guarded drag stages are recorded above.
 
 ## F05 Source Text Hold animation — headless gates passed, native pending
 
@@ -643,7 +687,7 @@ Every original A01–L05 ID appears once below. The labels are deliberately boun
 | E01 | Partial | Drag-created rectangle, rounded rectangle, ellipse, polygon and star; open lines can be drawn with Pen. Dedicated parametric line/tool-default controls and wider native regression remain. |
 | E02 | Partial | Open/closed Bezier Pen, insert/delete/convert points, handles, parametric conversion, same-path marquee/Ctrl+A, multi-vertex moves/static deletion, animated-safe Reverse/Set First, single-vertex numeric editing and same-path multi-vertex translation/rotation/scale/pivot transactions. Current-frame bulk transform automated and 12-case bounded native gates pass. Base+all-stored-pose transforms now pass headless gates with native scope acceptance pending. Cross-path selection, affine canvas handles and topology-changing animation remain; earlier singleton native mouse acceptance is recorded separately. |
 | E03 | Partial | Animated scalar/RGB/opacity paint, cap/join/miter/dash controls, fractional Points and Contents linear/radial Gradient Fill/Stroke. Remaining parametric details, topology editing and complete native coverage are not done. |
-| E04 | Partial | Nested Contents tree, paths/paints, animated group transforms/Skew, Composite ordering, 16 paint blend modes, gradient drafts/endpoints/modal editor, selected-group Pen, same-parent sibling multi-selection/block ordering and atomic cross-parent Move Into/Out/buttons/Ctrl+arrows. The cross-parent stage has headless gates only and eight native cases pending. Compound Colors animation, cross-parent block dragging and bulk field editing remain. |
+| E04 | Partial | Nested Contents tree, paths/paints, animated group transforms/Skew, Composite ordering, 16 paint blend modes, gradient drafts/endpoints/modal editor, selected-group Pen, same-parent sibling multi-selection/block ordering and atomic cross-parent Move Into/Out/buttons/Ctrl+arrows. Cross-parent buttons/keyboard and guarded Before/After/Into/root dragging pass headless gates; their 14 native cases remain pending. Compound Colors animation and bulk field editing remain. |
 | E05 | Partial | Fixed-topology shape/mask path animation and bounded per-source-contour Contents Trim Paths with animated Start/End/Offset, ordered scope, unchanged editable paths and explicit precision/work errors. Automated/release gates and all ten bounded native scenarios pass. Repeater, Merge/Offset Paths, compound/distributed modes and topology-changing interpolation remain. |
 | E06 | Not implemented | SVG import with editable element conversion and unsupported-element reporting. Internal SVG rendering is not an SVG importer. |
 
@@ -746,7 +790,7 @@ without changing unselected geometry or the project/LEP schema; all 12 bounded
 native cases pass. Base+all-stored-pose geometry transforms now pass their headless gate with native
 acceptance pending. Cross-path editing and topology remain separate. Speed corners and spatial/roving
 semantics also remain separate.
-Cross-parent tree moves need their own coordinate/paint-scope design.
+Cross-parent tree moves preserve local values and adopt destination placement/paint scope; their headless checkpoints are recorded above.
 This does not close the broader A04 backup-management or other backlog extensions.
 
 1. Extend native editing acceptance and retained regression evidence, especially
@@ -761,7 +805,7 @@ This does not close the broader A04 backup-management or other backlog extension
    retain the existing LEP container and VIEW versions. Source Text Hold animation now
    passes headless gates with native acceptance pending. Per-character styling,
    Text Animator, Auto Orient/Skew and full-animation anchor compensation
-   remain separate; E02 cross-path and E04 cross-parent edits need their own design.
+   remain separate; E02 cross-path selection and E04 compound Colors/bulk scalar edits need their own designs.
    The B01 Project-list correction passes its four bounded native cases. E05 Trim
    Paths now passes its bounded automated/release/native gates, with Start/End/Offset
    on each source contour, group-local

@@ -326,12 +326,34 @@ impl Render for Inspector {
         let duration = state.editor.project().composition().duration();
         let selected = state.editor.selected_layer().cloned();
         let comp = state.editor.project().composition().clone();
+        let tree_scroll_owner = self.contents_controls.clone();
         let mut panel = div()
+            .relative()
             .flex()
             .flex_col()
             .size_full()
             .min_w_0()
-            .bg(rgb(ui::BG));
+            .bg(rgb(ui::BG))
+            .child(
+                gpui::canvas(
+                    |_, _, _| (),
+                    move |bounds, _, window, _| {
+                        let tree = tree_scroll_owner.clone();
+                        let visible = bounds.intersect(&window.content_mask().bounds);
+                        window.on_mouse_event(
+                            move |event: &gpui::ScrollWheelEvent, phase, _, cx| {
+                                if phase.capture() && visible.contains(&event.position) {
+                                    tree.update(cx, |this, cx| this.invalidate_tree_layout(cx));
+                                }
+                            },
+                        );
+                    },
+                )
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full(),
+            );
         let Some(layer) = selected else {
             return panel.child(
                 div()

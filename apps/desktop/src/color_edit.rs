@@ -130,6 +130,55 @@ struct InputButton {
     hitbox: gpui::Hitbox,
     preserve_ime: bool,
 }
+/// Contents labels opt into a down-only route. The guard is checked before any
+/// blur and again after the one authorized synchronous field flush.
+type TreeInputGuard = std::rc::Rc<dyn Fn(&crate::editor::EditorState, &gpui::App, bool) -> bool>;
+#[derive(Clone)]
+struct TreeInputLabel {
+    control: String,
+    target: Option<InputTarget>,
+    hitbox: gpui::Hitbox,
+    guard: TreeInputGuard,
+}
+pub(crate) enum TreeDownTarget {
+    Editable(InputTarget),
+    SelectionOnly,
+}
+struct TreeDownPress {
+    control: String,
+    down: gpui::MouseDownEvent,
+    target: TreeDownTarget,
+}
+impl TreeDownPress {
+    fn matches(
+        &self,
+        control: &str,
+        event: &gpui::MouseDownEvent,
+        state: &crate::editor::EditorState,
+    ) -> bool {
+        tree_pointer_down_allowed(event)
+            && self.control == control
+            && same_down(&self.down, event)
+            && match &self.target {
+                TreeDownTarget::Editable(target) => target.current(state),
+                TreeDownTarget::SelectionOnly => true,
+            }
+    }
+}
+fn same_down(a: &gpui::MouseDownEvent, b: &gpui::MouseDownEvent) -> bool {
+    a.button == b.button
+        && a.position == b.position
+        && a.modifiers == b.modifiers
+        && a.click_count == b.click_count
+        && a.first_mouse == b.first_mouse
+}
+pub(crate) fn tree_pointer_down_allowed(event: &gpui::MouseDownEvent) -> bool {
+    event.button == gpui::MouseButton::Left
+        && event.click_count == 1
+        && !event.modifiers.alt
+        && !event.modifiers.platform
+        && !event.modifiers.function
+}
 fn pointer_preserves_composition(preserve_ime: bool, composing: bool) -> bool {
     preserve_ime && composing
 }
@@ -137,6 +186,8 @@ fn pointer_preserves_composition(preserve_ime: bool, composing: bool) -> bool {
 struct InputPointerWindow {
     buttons: Vec<InputButton>,
     press: Option<InputPress>,
+    tree_labels: Vec<TreeInputLabel>,
+    tree_press: Option<TreeDownPress>,
     generation: u64,
 }
 #[derive(Default)]
@@ -156,12 +207,13 @@ pub(crate) fn input_pointer_root(
     let draw_state = state.clone();
     root.capture_any_mouse_down(move |event, window, cx| {
         let id = window.window_handle().window_id().as_u64();
-        let candidate = {
+        let (candidate, tree_label) = {
             let pointers = cx.default_global::<InputPointers>();
             let entry = pointers.0.entry(id).or_default();
             entry.press = None;
+            entry.tree_press = None;
             entry.generation = entry.generation.wrapping_add(1);
-            (event.button == gpui::MouseButton::Left)
+            let candidate = (event.button == gpui::MouseButton::Left)
                 .then(|| {
                     entry
                         .buttons
@@ -170,8 +222,65 @@ pub(crate) fn input_pointer_root(
                         .find(|b| b.hitbox.is_hovered(window))
                         .cloned()
                 })
-                .flatten()
+                .flatten();
+            (
+                candidate,
+                entry
+                    .tree_labels
+                    .iter()
+                    .rev()
+                    .find(|b| b.hitbox.is_hovered(window))
+                    .cloned(),
+            )
         };
+        if let Some(label) = tree_label {
+            // Rejected labels cannot let a descendant outside-down handler blur
+            // marked input or rebase an old render closure onto a new owner.
+            if !window.is_window_active()
+                || !tree_pointer_down_allowed(event)
+                || pointer_preserves_composition(
+                    true,
+                    crate::components::TextField::is_composing(window, cx),
+                )
+                || !(label.guard)(state.read(cx), cx, false)
+                || label
+                    .target
+                    .as_ref()
+                    .is_some_and(|t| !t.current(state.read(cx)))
+            {
+                window.prevent_default();
+                cx.stop_propagation();
+                return;
+            }
+            let target = if let Some(before) = &label.target {
+                crate::components::TextField::commit_active(window, cx);
+                if !before.same_context(state.read(cx)) || !(label.guard)(state.read(cx), cx, true)
+                {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    return;
+                }
+                let Some(target) = InputTarget::new(state.read(cx)) else {
+                    return;
+                };
+                TreeDownTarget::Editable(target)
+            } else {
+                // Locked trees receive no editable receipt or explicit flush.
+                // Normal outside-down/blur remains; the tree's second guard
+                // rejects a changed source before selecting from this receipt.
+                TreeDownTarget::SelectionOnly
+            };
+            cx.default_global::<InputPointers>()
+                .0
+                .entry(id)
+                .or_default()
+                .tree_press = Some(TreeDownPress {
+                control: label.control,
+                down: event.clone(),
+                target,
+            });
+            return;
+        }
         let Some(button) = candidate.filter(|b| b.target.current(state.read(cx))) else {
             return;
         };
@@ -219,6 +328,7 @@ pub(crate) fn input_pointer_root(
                 && entry.generation == generation
             {
                 entry.press = None;
+                entry.tree_press = None;
             }
         });
     })
@@ -226,6 +336,7 @@ pub(crate) fn input_pointer_root(
         let id = window.window_handle().window_id().as_u64();
         if let Some(entry) = cx.default_global::<InputPointers>().0.get_mut(&id) {
             entry.press = None;
+            entry.tree_press = None;
         }
     })
     .child(
@@ -243,6 +354,7 @@ pub(crate) fn input_pointer_root(
                     .entry(id)
                     .or_default();
                 entry.buttons.clear();
+                entry.tree_labels.clear();
                 if !current {
                     entry.press = None;
                 }
@@ -254,8 +366,71 @@ pub(crate) fn input_pointer_root(
     )
 }
 
+/// The only down-receipt consumer is the Contents tree. Existing click/picker
+/// policies remain release-oriented and unchanged.
+pub(crate) fn input_pointer_tree_label(
+    label: gpui::Stateful<gpui::Div>,
+    control: String,
+    target: Option<InputTarget>,
+    guard: impl Fn(&crate::editor::EditorState, &gpui::App, bool) -> bool + 'static,
+) -> gpui::Stateful<gpui::Div> {
+    use gpui::prelude::*;
+    let guard: TreeInputGuard = std::rc::Rc::new(guard);
+    label.relative().child(
+        gpui::canvas(
+            move |bounds, window, cx| {
+                let hitbox = window.insert_hitbox(bounds, gpui::HitboxBehavior::Normal);
+                let id = window.window_handle().window_id().as_u64();
+                cx.default_global::<InputPointers>()
+                    .0
+                    .entry(id)
+                    .or_default()
+                    .tree_labels
+                    .push(TreeInputLabel {
+                        control: control.clone(),
+                        target: target.clone(),
+                        hitbox,
+                        guard: guard.clone(),
+                    });
+            },
+            |_, _, _, _| (),
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full(),
+    )
+}
+
+pub(crate) fn input_tree_down_target(
+    control: &str,
+    event: &gpui::MouseDownEvent,
+    state: &gpui::Entity<crate::editor::EditorState>,
+    window: &gpui::Window,
+    cx: &mut gpui::App,
+) -> Option<TreeDownTarget> {
+    let id = window.window_handle().window_id().as_u64();
+    let press = cx
+        .default_global::<InputPointers>()
+        .0
+        .get_mut(&id)?
+        .tree_press
+        .take()?;
+    (window.is_window_active() && press.matches(control, event, state.read(cx)))
+        .then_some(press.target)
+}
+
 pub(crate) fn cancel_input_pointer(window: &gpui::Window, cx: &mut gpui::App) {
     release_input_pointer(window.window_handle().window_id(), cx);
+}
+
+/// Every workspace down advances this, even a down rejected during ancestor
+/// capture. A tree gesture therefore cannot survive propagation being stopped
+/// before its own cancel listener runs.
+pub(crate) fn input_pointer_generation(window: &gpui::Window, cx: &gpui::App) -> u64 {
+    cx.try_global::<InputPointers>()
+        .and_then(|p| p.0.get(&window.window_handle().window_id().as_u64()))
+        .map_or(0, |p| p.generation)
 }
 
 pub(crate) fn release_input_pointer(window: gpui::WindowId, cx: &mut gpui::App) {
@@ -2435,6 +2610,84 @@ mod typography_pointer_tests {
                 ..Default::default()
             },
         }
+    }
+    #[test]
+    fn tree_down_receipt_is_exact_one_use_and_does_not_require_same_button_release() {
+        let state = scene();
+        let event = down();
+        let target = InputTarget::new(&state).unwrap();
+        let mut pending = Some(TreeDownPress {
+            control: "tree-label".into(),
+            down: event.clone(),
+            target: TreeDownTarget::Editable(target),
+        });
+        let receipt = pending.take().unwrap();
+        assert!(receipt.matches("tree-label", &event, &state));
+        assert!(pending.take().is_none());
+        // Down authorization has no release-position dependency; the tree's
+        // unified resolver owns the eventual outside-label release instead.
+        assert!(!receipt.matches("another-label", &event, &state));
+        let mut other = event.clone();
+        other.position.x += px(1.);
+        assert!(!receipt.matches("tree-label", &other, &state));
+        other = event.clone();
+        other.first_mouse = !other.first_mouse;
+        assert!(!receipt.matches("tree-label", &other, &state));
+        other = event.clone();
+        other.modifiers.shift = true;
+        assert!(!receipt.matches("tree-label", &other, &state));
+    }
+    #[test]
+    fn tree_down_receipt_rejects_repeats_wrong_buttons_unsupported_modifiers_and_changed_source() {
+        let mut state = scene();
+        let event = down();
+        for button in [MouseButton::Right, MouseButton::Middle] {
+            let mut other = event.clone();
+            other.button = button;
+            assert!(!tree_pointer_down_allowed(&other));
+        }
+        let mut repeat = event.clone();
+        repeat.click_count = 2;
+        assert!(!tree_pointer_down_allowed(&repeat));
+        for modifier in 0..3 {
+            let mut other = event.clone();
+            match modifier {
+                0 => other.modifiers.alt = true,
+                1 => other.modifiers.platform = true,
+                _ => other.modifiers.function = true,
+            }
+            assert!(!tree_pointer_down_allowed(&other));
+        }
+        let mut selection = event.clone();
+        selection.modifiers.control = true;
+        selection.modifiers.shift = true;
+        assert!(tree_pointer_down_allowed(&selection));
+        let receipt = TreeDownPress {
+            control: "tree-label".into(),
+            down: event.clone(),
+            target: TreeDownTarget::Editable(InputTarget::new(&state).unwrap()),
+        };
+        state
+            .editor
+            .execute(Command::RenameLayer {
+                id: 1,
+                name: "Changed after capture".into(),
+            })
+            .unwrap();
+        assert!(!receipt.matches("tree-label", &event, &state));
+    }
+    #[test]
+    fn ancestor_rejected_down_still_invalidates_the_frozen_tree_generation() {
+        let mut pointer = InputPointerWindow::default();
+        pointer.generation = pointer.generation.wrapping_add(1);
+        let frozen = pointer.generation;
+        // Ancestor capture advances before it can reject marked IME, modifiers,
+        // a stale label or another control. Descendant cancellation is optional.
+        pointer.generation = pointer.generation.wrapping_add(1);
+        assert_ne!(frozen, pointer.generation);
+        pointer.press = None;
+        pointer.tree_press = None;
+        assert_ne!(frozen, pointer.generation);
     }
     #[test]
     fn hierarchy_pointer_policy_preserves_marked_ime_before_any_flush_or_receipt() {

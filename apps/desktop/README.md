@@ -2592,15 +2592,24 @@ of another parent starts a new selection. A Group is one item with its entire
 subtree; selecting it does not independently select each descendant. Eye and
 disclosure buttons remain separate controls.
 
-Drag a selected label to move the selected sibling block before/after the
-insertion marker. The selected items retain their original order, as do all
-unselected siblings. An unselected label first becomes the sole selection. A
-Group's after-marker follows its whole subtree, including collapsed children.
-Dragging does **not** reparent items; the explicit Move Into/Out controls below
-remain separate. Hover and selection do not edit the document. A valid
-release is one Undo; an unchanged order or canceled drag preserves Undo/Redo.
-Source, document, composition, layer, frame, lock or hidden-row changes, focus
-loss and window deactivation cancel a stale drag instead of applying its old target.
+Drag a selected label to move the selected sibling block. Its top/bottom 6 px
+choose **Before/After**; a Group's center chooses **Into** and appends the block
+to that Group's children.
+Leaf centers, eye/disclosure controls and blank Inspector space are not targets.
+The dedicated **Contents root · drop to append** row always appends at root.
+A text hint identifies the target; gap lines and group/root outlines show its
+location. The selected items retain their original order, as do unselected
+siblings. An unselected label first becomes the sole selection. Ctrl/Shift keep
+their selection meaning and never copy a dragged block.
+
+An expanded Group's After marker follows its last visible descendant, at the
+Group's own indentation. It is unavailable when that endpoint is offscreen.
+Clipping never turns a hidden edge into a different target. Hover does not edit,
+expand or scroll the tree. Scroll, layout/viewport changes, Escape, focus loss,
+window deactivation, new presses and source/context changes cancel the gesture.
+Release resolves its actual final position and commits one atomic command; a
+no-op or canceled drag preserves Undo/Redo. The explicit Move Into/Out controls
+remain useful when a destination is outside the current viewport.
 
 Rename, numeric/paint controls and duplicate/delete require one
 selected item. Add uses the selected Group or the existing singleton parent;
@@ -2626,9 +2635,9 @@ original/final metadata limits are checked atomically. A successful edit is one
 Undo step. Graph pins/ranges keep stable IDs; ordinary valid selected keys remain,
 while Undo/Redo retain their existing key-selection clearing policy.
 
-The cross-parent button/keyboard stage has passed model, renderer, codec and CLI
-gates. Its eight native interaction cases remain pending because the supported
-desktop transport is unavailable; see [STATUS.md](STATUS.md).
+Cross-parent button/keyboard and drag verification is recorded in
+[STATUS.md](STATUS.md). Eight button/keyboard and six drag native interaction
+cases remain pending because the supported desktop transport is unavailable.
 
 With the tree focused, Ctrl+A selects its active sibling list; Up/Down navigates
 visible rows, Shift+Up/Down extends a sibling range, and Left/Right collapses or
@@ -2650,8 +2659,8 @@ another blocked editing/dialog flow; its owned keys do not fall through to layer
 Reordering preserves item IDs, local transforms, keys, poses, paint settings and
 references. It can intentionally change **which paths receive a paint and the
 overlap order**, following the rules below. It does not compensate coordinates or
-promise unchanged pixels. Cross-parent block dragging, bulk field edits and a
-Contents clipboard remain future work; no new project/LEP schema is required.
+promise unchanged pixels. Bulk field edits and a Contents clipboard remain
+future work; the hierarchy and drag commands require no new project/LEP schema.
 
 Paints consume paths above them in the same group, including transformed paths
 from child groups. Earlier paints/groups composite in front of later ones.
@@ -2676,7 +2685,7 @@ Non-Normal paint blending requires project version 47; old paints remain Normal.
 The modes follow sRGB/W3C compositing at the current 8-bit raster precision.
 AE pixel/color-space equivalence, Add/other AE modes, group Blend Mode and
 animated mode switching remain future work, alongside Repeater, Merge/Offset
-Paths and cross-parent block dragging. Layer blending remains the existing separate five-mode control.
+Paths. Layer blending remains the existing separate five-mode control.
 Fill and Stroke have a common color picker with HEX/RGB/HSV, opacity, recent
 colors and viewer sampling. Cancel leaves the document unchanged; accepting a
 draft updates only changed channels at the current frame as one Undo step.

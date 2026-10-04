@@ -16,8 +16,11 @@ use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
+#[cfg(test)]
+mod drop_integration_tests;
 pub(super) mod gradient_ramp;
 mod tree;
+mod tree_drop;
 mod tree_selection;
 use gradient_ramp::RampDrag;
 use tree_selection::Selection;
@@ -88,7 +91,7 @@ pub(crate) struct ContentsControls {
     move_serial: u64,
     tree_drag: Option<tree::Drag>,
     tree_focus: FocusHandle,
-    tree_rows: Rc<RefCell<std::collections::BTreeMap<u64, tree::RowBounds>>>,
+    tree_layout: Rc<RefCell<tree::TreeLayout>>,
     fields: Vec<(ContentsParam, Entity<TextField>)>,
     name: Option<Entity<TextField>>,
     add_open: bool,
@@ -142,7 +145,7 @@ impl ContentsControls {
             move_serial: 0,
             tree_drag: None,
             tree_focus: cx.focus_handle(),
-            tree_rows: Default::default(),
+            tree_layout: Default::default(),
             fields: vec![],
             name: None,
             add_open: false,
@@ -304,6 +307,11 @@ impl Render for ContentsControls {
                     cx.notify();
                 }
             }));
+            watches.push(cx.observe_window_bounds(w, |this, _, cx| {
+                // Native resize/move can precede the next paint. Do not let an
+                // immediate release act against the previous viewport geometry.
+                this.invalidate_tree_layout(cx);
+            }));
             watches.push(cx.on_blur(&self.ramp_focus, w, |this, _, cx| {
                 this.cancel_ramp(cx);
                 cx.notify();
@@ -317,6 +325,11 @@ impl Render for ContentsControls {
             watches.push(cx.on_focus_in(&self.tree_focus, w, |_, _, cx| cx.notify()));
             watches.push(cx.on_focus_out(&self.tree_focus, w, |_, _, _, cx| cx.notify()));
             self.paint_watches = Some(watches);
+        }
+        if self.tree_drag.as_ref().is_some_and(|d| {
+            d.pointer_generation != crate::color_edit::input_pointer_generation(w, cx)
+        }) {
+            self.tree_drag = None;
         }
         self.reconcile_tree(cx);
         let mut root = div().flex().flex_col().gap_1();
@@ -413,14 +426,24 @@ impl Render for ContentsControls {
         }
         let tree_active = self.tree_focus.contains_focused(w, cx);
         let visible = tree_selection::visible_rows(contents, &self.collapsed);
-        self.tree_rows
-            .borrow_mut()
-            .retain(|id, _| visible.iter().any(|(_, _, item)| item == id));
-        let marker = self
+        let preview = self
             .tree_drag
             .as_ref()
-            .and_then(|d| d.gap)
-            .and_then(|g| tree::marker_row(g, &visible));
+            .filter(|d| d.geometry_current(&self.tree_layout.borrow()))
+            .and_then(|d| d.preview.clone());
+        let layout_begin = self.tree_layout.clone();
+        let layout_order = visible.clone();
+        let layout_finish = self.tree_layout.clone();
+        let paint_layout = self.tree_layout.clone();
+        let paint_frozen = self.tree_drag.as_ref().and_then(|d| d.geometry.clone());
+        let groups = visible
+            .iter()
+            .filter_map(|(_, _, item)| {
+                matches!(contents.node(*item)?.kind, ContentsKind::Group(_)).then_some(*item)
+            })
+            .collect();
+        let pointer_target = crate::color_edit::InputTarget::new(self.state.read(cx));
+        let pointer_source = std::sync::Arc::new(self.state.read(cx).editor.project().clone());
         let tree_owner = cx.entity();
         let mut tree = div()
             .id("contents-tree")
@@ -433,19 +456,32 @@ impl Render for ContentsControls {
             .on_key_down(cx.listener(Self::tree_key))
             .child(
                 canvas(
-                    |_, _, _| (),
+                    move |_, _, _| {
+                        layout_begin
+                            .borrow_mut()
+                            .begin((composition, id), layout_order.clone());
+                    },
                     move |_, _, w, _| {
+                        let canceling = tree_owner.clone();
+                        w.on_mouse_event(move |event: &gpui::MouseDownEvent, phase, _, cx| {
+                            if phase.capture() {
+                                canceling.update(cx, |this, cx| {
+                                    this.tree_pointer_down_capture(event.position, cx)
+                                });
+                            }
+                        });
                         // Register before the first press, so a fast down/up cannot lose release.
                         let moving = tree_owner.clone();
                         w.on_mouse_event(move |e: &gpui::MouseMoveEvent, phase, w, cx| {
-                            if phase.bubble() {
+                            if phase.capture() {
                                 moving.update(cx, |this, cx| this.tree_move(e, w, cx));
                             }
                         });
                         let ending = tree_owner.clone();
                         w.on_mouse_event(move |e: &gpui::MouseUpEvent, phase, w, cx| {
-                            if phase.bubble() && e.button == MouseButton::Left {
-                                ending.update(cx, |this, cx| this.tree_up(e.position, w, cx));
+                            // Consume before any descendant can stop mouse-up.
+                            if phase.capture() {
+                                ending.update(cx, |this, cx| this.tree_up(e, w, cx));
                             }
                         });
                     },
@@ -461,60 +497,196 @@ impl Render for ContentsControls {
             let collapsed = self.collapsed.contains(&item);
             let state = self.state.clone();
             let enabled = node.enabled;
-            let row_bounds = self.tree_rows.clone();
+            let row_bounds = self.tree_layout.clone();
+            let label_bounds = self.tree_layout.clone();
+            let context = tree::PressContext::new(self, parent, item, pointer_source.clone(), cx);
+            let guard_context = context.clone();
+            let guard_owner = cx.entity();
+            let control = format!("contents-label-{composition}-{id}-{item}");
+            let label = div().id(("contents-item", item))
+                .px_2().h(px(26.)).flex().items_center().cursor_pointer()
+                .hover(|b| b.bg(rgb(0x353535)))
+                .when(is_group, |b| b.tooltip(|_, cx| cx.new(|_| ui::Tip("Select this group to draw Pen paths inside it. Drag label edges for Before/After, or a group center for Into. Keeps local values; placement and paint scope may change.".into())).into()))
+                .flex_1().min_w_0().justify_start().overflow_hidden()
+                .when(self.selection.items.contains(&item), |b| b.bg(rgb(if tree_active { 0x164a7b } else { 0x34383f })))
+                .child(node.name.clone())
+                .child(canvas(move |bounds, _, _| {
+                    label_bounds.borrow_mut().label(item, bounds);
+                }, |_, _, _, _| ()).absolute().top_0().left_0().size_full());
+            let label = crate::color_edit::input_pointer_tree_label(
+                label,
+                control.clone(),
+                pointer_target.clone(),
+                move |s, cx, after_flush| {
+                    guard_context.current(guard_owner.read(cx), s, after_flush)
+                },
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event, w, cx| {
+                    this.tree_down(&control, &context, event, w, cx)
+                }),
+            );
             tree = tree.child(
                 div()
                     .relative()
                     .flex()
                     .items_center()
                     .pl(px(depth as f32 * 10.))
-                    .h(px(26.)).flex_none()
+                    .h(px(26.))
+                    .flex_none()
                     .when(is_group, |d| {
                         d.child(
                             ui::tool(
                                 ("contents-expand", item),
-                                if collapsed { "chevron-right" } else { "chevron-down" },
+                                if collapsed {
+                                    "chevron-right"
+                                } else {
+                                    "chevron-down"
+                                },
                                 "Expand or collapse group",
                                 false,
                             )
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.tree_collapse(item, cx);
-                                cx.stop_propagation();
-                            })),
+                            .on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    this.tree_collapse(item, cx);
+                                    cx.stop_propagation();
+                                },
+                            )),
                         )
                     })
                     .child(
-                        ui::tool(("contents-visible", item), "eye", "Toggle item visibility", enabled)
+                        ui::tool(
+                            ("contents-visible", item),
+                            "eye",
+                            "Toggle item visibility",
+                            enabled,
+                        )
                         .when(!locked, |b| {
                             b.on_click(move |_, w, cx| {
                                 state.update(cx, |s, cx| {
-                                    s.dispatch(&Action::Edit(Command::Contents { id, edit: ContentsEdit::Enabled { item, enabled: !enabled } }), w, cx)
+                                    s.dispatch(
+                                        &Action::Edit(Command::Contents {
+                                            id,
+                                            edit: ContentsEdit::Enabled {
+                                                item,
+                                                enabled: !enabled,
+                                            },
+                                        }),
+                                        w,
+                                        cx,
+                                    )
                                 });
                                 cx.stop_propagation();
                             })
                         }),
                     )
+                    .child(label)
                     .child(
-                        div().id(("contents-item", item))
-                            .px_2().h(px(25.)).flex().items_center().cursor_pointer()
-                            .hover(|b| b.bg(rgb(0x353535)))
-                            .when(is_group, |b| b.tooltip(|_, cx| cx.new(|_| ui::Tip("Select this group to draw new Pen paths inside it. Drag its label to move the whole subtree between siblings. Order can change paint scope and overlap.".into())).into()))
-                            .flex_1().min_w_0().justify_start()
-                            .when(self.selection.items.contains(&item), |b| b.bg(rgb(if tree_active { 0x164a7b } else { 0x34383f })))
-                            .on_mouse_down(MouseButton::Left, cx.listener(move |this, event, w, cx| this.tree_down(id, parent, item, event, w, cx)))
-                            .child(node.name.clone()),
-                    )
-                    .child(canvas(|_, _, _| (), move |bounds, _, w, _| {
-                        row_bounds.borrow_mut().insert(item, tree::RowBounds { parent, bounds, visible: bounds.intersect(&w.content_mask().bounds) });
-                    }).absolute().top_0().left_0().size_full())
-                    .when(marker.is_some_and(|(id, _)| id == item), |row| {
-                        row.child(div().absolute().left_0().right_0().h(px(2.)).bg(rgb(ui::BLUE))
-                            .when(marker.is_some_and(|(_, after)| after), |line| line.bottom_0())
-                            .when(marker.is_some_and(|(_, after)| !after), |line| line.top_0()))
-                    }),
+                        canvas(
+                            move |bounds, w, _| {
+                                row_bounds
+                                    .borrow_mut()
+                                    .row(item, bounds, w.content_mask().bounds);
+                            },
+                            |_, _, _, _| (),
+                        )
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full(),
+                    ),
             );
         }
-        tree = tree.child(self.hierarchy_actions(cx));
+        let root_layout = self.tree_layout.clone();
+        let root_active = self.hierarchy_context(cx).is_some();
+        let feedback = preview
+            .as_ref()
+            .map(|p| match p.plan.target {
+                tree_selection::DropTarget::Before(item) => {
+                    format!("Before {}", contents.node(item).unwrap().name)
+                }
+                tree_selection::DropTarget::After(item) => {
+                    format!("After {}", contents.node(item).unwrap().name)
+                }
+                tree_selection::DropTarget::Into(item) => {
+                    format!("Into {} · append", contents.node(item).unwrap().name)
+                }
+                tree_selection::DropTarget::RootEnd => "Contents root · append".into(),
+            })
+            .unwrap_or_else(|| "Edges: Before / After · Group center: Into".into());
+        let marker = preview.map(|p| p.marker);
+        tree = tree
+            .child(
+                div()
+                    .relative()
+                    .h(px(26.))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .px_2()
+                    .text_size(px(11.))
+                    .text_color(rgb(if root_active { ui::MUTED } else { 0x555555 }))
+                    .child("Contents root · drop to append")
+                    .child(
+                        canvas(
+                            move |bounds, w, _| {
+                                root_layout
+                                    .borrow_mut()
+                                    .root(bounds, w.content_mask().bounds);
+                            },
+                            |_, _, _, _| (),
+                        )
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full(),
+                    ),
+            )
+            .child(
+                div()
+                    .h(px(20.))
+                    .flex_none()
+                    .text_size(px(10.))
+                    .text_color(rgb(ui::MUTED))
+                    .overflow_hidden()
+                    .child(feedback),
+            )
+            .child(self.hierarchy_actions(cx))
+            .child(
+                canvas(
+                    move |_, _, _| {
+                        layout_finish.borrow_mut().finish(&groups);
+                    },
+                    move |_, _, w, _| {
+                        let layout = paint_layout.borrow();
+                        if !paint_frozen.as_ref().is_some_and(|(epoch, g)| {
+                            *epoch == layout.epoch && layout.current() == Some(g)
+                        }) {
+                            return;
+                        }
+                        match &marker {
+                            Some(tree_drop::DropMarker::Line { start, end }) => {
+                                w.paint_quad(gpui::fill(
+                                    Bounds::new(*start, gpui::size(end.x - start.x, px(2.))),
+                                    rgb(ui::BLUE),
+                                ))
+                            }
+                            Some(
+                                tree_drop::DropMarker::Into(bounds)
+                                | tree_drop::DropMarker::Root(bounds),
+                            ) => w.paint_quad(gpui::outline(
+                                *bounds,
+                                rgb(ui::BLUE),
+                                gpui::BorderStyle::Solid,
+                            )),
+                            None => (),
+                        }
+                    },
+                )
+                .absolute()
+                .size_full(),
+            );
         root = root
             .child(tree)
             .child(div().text_size(px(11.)).child(format!(
@@ -532,7 +704,7 @@ impl Render for ContentsControls {
                 div()
                     .text_size(px(10.))
                     .text_color(rgb(ui::MUTED))
-                    .child("Drag labels between siblings · order may change paint scope"),
+                    .child("Drag label edges: Before / After · Group center: Into"),
             );
         if !self.selection.items.is_empty() {
             root = root.child(

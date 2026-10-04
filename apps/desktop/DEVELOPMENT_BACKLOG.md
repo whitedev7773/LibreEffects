@@ -22,6 +22,14 @@
 - **후속 고급 기능:** 패널 도킹·소스 뷰어·최근 프로젝트, 타임라인 고급 시간 편집/검색/가상화, 공간 경로·프리셋·표현식, Shape 연산/SVG·Text Animator, 추가 효과·모션 블러, 고정밀 색/HDR·Proxy/GPU, 템플릿, 설치/업데이트·한글화와 UI 회귀 자동화.
 - **별도 대형 단계:** 3D/카메라/라이트·모델, 추적·로토/Puppet, 플러그인/교환 포맷 연구, 웹/API 제품 범위. AEP/MOGRT 호환은 구현되지 않았다.
 
+### E04 교차 부모 Contents 드래그 — 2026-10-04, headless 검증 완료·native 대기
+
+- label 위/아래 edge의 Before/After, Group 중앙 Into, 별도 root append target을 추가했다. hover와 최종 release가 같은 semantic target/geometry/planner를 사용하며 source 순서, 같은 부모 Reorder와 교차 부모 MoveSiblings의 한 번 transaction을 유지한다. local 값은 보존하고 목적지 transform/paint scope를 적용한다. core/renderer/schema/LEP/VIEW 변경은 없다.
+- clipped full-label band와 subtree-end marker, 부모 indentation, root landing의 고정 공간을 검사한다. leaf 중앙·eye/disclosure·빈 공간은 target이 아니다. scroll/layout/focus/window/source 변경과 Escape/new press는 취소한다. 정확히 한 번 사용하는 mouse-down receipt로 pending field와 marked IME를 blur 전에 검증하고 최종 release에서 button/modifier/source/transport/geometry를 재검사한다. auto-scroll/hover expansion/cross-layer 이동은 포함하지 않는다.
+- 집중 61개, 전체 기본 1359개(Core 450 + Desktop 903 + helper 6), media 32개, fmt/all-target check와 일반 optimized release가 통과했다. 새 이름 test 34개에서 obsolete same-parent 전용 2개를 교체해 순증 32개다. 독립 검토 2건에서 blocker는 없었지만 planner/core test가 실제 ContentsControls 이벤트 전달·reveal을 증명하지 않는 한계를 명시했다.
+- 빌드 20261004.110504-c2a6fb77abcf9417와 frozen source 341개가 일치했다. 새 CLI 2sample/12 exact RGBA 비교(460,800 pixel), 이전 교차 부모 40쌍과 text/reference31,940,800 pixel, Trim21/Luma18/opacity46, all-pose28비교25,804,800 pixel, Source Text28render/21비교/12보존거부가 통과했다. 복구 중 발견한 중복 테스트 실행은 중단하고 원래 실행의 terminal 성공 결과를 별도 보존했다.
+- 실제 화면 연결은 복구되지 않았고 새 native6case와 이전41개는 미실행이다. E04는 Partial이다. 다음 bounded 검토는 공통 scalar의 multi-item 편집이며 compound Colors animation과 bulk stopwatch는 별도 범위다.
+
 ### E04 부모 간 형제 묶음 이동 stage1 — 2026-10-04, headless 검증 완료·native 대기
 
 - 단일/다중 형제 선택의 Move Into/Out와 트리 소유 Ctrl+Right/Left를 연결했다. Into는 가장 앞선 선택 항목 바로 위의 비선택 Group 끝에, Out은 grandparent에서 기존 parent 바로 뒤에 넣는다. 비연속 선택도 클릭/ID가 아닌 원본 형제 순서로 옮기며 빈 원본 Group을 유지한다. 기존 같은 부모 drag/Reorder는 그대로이고 cross-parent drag는 다음 stage다.

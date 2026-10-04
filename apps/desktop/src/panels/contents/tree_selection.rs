@@ -218,9 +218,84 @@ impl MovePlan {
     }
 }
 
+/// Drag intent is resolved against the current source, never a retained gap index.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum DropTarget {
+    Before(u64),
+    After(u64),
+    Into(u64),
+    RootEnd,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct DropPlan {
+    pub target: DropTarget,
+    pub source_parent: u64,
+    pub items: Vec<u64>,
+    pub parent: u64,
+    /// Same-parent indices use the original order; cross-parent indices use the
+    /// unchanged destination. Only `plan_order` adjusts for selected removal.
+    pub index: usize,
+    order: Option<Vec<u64>>,
+}
+impl DropPlan {
+    /// A valid identity target still has a preview, but must not touch history.
+    pub fn edit(&self) -> Option<ContentsEdit> {
+        if self.source_parent == self.parent {
+            Some(ContentsEdit::Reorder {
+                parent: self.parent,
+                order: self.order.clone()?,
+            })
+        } else {
+            Some(ContentsEdit::MoveSiblings {
+                source_parent: self.source_parent,
+                items: self.items.clone(),
+                parent: self.parent,
+                index: self.index,
+            })
+        }
+    }
+}
+
+pub(super) fn plan_drop(
+    contents: &ShapeContents,
+    selection: &Selection,
+    target: DropTarget,
+) -> Option<DropPlan> {
+    let rows = bounded_rows(contents)?;
+    let (source_parent, order, items) = selected_siblings(contents, selection)?;
+    let (parent, index) = match target {
+        DropTarget::Before(item) | DropTarget::After(item) => {
+            let parent = rows.iter().find(|(_, _, node)| node.id == item)?.1;
+            let destination = sibling_order(contents, parent)?;
+            let index = destination.iter().position(|id| *id == item)?
+                + usize::from(matches!(target, DropTarget::After(_)));
+            (parent, index)
+        }
+        DropTarget::Into(parent) => (parent, sibling_order(contents, parent)?.len()),
+        DropTarget::RootEnd => (0, contents.items.len()),
+    };
+    // Root has its own target. Into(0) must not impersonate a group.
+    if target == DropTarget::Into(0) {
+        return None;
+    }
+    validate_destination(&rows, &items, parent)?;
+    let reorder = (source_parent == parent)
+        .then(|| plan_order(&order, &selection.items, index))
+        .flatten();
+    Some(DropPlan {
+        target,
+        source_parent,
+        items,
+        parent,
+        index,
+        order: reorder,
+    })
+}
+
 /// Traverse only the actual Contents limits, including empty eighth-level groups.
 /// Source schema, tracks and metadata are still validated by the atomic core edit.
-fn bounded_rows(contents: &ShapeContents) -> Option<Vec<(usize, u64, &ContentsNode)>> {
+pub(super) fn bounded_rows(contents: &ShapeContents) -> Option<Vec<(usize, u64, &ContentsNode)>> {
     fn walk<'a>(
         nodes: &'a [ContentsNode],
         depth: usize,
@@ -247,6 +322,58 @@ fn bounded_rows(contents: &ShapeContents) -> Option<Vec<(usize, u64, &ContentsNo
     Some(rows)
 }
 
+fn selected_siblings(
+    contents: &ShapeContents,
+    selection: &Selection,
+) -> Option<(u64, Vec<u64>, Vec<u64>)> {
+    let source_parent = selection.parent?;
+    let order = sibling_order(contents, source_parent)?;
+    if selection.items.is_empty() || !selection.items.iter().all(|id| order.contains(id)) {
+        return None;
+    }
+    let items = order
+        .iter()
+        .copied()
+        .filter(|id| selection.items.contains(id))
+        .collect();
+    Some((source_parent, order, items))
+}
+
+/// Share the exact cycle and actual-depth rules between drag and hierarchy keys.
+fn validate_destination(
+    rows: &[(usize, u64, &ContentsNode)],
+    items: &[u64],
+    parent: u64,
+) -> Option<()> {
+    let target_depth = if parent == 0 {
+        0
+    } else {
+        let (depth, _, node) = rows.iter().find(|(_, _, n)| n.id == parent)?;
+        if !matches!(node.kind, ContentsKind::Group(_)) {
+            return None;
+        }
+        depth + 1
+    };
+    for item in items {
+        let start = rows.iter().position(|(_, _, n)| n.id == *item)?;
+        let source_depth = rows[start].0;
+        for &(depth, _, node) in rows[start..].iter().take(1).chain(
+            rows[start + 1..]
+                .iter()
+                .take_while(|(depth, _, _)| *depth > source_depth),
+        ) {
+            let moved_depth = target_depth + depth - source_depth;
+            if node.id == parent
+                || moved_depth > 8
+                || (moved_depth == 8 && matches!(node.kind, ContentsKind::Group(_)))
+            {
+                return None;
+            }
+        }
+    }
+    Some(())
+}
+
 /// The same plan serves singleton/multi buttons and Ctrl+arrows. No indices are
 /// retained by the UI: execute against the current source after pending input.
 pub(super) fn plan_move(
@@ -255,16 +382,7 @@ pub(super) fn plan_move(
     direction: MoveDirection,
 ) -> Option<MovePlan> {
     let rows = bounded_rows(contents)?;
-    let source_parent = selection.parent?;
-    let order = sibling_order(contents, source_parent)?;
-    if selection.items.is_empty() || !selection.items.iter().all(|id| order.contains(id)) {
-        return None;
-    }
-    let items: Vec<_> = order
-        .iter()
-        .copied()
-        .filter(|id| selection.items.contains(id))
-        .collect();
+    let (source_parent, order, items) = selected_siblings(contents, selection)?;
     let (parent, index) = match direction {
         MoveDirection::Into => {
             let first = order.iter().position(|id| selection.items.contains(id))?;
@@ -284,28 +402,7 @@ pub(super) fn plan_move(
             (parent, index)
         }
     };
-    let target_depth = if parent == 0 {
-        0
-    } else {
-        rows.iter().find(|(_, _, n)| n.id == parent)?.0 + 1
-    };
-    for item in &items {
-        let start = rows.iter().position(|(_, _, n)| n.id == *item)?;
-        let source_depth = rows[start].0;
-        for &(depth, _, node) in rows[start..].iter().take(1).chain(
-            rows[start + 1..]
-                .iter()
-                .take_while(|(depth, _, _)| *depth > source_depth),
-        ) {
-            let moved_depth = target_depth + depth - source_depth;
-            if node.id == parent
-                || moved_depth > 8
-                || (moved_depth == 8 && matches!(node.kind, ContentsKind::Group(_)))
-            {
-                return None;
-            }
-        }
-    }
+    validate_destination(&rows, &items, parent)?;
     Some(MovePlan {
         source_parent,
         items,
@@ -456,6 +553,160 @@ mod tests {
         ];
         c.items[0].enabled = false;
         c
+    }
+    #[test]
+    fn drop_plans_resolve_all_targets_and_keep_noncontiguous_source_order() {
+        let c = hierarchy();
+        let mut selection = Selection::default();
+        selection.all(0, &[94, 7]);
+        for (target, parent, index) in [
+            (DropTarget::Before(60), 90, 0),
+            (DropTarget::After(60), 90, 1),
+            (DropTarget::Into(90), 90, 1),
+            (DropTarget::Into(3), 3, 0),
+        ] {
+            let plan = plan_drop(&c, &selection, target).unwrap();
+            assert_eq!((plan.target, plan.source_parent), (target, 0));
+            assert_eq!((plan.parent, plan.index), (parent, index));
+            assert_eq!(plan.items, vec![7, 94]);
+            assert!(matches!(
+                plan.edit(),
+                Some(ContentsEdit::MoveSiblings {
+                    source_parent: 0, items, parent: p, index: i
+                }) if items == vec![7, 94] && p == parent && i == index
+            ));
+        }
+        selection.one(90, 60);
+        let plan = plan_drop(&c, &selection, DropTarget::RootEnd).unwrap();
+        assert_eq!((plan.source_parent, plan.parent, plan.index), (90, 0, 5));
+        assert!(matches!(
+            plan.edit(),
+            Some(ContentsEdit::MoveSiblings { .. })
+        ));
+        let plan = plan_drop(&c, &selection, DropTarget::Before(7)).unwrap();
+        assert_eq!((plan.parent, plan.index), (0, 1));
+    }
+    #[test]
+    fn drop_same_parent_targets_use_reorder_and_keep_identity_as_valid_noop() {
+        let c = hierarchy();
+        let mut selection = Selection::default();
+        selection.all(0, &[94, 7]);
+        let plan = plan_drop(&c, &selection, DropTarget::RootEnd).unwrap();
+        assert_eq!(plan.items, vec![7, 94]);
+        assert!(matches!(
+            plan.edit(),
+            Some(ContentsEdit::Reorder { parent: 0, order })
+                if order == vec![90, 81, 3, 7, 94]
+        ));
+        selection.all(0, &[7, 81]);
+        for target in [
+            DropTarget::Before(7),
+            DropTarget::After(7),
+            DropTarget::Before(81),
+            DropTarget::After(81),
+        ] {
+            assert!(plan_drop(&c, &selection, target).unwrap().edit().is_none());
+        }
+        selection.one(0, 94);
+        assert!(
+            plan_drop(&c, &selection, DropTarget::RootEnd)
+                .unwrap()
+                .edit()
+                .is_none()
+        );
+        selection.one(90, 60);
+        let plan = plan_drop(&c, &selection, DropTarget::Into(90)).unwrap();
+        assert_eq!((plan.source_parent, plan.parent, plan.index), (90, 90, 1));
+        assert!(plan.edit().is_none());
+    }
+    #[test]
+    fn drop_rejects_stale_mixed_empty_invalid_targets_and_selected_subtree_cycles() {
+        let mut c = hierarchy();
+        let ContentsKind::Group(children) = &mut c.items[0].kind else {
+            panic!()
+        };
+        children.push(node(50, Some(vec![node(40, Some(vec![]))])));
+        let mut selection = Selection::default();
+        selection.one(0, 90);
+        for target in [
+            DropTarget::Into(90),
+            DropTarget::Into(50),
+            DropTarget::Into(40),
+            DropTarget::Before(60),
+            DropTarget::After(50),
+            DropTarget::Before(40),
+            DropTarget::Into(7),
+            DropTarget::Into(0),
+            DropTarget::Before(0),
+            DropTarget::After(999),
+            DropTarget::Into(999),
+        ] {
+            assert!(plan_drop(&c, &selection, target).is_none(), "{target:?}");
+        }
+        for (parent, items) in [
+            (0, vec![]),
+            (0, vec![7, 60]),
+            (90, vec![7]),
+            (99, vec![7]),
+            (0, vec![999]),
+        ] {
+            selection.all(parent, &items);
+            assert!(plan_drop(&c, &selection, DropTarget::RootEnd).is_none());
+        }
+        selection.one(50, 40);
+        let plan = plan_drop(&c, &selection, DropTarget::After(90)).unwrap();
+        assert_eq!((plan.source_parent, plan.parent, plan.index), (50, 0, 1));
+        let plan = plan_drop(&c, &selection, DropTarget::Into(3)).unwrap();
+        assert_eq!((plan.parent, plan.index), (3, 0));
+    }
+    #[test]
+    fn drop_uses_exact_depth_and_node_bounds_even_for_empty_groups() {
+        let mut c = ShapeContents::default();
+        let mut chain = node(108, Some(vec![]));
+        for id in (101..108).rev() {
+            chain = node(id, Some(vec![chain]));
+        }
+        c.items = vec![chain, node(1, None), node(2, Some(vec![]))];
+        let mut selection = Selection::default();
+        selection.one(0, 1);
+        // Parent at depth 7 accepts a leaf at depth 8, but never an empty group.
+        assert!(plan_drop(&c, &selection, DropTarget::Into(108)).is_some());
+        selection.one(0, 2);
+        assert!(plan_drop(&c, &selection, DropTarget::Into(108)).is_none());
+        assert!(plan_drop(&c, &selection, DropTarget::Into(107)).is_some());
+        c.items = (1..=256).map(|id| node(id, None)).collect();
+        selection.all(0, &[1, 256]);
+        assert!(plan_drop(&c, &selection, DropTarget::RootEnd).is_some());
+        c.items.push(node(257, None));
+        assert!(plan_drop(&c, &selection, DropTarget::RootEnd).is_none());
+        c.items.pop();
+        c.items[1].id = 1;
+        assert!(plan_drop(&c, &selection, DropTarget::RootEnd).is_none());
+        c.items[1].id = 0;
+        assert!(plan_drop(&c, &selection, DropTarget::RootEnd).is_none());
+    }
+    #[test]
+    fn drop_planning_never_changes_source_selection_or_disclosure() {
+        let c = hierarchy();
+        let before = c.clone();
+        let mut selection = Selection::default();
+        selection.all(0, &[94, 7]);
+        let selected = selection.clone();
+        let collapsed: BTreeSet<_> = [90, 3].into();
+        let visible = visible_rows(&c, &collapsed);
+        for target in [
+            DropTarget::Before(60),
+            DropTarget::After(81),
+            DropTarget::Into(90),
+            DropTarget::Into(3),
+            DropTarget::RootEnd,
+        ] {
+            let _ = plan_drop(&c, &selection, target).unwrap().edit();
+        }
+        assert_eq!(c, before);
+        assert_eq!(selection, selected);
+        assert_eq!(collapsed, [90, 3].into());
+        assert_eq!(visible_rows(&c, &collapsed), visible);
     }
     #[test]
     fn hierarchy_plans_singleton_and_noncontiguous_blocks_in_source_order() {

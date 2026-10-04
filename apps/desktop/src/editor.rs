@@ -1596,6 +1596,40 @@ pub(crate) fn action_button(
 mod tests {
     use super::*;
     #[test]
+    fn contents_drag_transport_epoch_cannot_revive_after_edit_and_history_roundtrip() {
+        let mut state = EditorState::default();
+        state.editor.execute(Command::AddRectangle).unwrap();
+        state.editor.clear_history();
+        let source = state.editor.project().clone();
+        let document = state.document_revision;
+        let at_press = state.transport_generation();
+        state.apply_edit(&Command::RenameLayer {
+            id: 1,
+            name: "Changed during drag".into(),
+        });
+        let edited = state.editor.project().clone();
+        let after_edit = state.transport_generation();
+        assert_eq!(state.status, "Edited");
+        assert_ne!(edited, source);
+        assert_ne!(after_edit, at_press);
+        assert_eq!(state.document_revision, document);
+        state.step_history(false);
+        let after_undo = state.transport_generation();
+        assert_eq!(state.editor.project(), &source);
+        assert_ne!(after_undo, at_press);
+        assert_ne!(after_undo, after_edit);
+        assert_eq!(state.document_revision, document);
+        state.step_history(true);
+        let after_redo = state.transport_generation();
+        assert_eq!(state.editor.project(), &edited);
+        assert_ne!(after_redo, after_edit);
+        assert_ne!(after_redo, after_undo);
+        assert_eq!(state.document_revision, document);
+        // A view normalization/repaint does not by itself invalidate the epoch.
+        state.normalize();
+        assert_eq!(state.transport_generation(), after_redo);
+    }
+    #[test]
     fn contents_cross_parent_move_retains_keys_until_history_and_keeps_graph_identity() {
         use crate::view_state::{GraphChannel, GraphRanges};
         use libre_effects_core::{ContentsEdit, ContentsKind, ContentsParam, TrackEdit};
