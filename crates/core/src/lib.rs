@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-const PROJECT_VERSION: u32 = 52;
+const PROJECT_VERSION: u32 = 53;
 pub type Frame = u32;
 pub type LayerId = u64;
 pub type CompositionId = u64;
@@ -56,7 +56,11 @@ pub use image_sequence::MissingFramePolicy;
 mod time;
 mod time_remap;
 pub use assets::{AssetId, AssetLibrary, FolderId, MediaAsset, ProjectFolder, ProjectItem};
+mod source_text_animation;
+pub use source_text_animation::SourceTextAnimation;
 mod path_animation;
+#[cfg(test)]
+mod source_text_tests;
 pub use path_animation::{PathAnimation, PathTarget};
 mod mask_animation;
 pub use mask_animation::MaskParam;
@@ -273,6 +277,8 @@ pub struct Layer {
     text_style: TextStyle,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     text_parameters: BTreeMap<TextParam, AnimatedProperty>,
+    #[serde(default, skip_serializing_if = "SourceTextAnimation::is_default")]
+    source_text_animation: SourceTextAnimation,
     #[serde(
         default,
         skip_serializing_if = "audio_controls::AudioControls::is_default"
@@ -666,7 +672,11 @@ impl Project {
                             if !key.temporal.valid()
                                 || (self.version < 36 && !key.temporal.mode.is_independent())
                                 || (!key.temporal.is_empty()
-                                    && (self.version < 35 || matches!(path, PropertyPath::Path(_))))
+                                    && (self.version < 35
+                                        || matches!(
+                                            path,
+                                            PropertyPath::Path(_) | PropertyPath::SourceText
+                                        )))
                             {
                                 return Err(
                                     "Invalid temporal handles or project version (handles require 35, linked modes require 36)"
@@ -797,6 +807,7 @@ impl Project {
                 shape_animation::validate(layer, comp.duration, self.version)?;
                 text_animation::validate(layer, comp.duration, self.version)?;
                 path_animation::validate(layer, comp.duration, self.version)?;
+                source_text_animation::validate(layer, comp.duration, self.version)?;
                 audio_controls::validate(layer, comp.duration, self.version)?;
                 layer.markers.validate(comp.duration)?;
                 effects::validate(layer, comp.duration)?;
@@ -1032,6 +1043,11 @@ pub enum Command {
         width: f64,
         height: f64,
         name: String,
+    },
+    EditSourceText {
+        id: LayerId,
+        frame: Frame,
+        text: String,
     },
     SetTextStyle {
         id: LayerId,
@@ -1356,7 +1372,8 @@ impl Editor {
         // Apply to a candidate so invalid commands never partially mutate the project.
         let mut next = self.current.clone();
         let reorder_only = command.reorders_only();
-        let text_values_only = text_animation::value_edits_only(&command);
+        let text_values_only = text_animation::value_edits_only(&command)
+            || source_text_animation::value_edits_only(&command);
         let trim_values_only = shape_contents::trim_value_edits_only(&command);
         let luma_values_only = effects::luma_value_edits_only(&command);
         let velocity_scales_only = key_velocity_scale::edits_only(&command);
@@ -1691,6 +1708,13 @@ impl Editor {
         }) {
             next.project.version = next.project.version.max(51);
         }
+        if next.project.compositions().into_iter().any(|(_, comp)| {
+            comp.layers
+                .iter()
+                .any(|layer| !layer.source_text_animation.is_default())
+        }) {
+            next.project.version = next.project.version.max(53);
+        }
         self.accept_candidate(next)
     }
 }
@@ -1700,6 +1724,9 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
         return result;
     }
     if let Some(result) = shape_conversion::apply(state, &command) {
+        return result;
+    }
+    if let Some(result) = source_text_animation::apply(state, &command) {
         return result;
     }
     if let Some(result) = text_animation::apply(state, &command) {
@@ -1981,6 +2008,7 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
                 asset: None,
                 text_style: Default::default(),
                 text_parameters: BTreeMap::new(),
+                source_text_animation: SourceTextAnimation::default(),
                 audio_controls: Default::default(),
                 time_remap: None,
                 track_matte: None,

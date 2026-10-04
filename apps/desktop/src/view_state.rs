@@ -1510,3 +1510,93 @@ mod text_opacity_view_tests {
         assert_eq!(project.to_json().unwrap(), source);
     }
 }
+
+#[cfg(test)]
+mod source_text_view_tests {
+    use super::*;
+    use libre_effects_core::{Command, Content, Editor, Property, PropertyPath, TrackEdit};
+
+    #[test]
+    fn source_text_animation_preserves_numeric_view_bytes_view1_view2_and_lep1() {
+        for explicit in [false, true] {
+            let mut editor = Editor::default();
+            editor
+                .execute(Command::AddContent {
+                    content: Content::Text {
+                        text: "First".into(),
+                        font_size: 48.,
+                    },
+                    width: 400.,
+                    height: 120.,
+                    name: "Title".into(),
+                })
+                .unwrap();
+            let numeric = GraphChannel {
+                id: 1,
+                property: Property::PositionX.into(),
+            };
+            editor
+                .execute(Command::EditTrack {
+                    id: 1,
+                    property: numeric.property,
+                    edit: TrackEdit::ToggleKey { frame: 10 },
+                })
+                .unwrap();
+            let mut view = CompositionView::default();
+            view.frame = 30;
+            view.graph_view.height = Some([-100., 100.]);
+            if explicit {
+                view.graph_channels.pin(numeric).unwrap();
+                view.graph_channels.activate(numeric);
+                view.graph_channels.ranges.insert(
+                    numeric,
+                    GraphRanges {
+                        value: Some([-100., 100.]),
+                        speed: Some([-50., 50.]),
+                    },
+                );
+            }
+            let mut views = ProjectViews::default();
+            views.compositions.insert(1, view);
+            views.normalize(editor.project());
+            let before = views.encode_native(editor.project()).unwrap();
+            editor
+                .execute(Command::EditTrack {
+                    id: 1,
+                    property: PropertyPath::SourceText,
+                    edit: TrackEdit::ToggleAnimation { frame: 10 },
+                })
+                .unwrap();
+            editor
+                .execute(Command::EditSourceText {
+                    id: 1,
+                    frame: 30,
+                    text: "Second 🦋".into(),
+                })
+                .unwrap();
+            let project = editor.project().clone();
+            assert_eq!(views.encode_native(&project).unwrap(), before);
+            let value: serde_json::Value = serde_json::from_slice(&before).unwrap();
+            assert_eq!(value["version"], if explicit { 2 } else { 1 });
+            if explicit {
+                assert_eq!(value["compositions"]["1"]["graph_channels"]["version"], 1);
+            }
+            assert!(
+                !std::str::from_utf8(&before)
+                    .unwrap()
+                    .contains("source_text")
+            );
+            let native = crate::project_io::encode_native_project(&project, Some(&views)).unwrap();
+            assert_eq!(&native[8..10], &[1, 0]);
+            let opened = crate::project_io::decode_project(&native).unwrap();
+            assert_eq!(opened.project, project);
+            assert_eq!(opened.views.encode_native(&project).unwrap(), before);
+            assert_eq!(
+                crate::project_io::encode_native_project(&opened.project, Some(&opened.views))
+                    .unwrap(),
+                native
+            );
+            assert_eq!(editor.project(), &project);
+        }
+    }
+}

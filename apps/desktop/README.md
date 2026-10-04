@@ -455,9 +455,12 @@ new keys use the established Linear policy. Sampling clamps curve overshoot.
 
 Rendering, effect bounds, text hit testing, caret/selection geometry and paragraph
 flow share sampled typography. Direct Source Text edits keep static typography
-and all animation tracks. Paragraph overflow and Fit box height use the current
-frame. Paragraph-to-Point conversion retains only the currently composed visible
-lines, changing Source Text for every frame; it does not bake typography samples.
+and all numeric animation tracks. Paragraph overflow and Fit box height use the
+current frame's source and typography. Paragraph-to-Point conversion retains only
+currently composed visible lines. With Source Text animation enabled it edits the
+current Hold key; otherwise it edits the static source. Point/Paragraph mode is
+still global for the layer, so its layout changes at every key. Typography is not
+baked into static fields.
 Project Fonts checks the active composition at its captured local frame and other
 compositions at frame 0, labels those frames, and invalidates results on a frame
 or composition change. This is not whole-animation glyph coverage.
@@ -468,7 +471,7 @@ untouched legacy text stays sparse. LEP v1, VIEW v1/v2 and typed Graph address v
 remain unchanged. Sparse Graph focus does not leak new addresses into old files.
 Readers limited to project schema 48 cannot open projects containing typography
 tracks; old static and paint-only projects remain supported.
-Per-character styles, Source Text animation, Text Animator, absolute/Auto leading,
+Per-character styles, Text Animator, absolute/Auto leading,
 kerning modes and animated font identity/weight remain separate work.
 
 ### Independent text paint opacity
@@ -506,6 +509,52 @@ playback or dialog callbacks; normal valid blur still commits its own input.
 Native screen acceptance for these new controls remains pending the cloud native
 transport recovery; automated/CLI evidence is recorded separately in STATUS.md.
 
+### Animated Source Text
+
+Source Text is a separate, **Hold-only** channel for the entire UTF-8 string. It
+appears first in the Timeline Text section with a stopwatch, key button, previous/
+next key navigation and a sampled-text button that opens the existing canvas editor.
+Properties shows the current source and a stopwatch. The twelve numeric text
+channels remain independent; Source Text has no numeric value or Value/Speed Graph
+lane. F9, non-Hold interpolation, temporal handles and value/velocity scaling are
+rejected for the whole selected operation, not partially applied to scalar keys.
+Timeline selection, dragging, copy/paste and deletion support its key times. The
+core also supports time-only scaling without adding a new Graph affordance.
+
+Before the first key, the first keyed string is held. At a key its string takes
+effect and holds until the next key; the last string continues afterward. Empty
+strings are valid. Canvas and Properties edits affect the current-frame string
+when animation is enabled, or the static source when it is disabled. Unchanged
+input at an unkeyed frame creates no key or history; explicit key insertion can
+intentionally add an equal-valued key. Disabling animation freezes the current
+sample into the static baseline. Removing the last key freezes that key's string;
+batch Delete uses the existing deterministic last-removed-key fallback, not an
+implicit playhead sample. Undo restores the exact previous source and tracks.
+
+Rendering, effect bounds, caret/hit/selection geometry, wrapping, overflow and Fit
+use the same sampled string and typography. Paragraph-to-Point edits the current
+string and changes the layer-wide paragraph mode in one transaction; other keyed
+strings retain their data but use the new global mode. Resize before converting
+if hidden text must remain. Font diagnostics retain their checked-frame scope:
+active composition at its captured frame, inactive compositions at frame 0, with
+the existing 4 KiB/128-line analysis limit. They do not scan every keyed string.
+
+The sparse source animation stores an interned string pool and opaque Hold timing
+indices, leaving Content::Text.text as the independent static baseline. Limits
+are 16,384 UTF-8 bytes per string, 10,000 strings and keys, a 1 MiB stored pool per
+layer, and the existing 16 MiB escaped project metadata bound. Clipboard keys copy
+actual strings, never another layer's pool indices. Duplicate, split, shift, FPS
+clipboard conversion and precompose preserve the string data; time collisions or
+invalid mixed operations reject atomically. Scalar/font/style edits do not bake
+the current source sample into the baseline.
+
+A materialized source animation requires project schema 53, including inactive
+compositions. Unanimated legacy text stays sparse; LEP 1, VIEW 1/2, numeric Graph
+address 1 and TextStyle storage are unchanged. This is whole-layer source animation,
+not per-character rich text, Text Animator, text-on-path or reusable instance controls.
+Native acceptance remains pending the supported cloud screen transport; unit/CLI
+checks are separate evidence, as recorded in STATUS.md.
+
 ### Canvas text editing
 
 Ctrl+T selects the Text tool. Click to create point text or edit visible text;
@@ -533,7 +582,9 @@ Point/Paragraph buttons convert the selected layer. Paragraph-to-Point fixes
 the visible line breaks in the source and removes overflow, following the
 [AE conversion rule](https://helpx.adobe.com/after-effects/desktop/add-text/create-and-edit-text-layers/creating-editing-text-layers.html).
 The whole conversion is one Undo step, including restoration of hidden source.
-Resize the box before converting if that text needs to be retained. Home/End
+With Source Text animation it edits the current Hold key and changes the global
+paragraph mode; other keyed strings remain. Resize the box before converting if
+that text needs to be retained. Home/End
 move within the current visual line; Ctrl+Home/End target the entire source.
 
 Drag or Shift+arrows selects text; Home/End, Ctrl+Home/End and Ctrl+arrows move

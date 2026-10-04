@@ -1123,3 +1123,115 @@ mod coverage_tests {
         assert!(job.cancelled());
     }
 }
+
+#[cfg(test)]
+mod source_text_tests {
+    use super::*;
+    use crate::font_coverage::Status;
+    use crate::rendering::source_text_tests::{FIRST, animated_scene};
+
+    #[test]
+    fn source_text_font_check_captures_active_source_and_inactive_frame_zero() {
+        let mut editor = animated_scene(false);
+        let mut style = editor.selected_layer().unwrap().text_style();
+        style.fill_enabled = false;
+        style.stroke_enabled = false;
+        editor
+            .execute(Command::SetTextStyle { id: 1, style })
+            .unwrap();
+        editor.execute(Command::ToggleVisible(1)).unwrap();
+        editor.execute(Command::ToggleLocked(1)).unwrap();
+        editor.execute(Command::DuplicateComposition).unwrap();
+        let before = editor.project().clone();
+        let font = TextFont::of(&libre_effects_core::TextStyle::default());
+        let mut session = CoverageSession::default();
+        let job = session.start(&before, 7, &font, 30).unwrap();
+        assert_eq!(job.snapshot.layers.len(), 2);
+        for (index, frozen) in job.snapshot.layers.iter().enumerate() {
+            let active = frozen.usage.composition_id == before.active_composition_id();
+            assert_eq!(frozen.checked_frame, if active { 30 } else { 0 });
+            assert_eq!(
+                frozen.layer.source_text_at(frozen.checked_frame),
+                Some(if active { "" } else { FIRST })
+            );
+            assert!(frozen.layer.locked());
+            assert!(!frozen.layer.visible());
+            let report = crate::font_coverage::analyze(&frozen.layer, frozen.checked_frame);
+            if active {
+                assert_eq!(report.status, Status::Empty);
+                assert_eq!(report.glyphs, 0);
+            } else {
+                assert!(report.glyphs > 0);
+            }
+            assert!(session.accept(job.serial, index, Ok(report)));
+        }
+        session.finish(job.serial);
+        assert_eq!(session.check.as_ref().unwrap().phase, CheckPhase::Finished);
+        assert_eq!(editor.project(), &before);
+    }
+
+    #[test]
+    fn source_text_key_change_invalidates_frozen_font_results_without_revision_change() {
+        let mut editor = animated_scene(false);
+        let font = TextFont::of(&editor.selected_layer().unwrap().text_style());
+        let mut session = CoverageSession::default();
+        let job = session.start(editor.project(), 7, &font, 20).unwrap();
+        let frozen = &job.snapshot.layers[0];
+        let report = crate::font_coverage::analyze(&frozen.layer, frozen.checked_frame);
+        editor
+            .execute(Command::EditSourceText {
+                id: 1,
+                frame: 40,
+                text: "Changed future key".into(),
+            })
+            .unwrap();
+        session.validate(editor.project(), 7, Some(&font), true, 20);
+        assert!(job.cancelled());
+        assert!(session.check.is_none());
+        assert!(!session.accept(job.serial, 0, Ok(report)));
+        session.finish(job.serial);
+        assert!(!session.busy());
+    }
+
+    #[test]
+    fn source_text_font_replacement_keeps_all_strings_and_key_timing() {
+        let mut editor = animated_scene(true);
+        let mut style = editor.selected_layer().unwrap().text_style();
+        style.font_family = "Missing source-text font QA".into();
+        editor
+            .execute(Command::SetTextStyle {
+                id: 1,
+                style: style.clone(),
+            })
+            .unwrap();
+        let before = editor.project().clone();
+        let from = TextFont::of(&style);
+        let to = TextFont::of(&crate::fonts::resolved(&style));
+        let replacement = Replacement::new(&before, 7, from, to).unwrap();
+        editor
+            .execute(replacement.command(editor.project(), 7).unwrap())
+            .unwrap();
+        let original = before.composition().layer(1).unwrap();
+        let replaced = editor.project().composition().layer(1).unwrap();
+        assert_eq!(
+            replaced.source_text_animation(),
+            original.source_text_animation()
+        );
+        assert_eq!(replaced.content(), original.content());
+        for frame in [0, 10, 20, 30, 40, 60] {
+            assert_eq!(
+                replaced.source_text_at(frame),
+                original.source_text_at(frame)
+            );
+            assert_eq!(
+                replaced.text_typography_at(frame),
+                original.text_typography_at(frame)
+            );
+        }
+        let after = editor.project().clone();
+        editor.undo();
+        assert_eq!(editor.project(), &before);
+        editor.redo();
+        assert_eq!(editor.project(), &after);
+    }
+}

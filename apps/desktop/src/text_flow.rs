@@ -22,11 +22,11 @@ pub(crate) fn convert(
     paragraph: bool,
     frame: libre_effects_core::Frame,
 ) -> libre_effects_core::Command {
-    use libre_effects_core::{Command, Content};
+    use libre_effects_core::Command;
     let mut style = layer.text_style();
     let mut commands = vec![];
     if style.paragraph && !paragraph {
-        if let Content::Text { text, font_size } = layer.content() {
+        if let Some(text) = layer.source_text_at(frame) {
             let flow = layer_lines(layer, frame).unwrap();
             let text = flow
                 .iter()
@@ -34,12 +34,10 @@ pub(crate) fn convert(
                 .map(|l| &text[l.range.start..l.visible_end])
                 .collect::<Vec<_>>()
                 .join("\n");
-            commands.push(Command::SetContent {
+            commands.push(Command::EditSourceText {
                 id: layer.id(),
-                content: Content::Text {
-                    text,
-                    font_size: *font_size,
-                },
+                frame,
+                text,
             });
         }
     }
@@ -55,9 +53,7 @@ pub(crate) fn layer_lines(
     layer: &libre_effects_core::Layer,
     frame: libre_effects_core::Frame,
 ) -> Option<Arc<Vec<Line>>> {
-    let libre_effects_core::Content::Text { text, .. } = layer.content() else {
-        return None;
-    };
+    let text = layer.source_text_at(frame)?;
     let typography = layer.text_typography_at(frame)?;
     let mut style = layer.text_style();
     typography.apply_to_style(&mut style);

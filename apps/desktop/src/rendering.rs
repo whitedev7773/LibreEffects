@@ -424,7 +424,8 @@ impl Renderer {
                         )
                     })?,
             ),
-            Content::Text { text, .. } => {
+            Content::Text { .. } => {
+                let text = l.source_text_at(frame).unwrap();
                 let (fill, style, font_size, opacity) = text_paint.as_ref().unwrap();
                 let (paint, bounds) = layer_text_svg(
                     text,
@@ -792,6 +793,10 @@ pub(crate) fn import_image(path: &Path) -> Result<(Content, u32, u32), String> {
     }
     Ok((Content::Image { png: png.into() }, w, h))
 }
+
+#[cfg(test)]
+#[path = "source_text_render_tests.rs"]
+pub(crate) mod source_text_tests;
 
 #[cfg(test)]
 #[path = "text_opacity_render_tests.rs"]

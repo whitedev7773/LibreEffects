@@ -424,7 +424,7 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
     } = *command
     {
         return Some((|| {
-            if matches!(property, PropertyPath::Path(_)) {
+            if matches!(property, PropertyPath::Path(_) | PropertyPath::SourceText) {
                 return Err("Temporal modes require a scalar track".into());
             }
             let layer = state
@@ -451,7 +451,7 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
         return None;
     };
     Some((|| {
-        if !handle.valid() || matches!(property, PropertyPath::Path(_)) {
+        if !handle.valid() || matches!(property, PropertyPath::Path(_) | PropertyPath::SourceText) {
             return Err("Invalid scalar temporal handle".into());
         }
         let layer = state

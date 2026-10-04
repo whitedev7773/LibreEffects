@@ -527,6 +527,7 @@ fn key_clipboard_preserves_timing_interpolation_and_is_atomic() {
         .keys()[&10]
         .clone();
     let key = KeyCopy {
+        source_text: None,
         path_pose: None,
         effect_kind: None,
         key: KeyRef {

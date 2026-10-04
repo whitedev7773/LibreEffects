@@ -389,6 +389,7 @@ impl Layer {
                 }
                 .into_iter(),
             )
+            .chain(std::iter::once(&mut self.source_text_animation.timing))
             .chain(self.text_parameters.values_mut())
             .chain(self.time_remap.iter_mut())
             .chain(self.audio_controls.parameters.values_mut())

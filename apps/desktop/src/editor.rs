@@ -952,11 +952,26 @@ impl EditorState {
                     self.selected_layers = [*id].into();
                     self.selected_keys.clear();
                     self.graph_key = None;
-                    self.graph_property = *property;
-                    self.graph_external_activation(*id, *property);
-                    self.graph_open = !matches!(property, PropertyPath::Path(_));
-                    if matches!(property, PropertyPath::Path(_)) {
-                        self.tool = Tool::Pen;
+                    if *property == PropertyPath::SourceText {
+                        // Source Text selection is Timeline-only. Keep numeric
+                        // Graph lane identity, pins and ranges unchanged.
+                        self.graph_activate_property(
+                            crate::view_state::GraphChannel {
+                                id: *id,
+                                property: *property,
+                            },
+                            false,
+                        );
+                        self.graph_open = false;
+                        self.status =
+                            "Source Text · Hold only · Edit in Properties or on canvas".into();
+                    } else {
+                        self.graph_property = *property;
+                        self.graph_external_activation(*id, *property);
+                        self.graph_open = !matches!(property, PropertyPath::Path(_));
+                        if matches!(property, PropertyPath::Path(_)) {
+                            self.tool = Tool::Pen;
+                        }
                     }
                     self.expanded = true;
                 }

@@ -66,6 +66,26 @@ impl EditorState {
         channel: GraphChannel,
         preserve_keys: bool,
     ) -> bool {
+        // Source Text is a Hold-only Timeline row. Focusing it must leave the
+        // numeric Graph identity, pins and ranges exactly as the user left them.
+        if channel.property == PropertyPath::SourceText {
+            if !self
+                .editor
+                .project()
+                .composition()
+                .layer(channel.id)
+                .is_some_and(|layer| layer.source_text_at(self.frame).is_some())
+            {
+                return false;
+            }
+            self.editor.select(channel.id);
+            self.selected_layers = [channel.id].into();
+            if !preserve_keys {
+                self.selected_keys.clear();
+            }
+            self.graph_key = None;
+            return true;
+        }
         // Path rows share Timeline selection and retiming, but their values are
         // opaque pose references and must never become numeric Graph lanes.
         if matches!(channel.property, PropertyPath::Path(_)) {
@@ -1012,6 +1032,140 @@ mod tests {
         .into();
         s.saved = s.editor.project().clone();
         s
+    }
+
+    #[test]
+    fn source_text_focus_preserves_numeric_graph_ranges_saved_view_and_redo() {
+        use libre_effects_core::{KeyRef, Property, TrackEdit};
+        for animated in [false, true] {
+            for explicit in [false, true] {
+                for graph_open in [false, true] {
+                    let mut state = sparse_text_scene();
+                    let source = GraphChannel {
+                        id: 2,
+                        property: PropertyPath::SourceText,
+                    };
+                    let numeric = channel(1, Property::PositionX);
+                    if animated {
+                        state
+                            .editor
+                            .execute(Command::EditTrack {
+                                id: 2,
+                                property: source.property,
+                                edit: TrackEdit::ToggleAnimation { frame: 12 },
+                            })
+                            .unwrap();
+                        state
+                            .editor
+                            .execute(Command::EditSourceText {
+                                id: 2,
+                                frame: 30,
+                                text: "Changed 🦋".into(),
+                            })
+                            .unwrap();
+                    }
+                    if explicit {
+                        state.graph_pin_channel(numeric).unwrap();
+                        state.graph_activate_channel(numeric, true);
+                        state.graph_set_channel_height(numeric, false, Some([-300., 900.]));
+                        state.graph_set_channel_height(numeric, true, Some([-40., 40.]));
+                    } else {
+                        state.graph_property = numeric.property;
+                        state.graph_view.height = Some([-300., 900.]);
+                    }
+                    state
+                        .editor
+                        .execute(Command::RenameLayer {
+                            id: 2,
+                            name: "Redo source witness".into(),
+                        })
+                        .unwrap();
+                    state.editor.undo();
+                    state.editor.select(1);
+                    state.frame = 12;
+                    state.graph_open = graph_open;
+                    state.saved = state.editor.project().clone();
+                    if animated {
+                        state.selected_keys.insert(KeyRef {
+                            id: 2,
+                            property: source.property,
+                            frame: 12,
+                        });
+                    }
+                    let selected = state.selected_keys.clone();
+                    let project = state.editor.project().clone();
+                    let channels = state.graph_channels.clone();
+                    let graph = state.graph_view.clone();
+                    let property = state.graph_property;
+                    let saved = state.capture_views().encode_native(&project).unwrap();
+                    assert!(state.graph_activate_property(source, true));
+                    assert_eq!(state.editor.selected(), Some(2));
+                    assert_eq!(state.selected_layers, [2].into());
+                    assert_eq!(state.selected_keys, selected);
+                    assert_eq!(state.graph_property, property);
+                    assert_eq!(state.graph_channels, channels);
+                    assert_eq!(state.graph_view, graph);
+                    assert_eq!(state.graph_open, graph_open);
+                    assert_eq!(state.graph_key, None);
+                    assert!(!state.graph_included_channels().contains(&source));
+                    assert!(!state.graph_activate_channel(source, true));
+                    assert!(state.graph_pin_channel(source).is_err());
+                    for speed in [false, true] {
+                        state.graph_set_channel_height(source, speed, Some([0., 10.]));
+                    }
+                    assert_eq!(state.graph_channels, channels);
+                    assert_eq!(state.graph_view, graph);
+                    assert_eq!(
+                        state.capture_views().encode_native(&project).unwrap(),
+                        saved
+                    );
+                    assert!(state.graph_activate_property(source, false));
+                    assert!(state.selected_keys.is_empty());
+                    assert_eq!(
+                        state.capture_views().encode_native(&project).unwrap(),
+                        saved
+                    );
+                    assert_eq!(state.editor.project(), &project);
+                    assert!(!state.dirty());
+                    assert!(state.editor.can_redo());
+                    state.editor.redo();
+                    assert_eq!(
+                        state
+                            .editor
+                            .project()
+                            .composition()
+                            .layer(2)
+                            .unwrap()
+                            .name(),
+                        "Redo source witness"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn source_text_focus_rejects_nontext_and_missing_layers_without_view_mutation() {
+        let mut state = sparse_text_scene();
+        state.editor.select(2);
+        state.selected_layers = [2].into();
+        let keys = state.selected_keys.clone();
+        let property = state.graph_property;
+        let channels = state.graph_channels.clone();
+        for id in [1, 999] {
+            assert!(!state.graph_activate_property(
+                GraphChannel {
+                    id,
+                    property: PropertyPath::SourceText
+                },
+                false
+            ));
+            assert_eq!(state.editor.selected(), Some(2));
+            assert_eq!(state.selected_layers, [2].into());
+            assert_eq!(state.selected_keys, keys);
+            assert_eq!(state.graph_property, property);
+            assert_eq!(state.graph_channels, channels);
+        }
     }
 
     #[test]

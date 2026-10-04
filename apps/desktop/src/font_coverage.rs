@@ -61,7 +61,7 @@ pub(crate) enum Status {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Report {
-    /// Composition-local frame whose typography produced these glyphs.
+    /// Composition-local frame whose source and typography produced these glyphs.
     pub checked_frame: Frame,
     pub primary: Option<Face>,
     pub faces: Vec<FaceUsage>,
@@ -119,7 +119,7 @@ fn analyze_with_options(
 ) -> Report {
     let primary_id = primary.map(|face| face.id);
     let mut report = Report::new(primary.map(Face::from_info), frame);
-    let Content::Text { text, .. } = layer.content() else {
+    let Some(text) = layer.source_text_at(frame) else {
         report.status = Status::Unsupported;
         return report;
     };
@@ -910,5 +910,90 @@ mod tests {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod source_text_tests {
+    use super::*;
+    use crate::rendering::source_text_tests::{animated_scene, baked_scene};
+    use libre_effects_core::{Command, PropertyPath, TextParam, TrackEdit};
+
+    #[test]
+    fn source_text_glyph_reports_match_independently_baked_current_frames() {
+        for paragraph in [false, true] {
+            let mut e = animated_scene(paragraph);
+            let mut style = e.selected_layer().unwrap().text_style();
+            style.fill_enabled = false;
+            style.stroke_enabled = false;
+            e.execute(Command::SetTextStyle { id: 1, style }).unwrap();
+            for parameter in [TextParam::FillOpacity, TextParam::StrokeOpacity] {
+                e.execute(Command::EditText {
+                    id: 1,
+                    parameter,
+                    edit: TrackEdit::Value {
+                        frame: 20,
+                        value: 0.,
+                    },
+                })
+                .unwrap();
+            }
+            let before = e.project().clone();
+            let json = before.to_json().unwrap();
+            for frame in [0, 9, 10, 19, 20, 29, 30, 39, 40, 60] {
+                let static_e = baked_scene(paragraph, frame);
+                assert_eq!(
+                    analyze(e.project().composition().layer(1).unwrap(), frame),
+                    analyze(static_e.selected_layer().unwrap(), frame),
+                    "paragraph={paragraph} frame={frame}"
+                );
+            }
+            assert_eq!(e.project(), &before);
+            assert_eq!(e.project().to_json().unwrap(), json);
+        }
+    }
+
+    #[test]
+    fn source_text_analysis_limits_apply_only_to_the_current_sample() {
+        let mut e = animated_scene(false);
+        for (frame, text) in [
+            (50, "한".repeat(MAX_SOURCE_BYTES / 3 + 1)),
+            (60, "A\n".repeat(MAX_SOURCE_LINES)),
+            (70, String::new()),
+        ] {
+            e.execute(Command::EditSourceText { id: 1, frame, text })
+                .unwrap();
+        }
+        let before = e.project().clone();
+        let layer = before.composition().layer(1).unwrap();
+        assert!(layer.track(PropertyPath::SourceText).unwrap().keys().len() > 4);
+        for frame in [0, 10, 20, 40, 49] {
+            let report = analyze(layer, frame);
+            assert!(
+                report.glyphs > 0,
+                "other oversized keys cannot suppress frame {frame}"
+            );
+            assert_ne!(
+                report.status,
+                Status::Incomplete("Layer exceeds the text analysis limit".into())
+            );
+        }
+        for frame in [50, 59, 60, 69] {
+            let report = analyze(layer, frame);
+            assert_eq!(report.checked_frame, frame);
+            assert_eq!(
+                report.status,
+                Status::Incomplete("Layer exceeds the text analysis limit".into())
+            );
+            assert!(report.truncated);
+            assert_eq!(report.glyphs, 0);
+        }
+        for frame in [30, 39, 70, 89] {
+            let report = analyze(layer, frame);
+            assert_eq!(report.status, Status::Empty);
+            assert_eq!(report.glyphs, 0);
+            assert!(!report.truncated);
+        }
+        assert_eq!(e.project(), &before);
     }
 }

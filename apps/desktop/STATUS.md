@@ -6,8 +6,8 @@ Contents sibling-tree, layer-wide text-paint, numeric-vertex, font-diagnostic an
 Speed Graph endpoint-velocity, multi-channel Graph, multi-vertex transform and
 C09 layer-command / Linux image-retirement, F03 typography and B01 Project-list
 label, E05 Trim Paths, automatic About build identity and the G06 Luma Key
-headless checkpoint and independent Text Fill/Stroke opacity
-(native validation pending for the two newest feature slices).
+headless checkpoint, independent Text Fill/Stroke opacity and Hold-only Source
+Text animation (native validation pending for these three newest feature slices).
 This is the current checkpoint inventory;
 [DEVELOPMENT_BACKLOG.md](DEVELOPMENT_BACKLOG.md) retains the original audit and
 its dated implementation/test history. Older “remaining” lists and test counts
@@ -17,6 +17,56 @@ Libre Effects is an **early 2D motion-graphics and compositing editor**. It is n
 an After Effects replacement, an AE pixel-equivalent renderer, or an AEP/Adobe
 script-compatible application. A working control or passing model test alone
 does not establish a complete native editing workflow.
+
+## F05 Source Text Hold animation — headless gates passed, native pending
+
+Whole-layer Source Text has a separate Hold-only Timeline row, guarded stopwatch,
+key/navigation controls and sampled-text canvas-edit button. Properties edits the
+current sample. Numeric text channels remain independent; Source Text has no
+numeric Graph address, value field, easing or velocity editing. Time-only key
+selection/dragging/clipboard/deletion is connected; the core also supports time-only
+scaling without a new Graph affordance. Numeric Graph pins/ranges and VIEW bytes
+remain stable. This is not rich text, Text Animator, text-on-path or instance controls.
+
+The default-skipped string pool/timing field requires schema 53 only when animation
+is materialized. Static Content::Text.text stays the baseline. Sampling holds the
+first key before it, the latest key between keys, and the last key afterward;
+empty strings are valid. Unchanged edits do not add keys or migrate schema/assets,
+and off/last-key operations freeze the documented sample before clearing storage.
+String payloads, not opaque indices, cross key clipboards. All-layer workflows,
+collision rejection, exact no-ops and history/Redo are covered. Limits remain
+16,384 UTF-8 bytes/string, 10,000 keys/strings, 1 MiB pool/layer and 16 MiB escaped
+metadata. Occupancy is scanned linearly; dead-slot reuse/reclamation is planned
+before mutation and preserves every live index, including at full/fragmented caps.
+
+Renderer, effect bounds, text geometry, wrapping, Fit, conversion, sessions and
+glyph diagnostics share the frame-sampled source. Paragraph-to-Point writes the
+current string and changes global paragraph mode atomically; other keyed strings
+remain, with the new global layout mode. Font checks still cover the checked
+active frame and inactive frame 0, not every keyed source. LEP 1, VIEW 1/2, numeric
+Graph address 1 and TextStyle are unchanged. Source data never enters a numeric lane.
+
+All 26 new core tests and 27 focused desktop matches (26 new plus one existing)
+pass. Final gates pass 1253 default tests (411 core, 836 desktop, six helpers),
+all 32 media tests, formatting, all-target checking and the normal optimized
+release (166.1 seconds). The pinned build is `20261004.085447-3ba71bfa99d1ccdb`,
+matching all 331 watched source inputs. Scoped test debug=0/strip overrides do not
+change optimization/assertions/features, repository settings or the release profile.
+
+Actual CLI checks pass 21 exact RGBA comparisons across 28 renders at seven Hold
+boundary samples, plus 12 malformed/future/down-declared/old-reader rejections
+that preserve existing output and leave no temporary files. Baked source strings
+are independently assigned; the release comparison still shares the renderer and
+is not a separate raster implementation. All 31,940,800 prior text/reference pixels,
+21 Trim frames, 18 Luma frames and 46 prior opacity renders remain exact. The former
+opacity future-schema53 rejection fixtures remain historical; only their valid
+render records are reused now that schema 53 is supported. Original fixture hashes
+remain unchanged.
+
+Eight Source Text native cases are prepared but unrun, separate from eight Luma
+and eight opacity cases. The exact authorized read-only retry at 09:00 UTC still
+failed on the missing native pipe; no screen or app state was obtained or changed.
+Fixture decoding and helper tests do not establish native Save/Open/input behavior.
 
 ## F03 / D01 Text paint opacity — headless gates passed, native pending
 
@@ -508,9 +558,9 @@ Every original A01–L05 ID appears once below. The labels are deliberately boun
 | --- | --- | --- |
 | F01 | Partial | Direct canvas point/paragraph text, selection, paste, wrapping, resize, commit/cancel and Undo. Real Korean IME composition/candidate and full native gesture/focus coverage remain. |
 | F02 | Partial | Installed family/real-style selection, shared preview/output resolution, missing-font reporting, project-wide replacement and explicit bounded final-glyph/fallback diagnostics. Variable axes, runtime catalog refresh, semantic/color-font assurance and cross-machine portability testing remain. |
-| F03 | Partial | Layer-wide alignment, spacing, wrapping, Fill/Stroke and paint order. Ten original scalar RGB, Stroke Width, Font Size, Tracking and Leading channels pass automated/release and bounded native acceptance. Independent Fill/Stroke Opacity adds two schema 52 percentage channels; automated/release/CLI gates pass and native acceptance remains pending as described above. Per-character rich text, Source Text animation and full kerning/paragraph controls remain. |
+| F03 | Partial | Layer-wide alignment, spacing, wrapping, Fill/Stroke and paint order. Ten original scalar RGB, Stroke Width, Font Size, Tracking and Leading channels pass automated/release and bounded native acceptance. Independent Fill/Stroke Opacity adds two schema 52 percentage channels; automated/release/CLI gates pass and native acceptance remains pending as described above. Per-character rich text and full kerning/paragraph controls remain; the separate Source Text Hold slice is recorded under F05. |
 | F04 | Not implemented | Text Animator and character/word/line Range Selectors. |
-| F05 | Not implemented | Text on paths, Source Text animation and reusable per-instance text controls. |
+| F05 | Partial | Whole-layer Hold-only Source Text animation, shared sampled rendering/editing/layout/diagnostics, discrete key workflows and schema53 persistence pass automated/release/CLI gates. Native acceptance remains pending. Text on paths and reusable per-instance controls remain unimplemented. |
 
 ### G — Masks, compositing and effects
 
@@ -613,8 +663,9 @@ This does not close the broader A04 backup-management or other backlog extension
    Leading now pass automated/release and all ten bounded native cases.
    Sampled rendering, caret/hit geometry, paragraph operations and font diagnostics
    preserve static bases and exact no-ops. Parameter-specific schema requirements
-   retain the existing LEP container and VIEW versions. Per-character styling, Source Text
-   animation, Text Animator, Auto Orient/Skew and full-animation anchor compensation
+   retain the existing LEP container and VIEW versions. Source Text Hold animation now
+   passes headless gates with native acceptance pending. Per-character styling,
+   Text Animator, Auto Orient/Skew and full-animation anchor compensation
    remain separate; E02 cross-path and E04 cross-parent edits need their own design.
    The B01 Project-list correction passes its four bounded native cases. E05 Trim
    Paths now passes its bounded automated/release/native gates, with Start/End/Offset

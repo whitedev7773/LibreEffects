@@ -71,6 +71,9 @@ pub(super) fn apply(
         if matches!(key.property, PropertyPath::Path(_)) {
             return Err("Geometry path keys do not support scalar velocity scaling".into());
         }
+        if key.property == PropertyPath::SourceText {
+            return Err("Source Text keys do not support scalar velocity scaling".into());
+        }
         tracks
             .entry((key.id, key.property))
             .or_default()

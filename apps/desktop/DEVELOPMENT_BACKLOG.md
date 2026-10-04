@@ -18,9 +18,19 @@
 
 - **구현·검증됨:** 다중 컴포지션/프리컴포지션, 공유 자산·폴더·썸네일·다중 파일/이미지 시퀀스 가져오기·FPS/알파 해석, 저장·복구·미디어 수집/재연결, 유리수 FPS, Null/Solid/Adjustment, 레이어 복사·마커·스냅·다중 정렬/분배·부모 Pick Whip, 변형/효과 키 편집, 영상·프리컴포지션 Time Remap, 순서 있는 효과 스택, 5종 블렌딩·4종 Track Matte, Curves/Gradient 등 기본 효과, 배경색 MP4·알파 MOV/PNG, 뷰 상태 저장·눈금자/가이드/채널/픽셀 정보, 스냅샷 기반 렌더 큐·다중 출력·재시도·출력 크기/FPS/채널/인코딩 설정, 독립/영상 오디오 메타데이터·파형·중첩 믹싱·AAC/PCM 영상 출력, 좌우 레벨·팬·페이드 애니메이션·오디오 스위치·구간 미터, Windows 기본 장치 재생·100ms 스크럽·장치 시계 기반 플레이헤드·재생 블록 미터, 지속 영상 디코더·제한된 순차 프리페치·비동기 합성과 오래된 요청 취소. 상세 제약은 아래 표에 남긴다.
 - **다음 핵심 개발(2026-10-02 사용자 우선순위 변경):** 실제 AE 첫 작업 화면을 기준으로 편집 도구·효과·텍스트·마스크와 관련 UI를 우선한다. J02 디스크 캐시/J03 증분 평가, 고급 출력·GPU·HDR·장치/코덱 확장은 뒤로 미룬다.
-- **정교한 편집에 남은 기능:** D02/D03 공간 보간·혼합 채널 수직/Speed corner 변형, E02/E03 경로 토폴로지·교차 경로/전체 pose 편집, E04 부모 간 트리 이동·복합 Colors 애니메이션, G01 가변 Feather·로토베지어, F01–F03 실제 IME 검증·문자별 스타일·Source Text/Text Animator, B01/B05/B07 배치 회귀·단축키/접근성. 스칼라 양방향 시간 보간·Speed Graph, Contents·도형 속성 애니메이션, 직접 텍스트 편집과 B06 공통 색 선택기는 아래 이력의 범위로 이미 구현됐다.
+- **정교한 편집에 남은 기능:** D02/D03 공간 보간·혼합 채널 수직/Speed corner 변형, E02/E03 경로 토폴로지·교차 경로/전체 pose 편집, E04 부모 간 트리 이동·복합 Colors 애니메이션, G01 가변 Feather·로토베지어, F01–F05 실제 IME 검증·문자별 스타일·Text Animator·경로 위 텍스트/인스턴스 컨트롤, B01/B05/B07 배치 회귀·단축키/접근성. 스칼라 양방향 시간 보간·Speed Graph, Contents·도형 속성 애니메이션, 직접 텍스트 편집과 B06 공통 색 선택기는 아래 이력의 범위로 이미 구현됐다.
 - **후속 고급 기능:** 패널 도킹·소스 뷰어·최근 프로젝트, 타임라인 고급 시간 편집/검색/가상화, 공간 경로·프리셋·표현식, Shape 연산/SVG·Text Animator, 추가 효과·모션 블러, 고정밀 색/HDR·Proxy/GPU, 템플릿, 설치/업데이트·한글화와 UI 회귀 자동화.
 - **별도 대형 단계:** 3D/카메라/라이트·모델, 추적·로토/Puppet, 플러그인/교환 포맷 연구, 웹/API 제품 범위. AEP/MOGRT 호환은 구현되지 않았다.
+
+### F05 레이어 전체 Source Text Hold animation — 2026-10-04, headless 검증 완료·native 대기
+
+- 전체 UTF-8 문자열을 Hold key로 바꾸는 독립 Source Text 채널을 추가했다. Timeline Text의 첫 행에 watch/key/이전·다음/현재 문자열 canvas 편집을 두고 Properties도 현재 sample을 편집한다. 숫자 값·Value/Speed Graph·F9/비-Hold/temporal/velocity 편집은 전체 선택에 대해 거부한다. 시간 선택·drag·copy/paste·delete는 지원하고 core의 time-only scaling에는 새 Graph UI를 만들지 않았다.
+- 첫 key 전에는 첫 문자열, key 사이/뒤에는 최근 문자열을 유지하며 빈 문자열도 유효하다. animation이 꺼져 있으면 static baseline을, 켜져 있으면 현재 frame의 Hold key를 편집한다. 동일 문자열은 key/history를 만들지 않는다. off/마지막 key 제거는 명시한 fallback을 baseline에 굳히고 pool/timing을 비운다. 기존 정적 글꼴·typography·paint·opacity 값과 트랙은 유지한다.
+- sparse source_text_animation의 interned string pool과 opaque timing은 존재할 때 schema 53을 요구한다. 16,384 UTF-8 byte/string, 10,000 key/string, layer당 1 MiB pool 및 기존 16 MiB escaped metadata 한도를 검증한다. live slot을 한 번에 표시하고 dead slot을 재사용/필요분만 비워 full/fragmented pool에서도 live index를 보존한다. 실패는 storage/Undo/Redo까지 원자적이다. clipboard는 index가 아니라 실제 문자열을 옮긴다.
+- renderer/effect bounds, caret/hit/selection, wrapping/overflow/Fit, text session과 glyph 진단이 같은 현재 문자열을 사용한다. Paragraph→Point는 같은 sample의 범위를 잘라 현재 문자열과 global paragraph mode를 한 transaction으로 바꾸고 다른 keyed string은 보존한다. glyph 진단은 active checked frame/inactive 0 및 기존 4 KiB/128-line 범위이며 전체 animation glyph 보장이 아니다. LEP 1, VIEW 1/2, 숫자 Graph address 1과 TextStyle은 그대로다.
+- 새 core 26개와 desktop 26개를 추가했다. 집중 core 26개, desktop 27개(기존 1개 포함)가 통과했고 전체 기본 1253개(Core 411 + Desktop 836 + helper 6), media 32개, fmt/all-target check와 일반 optimized release가 통과했다. 빌드 번호 20261004.085447-3ba71bfa99d1ccdb와 source input 331개를 대조했다. 기존 임시 test debug=0/strip 외 repository/release profile 변경은 없다.
+- 실제 CLI는 Hold 경계 7개 sample의 28 render/21 exact RGBA 비교, 미래·하향 선언·잘못된 pool/비-Hold·구형 reader의 12개 거부/기존 출력 보존을 통과했다. 정적 문자열은 독립 지정했지만 같은 renderer의 일관성 비교라는 한계를 남긴다. 이전 text/reference 31,940,800 RGBA pixel, Trim 21 frame, Luma 18 frame, opacity 46 render가 정확히 유지됐다. 예전 opacity future53 거부 fixture는 역사 기록이며 현재 schema53 reader에 잘못 재적용하지 않았다.
+- Source Text 8-case native 계획은 미실행이며 Luma 8개·opacity 8개와 별도다. 09:00 UTC 지원 read-only 재시도도 native pipe 부재로 실패했고 화면/app 상태를 보거나 바꾸지 않았다. F05는 Partial이다. rich text/Text Animator/경로 위 텍스트/재사용 instance control을 완료했다고 주장하지 않는다. 다음 bounded E02 항목은 기존 정점 변형에 base+모든 stored pose 범위를 추가하는 작업이며 기존 renderer를 바꾸지 않는다.
 
 ### F03 / D01 독립 Text Fill·Stroke Opacity — 2026-10-04, headless 검증 완료·native 대기
 

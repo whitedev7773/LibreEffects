@@ -27,6 +27,7 @@ fn text_groups(layer: &libre_effects_core::Layer) -> Vec<(String, Vec<PropertyPa
         return vec![];
     }
     vec![
+        ("Source Text · Hold".into(), vec![PropertyPath::SourceText]),
         (
             "Fill Color".into(),
             TextPaint::Fill.channels().map(PropertyPath::Text).to_vec(),
@@ -110,6 +111,152 @@ fn group_watch(
                 edit: TrackEdit::ToggleAnimation { frame },
             })
             .collect(),
+    )
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SourceTextControl {
+    Animation,
+    Key,
+    Edit,
+    Previous,
+    Next,
+}
+
+fn source_text_summary(layer: &libre_effects_core::Layer, frame: u32) -> String {
+    let Some(text) = layer.source_text_at(frame) else {
+        return String::new();
+    };
+    if text.is_empty() {
+        return "(empty)".into();
+    }
+    let mut chars = text.chars();
+    let mut summary: String = chars
+        .by_ref()
+        .take(24)
+        .map(|c| match c {
+            '\r' | '\n' => '↵',
+            '\t' => '⇥',
+            other => other,
+        })
+        .collect();
+    if chars.next().is_some() {
+        summary.push('…');
+    }
+    summary
+}
+
+fn source_text_action(
+    layer: &libre_effects_core::Layer,
+    frame: u32,
+    control: SourceTextControl,
+) -> Option<Action> {
+    if layer.locked() || layer.source_text_at(frame).is_none() {
+        return None;
+    }
+    let track = layer.track(PropertyPath::SourceText)?;
+    Some(match control {
+        SourceTextControl::Animation | SourceTextControl::Key => Action::Edit(Command::EditTrack {
+            id: layer.id(),
+            property: PropertyPath::SourceText,
+            edit: if control == SourceTextControl::Animation {
+                TrackEdit::ToggleAnimation { frame }
+            } else {
+                TrackEdit::ToggleKey { frame }
+            },
+        }),
+        SourceTextControl::Edit => Action::BeginText(Some(layer.id()), [0.0; 2]),
+        SourceTextControl::Previous => Action::Seek(*track.keys().range(..frame).next_back()?.0),
+        SourceTextControl::Next => Action::Seek(
+            *track
+                .keys()
+                .range((std::ops::Bound::Excluded(frame), std::ops::Bound::Unbounded))
+                .next()?
+                .0,
+        ),
+    })
+}
+
+/// Source Text never exposes its opaque pool value as a numeric field. Buttons
+/// share Properties' pointer-before-blur guard, then replan from the committed
+/// current sample. Navigation and edits cannot reuse a stale frame/layer draft.
+pub(super) fn source_text_control(
+    state: &Entity<EditorState>,
+    layer: &libre_effects_core::Layer,
+    frame: u32,
+    kind: SourceTextControl,
+    target: Option<InputTarget>,
+    scope: &'static str,
+) -> impl IntoElement {
+    let id = layer.id();
+    let control = format!("{scope}-source-text-{id}-{kind:?}");
+    let state = state.clone();
+    let track = layer.track(PropertyPath::SourceText);
+    let (icon, tip, active) = match kind {
+        SourceTextControl::Animation => (
+            "stopwatch",
+            "Toggle Source Text animation · Hold only",
+            track.is_some_and(|t| !t.keys().is_empty()),
+        ),
+        SourceTextControl::Key => (
+            "diamond",
+            "Add / remove Source Text key · Hold only",
+            track.is_some_and(|t| t.keys().contains_key(&frame)),
+        ),
+        SourceTextControl::Edit => (
+            "text",
+            "Edit current Source Text on canvas · Hold only",
+            false,
+        ),
+        SourceTextControl::Previous => ("arrow-left", "Previous Source Text key", false),
+        SourceTextControl::Next => ("arrow-right", "Next Source Text key", false),
+    };
+    let button = if kind == SourceTextControl::Edit {
+        ui::text_button(
+            SharedString::from(control.clone()),
+            source_text_summary(layer, frame),
+        )
+        .w(px(100.0))
+        .min_w_0()
+        .overflow_hidden()
+        .justify_start()
+        .text_size(px(10.0))
+        .tooltip(move |_, cx| cx.new(|_| ui::Tip(tip.into())).into())
+    } else {
+        ui::tool(SharedString::from(control.clone()), icon, tip, active)
+    };
+    crate::color_edit::input_pointer_button(button, control.clone(), target.clone()).on_click(
+        move |event, window, cx| {
+            cx.stop_propagation();
+            let Some(target) =
+                crate::color_edit::input_click_target(&control, event, &target, &state, window, cx)
+            else {
+                return;
+            };
+            if state.read(cx).editor.selected() != Some(id) {
+                return;
+            }
+            TextField::commit_active(window, cx);
+            state.update(cx, |s, cx| {
+                if !target.same_context(s) {
+                    return;
+                }
+                s.finish_text(true, cx);
+                if !target.same_context(s) {
+                    return;
+                }
+                let action = s
+                    .editor
+                    .selected_layer()
+                    .and_then(|layer| source_text_action(layer, s.frame, kind));
+                if let Some(action) = action {
+                    if kind == SourceTextControl::Edit {
+                        s.graph_open = false;
+                    }
+                    s.dispatch(&action, window, cx);
+                }
+            });
+        },
     )
 }
 
@@ -1165,7 +1312,9 @@ impl Render for Timeline {
                             };
                             Some(((3, item), format!("Contents · {name}")))
                         }
-                        PropertyPath::Text(_) => Some(((4, 0), "Text".to_string())),
+                        PropertyPath::Text(_) | PropertyPath::SourceText => {
+                            Some(((4, 0), "Text".to_string()))
+                        }
                         PropertyPath::Shape(_) => Some(((0, 1), "Contents · Shape".to_string())),
                         PropertyPath::Path(libre_effects_core::PathTarget::Shape) => {
                             Some(((0, 0), "Contents · Path".to_string()))
@@ -1239,14 +1388,27 @@ impl Render for Timeline {
                         .w(px(left))
                         .flex_none()
                         .pl(px(128.0))
-                        .child(ui::action_tool(
-                            prop_id("watch"),
-                            "stopwatch",
-                            "Toggle animation",
-                            &self.state,
-                            Action::Edit(watch),
-                            animated,
-                        ))
+                        .child(if channel == PropertyPath::SourceText {
+                            source_text_control(
+                                &self.state,
+                                layer,
+                                frame,
+                                SourceTextControl::Animation,
+                                self.input_source.clone(),
+                                "timeline",
+                            )
+                            .into_any_element()
+                        } else {
+                            ui::action_tool(
+                                prop_id("watch"),
+                                "stopwatch",
+                                "Toggle animation",
+                                &self.state,
+                                Action::Edit(watch),
+                                animated,
+                            )
+                            .into_any_element()
+                        })
                         .child(
                             ui::text_button(prop_id("label"), label.clone())
                                 .min_w_0()
@@ -1266,9 +1428,14 @@ impl Render for Timeline {
                                             },
                                             true,
                                         );
-                                        if matches!(channel, PropertyPath::Path(_)) {
+                                        if matches!(
+                                            channel,
+                                            PropertyPath::Path(_) | PropertyPath::SourceText
+                                        ) {
                                             s.graph_open = false;
-                                            s.tool = crate::editor::Tool::Pen;
+                                            if matches!(channel, PropertyPath::Path(_)) {
+                                                s.tool = crate::editor::Tool::Pen;
+                                            }
                                         }
                                         s.graph_key = None;
                                         cx.notify();
@@ -1276,6 +1443,23 @@ impl Render for Timeline {
                                 }),
                         );
                     for property in properties.iter().copied() {
+                        if property == PropertyPath::SourceText {
+                            for kind in [
+                                SourceTextControl::Previous,
+                                SourceTextControl::Edit,
+                                SourceTextControl::Next,
+                            ] {
+                                controls = controls.child(source_text_control(
+                                    &self.state,
+                                    layer,
+                                    frame,
+                                    kind,
+                                    self.input_source.clone(),
+                                    "timeline",
+                                ));
+                            }
+                            continue;
+                        }
                         if matches!(property, PropertyPath::Path(_)) {
                             controls = controls.child(ui::action_tool(
                                 prop_id("edit-path"),
@@ -1492,23 +1676,36 @@ impl Render for Timeline {
                     } else {
                         at_frame.clone()
                     };
-                    controls = controls.child(ui::action_tool(
-                        prop_id("key"),
-                        "diamond",
-                        "Add / remove keys",
-                        &self.state,
-                        Action::Edit(Command::Batch(
-                            toggle
-                                .into_iter()
-                                .map(|property| Command::EditTrack {
-                                    id,
-                                    property,
-                                    edit: TrackEdit::ToggleKey { frame },
-                                })
-                                .collect(),
-                        )),
-                        !at_frame.is_empty(),
-                    ));
+                    controls = controls.child(if channel == PropertyPath::SourceText {
+                        source_text_control(
+                            &self.state,
+                            layer,
+                            frame,
+                            SourceTextControl::Key,
+                            self.input_source.clone(),
+                            "timeline",
+                        )
+                        .into_any_element()
+                    } else {
+                        ui::action_tool(
+                            prop_id("key"),
+                            "diamond",
+                            "Add / remove keys",
+                            &self.state,
+                            Action::Edit(Command::Batch(
+                                toggle
+                                    .into_iter()
+                                    .map(|property| Command::EditTrack {
+                                        id,
+                                        property,
+                                        edit: TrackEdit::ToggleKey { frame },
+                                    })
+                                    .collect(),
+                            )),
+                            !at_frame.is_empty(),
+                        )
+                        .into_any_element()
+                    });
                     let mut keys = div()
                         .relative()
                         .flex_1()
@@ -1621,11 +1818,16 @@ impl Render for Timeline {
                                                     GraphChannel { id, property },
                                                     true,
                                                 );
-                                                s.graph_key = Some(KeyRef {
-                                                    id,
-                                                    property,
-                                                    frame: key_frame,
-                                                });
+                                                s.graph_key = (property
+                                                    != PropertyPath::SourceText)
+                                                    .then_some(KeyRef {
+                                                        id,
+                                                        property,
+                                                        frame: key_frame,
+                                                    });
+                                                if property == PropertyPath::SourceText {
+                                                    s.graph_open = false;
+                                                }
                                                 s.dispatch(&Action::Seek(key_frame), window, cx);
                                             });
                                             this.drag = Some(KeyDrag {
@@ -2362,6 +2564,7 @@ mod tests {
                 .map(|(s, p)| (s.as_str(), p.len()))
                 .collect::<Vec<_>>(),
             [
+                ("Source Text · Hold", 1),
                 ("Fill Color", 3),
                 ("Stroke Color", 3),
                 ("Stroke Width", 1),
@@ -2378,7 +2581,9 @@ mod tests {
                 .flat_map(|(_, p)| p.iter())
                 .copied()
                 .collect::<Vec<_>>(),
-            TextParam::ALL.map(PropertyPath::Text)
+            std::iter::once(PropertyPath::SourceText)
+                .chain(TextParam::ALL.map(PropertyPath::Text))
+                .collect::<Vec<_>>()
         );
         for (_, properties) in &groups {
             assert!(super::group_visible(
@@ -2397,7 +2602,10 @@ mod tests {
                 Some(super::PropertyFilter::Opacity)
             ));
             for p in properties {
-                assert!(e.selected_layer().unwrap().track_value(*p, 30).is_some());
+                assert_eq!(
+                    e.selected_layer().unwrap().track_value(*p, 30).is_some(),
+                    *p != PropertyPath::SourceText,
+                );
             }
         }
         e.execute(Command::EditText {
@@ -2406,7 +2614,7 @@ mod tests {
             edit: TrackEdit::ToggleAnimation { frame: 0 },
         })
         .unwrap();
-        let fill = &groups[0].1;
+        let fill = &groups[1].1;
         assert!(super::group_animated(e.selected_layer().unwrap(), fill));
         assert!(super::group_visible(
             e.selected_layer().unwrap(),
@@ -2467,8 +2675,8 @@ mod tests {
         .unwrap();
         let source = e.project().clone();
         let groups = super::text_groups(e.selected_layer().unwrap());
-        assert_eq!(groups.iter().flat_map(|(_, paths)| paths).count(), 12);
-        for (paint, index) in [(TextPaint::Fill, 6), (TextPaint::Stroke, 7)] {
+        assert_eq!(groups.iter().flat_map(|(_, paths)| paths).count(), 13);
+        for (paint, index) in [(TextPaint::Fill, 7), (TextPaint::Stroke, 8)] {
             let parameter = paint.opacity();
             let paths = &groups[index].1;
             assert_eq!(paths, &[PropertyPath::Text(parameter)]);
@@ -2481,8 +2689,8 @@ mod tests {
             assert!(!super::group_animated(e.selected_layer().unwrap(), paths));
         }
         assert_eq!(e.project(), &source);
-        let fill = &groups[6].1;
-        let stroke = &groups[7].1;
+        let fill = &groups[7].1;
+        let stroke = &groups[8].1;
         e.execute(super::group_watch(e.selected_layer().unwrap(), fill, 30))
             .unwrap();
         assert!(super::group_animated(e.selected_layer().unwrap(), fill));
@@ -2531,5 +2739,254 @@ mod tests {
         assert_eq!(frame_at(150.0, 100.0, 100.0, 30, 60, 150), 60.0);
         assert_eq!(frame_at(-50.0, 100.0, 100.0, 30, 60, 150), 30.0);
         assert_eq!(frame_at(500.0, 100.0, 100.0, 100, 60, 150), 149.0);
+    }
+}
+
+#[cfg(test)]
+mod source_text_tests {
+    use super::*;
+    use libre_effects_core::{Content, Editor, Interpolation, KeyScale};
+
+    fn editor() -> Editor {
+        let mut e = Editor::default();
+        e.execute(Command::AddContent {
+            content: Content::Text {
+                text: "Start 🦋".into(),
+                font_size: 48.0,
+            },
+            width: 400.0,
+            height: 120.0,
+            name: "Text".into(),
+        })
+        .unwrap();
+        e
+    }
+
+    fn command(e: &Editor, frame: u32, control: SourceTextControl) -> Command {
+        let Some(Action::Edit(command)) =
+            source_text_action(e.selected_layer().unwrap(), frame, control)
+        else {
+            panic!("Expected Source Text command")
+        };
+        command
+    }
+
+    #[test]
+    fn source_text_timeline_controls_hold_watch_key_navigation_and_sample_summary() {
+        let mut e = editor();
+        assert_eq!(
+            text_groups(e.selected_layer().unwrap())[0],
+            ("Source Text · Hold".into(), vec![PropertyPath::SourceText])
+        );
+        assert_eq!(
+            source_text_summary(e.selected_layer().unwrap(), 15),
+            "Start 🦋"
+        );
+        assert!(
+            source_text_action(e.selected_layer().unwrap(), 15, SourceTextControl::Previous)
+                .is_none()
+        );
+        assert!(
+            source_text_action(e.selected_layer().unwrap(), 15, SourceTextControl::Next).is_none()
+        );
+        assert!(matches!(
+            source_text_action(e.selected_layer().unwrap(), 15, SourceTextControl::Edit),
+            Some(Action::BeginText(Some(1), _))
+        ));
+        e.execute(command(&e, 10, SourceTextControl::Animation))
+            .unwrap();
+        e.execute(Command::EditSourceText {
+            id: 1,
+            frame: 30,
+            text: "".into(),
+        })
+        .unwrap();
+        e.execute(Command::EditSourceText {
+            id: 1,
+            frame: 50,
+            text: "世界\n🦋\tline".into(),
+        })
+        .unwrap();
+        assert_eq!(
+            source_text_summary(e.selected_layer().unwrap(), 29),
+            "Start 🦋"
+        );
+        assert_eq!(
+            source_text_summary(e.selected_layer().unwrap(), 30),
+            "(empty)"
+        );
+        assert_eq!(
+            source_text_summary(e.selected_layer().unwrap(), 50),
+            "世界↵🦋⇥line"
+        );
+        for (frame, previous, next) in [
+            (0, None, Some(10)),
+            (10, None, Some(30)),
+            (30, Some(10), Some(50)),
+            (60, Some(50), None),
+        ] {
+            let seek = |kind| match source_text_action(e.selected_layer().unwrap(), frame, kind) {
+                Some(Action::Seek(frame)) => Some(frame),
+                None => None,
+                _ => panic!("Expected seek"),
+            };
+            assert_eq!(seek(SourceTextControl::Previous), previous);
+            assert_eq!(seek(SourceTextControl::Next), next);
+        }
+        e.execute(command(&e, 40, SourceTextControl::Key)).unwrap();
+        let track = e
+            .selected_layer()
+            .unwrap()
+            .track(PropertyPath::SourceText)
+            .unwrap();
+        assert_eq!(track.keys().len(), 4);
+        assert!(
+            track
+                .keys()
+                .values()
+                .all(|k| k.interpolation == Interpolation::Hold)
+        );
+        assert_eq!(e.selected_layer().unwrap().source_text_at(40), Some(""));
+        assert_eq!(
+            e.selected_layer()
+                .unwrap()
+                .track_value(PropertyPath::SourceText, 40),
+            None
+        );
+        assert!(group_visible(
+            e.selected_layer().unwrap(),
+            &[PropertyPath::SourceText],
+            Some(PropertyFilter::Animated)
+        ));
+        e.execute(command(&e, 40, SourceTextControl::Animation))
+            .unwrap();
+        assert_eq!(e.selected_layer().unwrap().source_text_at(0), Some(""));
+        assert!(!group_animated(
+            e.selected_layer().unwrap(),
+            &[PropertyPath::SourceText]
+        ));
+        e.execute(Command::ToggleLocked(1)).unwrap();
+        for kind in [
+            SourceTextControl::Animation,
+            SourceTextControl::Key,
+            SourceTextControl::Edit,
+            SourceTextControl::Previous,
+            SourceTextControl::Next,
+        ] {
+            assert!(source_text_action(e.selected_layer().unwrap(), 40, kind).is_none());
+        }
+    }
+
+    #[test]
+    fn source_text_timeline_copy_retime_and_delete_preserve_string_payload_and_hold_keys() {
+        let mut e = editor();
+        e.execute(command(&e, 10, SourceTextControl::Animation))
+            .unwrap();
+        e.execute(Command::EditSourceText {
+            id: 1,
+            frame: 30,
+            text: "Copied 世界".into(),
+        })
+        .unwrap();
+        let key = KeyRef {
+            id: 1,
+            property: PropertyPath::SourceText,
+            frame: 30,
+        };
+        let copy = e
+            .selected_layer()
+            .unwrap()
+            .copy_key(key.property, key.frame)
+            .unwrap();
+        assert_eq!(copy.source_text.as_deref(), Some("Copied 世界"));
+        e.execute(Command::AddContent {
+            content: Content::Text {
+                text: "Unrelated pool baseline".into(),
+                font_size: 60.0,
+            },
+            width: 400.0,
+            height: 120.0,
+            name: "Target".into(),
+        })
+        .unwrap();
+        let target = e.selected().unwrap();
+        e.execute(command(&e, 0, SourceTextControl::Animation))
+            .unwrap();
+        e.execute(Command::PasteKeys {
+            keys: vec![copy],
+            frame: 40,
+            target: Some(target),
+        })
+        .unwrap();
+        let pasted = KeyRef {
+            id: target,
+            property: PropertyPath::SourceText,
+            frame: 40,
+        };
+        assert_eq!(
+            e.selected_layer().unwrap().source_text_at(40),
+            Some("Copied 世界")
+        );
+        e.execute(Command::MoveKeys {
+            keys: vec![pasted],
+            delta: 5,
+        })
+        .unwrap();
+        let moved = KeyRef {
+            frame: 45,
+            ..pasted
+        };
+        e.execute(Command::ScaleKeys {
+            keys: vec![moved],
+            scale: KeyScale {
+                time_origin: 0.0,
+                time_scale: 2.0,
+                value_origin: 0.0,
+                value_scale: 1.0,
+            },
+        })
+        .unwrap();
+        assert_eq!(
+            e.selected_layer().unwrap().source_text_at(89),
+            Some("Unrelated pool baseline")
+        );
+        assert_eq!(
+            e.selected_layer().unwrap().source_text_at(90),
+            Some("Copied 世界")
+        );
+        let keys = e
+            .selected_layer()
+            .unwrap()
+            .track(PropertyPath::SourceText)
+            .unwrap()
+            .keys()
+            .keys()
+            .map(|frame| KeyRef {
+                id: target,
+                property: PropertyPath::SourceText,
+                frame: *frame,
+            })
+            .collect();
+        let before = e.project().clone();
+        e.execute(Command::DeleteKeys(keys)).unwrap();
+        assert_eq!(
+            e.selected_layer().unwrap().source_text_at(0),
+            Some("Copied 世界")
+        );
+        assert!(!group_animated(
+            e.selected_layer().unwrap(),
+            &[PropertyPath::SourceText]
+        ));
+        e.undo();
+        assert_eq!(e.project(), &before);
+        assert_eq!(
+            e.selected_layer()
+                .unwrap()
+                .track(PropertyPath::SourceText)
+                .unwrap()
+                .keys()[&90]
+                .interpolation,
+            Interpolation::Hold
+        );
     }
 }

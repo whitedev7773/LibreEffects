@@ -152,6 +152,7 @@ pub struct KeyRef {
 }
 #[derive(Clone, Debug)]
 pub struct KeyCopy {
+    pub source_text: Option<String>,
     pub path_pose: Option<VectorPath>,
     pub key: KeyRef,
     pub data: Keyframe,
@@ -753,6 +754,12 @@ pub(super) fn apply_extended(
                 if !layer.text_parameters.is_empty() && !matches!(content, Content::Text { .. }) {
                     return Err("Text paint tracks require text content".into());
                 }
+                if layer.source_text_animation.animated() {
+                    match (&layer.content, content) {
+                        (Content::Text { text: current, .. }, Content::Text { text: next, .. }) if current == next => {},
+                        _ => return Err("Edit animated Source Text at the current frame, or turn its animation off first".into()),
+                    }
+                }
                 layer.content = content.clone();
                 layer.asset = None;
                 layer.footage_interpretation = Default::default();
@@ -813,7 +820,11 @@ pub(super) fn apply_extended(
             }
             Command::DeleteKeys(keys) => {
                 for key in keys.iter().copied().collect::<BTreeSet<_>>() {
-                    let track = editable(state, key.id)?.track_mut(key.property)?;
+                    let layer = editable(state, key.id)?;
+                    let source_sample = (key.property == PropertyPath::SourceText)
+                        .then(|| layer.source_text_at(key.frame).map(str::to_owned))
+                        .flatten();
+                    let track = layer.track_mut(key.property)?;
                     let value = track.value_at(key.frame);
                     track
                         .keys
@@ -821,6 +832,11 @@ pub(super) fn apply_extended(
                         .ok_or("Selected key no longer exists")?;
                     if track.keys.is_empty() {
                         track.value = value;
+                        if let Some(text) = source_sample {
+                            layer.bake_source_text(text)?;
+                        }
+                    } else if source_sample.is_some() {
+                        layer.source_text_animation.refresh_fallback();
                     }
                 }
             }
@@ -836,6 +852,7 @@ pub(super) fn apply_extended(
                     .ok_or("Copy keyframes first")?;
                 let duration = state.project.composition.duration;
                 for key in keys {
+                    source_text_animation::validate_copy(key)?;
                     let to = shifted(key.key.frame, *frame as i64 - first as i64, duration, false)?;
                     let layer = editable(state, target.unwrap_or(key.key.id))?;
                     if let PropertyPath::Effect { effect, .. } = key.key.property {
@@ -847,6 +864,16 @@ pub(super) fn apply_extended(
                         if kind.is_none() || kind != key.effect_kind {
                             return Err("Paste requires a matching effect instance and kind on the target layer".into());
                         }
+                    }
+                    if key.key.property == PropertyPath::SourceText {
+                        if layer
+                            .track(key.key.property)
+                            .is_some_and(|track| track.keys.contains_key(&to))
+                        {
+                            return Err("Paste would overwrite a keyframe".into());
+                        }
+                        layer.paste_source_text(to, key.source_text.as_deref().unwrap())?;
+                        continue;
                     }
                     let mut data = key.data.clone();
                     if let PropertyPath::Path(target) = key.key.property {

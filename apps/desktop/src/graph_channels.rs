@@ -23,10 +23,12 @@ impl From<KeyRef> for GraphChannel {
 }
 impl GraphChannel {
     pub fn available(self, composition: &Composition) -> bool {
-        !matches!(self.property, PropertyPath::Path(_))
-            && composition
-                .layer(self.id)
-                .is_some_and(|layer| layer.track(self.property).is_some())
+        !matches!(
+            self.property,
+            PropertyPath::Path(_) | PropertyPath::SourceText
+        ) && composition
+            .layer(self.id)
+            .is_some_and(|layer| layer.track(self.property).is_some())
     }
 }
 
@@ -165,7 +167,7 @@ impl GraphChannels {
 
 // This DTO belongs to desktop VIEW schema v2, not the render project schema.
 // PropertyPath intentionally has no core serde dependency; every scalar variant
-// gets a typed, unambiguous address here. Path timing is never a numeric lane.
+// gets a typed, unambiguous address here. Opaque timing is never a numeric lane.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum PropertyAddress {
@@ -191,6 +193,9 @@ impl TryFrom<PropertyPath> for PropertyAddress {
             PropertyPath::TimeRemap => Self::TimeRemap {},
             PropertyPath::Effect { effect, parameter } => Self::Effect { effect, parameter },
             PropertyPath::Path(_) => return Err("Path timing cannot be a Graph channel".into()),
+            PropertyPath::SourceText => {
+                return Err("Source Text timing cannot be a Graph channel".into());
+            }
         })
     }
 }
@@ -411,6 +416,68 @@ mod tests {
         );
         assert!(serde_json::from_str::<GraphChannels>(
             r#"{"version":1,"pinned":[],"active":{"id":1,"property":{"kind":"time_remap","future":true}},"ranges":[]}"#
+        ).is_err());
+    }
+
+    #[test]
+    fn source_text_has_no_numeric_graph_address_or_availability() {
+        use libre_effects_core::{Command, Content, Editor, TrackEdit};
+        let mut editor = Editor::default();
+        editor
+            .execute(Command::AddContent {
+                content: Content::Text {
+                    text: "Title".into(),
+                    font_size: 48.,
+                },
+                width: 400.,
+                height: 120.,
+                name: "Title".into(),
+            })
+            .unwrap();
+        let source = GraphChannel {
+            id: 1,
+            property: PropertyPath::SourceText,
+        };
+        for animated in [false, true] {
+            if animated {
+                editor
+                    .execute(Command::EditTrack {
+                        id: 1,
+                        property: source.property,
+                        edit: TrackEdit::ToggleAnimation { frame: 10 },
+                    })
+                    .unwrap();
+            }
+            let project = editor.project().clone();
+            assert!(
+                project
+                    .composition()
+                    .layer(1)
+                    .unwrap()
+                    .track(source.property)
+                    .is_some()
+            );
+            assert!(!source.available(project.composition()));
+            assert!(PropertyAddress::try_from(source.property).is_err());
+            let mut channels = GraphChannels::default();
+            channels.pin(source).unwrap();
+            channels.activate(source);
+            channels.ranges.insert(
+                source,
+                GraphRanges {
+                    value: Some([0., 10.]),
+                    speed: Some([-10., 10.]),
+                },
+            );
+            assert!(serde_json::to_vec(&channels).is_err());
+            channels.prune(project.composition());
+            assert!(channels.is_legacy());
+            assert!(channels.pinned.is_empty() && channels.ranges.is_empty());
+            assert_eq!(channels.active, None);
+            assert_eq!(editor.project(), &project);
+        }
+        assert!(serde_json::from_str::<GraphChannels>(
+            r#"{"version":1,"pinned":[],"active":{"id":1,"property":{"kind":"source_text"}},"ranges":[]}"#
         ).is_err());
     }
 

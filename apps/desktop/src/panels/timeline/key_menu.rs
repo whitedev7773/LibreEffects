@@ -89,6 +89,14 @@ fn command(project: &Project, keys: &[KeyRef], edit: Edit) -> Result<Option<Comm
         {
             return Err("This command requires scalar keys".into());
         }
+        if key.property == PropertyPath::SourceText
+            && !matches!(edit, Edit::Delete | Edit::Segment(Interpolation::Hold))
+        {
+            return Err(
+                "Source Text keys are Hold-only and cannot use numeric Graph or temporal controls"
+                    .into(),
+            );
+        }
         match edit {
             Edit::Mode(mode) => commands.push(Command::SetTemporalMode {
                 id: key.id,
@@ -425,6 +433,94 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn source_text_menu_allows_hold_and_delete_but_rejects_numeric_actions_for_whole_selection() {
+        let (mut state, numeric) = scene();
+        state
+            .editor
+            .execute(Command::AddContent {
+                content: libre_effects_core::Content::Text {
+                    text: "First".into(),
+                    font_size: 48.,
+                },
+                width: 400.,
+                height: 120.,
+                name: "Title".into(),
+            })
+            .unwrap();
+        let source = KeyRef {
+            id: 2,
+            property: PropertyPath::SourceText,
+            frame: 30,
+        };
+        state
+            .editor
+            .execute(Command::EditTrack {
+                id: 2,
+                property: source.property,
+                edit: TrackEdit::ToggleAnimation { frame: 10 },
+            })
+            .unwrap();
+        state
+            .editor
+            .execute(Command::EditSourceText {
+                id: 2,
+                frame: 30,
+                text: "Second 🦋".into(),
+            })
+            .unwrap();
+        let before = state.editor.project().clone();
+        for keys in [
+            vec![source],
+            vec![numeric[0], source],
+            vec![source, numeric[0]],
+        ] {
+            for (_, _, edit) in ENTRIES {
+                let result = command(&before, &keys, edit);
+                assert_eq!(
+                    result.is_ok(),
+                    matches!(edit, Edit::Delete | Edit::Segment(Interpolation::Hold))
+                );
+            }
+            assert_eq!(state.editor.project(), &before);
+        }
+        state
+            .editor
+            .execute(
+                command(&before, &[source], Edit::Segment(Interpolation::Hold))
+                    .unwrap()
+                    .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(state.editor.project(), &before);
+        state
+            .editor
+            .execute(
+                command(&before, &[numeric[0], source], Edit::Delete)
+                    .unwrap()
+                    .unwrap(),
+            )
+            .unwrap();
+        for key in [numeric[0], source] {
+            assert!(
+                !state
+                    .editor
+                    .project()
+                    .composition()
+                    .layer(key.id)
+                    .unwrap()
+                    .track(key.property)
+                    .unwrap()
+                    .keys()
+                    .contains_key(&key.frame)
+            );
+        }
+        state.editor.undo();
+        assert_eq!(state.editor.project(), &before);
+        state.editor.execute(Command::ToggleLocked(2)).unwrap();
+        assert!(command(state.editor.project(), &[source], Edit::Delete).is_err());
+    }
+
     #[test]
     fn invalid_or_locked_selection_cannot_partially_apply_but_graph_remains_available() {
         let (mut s, keys) = scene();

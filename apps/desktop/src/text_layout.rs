@@ -105,9 +105,7 @@ impl Layout {
         layer: &libre_effects_core::Layer,
         frame: libre_effects_core::Frame,
     ) -> Option<Arc<Self>> {
-        let libre_effects_core::Content::Text { text, .. } = layer.content() else {
-            return None;
-        };
+        let text = layer.source_text_at(frame)?;
         let typography = layer.text_typography_at(frame)?;
         let mut style = layer.text_style();
         typography.apply_to_style(&mut style);

@@ -2508,6 +2508,21 @@ impl Render for Graph {
         let property = state
             .graph_active_channel()
             .map_or(state.graph_property, |channel| channel.property);
+        if property == PropertyPath::SourceText {
+            return div()
+                .id("source-text-graph-help")
+                .size_full()
+                .p_4()
+                .child("Source Text uses Hold-only keyframes. Edit text in Properties or the Composition viewer; move, copy and delete its keys in the timeline.")
+                .child(ui::action_tool(
+                    "source-text-return-timeline",
+                    "text",
+                    "Return to Source Text timeline",
+                    &self.state,
+                    Action::GraphProperty(state.editor.selected().unwrap_or(0), property),
+                    false,
+                ));
+        }
         if matches!(property, PropertyPath::Path(_)) {
             return div().id("path-graph-help").size_full().p_4().child("Path geometry is edited in the Composition viewer. Move, copy and ease its keyframes in the timeline.")
                 .child(ui::action_tool("path-return-timeline", "pen", "Return to path timeline", &self.state, Action::GraphProperty(state.editor.selected().unwrap_or(0),property), false));
@@ -3083,7 +3098,7 @@ impl Render for Graph {
                         ),
                 );
             }
-            if !matches!(property, PropertyPath::Path(_)) {
+            if !matches!(property, PropertyPath::Path(_) | PropertyPath::SourceText) {
                 let mut modes = div().flex().mt_1();
                 for mode in [
                     TemporalMode::Independent,

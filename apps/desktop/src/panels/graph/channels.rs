@@ -113,13 +113,16 @@ fn gradient_unit(p: GradientParam) -> Unit {
 }
 pub(super) fn describe(project: &Project, channel: GraphChannel) -> Option<Descriptor> {
     let layer = project.composition().layer(channel.id)?;
-    if matches!(channel.property, PropertyPath::Path(_)) {
+    if matches!(
+        channel.property,
+        PropertyPath::Path(_) | PropertyPath::SourceText
+    ) {
         return None;
     }
     layer.track(channel.property)?;
     let mut label = layer.track_label(channel.property)?;
     let units = match channel.property {
-        PropertyPath::Path(_) => return None,
+        PropertyPath::Path(_) | PropertyPath::SourceText => return None,
         PropertyPath::Transform(p) => transform_unit(p),
         PropertyPath::Shape(p) => shape_unit(p),
         PropertyPath::Text(parameter) => text_unit(parameter),
@@ -514,5 +517,73 @@ mod luma_units_tests {
                 .all(|channel| describe(editor.project(), channel).is_none())
         );
         assert!(all_keys(editor.project(), &channels).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod source_text_channel_tests {
+    use super::*;
+    use libre_effects_core::{Command, Editor, TrackEdit};
+
+    #[test]
+    fn source_text_is_never_described_or_collected_as_a_value_or_speed_lane() {
+        let mut editor = Editor::default();
+        editor
+            .execute(Command::AddContent {
+                content: Content::Text {
+                    text: "First".into(),
+                    font_size: 48.,
+                },
+                width: 400.,
+                height: 120.,
+                name: "Title".into(),
+            })
+            .unwrap();
+        let source = GraphChannel {
+            id: 1,
+            property: PropertyPath::SourceText,
+        };
+        let numeric = GraphChannel {
+            id: 1,
+            property: Property::PositionX.into(),
+        };
+        editor
+            .execute(Command::EditTrack {
+                id: 1,
+                property: numeric.property,
+                edit: TrackEdit::ToggleKey { frame: 10 },
+            })
+            .unwrap();
+        for animated in [false, true] {
+            if animated {
+                editor
+                    .execute(Command::EditTrack {
+                        id: 1,
+                        property: source.property,
+                        edit: TrackEdit::ToggleAnimation { frame: 10 },
+                    })
+                    .unwrap();
+                editor
+                    .execute(Command::EditSourceText {
+                        id: 1,
+                        frame: 30,
+                        text: "Second 🦋".into(),
+                    })
+                    .unwrap();
+            }
+            let before = editor.project().clone();
+            assert!(describe(&before, source).is_none());
+            assert!(describe(&before, numeric).is_some());
+            assert_eq!(
+                all_keys(&before, &[source, numeric]),
+                [KeyRef {
+                    id: 1,
+                    property: numeric.property,
+                    frame: 10,
+                }]
+                .into()
+            );
+            assert_eq!(editor.project(), &before);
+        }
     }
 }

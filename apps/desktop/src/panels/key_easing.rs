@@ -18,7 +18,7 @@ pub(super) fn shortcut(event: &KeyDownEvent) -> Option<(bool, bool)> {
 }
 
 /// Validate the whole selection before creating a single undo transaction.
-/// Path poses have a different interpolation model and are rejected explicitly.
+/// Opaque Path poses and Hold-only Source Text are rejected explicitly.
 pub(super) fn selected(
     project: &Project,
     keys: &[KeyRef],
@@ -27,8 +27,15 @@ pub(super) fn selected(
 ) -> Result<Option<Command>, String> {
     let mut commands = Vec::new();
     for key in keys {
-        if matches!(key.property, libre_effects_core::PropertyPath::Path(_)) {
-            return Err("Easy Ease currently supports scalar keys; deselect path keys".into());
+        if matches!(
+            key.property,
+            libre_effects_core::PropertyPath::Path(_)
+                | libre_effects_core::PropertyPath::SourceText
+        ) {
+            return Err(
+                "Easy Ease currently supports scalar keys; deselect path keys and Source Text keys"
+                    .into(),
+            );
         }
         let layer = project
             .composition()
@@ -37,9 +44,9 @@ pub(super) fn selected(
         if layer.locked() {
             return Err("Unlock the selected layers before easing keyframes".into());
         }
-        let track = layer
-            .track(key.property)
-            .ok_or("Easy Ease currently supports scalar keys; deselect path keys")?;
+        let track = layer.track(key.property).ok_or(
+            "Easy Ease currently supports scalar keys; deselect path keys and Source Text keys",
+        )?;
         if !track.keys().contains_key(&key.frame) {
             return Err("Selected keyframe no longer exists".into());
         }
@@ -220,6 +227,72 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn source_text_rejects_every_f9_direction_and_mixed_selection_atomically() {
+        let (mut editor, numeric) = scene();
+        editor
+            .execute(Command::AddContent {
+                content: libre_effects_core::Content::Text {
+                    text: "First".into(),
+                    font_size: 48.,
+                },
+                width: 400.,
+                height: 120.,
+                name: "Title".into(),
+            })
+            .unwrap();
+        let source = KeyRef {
+            id: 3,
+            property: libre_effects_core::PropertyPath::SourceText,
+            frame: 30,
+        };
+        editor
+            .execute(Command::EditTrack {
+                id: source.id,
+                property: source.property,
+                edit: TrackEdit::ToggleAnimation { frame: 10 },
+            })
+            .unwrap();
+        for frame in [30, 60] {
+            editor
+                .execute(Command::EditTrack {
+                    id: source.id,
+                    property: source.property,
+                    edit: TrackEdit::ToggleKey { frame },
+                })
+                .unwrap();
+        }
+        editor
+            .execute(Command::RenameLayer {
+                id: 3,
+                name: "Redo witness".into(),
+            })
+            .unwrap();
+        editor.undo();
+        let before = editor.project().clone();
+        for chord in ["f9", "shift-f9", "ctrl-shift-f9"] {
+            let (incoming, outgoing) = shortcut(&event(chord)).unwrap();
+            for keys in [
+                vec![source],
+                vec![numeric[0], source],
+                vec![source, numeric[0]],
+            ] {
+                assert!(
+                    selected(&before, &keys, incoming, outgoing)
+                        .unwrap_err()
+                        .contains("Source Text")
+                );
+                assert_eq!(editor.project(), &before);
+                assert!(editor.can_redo());
+            }
+        }
+        editor.redo();
+        assert_eq!(
+            editor.project().composition().layer(3).unwrap().name(),
+            "Redo witness"
+        );
+    }
+
     #[test]
     fn invalid_selection_rejects_whole_edit_and_empty_or_missing_side_is_noop() {
         let (mut e, keys) = scene();

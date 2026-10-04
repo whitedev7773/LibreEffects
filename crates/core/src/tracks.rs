@@ -9,6 +9,7 @@ pub enum PropertyPath {
     },
     Shape(ShapeParam),
     Text(TextParam),
+    SourceText,
     Path(PathTarget),
     Mask {
         mask: u64,
@@ -59,6 +60,12 @@ impl Layer {
                 _ => return None,
             },
             PropertyPath::Shape(p) => p.label().into(),
+            PropertyPath::SourceText => {
+                if !matches!(self.content, Content::Text { .. }) {
+                    return None;
+                }
+                "Source Text".into()
+            }
             PropertyPath::Text(p) => {
                 if !matches!(self.content, Content::Text { .. }) {
                     return None;
@@ -105,6 +112,8 @@ impl Layer {
                 Content::Shape(s) if s.has_parameter(p) => s.parameters.get(&p),
                 _ => None,
             },
+            PropertyPath::SourceText => matches!(self.content, Content::Text { .. })
+                .then_some(&self.source_text_animation.timing),
             PropertyPath::Text(p) => matches!(self.content, Content::Text { .. })
                 .then(|| self.text_parameters.get(&p))
                 .flatten(),
@@ -138,7 +147,7 @@ impl Layer {
                 _ => return None,
             },
             PropertyPath::Text(p) => self.text_value_at(p, frame)?,
-            PropertyPath::Path(_) => return None,
+            PropertyPath::Path(_) | PropertyPath::SourceText => return None,
             PropertyPath::Mask { mask, parameter } => self
                 .path_masks
                 .iter()
@@ -171,6 +180,7 @@ impl Layer {
                 .into_iter()
                 .flatten(),
             )
+            .chain(matches!(self.content, Content::Text { .. }).then_some(PropertyPath::SourceText))
             .chain(self.text_parameters.keys().copied().map(PropertyPath::Text))
             .chain(self.time_remap.as_ref().map(|_| PropertyPath::TimeRemap))
             .chain(match &self.content {
@@ -230,7 +240,8 @@ impl Layer {
         let data = self.track(property)?.keys().get(&frame)?.clone();
         let effect_kind = match property {
             PropertyPath::Contents { .. } => None,
-            PropertyPath::Text(_)
+            PropertyPath::SourceText
+            | PropertyPath::Text(_)
             | PropertyPath::Shape(_)
             | PropertyPath::Path(_)
             | PropertyPath::Mask { .. }
@@ -242,6 +253,9 @@ impl Layer {
             }
         };
         Some(KeyCopy {
+            source_text: (property == PropertyPath::SourceText)
+                .then(|| self.source_text_at(frame).map(str::to_owned))
+                .flatten(),
             key: KeyRef {
                 id: self.id,
                 property,
@@ -271,6 +285,8 @@ impl Layer {
                 Content::Shape(s) if s.has_parameter(p) => Some(s.shape_track_mut(p, self.color)),
                 _ => None,
             },
+            PropertyPath::SourceText => matches!(self.content, Content::Text { .. })
+                .then_some(&mut self.source_text_animation.timing),
             PropertyPath::Text(p) => self.text_track_mut(p),
             PropertyPath::Path(target) => {
                 self.path_animation_mut(target).map(|(_, a)| &mut a.timing)
@@ -551,6 +567,7 @@ mod tests {
 
 pub(super) fn command(id: LayerId, property: PropertyPath, edit: TrackEdit) -> Command {
     match property {
+        PropertyPath::SourceText => Command::EditTrack { id, property, edit },
         PropertyPath::Contents { item, parameter } => Command::Contents {
             id,
             edit: ContentsEdit::Track {

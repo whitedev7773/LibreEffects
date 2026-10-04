@@ -218,7 +218,7 @@ pub(crate) struct Session {
     pub id: LayerId,
     pub frame: Frame,
     pub world: Affine,
-    /// Frozen playhead geometry. Existing source commits use `base_font_size`.
+    /// Frozen playhead geometry. Existing source commits never persist typography.
     pub font_size: f64,
     pub width: f64,
     pub height: f64,
@@ -228,7 +228,6 @@ pub(crate) struct Session {
     base: Project,
     seed: Vec<Command>,
     revision: u64,
-    base_font_size: Option<f64>,
 }
 impl Session {
     pub fn line_edge(&mut self, end: bool, document: bool, extend: bool) {
@@ -313,7 +312,6 @@ impl Session {
     ) -> Result<Self, String> {
         let mut temporary = Editor::default();
         temporary.replace_project(project.clone())?;
-        let existing = id.is_some();
         let mut seed = vec![];
         let id = if let Some(id) = id {
             id
@@ -360,7 +358,7 @@ impl Session {
         if layer.locked() {
             return Err("Unlock the text layer before editing".into());
         }
-        let Content::Text { text, font_size } = layer.content() else {
+        let Some(text) = layer.source_text_at(frame) else {
             return Err("Select a text layer".into());
         };
         let world = comp
@@ -371,7 +369,7 @@ impl Session {
         let mut style = layer.text_style();
         typography.apply_to_style(&mut style);
         Ok(Self {
-            buffer: Buffer::new(text.clone()),
+            buffer: Buffer::new(text.into()),
             id,
             frame,
             world,
@@ -384,7 +382,6 @@ impl Session {
             base: project.clone(),
             seed,
             revision,
-            base_font_size: existing.then_some(*font_size),
         })
     }
     pub fn valid(&self, project: &Project, revision: u64, frame: Frame) -> bool {
@@ -395,7 +392,8 @@ impl Session {
             !self.buffer.text.is_empty()
         } else {
             self.base.composition().layer(self.id).is_some_and(|l| {
-                matches!(l.content(),Content::Text{text,..} if text!=&self.buffer.text)
+                l.source_text_at(self.frame)
+                    .is_some_and(|text| text != self.buffer.text)
                     || (self.style.paragraph
                         && (l.width() != self.width || l.height() != self.height))
             })
@@ -403,16 +401,29 @@ impl Session {
     }
     pub fn command(&self) -> Command {
         let mut commands = self.seed.clone();
-        commands.push(Command::SetContent {
-            id: self.id,
-            content: Content::Text {
+        if self.seed.is_empty() {
+            // Edit from the immutable frame sample. Repeated previews operate on
+            // fresh clones, so their interned drafts cannot grow the live pool.
+            commands.push(Command::EditSourceText {
+                id: self.id,
+                frame: self.frame,
                 text: self.buffer.text.clone(),
-                // Source editing must never bake a sampled animation value
-                // into the persisted fallback, even at an existing keyframe.
-                font_size: self.base_font_size.unwrap_or(self.font_size),
-            },
-        });
-        if self.style.paragraph {
+            });
+        } else {
+            commands.push(Command::SetContent {
+                id: self.id,
+                content: Content::Text {
+                    text: self.buffer.text.clone(),
+                    font_size: self.font_size,
+                },
+            });
+        }
+        if self.style.paragraph
+            && (!self.seed.is_empty()
+                || self.base.composition().layer(self.id).is_some_and(|layer| {
+                    layer.width() != self.width || layer.height() != self.height
+                }))
+        {
             commands.push(Command::SetTextBox {
                 id: self.id,
                 width: self.width,
@@ -428,6 +439,10 @@ impl Session {
         Ok(e.project().clone())
     }
 }
+
+#[cfg(test)]
+#[path = "source_text_session_tests.rs"]
+mod source_text_tests;
 
 #[cfg(test)]
 #[path = "text_paint_session_tests.rs"]

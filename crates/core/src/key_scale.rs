@@ -48,6 +48,9 @@ pub(super) fn apply(state: &mut Snapshot, keys: &[KeyRef], scale: KeyScale) -> R
         if matches!(key.property, PropertyPath::Path(_)) {
             return Err("Geometry path keys do not support scalar key scaling".into());
         }
+        if key.property == PropertyPath::SourceText && scale.value_scale != 1.0 {
+            return Err("Source Text supports time-only key scaling".into());
+        }
         tracks
             .entry((key.id, key.property))
             .or_default()

@@ -28,6 +28,20 @@ mod text_box;
 #[path = "text_input.rs"]
 mod text_input;
 
+/// Point text falls back to the layer box only when the current Hold sample
+/// is empty. The static baseline may contain a different string.
+fn text_layer_hit(layer: &libre_effects_core::Layer, frame: u32, local: [f64; 2]) -> bool {
+    let Some(text) = layer.source_text_at(frame) else {
+        return false;
+    };
+    if text.is_empty() || layer.text_style().paragraph {
+        (0.0..=layer.width()).contains(&local[0]) && (0.0..=layer.height()).contains(&local[1])
+    } else {
+        crate::text_edit::layout::Layout::for_layer(layer, frame)
+            .is_some_and(|layout| layout.contains(local))
+    }
+}
+
 #[derive(Clone)]
 struct GuideGesture {
     original: Vec<Guide>,
@@ -575,24 +589,12 @@ impl Preview {
                 .layers()
                 .iter()
                 .find(|l| {
-                    let libre_effects_core::Content::Text { text, .. } = l.content() else {
-                        return false;
-                    };
                     !l.locked()
                         && comp.layer_active(l, frame, true)
                         && comp
                             .world_transform(l.id(), frame)
                             .and_then(|m| m.inverse())
-                            .is_some_and(|m| {
-                                if text.is_empty() || l.text_style().paragraph {
-                                    let local = m.point(p);
-                                    (0.0..=l.width()).contains(&local[0])
-                                        && (0.0..=l.height()).contains(&local[1])
-                                } else {
-                                    crate::text_edit::layout::Layout::for_layer(l, frame)
-                                        .is_some_and(|layout| layout.contains(m.point(p)))
-                                }
-                            })
+                            .is_some_and(|m| text_layer_hit(l, frame, m.point(p)))
                 })
                 .map(|l| l.id())
                 .filter(|_| !(state.tool == Tool::Text && event.modifiers.shift));
@@ -1910,3 +1912,54 @@ mod tests {
 #[cfg(test)]
 #[path = "preview_vertex_tests.rs"]
 mod numeric_vertex_tests;
+
+#[cfg(test)]
+mod source_text_tests {
+    use super::*;
+    use libre_effects_core::{Content, Editor, PropertyPath, TrackEdit};
+
+    #[test]
+    fn empty_text_hit_fallback_follows_the_sample_in_both_baseline_directions() {
+        for baseline in ["", "A"] {
+            let mut e = Editor::default();
+            e.execute(Command::AddContent {
+                content: Content::Text {
+                    text: baseline.into(),
+                    font_size: 48.0,
+                },
+                width: 600.0,
+                height: 400.0,
+                name: "Text".into(),
+            })
+            .unwrap();
+            e.execute(Command::EditTrack {
+                id: 1,
+                property: PropertyPath::SourceText,
+                edit: TrackEdit::ToggleAnimation { frame: 10 },
+            })
+            .unwrap();
+            e.execute(Command::EditSourceText {
+                id: 1,
+                frame: 30,
+                text: if baseline.is_empty() {
+                    "A".into()
+                } else {
+                    "".into()
+                },
+            })
+            .unwrap();
+            let before = e.project().clone();
+            let layer = e.selected_layer().unwrap();
+            for frame in [0, 10, 29, 30, 60] {
+                let empty = layer.source_text_at(frame).unwrap().is_empty();
+                assert_eq!(text_layer_hit(layer, frame, [590.0, 390.0]), empty);
+                assert!(!text_layer_hit(layer, frame, [-1.0, -1.0]));
+                assert!(!text_layer_hit(layer, frame, [601.0, 401.0]));
+            }
+            assert_eq!(e.project(), &before);
+        }
+        let mut e = Editor::default();
+        e.execute(Command::AddSolid).unwrap();
+        assert!(!text_layer_hit(e.selected_layer().unwrap(), 0, [1.0, 1.0]));
+    }
+}

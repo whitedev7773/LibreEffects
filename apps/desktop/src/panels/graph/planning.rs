@@ -33,8 +33,11 @@ fn validate(project: &Project, keys: &[KeyRef]) -> Result<Vec<KeyRef>, String> {
         .into_iter()
         .collect();
     for key in &keys {
-        if matches!(key.property, PropertyPath::Path(_)) {
-            return Err("Geometry paths are not scalar graph channels".into());
+        if matches!(
+            key.property,
+            PropertyPath::Path(_) | PropertyPath::SourceText
+        ) {
+            return Err("Path and Source Text timing are not scalar graph channels".into());
         }
         let layer = project
             .composition()
@@ -704,3 +707,109 @@ impl TimeGesture {
 #[cfg(test)]
 #[path = "planning_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod source_text_planning_tests {
+    use super::*;
+    use libre_effects_core::{Content, Property};
+
+    #[test]
+    fn source_text_cannot_enter_any_graph_plan_or_mixed_clipboard_preview() {
+        let mut editor = Editor::default();
+        editor
+            .execute(Command::AddContent {
+                content: Content::Text {
+                    text: "First".into(),
+                    font_size: 48.,
+                },
+                width: 400.,
+                height: 120.,
+                name: "Title".into(),
+            })
+            .unwrap();
+        for property in [PropertyPath::SourceText, Property::PositionX.into()] {
+            for frame in [10, 30] {
+                editor
+                    .execute(Command::EditTrack {
+                        id: 1,
+                        property,
+                        edit: TrackEdit::ToggleKey { frame },
+                    })
+                    .unwrap();
+            }
+        }
+        let source = KeyRef {
+            id: 1,
+            property: PropertyPath::SourceText,
+            frame: 10,
+        };
+        let numeric = KeyRef {
+            property: Property::PositionX.into(),
+            ..source
+        };
+        editor
+            .execute(Command::RenameLayer {
+                id: 1,
+                name: "Redo witness".into(),
+            })
+            .unwrap();
+        editor.undo();
+        let before = editor.project().clone();
+        for keys in [
+            vec![
+                source,
+                KeyRef {
+                    frame: 30,
+                    ..source
+                },
+            ],
+            vec![numeric, source],
+            vec![source, numeric],
+        ] {
+            assert!(EditPlan::translate(&before, &keys, 5, Some(source)).is_err());
+            assert!(EditPlan::scale_time(&before, &keys, 10., 2., Some(source)).is_err());
+            assert!(EditPlan::scale_value(&before, &keys, 2., Some(source)).is_err());
+            assert!(EditPlan::delete(&before, &keys).is_err());
+            for interpolation in [
+                Interpolation::Hold,
+                Interpolation::Linear,
+                Interpolation::Smooth,
+            ] {
+                assert!(EditPlan::interpolation(&before, &keys, interpolation).is_err());
+            }
+            for mode in [
+                TemporalMode::Independent,
+                TemporalMode::Continuous,
+                TemporalMode::Auto,
+            ] {
+                assert!(EditPlan::temporal_mode(&before, &keys, mode).is_err());
+            }
+            assert!(EditPlan::ease(&before, &keys, true, true).is_err());
+            let copies: Vec<_> = keys
+                .iter()
+                .map(|key| {
+                    before
+                        .composition()
+                        .layer(key.id)
+                        .unwrap()
+                        .copy_key(key.property, key.frame)
+                        .unwrap()
+                })
+                .collect();
+            assert!(
+                EditPlan::paste_copies(
+                    &before,
+                    &copies,
+                    &[channel(source), channel(numeric)],
+                    Some(channel(numeric)),
+                    60,
+                    None,
+                    &[],
+                )
+                .is_err()
+            );
+            assert_eq!(editor.project(), &before);
+            assert!(editor.can_redo());
+        }
+    }
+}

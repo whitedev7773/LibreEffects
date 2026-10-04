@@ -3,7 +3,7 @@
 `.lep` is the native Libre Effects Project file extension. It is a bounded binary
 container for portable project metadata, optional editor view state, and embedded
 images. The container version is **1**. The project's JSON schema version remains
-independent (currently **52**); choosing this format does not upgrade that schema.
+independent (currently **53**); choosing this format does not upgrade that schema.
 Schema 48 adds optional layer-wide text-paint tracks. Schema 49 adds sparse
 `FontSize`, `Tracking` and `Leading` tracks in the same text-parameter map. Any
 materialized typography track, including a keyless override or an inactive
@@ -38,6 +38,20 @@ keyless 100%, disabled paint or an inactive composition. Existing RGB/Stroke Wid
 tracks still require 48 and typography 49. An unchanged default-value edit does
 not materialize a track or upgrade schema. LEP 1, VIEW 1/2 and typed address 1 remain
 unchanged; saved opacity pins require their corresponding materialized track.
+
+Schema 53 adds the default-skipped layer `source_text_animation` field, separate
+from numeric `text_parameters` and TextStyle. It stores `strings` (UTF-8 pool) and
+`timing` (opaque pool indices with Hold-only keys); `Content::Text.text` remains
+the static baseline. Before the first key use the first string, then hold the
+latest key. Empty strings are valid. Nondefault keyless storage, invalid indices,
+non-Hold interpolation or temporal handles/modes are rejected. Off/last-key
+operations bake the chosen fallback into the baseline and clear the pool/timing.
+Limits are 16,384 bytes per string, 10,000 strings and keys, 1 MiB pool bytes per
+layer, plus the existing 16 MiB escaped metadata bound. Live indices remain stable;
+unreferenced pool storage can be reused. Every nondefault animation requires schema
+53, including in inactive compositions. Static old text does not gain the field.
+LEP 1 and VIEW 1/2 remain unchanged. Source Text is a nonnumeric property and cannot
+be serialized as a numeric Graph address; existing pins/ranges retain address 1.
 
 A numeric project schema newer than this reader's supported maximum is rejected
 with both version numbers before model deserialization or asset resolution. This

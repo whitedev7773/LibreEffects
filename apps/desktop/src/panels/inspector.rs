@@ -19,18 +19,16 @@ fn text_field_command(
     if layer.locked() {
         return Err("Unlock the text layer before editing".into());
     }
-    let Content::Text { text, font_size } = layer.content() else {
+    let Some(text) = layer.source_text_at(frame) else {
         return Err("Select a text layer".into());
     };
     match index {
-        // Source Text is static and always retains the base font size. Existing
-        // typography tracks are independent of this content replacement.
-        0 => Ok((text != value).then(|| Command::SetContent {
+        // Compare the displayed sample before interning. Unchanged input at an
+        // unkeyed frame must not materialize a key or change independent styling.
+        0 => Ok((text != value).then(|| Command::EditSourceText {
             id: layer.id(),
-            content: Content::Text {
-                text: value.into(),
-                font_size: *font_size,
-            },
+            frame,
+            text: value.into(),
         })),
         1 | 11 | 12 => layer.text_value_command(
             text_field_parameter(index).unwrap(),
@@ -491,8 +489,8 @@ impl Render for Inspector {
             _ => layer.color(),
         };
         let mut entries = vec![(2, "Fill (hex)", format!("{fill_color:06X}"))];
-        if let Content::Text { text, .. } = layer.content() {
-            entries.insert(0, (0, "Text", text.clone()));
+        if let Some(text) = layer.source_text_at(frame) {
+            entries.insert(0, (0, "Source Text", text.to_owned()));
             entries.insert(
                 1,
                 (
@@ -824,13 +822,23 @@ impl Render for Inspector {
                     .items_center()
                     .child(
                         div()
-                            .w(px(if index == 11 || index == 12 {
+                            .w(px(if index == 0 || index == 11 || index == 12 {
                                 155.0
                             } else {
                                 105.0
                             }))
                             .flex()
                             .items_center()
+                            .when(index == 0 && !locked, |d| {
+                                d.child(super::timeline::source_text_control(
+                                    &self.state,
+                                    &layer,
+                                    frame,
+                                    super::timeline::SourceTextControl::Animation,
+                                    self.extra_source.clone(),
+                                    "inspector",
+                                ))
+                            })
                             .when(
                                 text_field_parameter(index).is_some()
                                     && !locked
@@ -1326,5 +1334,160 @@ mod typography_tests {
         for index in [11, 12] {
             assert!(text_field_command(e.selected_layer().unwrap(), 17, index, "50").is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod source_text_tests {
+    use super::*;
+
+    fn state() -> EditorState {
+        let mut s = EditorState::default();
+        s.editor
+            .execute(Command::AddContent {
+                content: Content::Text {
+                    text: "Baseline".into(),
+                    font_size: 48.0,
+                },
+                width: 400.0,
+                height: 120.0,
+                name: "Text".into(),
+            })
+            .unwrap();
+        s.editor
+            .execute(Command::EditTrack {
+                id: 1,
+                property: PropertyPath::SourceText,
+                edit: TrackEdit::ToggleAnimation { frame: 10 },
+            })
+            .unwrap();
+        s.editor
+            .execute(Command::EditSourceText {
+                id: 1,
+                frame: 40,
+                text: "Changed 🦋\r\n世界".into(),
+            })
+            .unwrap();
+        s.frame = 20;
+        s
+    }
+
+    #[test]
+    fn inspector_source_text_reads_hold_sample_and_edits_only_current_source() {
+        let mut s = state();
+        for parameter in [
+            TextParam::FontSize,
+            TextParam::FillOpacity,
+            TextParam::StrokeOpacity,
+        ] {
+            s.editor
+                .execute(Command::EditText {
+                    id: 1,
+                    parameter,
+                    edit: TrackEdit::ToggleAnimation { frame: 0 },
+                })
+                .unwrap();
+        }
+        let layer = s.editor.selected_layer().unwrap();
+        let style = layer.text_style();
+        let baseline = layer.content().clone();
+        let numeric: Vec<_> = layer
+            .track_paths()
+            .into_iter()
+            .filter(|p| *p != PropertyPath::SourceText)
+            .map(|p| (p, layer.track(p).unwrap().clone()))
+            .collect();
+        for (frame, value) in [
+            (0, "Baseline"),
+            (20, "Baseline"),
+            (40, "Changed 🦋\r\n世界"),
+            (80, "Changed 🦋\r\n世界"),
+        ] {
+            assert!(
+                text_field_command(layer, frame, 0, value)
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        s.editor
+            .execute(Command::RenameLayer {
+                id: 1,
+                name: "Temporary".into(),
+            })
+            .unwrap();
+        s.editor.undo();
+        let origin = s.editor.project().clone();
+        assert!(s.editor.can_redo());
+        assert!(
+            text_field_command(s.editor.selected_layer().unwrap(), 20, 0, "Baseline")
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(s.editor.project(), &origin);
+        assert!(s.editor.can_redo());
+        let text = "  🦋\r\nWorld  ";
+        let command = text_field_command(s.editor.selected_layer().unwrap(), 20, 0, text)
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(&command, Command::EditSourceText { id: 1, frame: 20, text: value } if value == text)
+        );
+        s.editor.execute(command).unwrap();
+        let layer = s.editor.selected_layer().unwrap();
+        assert_eq!(layer.source_text_at(20), Some(text));
+        assert_eq!(layer.source_text_at(39), Some(text));
+        assert_eq!(layer.source_text_at(40), Some("Changed 🦋\r\n世界"));
+        assert_eq!(layer.content(), &baseline);
+        assert_eq!(layer.text_style(), style);
+        for (p, track) in numeric {
+            assert_eq!(layer.track(p), Some(&track));
+        }
+        s.editor.undo();
+        assert_eq!(s.editor.project(), &origin);
+        s.editor.redo();
+        let command = text_field_command(s.editor.selected_layer().unwrap(), 20, 0, "")
+            .unwrap()
+            .unwrap();
+        s.editor.execute(command).unwrap();
+        assert_eq!(
+            s.editor.selected_layer().unwrap().source_text_at(20),
+            Some("")
+        );
+    }
+
+    #[test]
+    fn source_text_input_binding_rejects_source_frame_revision_layer_and_playback_changes() {
+        let mut s = state();
+        let target = InputTarget::new(&s).unwrap();
+        assert!(target.current(&s));
+        s.frame += 1;
+        assert!(!target.current(&s));
+        s.frame -= 1;
+        s.document_revision += 1;
+        assert!(!target.current(&s));
+        s.document_revision -= 1;
+        s.playing = true;
+        assert!(!target.current(&s));
+        s.playing = false;
+        s.editor
+            .execute(Command::EditSourceText {
+                id: 1,
+                frame: 40,
+                text: "Different future source".into(),
+            })
+            .unwrap();
+        // Even an unchanged current Hold sample cannot accept a stale document.
+        assert_eq!(
+            s.editor.selected_layer().unwrap().source_text_at(s.frame),
+            Some("Baseline")
+        );
+        assert!(!target.current(&s));
+        s.editor.undo();
+        assert!(target.current(&s));
+        s.editor.execute(Command::ToggleLocked(1)).unwrap();
+        assert!(!target.current(&s));
+        s.editor.undo();
+        s.editor.execute(Command::AddSolid).unwrap();
+        assert!(!target.current(&s));
     }
 }
