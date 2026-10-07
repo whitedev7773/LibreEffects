@@ -57,6 +57,24 @@ fn near(a: f32, b: f32) {
 }
 
 #[test]
+fn continuous_audio_stops_at_precise_endpoint_inside_a_visual_frame() {
+    let e = scene("missing.wav", 60.into());
+    let mut value = serde_json::to_value(e.project()).unwrap();
+    value["version"] = serde_json::json!(81);
+    let layer = &mut value["composition"]["layers"][0];
+    layer["precise_range"] = serde_json::json!([-60.0, 100.5]);
+    layer["in_frame"] = serde_json::json!(0);
+    layer["out_frame"] = serde_json::json!(101);
+    let project = libre_effects_core::Project::from_json(&value.to_string()).unwrap();
+    let layer = &project.composition().layers()[0];
+    let position = |seconds| voice_position(std::iter::once((layer, 60.into(), 180)), seconds);
+    assert!(position(100.499 / 60.0).unwrap().is_some());
+    assert!(position(100.5 / 60.0).unwrap().is_none());
+    assert!(position(100.75 / 60.0).unwrap().is_none());
+    assert!(layer.active_at(100, 180));
+}
+
+#[test]
 fn mixer_uses_continuous_clock_and_identical_block_boundaries() {
     let mut e = scene("missing.wav", "30000/1001".parse().unwrap());
     e.execute(Command::SetVideoSpeed { id: 1, speed: 1.5 })

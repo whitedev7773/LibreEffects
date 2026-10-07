@@ -18,6 +18,11 @@ pub(crate) struct VideoInfo {
     pub source_fps: f64,
     pub audio: Option<libre_effects_core::AudioMetadata>,
 }
+/// Keep resize sampling bicubic while avoiding the fast YUV-to-RGB path's
+/// downward byte bias. Both rounding and full chroma interpolation are needed.
+pub(crate) fn video_scale_filter(width: u32, height: u32) -> String {
+    format!("scale={width}:{height}:flags=bicubic+accurate_rnd+full_chroma_int,setsar=1")
+}
 pub(crate) fn command(executable: &Path) -> Command {
     let mut c = Command::new(executable);
     #[cfg(windows)]
@@ -525,7 +530,7 @@ pub(crate) fn frame_png(
         "-frames:v",
         "1",
         "-vf",
-        &format!("scale={width}:{height},setsar=1"),
+        &video_scale_filter(width, height),
         "-pix_fmt",
         "rgba",
         "-c:v",

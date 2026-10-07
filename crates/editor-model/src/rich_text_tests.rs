@@ -137,6 +137,7 @@ fn rich_text_canonicalizes_only_adjacent_equal_styles() {
     assert_eq!(rich.style_at(4), &red);
     let noncanonical = RichText {
         point_origin: false,
+        proportional_metrics: false,
         positioning: None,
         default_style: red.clone(),
         runs: vec![run(0, 1, &red), run(1, 2, &red)],
@@ -391,6 +392,7 @@ fn rich_text_source_and_explicit_draft_style_commit_as_one_batch() {
     assert!(!editor.can_undo());
     let malformed = RichText {
         point_origin: false,
+        proportional_metrics: false,
         positioning: None,
         default_style: style(0),
         runs: vec![run(0, 1, &style(0))],
@@ -711,6 +713,7 @@ fn rich_text_rejects_grapheme_and_crlf_style_splits_after_canonicalization() {
         );
         let persisted = RichText {
             point_origin: false,
+            proportional_metrics: false,
             positioning: None,
             default_style: red.clone(),
             runs: different,

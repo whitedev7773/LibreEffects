@@ -919,6 +919,7 @@ fn process_chunk(
             &chunk.text,
             font,
             span.small_caps,
+            span.proportional_widths,
             span.apply_kerning,
             resolver,
             fontdb,
@@ -930,35 +931,36 @@ fn process_chunk(
             continue;
         }
 
-        // Overwrite span's glyphs.
-        let mut iter = tmp_glyphs.into_iter();
-        while let Some(new_glyph) = iter.next() {
-            if !span_contains(span, new_glyph.byte_idx) {
+        // Cluster lengths are UTF-8 bytes, not glyph counts. Replace whole
+        // connected source intervals at boundaries shared by both shapers.
+        // This also handles one ligature becoming several glyphs (and vice
+        // versa), combining marks, multibyte text and RTL visual ordering.
+        let mut boundaries: Vec<_> = glyphs
+            .iter()
+            .map(|glyph| glyph.byte_idx.value())
+            .filter(|at| tmp_glyphs.iter().any(|glyph| glyph.byte_idx.value() == *at))
+            .collect();
+        boundaries.push(chunk.text.len());
+        boundaries.sort_unstable();
+        boundaries.dedup();
+        for interval in boundaries.windows(2) {
+            let contains = |glyph: &Glyph| {
+                interval[0] <= glyph.byte_idx.value() && glyph.byte_idx.value() < interval[1]
+            };
+            if !tmp_glyphs
+                .iter()
+                .any(|glyph| contains(glyph) && span_contains(span, glyph.byte_idx))
+            {
                 continue;
             }
-
-            let Some(idx) = glyphs.iter().position(|g| g.byte_idx == new_glyph.byte_idx) else {
+            let Some(insert_at) = glyphs.iter().position(contains) else {
                 continue;
             };
-
-            let prev_cluster_len = glyphs[idx].cluster_len;
-            if prev_cluster_len < new_glyph.cluster_len {
-                // If the new font represents the same cluster with fewer glyphs
-                // then remove remaining glyphs.
-                for _ in 1..new_glyph.cluster_len {
-                    glyphs.remove(idx + 1);
-                }
-            } else if prev_cluster_len > new_glyph.cluster_len {
-                // If the new font represents the same cluster with more glyphs
-                // then insert them after the current one.
-                for j in 1..prev_cluster_len {
-                    if let Some(g) = iter.next() {
-                        glyphs.insert(idx + j, g);
-                    }
-                }
-            }
-
-            glyphs[idx] = new_glyph;
+            glyphs.retain(|glyph| !contains(glyph));
+            glyphs.splice(
+                insert_at..insert_at,
+                tmp_glyphs.iter().filter(|glyph| contains(glyph)).cloned(),
+            );
         }
     }
 
@@ -1304,12 +1306,20 @@ pub(crate) fn shape_text(
     text: &str,
     font: Arc<ResolvedFont>,
     small_caps: bool,
+    proportional_widths: bool,
     apply_kerning: bool,
     resolver: &FontResolver,
     fontdb: &mut Arc<fontdb::Database>,
 ) -> Vec<Glyph> {
-    let mut glyphs = shape_text_with_font(text, font.clone(), small_caps, apply_kerning, fontdb)
-        .unwrap_or_default();
+    let mut glyphs = shape_text_with_font(
+        text,
+        font.clone(),
+        small_caps,
+        proportional_widths,
+        apply_kerning,
+        fontdb,
+    )
+    .unwrap_or_default();
 
     // Remember all fonts used for shaping.
     let mut used_fonts = vec![font.id];
@@ -1337,6 +1347,7 @@ pub(crate) fn shape_text(
                 text,
                 fallback_font.clone(),
                 small_caps,
+                proportional_widths,
                 apply_kerning,
                 fontdb,
             )
@@ -1394,6 +1405,7 @@ fn shape_text_with_font(
     text: &str,
     font: Arc<ResolvedFont>,
     small_caps: bool,
+    proportional_widths: bool,
     apply_kerning: bool,
     fontdb: &fontdb::Database,
 ) -> Option<Vec<Glyph>> {
@@ -1427,6 +1439,9 @@ fn shape_text_with_font(
             let mut features = Vec::new();
             if small_caps {
                 features.push(rustybuzz::Feature::new(Tag::from_bytes(b"smcp"), 1, ..));
+            }
+            if proportional_widths {
+                features.push(rustybuzz::Feature::new(Tag::from_bytes(b"palt"), 1, ..));
             }
 
             if !apply_kerning {

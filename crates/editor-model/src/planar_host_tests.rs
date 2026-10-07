@@ -69,6 +69,26 @@ app.endUndoGroup();
 "#;
 
 #[test]
+fn jsx_reads_joined_xy_key_metadata_without_promoting_or_changing_source() {
+    let project = run(scene(false).project().clone(), 0, CURVE)
+        .unwrap()
+        .project;
+    let result = run(project.clone(), 0, r#"
+        var p=app.project.activeItem.layer(1).transform.position;
+        if(p.keyInInterpolationType(1)!==KeyframeInterpolationType.HOLD || p.keyOutInterpolationType(1)!==KeyframeInterpolationType.BEZIER) throw Error('independent sides');
+        var incoming=p.keyInTemporalEase(2), outgoing=p.keyOutTemporalEase(4);
+        if(incoming.length!==1 || incoming[0].speed!==1e-9 || incoming[0].influence!==62.5) throw Error('incoming ease');
+        if(outgoing[0].speed!==1e-199 || outgoing[0].influence!==17.25) throw Error('dormant ease');
+        var tangent=p.keyInSpatialTangent(1);
+        if(tangent.length!==2 || tangent[0]!==3 || tangent[1]!==-7) throw Error('XY tangent');
+        if(p.keySpatialContinuous(2)!==true || p.keySpatialAutoBezier(2)!==false || p.keyTemporalContinuous(2)!==false || p.keyTemporalAutoBezier(2)!==false) throw Error('flags');
+        tangent[0]=900;
+        if(p.keyInSpatialTangent(1)[0]!==3) throw Error('aliased tangent');
+    "#).unwrap();
+    assert_eq!(result.project, project);
+}
+
+#[test]
 fn jsx_restores_joined_xy_metadata_without_a_base_and_commits_one_undo() {
     let mut editor = scene(true);
     let original = editor.project().clone();

@@ -134,7 +134,7 @@ pub(crate) struct Preview {
     pending: Option<Request>,
     gradient_render_context: Option<preview_render::GradientContext>,
     decoder_revision: u64,
-    ready: Option<(Request, Result<crate::rendering::RenderedFrame, String>)>,
+    ready: Option<(Request, Result<crate::preview_frame::Frame, String>)>,
     // Only the displayed frame retains its evaluated scene, never every RAM frame.
     displayed: Option<(Request, Option<std::sync::Arc<libre_effects_core::Project>>)>,
     failed: Option<(Request, String)>,

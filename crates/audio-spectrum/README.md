@@ -1,8 +1,7 @@
 # Native stereo spectrum analysis
 
-This dependency implements the explicitly native `NativeV1` profile. It is not
-an After Effects compatibility mode or a calibrated recreation of another
-application's Audio Spectrum effect. It has no project, decoder, file, geometry,
+This dependency implements explicitly named `NativeV1` and `HammingV1` profiles.
+Neither establishes complete After Effects compatibility. It has no project, decoder, file, geometry,
 wall-clock, playback, or preceding-frame dependency. There are no dependencies
 outside Rust's standard library, and unsafe code is forbidden.
 
@@ -41,6 +40,28 @@ For example, a 90 ms input is 4,320 frames and uses an 8,192-point FFT. Adding
 output bands increases display sampling density, not the window's frequency
 resolution. Hann coherent gain normalizes a bin-centered sinusoid; arbitrary
 frequencies retain the window's leakage/scalloping and are not peak-corrected.
+
+## HammingV1
+
+`estimate_profile_work` and `analyze_profile` select this opt-in profile. Input,
+one-sided endpoint factors, finite-result rules and
+resource ceilings are shared with NativeV1. The differences are:
+
+- The periodic window is `0.54 - 0.46*cos(2*pi*i/N)`.
+- Stereo uses the arithmetic mean of both channels before taking magnitude.
+  Independent AE captures confirm antiphase cancellation, a half-height
+  one-channel signal, and the intermediate height of unequal channels.
+- Bin magnitudes divide by `N`, preserving the window's amplitude attenuation;
+  a bin-centered sine of amplitude 0.5 in both channels produces 0.27.
+- Band `i` samples `start + (end-start)*i/bands`, excluding the end frequency.
+- The FFT uses `min(4*next_power_of_two(N), 65536)` for denser interpolation.
+
+Independent AE digital-bar captures of 100/400 Hz tones at 60/90/120/180 ms
+motivate this profile. A continuous Hamming DFT predicts 1,031 of 1,032 measured
+integer bar heights exactly and the remaining one within a pixel. That evidence
+does not recover AE's internal transform, paint or all source
+sampling rules. HammingV1 retains an explicit deterministic native contract.
+NativeV1 remains the default and its coefficients are unchanged.
 
 ## Admission, allocation, and cancellation
 

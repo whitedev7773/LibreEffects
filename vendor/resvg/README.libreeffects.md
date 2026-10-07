@@ -48,6 +48,13 @@ asset decoders retain their upstream allocation behavior.
 
 ## Focused validation
 
+Quality raster-image minification averages premultiplied pixel coverage before
+the final bicubic/bilinear sampling. Original image bytes and image coordinates
+are preserved; nearest-neighbor pixel-art modes retain their original behavior.
+Synthetic rendered checkerboards and odd-sized transparent edges verify coverage
+and alpha without relying on project artwork. This improves minification but does
+not establish equivalence to AE's full image sampling pipeline.
+
 - `cargo test --offline --manifest-path vendor/resvg/Cargo.toml --lib`
 - `cargo check --offline --manifest-path vendor/resvg/Cargo.toml --no-default-features --lib`
 - `cargo test --offline --manifest-path vendor/usvg/Cargo.toml --lib gaussian_blur_edge_mode_tests`
@@ -58,3 +65,44 @@ a second implementation. Literal five-box and FIR boundary oracles, constant
 premultiplied corners, zero sigma, checked domain failures and memory caps are
 covered. This is a bounded native rendering contract, not a claim of complete
 SVG edgeMode or all AE GPU/kernel parity.
+
+## Explicit fractional-box mask feather
+
+The private usvg profile selects three horizontal fractional-box passes followed
+by three vertical passes, with transparent borders and floor-to-byte quantization
+after each pass. Sliding integer channel sums make work linear in pixel count,
+independent of radius. One bounded pixel scratch buffer is reused. Exact quarter
+turns swap axes and directional order together; arbitrary shear/rotation rejects.
+The profile never infers a radius from Gaussian stdDeviation and does not change
+an ordinary Gaussian filter. Both SVG writers preserve the explicit radius.
+
+The checked entry point is activated for this profile even without repeat-edge
+domains. Input/output copies, scratch, and containing buffers share allocation
+limits; errors identify the affected primitive. Literal impulse, independent
+direct convolution, premultiplied channels, quarter turns, invalid radii and
+memory/transform rejection are tested. Measured AE square-mask alpha remains
+within two levels for the sampled Feather 20/50 probes and one for 677. Full
+composition paint and AE's small-kernel behavior are separate qualifications.
+
+## Explicit opaque layer-opacity interpolation
+
+`data-libre-effects-compositing="opaque-opacity-byte257-v1"` on a normal group
+opts into `D + trunc(((S-D)*A+128)*257/65536)` for opaque source and destination
+pixels, where A is the rounded byte layer opacity. Zero retains D and 255 copies
+S. Signed division truncates toward zero; a signed right shift changes the result.
+Partial-alpha pairs are painted through the original tiny-skia implementation.
+This is a limited mathematical profile, not a complete AE compositing contract.
+
+The checked renderer activates for this profile without blur domains. A bounded
+intersection buffer records opaque overrides before the unchanged native draw;
+its bytes share the containing layer's live allocation cap. Placement intersects
+in i64 before indexing, including negative and completely offscreen coordinates.
+Conflicting blend modes and memory limits fail explicitly. Both usvg writers
+retain the private attribute and malformed profiles reject during parsing.
+An opacity-only checked tree retains the legacy ordinary-Gaussian group crop
+pixels while still checking each buffer and its live bytes. Trees with explicit
+box/repeat blur retain the stricter unclipped-support contract.
+The fixture contains 405 literal independently captured AE byte cases; checked
+SVG rendering, opacity endpoints, negative division boundaries and preservation
+of unqualified partial-alpha pixels are tested. Diagnostic PNG and the official
+render queue's TIFF output were independently compared for the seven gray ramps.

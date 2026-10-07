@@ -182,6 +182,7 @@ impl RichText {
     /// Callers compare exact source bytes separately.
     pub(crate) fn same_shaping_as(&self, other: &Self) -> bool {
         if self.point_origin != other.point_origin
+            || self.proportional_metrics != other.proportional_metrics
             || !self.default_style.same_shaping_as(&other.default_style)
             || self.runs.last().map(|run| run.end) != other.runs.last().map(|run| run.end)
         {

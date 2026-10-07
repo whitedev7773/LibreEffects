@@ -27,6 +27,12 @@ brand, so arbitrary objects and proxies around a path cannot forge a result.
 The authored `value` of a path property has the same brand. Path inspection and
 mask-reading methods are not exposed.
 
+For zero-handle polygons, `createPath` reproduces the float32 to signed 16.16
+coordinate storage measured in independent AE probes, including half-step
+rounding and overflow to -32768. Authored path values retain their exact captured
+coordinates. Curved paths retain the native relative-handle contract; their AE
+storage pipeline is not qualified and can also change vertex coordinates.
+
 `linear(t, tMin, tMax, first, last)` clamps to its endpoints and interpolates
 finite scalars or matching two-/three-component vectors. Its bounded contract
 requires an increasing time range with a finite span; it does not coerce values.
@@ -55,3 +61,42 @@ private path copies reach the serialized result; authored snapshots stay intact.
 
 The regression programs in this crate are independently authored synthetic
 fixtures. Original project expression sources are not included.
+
+Within one evaluation, immutable marker-key and Slider views are reused, and
+exact layer-name lookup uses a first-name index. Every lookup and Slider sample
+still charges the host-read budget, including cache hits. Invalid lookups and
+attempted mutations remain sticky batch failures. Nothing is cached across
+snapshots or frames. Development/test builds optimize the embedded C VM while
+retaining the same expression execution limits.
+
+For actual AE reference evidence, the desktop's `ae-expression-reference.jsx`
+captures explicit composition/time cases and exact expression source. The
+`compare_reference` example checks those local cases with production evaluator
+limits and an explicit numerical tolerance, reporting every mismatched property.
+These captures are separate from synthetic unit fixtures and do not attest to
+full AEP import, text rasterization or effect/render parity.
+
+## Bounded math and time helpers
+
+`add`, `sub`, `mul`, `div`, `dot`, `cross`, `length`, `normalize`, `clamp`,
+`degreesToRadians`, `radiansToDegrees` and `timeToFrames` are available to exact
+expression source. `linear` accepts both its three- and five-argument forms.
+
+Vector helpers admit one to four finite components. Add/subtract/dot/distance
+pad missing axes with zero; multiply/divide use a finite scalar. `cross` admits
+two three-component vectors. Clamp accepts three numbers or three vectors;
+scalar/vector mixtures reject. Zero-vector normalization, division by zero,
+nonfinite arithmetic, sparse arrays, accessors and implicit coercion reject the
+whole batch. Normalization scales before measuring magnitude, preserving tiny
+and very large finite directions. Final property dimensions remain unchanged.
+
+`timeToFrames` defaults to the snapshot's composition-local time and frame rate;
+native snapshots have no nonzero Adobe display-start origin. Absolute times round
+down, including negative values; durations round away from zero. The duration
+flag must be boolean, FPS positive, and the result an exact-range JS integer.
+
+These helpers are frozen, count against the existing host-read budget, and are
+reserved from explicit `local_bindings`. Helpers never mutate an authored value
+or add random/asynchronous capabilities. The reference semantics are documented
+in [Adobe's expression language reference](https://helpx.adobe.com/after-effects/desktop/work-with-expressions/expression-language-reference/expression-language-reference.html);
+the stricter native input bounds above remain part of this subset.

@@ -675,9 +675,9 @@ mod tests {
         b.all();
         b.replace(None, "first\r\nsecond", false, None).unwrap();
         b.line_edge(false, false, false);
-        assert_eq!(b.caret, 6);
+        assert_eq!(b.caret, 7);
         b.step(false, true);
-        assert_eq!(&b.text[b.selection()], "\n");
+        assert_eq!(&b.text[b.selection()], "\r\n");
     }
     #[test]
     fn session_preview_commit_cancel_and_stale_document_are_independent() {

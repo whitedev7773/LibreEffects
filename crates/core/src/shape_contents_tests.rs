@@ -38,6 +38,52 @@ fn contents_value(e: &mut Editor, item: u64, parameter: ContentsParam, value: f6
 }
 
 #[test]
+fn centered_parametric_geometry_resizes_about_position_and_converts_without_moving() {
+    let mut node = ContentsNode::with_defaults(ContentsKind::Parametric(ShapeKind::Rectangle));
+    let legacy = node.path_at(0).unwrap();
+    assert_eq!(legacy.vertices[0].position, [0.0, 0.0]);
+    node.centered = true;
+    node.set_static_value(ContentsParam::Transform(Property::PositionX), 10.0)
+        .unwrap();
+    node.set_static_value(ContentsParam::Width, 80.0).unwrap();
+    node.set_static_value(ContentsParam::Height, 40.0).unwrap();
+    assert_eq!(
+        node.path_at(0).unwrap().vertices[0].position,
+        [-30.0, -20.0]
+    );
+    let mut e = Editor::default();
+    e.execute(Command::AddContent {
+        content: Content::ShapeContents(ShapeContents::from_nodes(vec![node]).unwrap()),
+        width: 100.0,
+        height: 100.0,
+        name: "Centered geometry".into(),
+    })
+    .unwrap();
+    assert_eq!(e.project().version, 81);
+    contents_value(&mut e, 1, ContentsParam::Width, 120.0);
+    let resized = contents(&e).node(1).unwrap().path_at(0).unwrap();
+    assert_eq!(resized.vertices[0].position, [-50.0, -20.0]);
+    let saved = e.project().clone();
+    assert_eq!(
+        project_file::decode(&project_file::encode(&saved, None).unwrap())
+            .unwrap()
+            .project,
+        saved
+    );
+    let mut old = saved.clone();
+    old.version = 80;
+    assert!(old.validate().is_err());
+    edit(&mut e, ContentsEdit::ConvertPath { item: 1, frame: 0 });
+    let converted = contents(&e).node(1).unwrap();
+    assert!(!converted.centered);
+    assert_eq!(converted.path_at(0).unwrap(), resized);
+    e.undo();
+    assert_eq!(e.project(), &saved);
+    e.redo();
+    assert_eq!(contents(&e).node(1).unwrap().path_at(0).unwrap(), resized);
+}
+
+#[test]
 fn paint_blend_modes_roundtrip_and_reject_stale_versions_or_invalid_targets() {
     let mut e = scene();
     edit(&mut e, ContentsEdit::Promote);

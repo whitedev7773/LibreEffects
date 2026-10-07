@@ -154,6 +154,39 @@ impl PathMaskMode {
         }
     }
 }
+/// Explicit feather filtering; authored Feather values retain their own units.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub enum MaskFeatherKernel {
+    #[default]
+    GaussianV1,
+    /// Three horizontal then three vertical fractional box passes. Each pass
+    /// floors premultiplied byte channels. Positive Feather uses radius
+    /// `Feather * radius_per_unit + 0.5`; zero remains an exact no-op.
+    /// This mathematical profile does not claim complete AE equivalence.
+    FractionalBox3V1 { radius_per_unit: f64 },
+}
+impl MaskFeatherKernel {
+    pub fn is_default(&self) -> bool {
+        *self == Self::GaussianV1
+    }
+    pub fn valid(&self) -> bool {
+        match self {
+            Self::GaussianV1 => true,
+            Self::FractionalBox3V1 { radius_per_unit } => {
+                radius_per_unit.is_finite() && (0.0..=1.0).contains(radius_per_unit)
+            }
+        }
+    }
+    pub fn box_radius(&self, feather: f64) -> Option<f64> {
+        match self {
+            Self::FractionalBox3V1 { radius_per_unit } if feather > 0.0 => {
+                Some(feather * radius_per_unit + 0.5)
+            }
+            _ => None,
+        }
+    }
+}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PathMask {
@@ -164,6 +197,8 @@ pub struct PathMask {
     pub path: VectorPath,
     pub mode: PathMaskMode,
     pub inverted: bool,
+    #[serde(default, skip_serializing_if = "MaskFeatherKernel::is_default")]
+    pub feather_kernel: MaskFeatherKernel,
 }
 impl Default for PathMask {
     fn default() -> Self {
@@ -174,6 +209,7 @@ impl Default for PathMask {
             path: VectorPath::default(),
             mode: PathMaskMode::Add,
             inverted: false,
+            feather_kernel: MaskFeatherKernel::default(),
         }
     }
 }

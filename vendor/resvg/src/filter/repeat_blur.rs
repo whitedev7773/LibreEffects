@@ -89,7 +89,7 @@ fn contains(outer: IntRect, inner: IntRect) -> bool {
         && inner.bottom() <= outer.bottom()
 }
 
-fn box_support(sigma: f64) -> Result<u32, Failure> {
+pub(super) fn box_support(sigma: f64) -> Result<u32, Failure> {
     // Guard upstream's float-to-i32 widths and wl + 2 before entering its exact
     // width calculation. Practical memory limits are checked separately.
     let ideal = (12.0f32 * (sigma as f32).powi(2) / 5.0).sqrt() + 1.0;

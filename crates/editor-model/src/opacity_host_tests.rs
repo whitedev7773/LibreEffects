@@ -32,6 +32,47 @@ for(var k=1;k<=4;k++){
 if(p.numKeys!==4||p.keyTime(3)!==3||p.keyValue(3)!==100||p.nearestKeyIndex(2)!==2)throw Error('key identity');
 l.name='Opacity 검증';app.endUndoGroup();
 "#;
+
+#[test]
+fn jsx_reads_native_opacity_key_sides_and_exact_signed_ease_without_editing() {
+    let project = run(scene().project().clone(), 0, RESTORE).unwrap().project;
+    let result = run(project.clone(), 0, r#"
+        var p=app.project.activeItem.layer(1).transform.opacity;
+        if(p.keyInInterpolationType(1)!==KeyframeInterpolationType.BEZIER || p.keyOutInterpolationType(4)!==KeyframeInterpolationType.BEZIER) throw Error('interpolation');
+        var first=p.keyInTemporalEase(1), last=p.keyOutTemporalEase(4);
+        if(first.length!==1 || !(first[0] instanceof KeyframeEase) || first[0].speed!==-5e-324 || first[0].influence!==65) throw Error('incoming ease');
+        if(last.length!==1 || last[0].speed!==-1e-199 || last[0].influence!==35) throw Error('outgoing ease');
+        if(p.keyTemporalContinuous(2)!==false || p.keyTemporalAutoBezier(2)!==false) throw Error('flags');
+        first[0].speed=999;
+        if(p.keyInTemporalEase(1)[0].speed!==-5e-324) throw Error('read alias mutated source');
+    "#).unwrap();
+    assert_eq!(result.project, project);
+}
+
+#[test]
+fn jsx_key_metadata_rejects_bad_indexes_legacy_timing_and_spatial_scalar_reads() {
+    let project = run(scene().project().clone(), 0, RESTORE).unwrap().project;
+    for source in [
+        "var p=app.project.activeItem.layer(1).transform.opacity;try{p.keyInTemporalEase(0)}catch(e){}",
+        "var p=app.project.activeItem.layer(1).transform.opacity;try{p.keyOutInterpolationType(5)}catch(e){}",
+        "var p=app.project.activeItem.layer(1).transform.opacity;try{p.keyInTemporalEase(1.5)}catch(e){}",
+        "var p=app.project.activeItem.layer(1).transform.opacity;try{p.keyInSpatialTangent(1)}catch(e){}",
+    ] {
+        assert!(run(project.clone(), 0, source).is_err(), "{source}");
+    }
+    assert!(
+        run(
+            scene().project().clone(),
+            0,
+            r#"
+        var p=app.project.activeItem.layer(1).transform.opacity;
+        p.setValueAtTime(0,20);
+        try{p.keyInTemporalEase(1)}catch(e){}
+    "#
+        )
+        .is_err()
+    );
+}
 #[test]
 fn jsx_restores_each_side_and_dormant_signed_speeds_as_one_native_transaction() {
     let mut e = scene();

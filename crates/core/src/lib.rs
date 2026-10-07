@@ -3,13 +3,15 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-const PROJECT_VERSION: u32 = 80;
+const PROJECT_VERSION: u32 = 84;
 pub type Frame = u32;
 pub type LayerId = u64;
 pub type CompositionId = u64;
 
 mod blend;
 pub use blend::BlendMode;
+mod compositing;
+pub use compositing::CompositingProfile;
 mod paint_blend;
 pub use paint_blend::PaintBlend;
 mod color_curves;
@@ -45,6 +47,7 @@ mod luma_key_tests;
 pub use layer_transform::LayerTransformOp;
 mod layer_timing;
 mod opacity_timing;
+mod precise_range;
 pub use opacity_timing::{
     OpacityEase, OpacityEdit, OpacityInterpolation, OpacityKeyTiming, OpacityTiming,
 };
@@ -89,7 +92,7 @@ pub use path_animation::{PathAnimation, PathTarget};
 mod mask_animation;
 pub use mask_animation::MaskParam;
 mod paths;
-pub use paths::{PathMask, PathMaskMode, PathOrder, PathVertex, VectorPath};
+pub use paths::{MaskFeatherKernel, PathMask, PathMaskMode, PathOrder, PathVertex, VectorPath};
 mod shape_animation;
 mod shape_stroke;
 pub use shape_animation::ShapeParam;
@@ -274,6 +277,7 @@ impl Property {
             && match self {
                 Self::Opacity => (0.0..=100.0).contains(&value),
                 Self::ScaleX | Self::ScaleY => (-10_000.0..=10_000.0).contains(&value),
+                Self::PositionX | Self::PositionY => value.abs() <= 2_000_000_000_000_000.0,
                 _ => value.abs() <= 1_000_000.0,
             }
     }
@@ -351,6 +355,9 @@ impl AnimatedProperty {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Layer {
+    /// Composition-frame endpoints before clipping to the timeline's integer grid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    precise_range: Option<[f64; 2]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     planar_position: Option<SpatialPosition2>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -512,7 +519,7 @@ impl Layer {
         self.out_frame.unwrap_or(duration)
     }
     pub fn active_at(&self, frame: Frame, duration: Frame) -> bool {
-        self.visible && frame >= self.in_frame && frame < self.out_frame(duration)
+        self.active_at_sample(f64::from(frame), duration)
     }
     pub fn id(&self) -> LayerId {
         self.id
@@ -555,6 +562,8 @@ impl Layer {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Composition {
+    #[serde(default, skip_serializing_if = "CompositingProfile::is_default")]
+    compositing_profile: CompositingProfile,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     preserve_nested_frame_rate: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -743,6 +752,7 @@ impl Default for Project {
             next_composition_id: 2,
             other_compositions: BTreeMap::new(),
             composition: Composition {
+                compositing_profile: CompositingProfile::default(),
                 preserve_nested_frame_rate: None,
                 camera: None,
                 guides: Vec::new(),
@@ -776,6 +786,9 @@ impl Project {
     }
 
     fn validate(&self) -> Result<(), String> {
+        if self.version < 84 && compositing::materialized(self) {
+            return Err("Explicit opaque opacity compositing requires project version 84".into());
+        }
         if self.evaluated_frame.is_some() || self.render_sample.is_some() {
             return Err("An evaluated render view cannot be saved or committed".into());
         }
@@ -955,6 +968,7 @@ impl Project {
             }
             for layer in &comp.layers {
                 layer_timing::validate(layer, self.version)?;
+                precise_range::validate(layer, self.version, comp.duration)?;
                 expressions::validate(layer, self.version)?;
                 time_remap::validate(layer, comp.duration, self.version)?;
                 if !layer.text_style.valid()
@@ -1048,6 +1062,10 @@ impl Project {
 /// The future scripting bridge and native controls both dispatch these commands.
 #[derive(Clone, Debug)]
 pub enum Command {
+    SetCompositingProfile {
+        composition: CompositionId,
+        profile: CompositingProfile,
+    },
     SetPreserveNestedFrameRate {
         composition: CompositionId,
         preserve: bool,
@@ -1424,6 +1442,11 @@ pub enum Command {
         id: LayerId,
         masks: Vec<PathMask>,
     },
+    SetMaskFeatherKernel {
+        id: LayerId,
+        mask: u64,
+        kernel: MaskFeatherKernel,
+    },
     SetMask {
         id: LayerId,
         mask: Option<Mask>,
@@ -1551,6 +1574,12 @@ pub enum Command {
         id: LayerId,
         start: Frame,
         end: Frame,
+    },
+    /// Exact source endpoints in composition-frame units; the timeline clips them.
+    SetLayerRangeSamples {
+        id: LayerId,
+        start: f64,
+        end: f64,
     },
     ConfigureComposition {
         name: String,
@@ -1744,8 +1773,17 @@ impl Editor {
     }
 
     fn accept_candidate(&mut self, mut next: Snapshot) -> Result<(), String> {
-        if audio_spectrum::materialized(&next.project) {
-            next.project.version = next.project.version.max(79);
+        if compositing::materialized(&next.project) {
+            next.project.version = next.project.version.max(84);
+        }
+        if mask_animation::has_custom_kernel(&next.project) {
+            next.project.version = next.project.version.max(83);
+        }
+        if precise_range::materialized(&next.project) {
+            next.project.version = next.project.version.max(81);
+        }
+        if let Some(version) = audio_spectrum::required_version(&next.project) {
+            next.project.version = next.project.version.max(version);
         }
         if render_sampling::materialized(&next.project) {
             next.project.version = next.project.version.max(77);
@@ -1771,6 +1809,7 @@ impl Editor {
             return self.accept_candidate(next);
         }
         let expressions_only = expressions::edits_only(&self.current.project, &command)
+            || compositing::edits_only(&command, 0)
             || render_sampling::edits_only(&command)
             || effects::gaussian_mode_edits_only(&command)
             || audio_spectrum::edits_only(&command);
@@ -1791,6 +1830,7 @@ impl Editor {
         let spatial_only = spatial::edits_only(&command);
         let planar_only = planar::edits_only(&command);
         let opacity_only = opacity_timing::edits_only(&self.current.project, &command);
+        let mask_kernel_only = mask_animation::kernel_edits_only(&command, 0);
         let text_animator_only = text_animation::animator_edits_only(&command);
         let luma_values_only = effects::luma_value_edits_only(&command);
         let velocity_scales_only = key_velocity_scale::edits_only(&command);
@@ -1808,6 +1848,9 @@ impl Editor {
             || planar_only
             || opacity_only
             || text_animator_only
+            || mask_animation::has_custom_kernel(&self.current.project)
+            || compositing::materialized(&self.current.project)
+            || mask_kernel_only
         {
             // Validate the source too: a source-preserving edit must not repair invalid
             // historical schemas, excessive nesting or an oversized document.
@@ -1815,6 +1858,9 @@ impl Editor {
             document::validate_budget(&self.current.project)?;
         }
         apply(&mut next, command)?;
+        if precise_range::materialized(&next.project) {
+            next.project.version = next.project.version.max(81);
+        }
         if expressions_only && next != self.current && expressions::materialized(&next.project) {
             next.project.version =
                 next.project
@@ -1870,6 +1916,7 @@ impl Editor {
             || planar_only
             || opacity_only
             || text_animator_only
+            || mask_kernel_only
         {
             return self.accept_candidate(next);
         }
@@ -2256,6 +2303,9 @@ impl Editor {
 }
 
 fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
+    if let Some(result) = compositing::apply(state, &command) {
+        return result;
+    }
     if let Some(result) = render_sampling::apply(state, &command) {
         return result;
     }
@@ -2570,7 +2620,8 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
                     .as_ref()
                     .is_some_and(|position| position.keys.keys().any(|frame| frame >= duration))
                 || layer.in_frame >= *duration
-                || layer.out_frame.is_some_and(|end| end > *duration)
+                || (layer.precise_range.is_none()
+                    && layer.out_frame.is_some_and(|end| end > *duration))
                 || layer
                     .properties
                     .values()
@@ -2584,6 +2635,9 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
         comp.fps = *fps;
         comp.display_start = *display_start;
         comp.duration = *duration;
+        for layer in &mut comp.layers {
+            layer.project_precise_range(*duration);
+        }
         if let Some([start, end]) = comp.work_area {
             comp.work_area = Some([start.min(duration - 1), end.min(*duration)]);
         }
@@ -2599,6 +2653,7 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
         comp.layers.insert(
             0,
             Layer {
+                precise_range: None,
                 expressions: Vec::new(),
                 start_frame: None,
                 label_index: None,
@@ -2668,6 +2723,7 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
         | Command::DuplicateLayer(id) => *id,
         Command::RenameLayer { id, .. }
         | Command::SetLayerRange { id, .. }
+        | Command::SetLayerRangeSamples { id, .. }
         | Command::MoveKeyframe { id, .. }
         | Command::ToggleAnimation { id, .. } => *id,
         Command::MoveLayer { id, .. }
@@ -2723,6 +2779,15 @@ fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
             }
             layer.in_frame = start;
             layer.out_frame = Some(end);
+            layer.precise_range = None;
+        }
+        Command::SetLayerRangeSamples { start, end, .. } => {
+            layer.precise_range = Some([start, end]);
+            layer.project_precise_range(comp.duration);
+            precise_range::validate(layer, PROJECT_VERSION, comp.duration)?;
+            if layer.in_frame >= layer.out_frame(comp.duration) {
+                return Err("Layer range must overlap a composition frame".into());
+            }
         }
         Command::MoveKeyframe {
             property, from, to, ..

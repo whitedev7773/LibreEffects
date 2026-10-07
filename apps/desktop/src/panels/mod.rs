@@ -17,6 +17,7 @@ mod key_glyph;
 mod markers;
 mod mask_values;
 mod matte;
+mod native_opacity;
 mod parent_drag;
 mod path_masks;
 mod pen;

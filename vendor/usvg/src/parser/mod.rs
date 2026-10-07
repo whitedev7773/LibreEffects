@@ -42,6 +42,11 @@ pub enum Error {
     /// Also occurs if width, height and viewBox are not set.
     InvalidSize,
 
+    /// Invalid or conflicting Libre Effects fractional box filter extension.
+    InvalidBox3Blur,
+    /// Invalid private mathematical opacity-compositing extension.
+    InvalidCompositingProfile,
+
     /// Failed to parse an SVG data.
     ParsingFailed(roxmltree::Error),
 }
@@ -66,6 +71,10 @@ impl std::fmt::Display for Error {
             }
             Error::InvalidSize => {
                 write!(f, "SVG has an invalid size")
+            }
+            Error::InvalidBox3Blur => write!(f, "invalid Libre Effects fractional box blur"),
+            Error::InvalidCompositingProfile => {
+                write!(f, "invalid Libre Effects opacity compositing profile")
             }
             Error::ParsingFailed(ref e) => {
                 write!(f, "SVG data parsing failed cause {}", e)
@@ -120,6 +129,22 @@ impl crate::Tree {
 
     /// Parses `Tree` from `roxmltree::Document`.
     pub fn from_xmltree(doc: &roxmltree::Document, opt: &Options) -> Result<Self, Error> {
+        for node in doc.descendants() {
+            if let Some(text) = node.attribute(svgtree::BYTE257_ATTRIBUTE) {
+                if svgtree::parse_tag_name(node) != Some(EId::G) || text != svgtree::BYTE257_PROFILE
+                {
+                    return Err(Error::InvalidCompositingProfile);
+                }
+            }
+            if let Some(text) = node.attribute(svgtree::BOX3_ATTRIBUTE) {
+                if svgtree::parse_tag_name(node) != Some(EId::FeGaussianBlur)
+                    || svgtree::parse_box3_radius(text).is_none()
+                    || !matches!(node.attribute("edgeMode"), None | Some("none"))
+                {
+                    return Err(Error::InvalidBox3Blur);
+                }
+            }
+        }
         let doc = svgtree::Document::parse_tree(doc, opt.style_sheet.as_deref())?;
         self::converter::convert_doc(&doc, opt)
     }

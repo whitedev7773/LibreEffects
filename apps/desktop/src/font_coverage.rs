@@ -8,7 +8,10 @@
 //! caret positions are inferred from usvg's possibly-empty cluster fragments.
 use libre_effects_core::{Content, Frame, Layer, text_paragraphs::paragraphs};
 use resvg::usvg::{self, fontdb};
-use std::collections::{BTreeMap, HashMap};
+use std::{
+    collections::{BTreeMap, HashMap},
+    ops::Range,
+};
 
 pub(crate) const MAX_SOURCE_BYTES: usize = 4096;
 pub(crate) const MAX_SOURCE_LINES: usize = 128;
@@ -119,11 +122,6 @@ fn analyze_with_options(
 ) -> Report {
     let primary_id = primary.map(|face| face.id);
     let mut report = Report::new(primary.map(Face::from_info), frame);
-    if layer.rich_text().is_some() {
-        report.status =
-            Status::Incomplete("Rich-run font coverage analysis is not yet supported".into());
-        return report;
-    }
     let Some(text) = layer.source_text_at(frame) else {
         report.status = Status::Unsupported;
         return report;
@@ -136,6 +134,30 @@ fn analyze_with_options(
         report.status = Status::Incomplete("Layer exceeds the text analysis limit".into());
         report.truncated = true;
         return report;
+    }
+    if let Some(rich) = layer.rich_text() {
+        report.composed_lines = paragraphs(text).count();
+        let lines = match crate::rich_text_render::coverage_lines(
+            text,
+            rich,
+            layer.width(),
+            &layer.text_style(),
+        ) {
+            Ok(lines) => lines,
+            Err(error) => {
+                report.status = Status::Incomplete(error);
+                return report;
+            }
+        };
+        let mut expected = BTreeMap::new();
+        let mut expected_nodes = 0;
+        for paragraph in paragraphs(text) {
+            expected_nodes += usize::from(!paragraph.text.is_empty());
+            for c in paragraph.text.chars() {
+                *expected.entry(normalized(c)).or_insert(0usize) += 1;
+            }
+        }
+        return inspect_trees(lines, expected, expected_nodes, report);
     }
     let mut style = layer.text_style();
     // Sample only into temporary geometry inputs. Font identity and all stored
@@ -227,16 +249,34 @@ fn inspect_svg(
             return report;
         }
     };
+    let primary = primary_id
+        .into_iter()
+        .map(|id| (0..usize::MAX, id))
+        .collect();
+    inspect_trees(vec![(tree, primary)], expected, expected_nodes, report)
+}
+
+fn inspect_trees(
+    trees: Vec<(usvg::Tree, Vec<(Range<usize>, fontdb::ID)>)>,
+    expected: BTreeMap<char, usize>,
+    expected_nodes: usize,
+    mut report: Report,
+) -> Report {
     struct Inspection {
-        fonts: HashMap<fontdb::ID, usize>,
+        fonts: HashMap<(fontdb::ID, bool, bool), usize>,
         represented: BTreeMap<char, usize>,
         nodes: usize,
         limited: bool,
     }
-    fn visit(group: &usvg::Group, report: &mut Report, inspection: &mut Inspection) {
+    fn visit(
+        group: &usvg::Group,
+        primary: &[(Range<usize>, fontdb::ID)],
+        report: &mut Report,
+        inspection: &mut Inspection,
+    ) {
         for node in group.children() {
             match node {
-                usvg::Node::Group(group) => visit(group, report, inspection),
+                usvg::Node::Group(group) => visit(group, primary, report, inspection),
                 usvg::Node::Text(text) => {
                     inspection.nodes += 1;
                     for glyph in text
@@ -249,7 +289,18 @@ fn inspect_svg(
                             return;
                         }
                         report.glyphs += 1;
-                        *inspection.fonts.entry(glyph.font).or_default() += 1;
+                        let requested = primary
+                            .iter()
+                            .find(|(range, _)| range.contains(&glyph.source_range.start))
+                            .map(|(_, id)| *id);
+                        *inspection
+                            .fonts
+                            .entry((
+                                glyph.font,
+                                requested == Some(glyph.font),
+                                requested.is_some_and(|id| id != glyph.font),
+                            ))
+                            .or_default() += 1;
                         for c in glyph.text.chars() {
                             *inspection.represented.entry(c).or_default() += 1;
                         }
@@ -286,26 +337,40 @@ fn inspect_svg(
         nodes: 0,
         limited: false,
     };
-    visit(tree.root(), &mut report, &mut inspection);
     let mut reasons = vec![];
+    for (tree, primary) in trees {
+        visit(tree.root(), &primary, &mut report, &mut inspection);
+        for ((id, is_primary, is_fallback), glyphs) in std::mem::take(&mut inspection.fonts) {
+            // Resolve in this tree: saved-position lines use their own immutable
+            // font database, and a fallback resolver may add a new face.
+            if let Some(info) = tree.fontdb().face(id) {
+                report.truncated |= font_name_limited(info);
+                let face = Face::from_info(info);
+                if let Some(usage) = report.faces.iter_mut().find(|usage| {
+                    usage.font == face
+                        && usage.is_primary == is_primary
+                        && usage.is_fallback == is_fallback
+                }) {
+                    usage.glyphs += glyphs;
+                } else {
+                    report.faces.push(FaceUsage {
+                        font: face,
+                        glyphs,
+                        is_primary,
+                        is_fallback,
+                    });
+                }
+            } else if !reasons.contains(&"A positioned font could not be identified") {
+                reasons.push("A positioned font could not be identified");
+            }
+        }
+        if inspection.limited {
+            break;
+        }
+    }
     if inspection.limited {
         report.truncated = true;
         reasons.push("Positioned-glyph analysis limit reached");
-    }
-    for (id, glyphs) in inspection.fonts {
-        // IDs belong to this tree's database. Never resolve these against the
-        // initial global catalog: a resolver may have added fonts during parse.
-        if let Some(info) = tree.fontdb().face(id) {
-            report.truncated |= font_name_limited(info);
-            report.faces.push(FaceUsage {
-                font: Face::from_info(info),
-                glyphs,
-                is_primary: primary_id == Some(id),
-                is_fallback: primary_id.is_some_and(|primary| primary != id),
-            });
-        } else if !reasons.contains(&"A positioned font could not be identified") {
-            reasons.push("A positioned font could not be identified");
-        }
     }
     report.faces.sort_by(|a, b| {
         (&a.font, a.is_primary, a.is_fallback, a.glyphs).cmp(&(
@@ -344,6 +409,107 @@ mod tests {
     const FIXTURE: &[u8] =
         include_bytes!("../assets/fonts/test-fixtures/CoverageFixture-Regular.ttf");
     const WANTED: &[u8] = include_bytes!("../assets/fonts/WantedSans-Regular.ttf");
+
+    #[test]
+    fn rich_run_coverage_uses_each_requested_face_without_double_counting_paint() {
+        use libre_effects_core::{RichText, TextCharacterStyle, TextStyleRun};
+        let source = "AB\r\nCD";
+        let base = TextCharacterStyle::from_style(&TextStyle::default(), 48.0, 0xffffff);
+        let mut bold = base.clone();
+        bold.weight = 700;
+        bold.font_face = crate::fonts::matched(&bold.font().style())
+            .post_script_name
+            .clone();
+        bold.stroke_enabled = true;
+        bold.stroke_width = 6.0;
+        let rich = RichText::new(
+            source,
+            base.clone(),
+            vec![
+                TextStyleRun {
+                    start: 0,
+                    end: 4,
+                    style: base,
+                },
+                TextStyleRun {
+                    start: 4,
+                    end: source.len(),
+                    style: bold.clone(),
+                },
+            ],
+        )
+        .unwrap();
+        let mut e = editor(source, TextStyle::default(), 600.0, 200.0);
+        e.execute(Command::SetRichText {
+            id: 1,
+            rich_text: Some(rich.clone()),
+        })
+        .unwrap();
+        let original = e.project().clone();
+        let generation = e.context_generation();
+        let report = analyze(e.selected_layer().unwrap(), 0);
+        assert_eq!(report.status, Status::Complete);
+        assert_eq!(report.composed_lines, 2);
+        assert_eq!(report.glyphs, 4);
+        assert_eq!(report.unresolved_glyphs, 0);
+        assert_eq!(report.faces.len(), 2);
+        assert!(
+            report
+                .faces
+                .iter()
+                .all(|face| face.is_primary && !face.is_fallback)
+        );
+        assert!(
+            report
+                .faces
+                .iter()
+                .any(|face| face.font.face == bold.font_face)
+        );
+        assert_eq!(e.project(), &original);
+        assert_eq!(e.context_generation(), generation);
+        let mut disabled = rich;
+        for run in &mut disabled.runs {
+            run.style.fill_enabled = false;
+            run.style.stroke_enabled = false;
+        }
+        e.execute(Command::SetRichText {
+            id: 1,
+            rich_text: Some(disabled),
+        })
+        .unwrap();
+        e.execute(Command::ToggleVisible(1)).unwrap();
+        assert_eq!(analyze(e.selected_layer().unwrap(), 0), report);
+    }
+
+    #[test]
+    fn rich_run_coverage_keeps_missing_faces_and_source_limits_incomplete() {
+        use libre_effects_core::{RichText, TextCharacterStyle, TextStyleRun};
+        for source in ["AB".to_string(), "A".repeat(MAX_SOURCE_BYTES + 1)] {
+            let base = TextCharacterStyle::from_style(&TextStyle::default(), 48.0, 0xffffff);
+            let mut missing = base.clone();
+            missing.font_face = "LibreEffects-Synthetic-Missing-Face".into();
+            let rich = RichText::new(
+                &source,
+                base,
+                vec![TextStyleRun {
+                    start: 0,
+                    end: source.len(),
+                    style: missing,
+                }],
+            )
+            .unwrap();
+            let mut e = editor(&source, TextStyle::default(), 600.0, 200.0);
+            e.execute(Command::SetRichText {
+                id: 1,
+                rich_text: Some(rich),
+            })
+            .unwrap();
+            let report = analyze(e.selected_layer().unwrap(), 0);
+            assert!(matches!(report.status, Status::Incomplete(_)));
+            assert_eq!(report.glyphs, 0);
+            assert_eq!(report.truncated, source.len() > MAX_SOURCE_BYTES);
+        }
+    }
 
     fn editor(text: &str, style: TextStyle, width: f64, height: f64) -> Editor {
         let mut editor = Editor::default();
@@ -483,6 +649,47 @@ mod tests {
         assert_eq!(report.status, Status::Complete);
         assert_eq!(Some(&report.faces[0].font), report.primary.as_ref());
         assert!(report.faces[0].is_fallback && !report.faces[0].is_primary);
+    }
+
+    #[test]
+    fn mixed_requested_faces_keep_primary_and_fallback_glyph_totals_separate() {
+        let (mut options, primary, fallback) = isolated(true, true);
+        let fallback = fallback.unwrap();
+        let source = "<svg xmlns='http://www.w3.org/2000/svg' width='600' height='200'><text x='0' y='48' font-size='48'>A한</text></svg>";
+        let fallback_tree = usvg::Tree::from_str(source, &options).unwrap();
+        options.font_resolver.select_font = Box::new(move |_, _| Some(fallback));
+        let primary_tree = usvg::Tree::from_str(source, &options).unwrap();
+        let report = inspect_trees(
+            vec![
+                (fallback_tree, vec![(0..4, primary)]),
+                (primary_tree, vec![(0..4, fallback)]),
+            ],
+            BTreeMap::from([('A', 2), ('한', 2)]),
+            2,
+            Report::new(None, 0),
+        );
+        assert_eq!(report.status, Status::Complete);
+        assert_eq!(report.glyphs, 4);
+        assert_eq!(report.faces.len(), 2);
+        assert_eq!(report.faces[0].font, report.faces[1].font);
+        assert_eq!(
+            report
+                .faces
+                .iter()
+                .filter(|face| face.is_fallback)
+                .map(|face| face.glyphs)
+                .sum::<usize>(),
+            2,
+        );
+        assert_eq!(
+            report
+                .faces
+                .iter()
+                .filter(|face| face.is_primary)
+                .map(|face| face.glyphs)
+                .sum::<usize>(),
+            2,
+        );
     }
 
     #[test]

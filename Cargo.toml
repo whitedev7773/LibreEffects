@@ -32,3 +32,27 @@ resvg = { path = "vendor/resvg" }
 
 # Pinned GPUI: negotiate reliable X11 repeat releases on the existing client.
 gpui = { path = "vendor/gpui" }
+
+# Keep the embedded C VM optimized in development and test builds. Expressions
+# retain the same CPU deadline as release builds; unoptimized VM dispatch must
+# not consume that deadline merely because the owning Rust app is being debugged.
+[profile.dev.package.rquickjs-sys]
+opt-level = 2
+
+[profile.test.package.rquickjs-sys]
+opt-level = 2
+
+# Keep software rasterization usable while debugging the editor. Large blur,
+# matte and image passes otherwise spend seconds in per-pixel dependency loops.
+# Editor code and debug assertions remain unchanged; no fast-math is enabled.
+[profile.dev.package.resvg]
+opt-level = 2
+
+[profile.dev.package.tiny-skia]
+opt-level = 2
+
+[profile.test.package.resvg]
+opt-level = 2
+
+[profile.test.package.tiny-skia]
+opt-level = 2

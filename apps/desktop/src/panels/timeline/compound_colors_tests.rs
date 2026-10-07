@@ -400,7 +400,12 @@ fn compound_timeline_static_legacy_stop_animation_cannot_enable_colors() {
 #[test]
 fn compound_timeline_wiring_keeps_colors_outside_scalar_graph_and_drags() {
     let source = include_str!("../timeline.rs");
-    assert!(source.contains("rows = rows.child(self.colors.render_rows("));
+    assert!(
+        source
+            .split_whitespace()
+            .collect::<String>()
+            .contains("rows=rows.child(self.colors.render_rows(")
+    );
     assert!(source.contains("self.colors.observe(state)"));
     assert!(source.contains("this.colors.clear_selection()"));
     assert!(source.contains("this.colors.key_down(event, &this.state, window, cx)"));
@@ -459,13 +464,17 @@ fn compound_timeline_move_returns_enter_and_escape_to_timeline_focus() {
     let colors = include_str!("compound_colors.rs");
     let field = include_str!("../../components/text_field.rs");
     assert!(
-        timeline.contains("self.input_source.clone(),\n                    self.focus.clone(),")
+        timeline
+            .split_whitespace()
+            .collect::<String>()
+            .contains("self.input_source.clone(),self.focus.clone(),")
     );
     assert!(colors.contains(".return_focus(return_focus.clone())"));
     assert!(
-        field.contains(
-            "if let Some(focus) = &self.return_focus {\n            window.focus(focus);"
-        )
+        field
+            .split_whitespace()
+            .collect::<String>()
+            .contains("ifletSome(focus)=&self.return_focus{window.focus(focus);")
     );
     let enter = field
         .split("\"enter\" => {")
@@ -995,7 +1004,12 @@ fn compound_timeline_selected_details_cannot_expand_the_ruler_coordinate_space()
     assert!(source.contains("rows = rows.child(note(summary))"));
     assert!(source.contains("rows = rows.child(detail).child(note("));
     let timeline = include_str!("../timeline.rs");
-    assert!(timeline.contains(".id(\"timeline-rows\")\n                            .min_w_0()"));
+    assert!(
+        timeline
+            .split_whitespace()
+            .collect::<String>()
+            .contains(".id(\"timeline-rows\").min_w_0()")
+    );
 }
 
 fn pointer_geometry(state: &EditorState) -> PointerGeometry {

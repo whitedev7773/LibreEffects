@@ -70,6 +70,8 @@ fn parse<'input>(
         nodes: Vec::new(),
         attrs: Vec::new(),
         links: HashMap::new(),
+        box3_radii: HashMap::new(),
+        byte257_groups: Default::default(),
     };
 
     // build a map of id -> node for resolve_href
@@ -400,6 +402,21 @@ pub(crate) fn parse_svg_element<'input>(
             attributes: ShortRange::new(attrs_start_idx as u32, doc.attrs.len() as u32),
         },
     );
+
+    if tag_name == EId::FeGaussianBlur {
+        if let Some(radius) = xml_node
+            .attribute(super::BOX3_ATTRIBUTE)
+            .and_then(super::parse_box3_radius)
+        {
+            doc.box3_radii.insert(node_id, radius);
+        }
+    }
+
+    if tag_name == EId::G
+        && xml_node.attribute(super::BYTE257_ATTRIBUTE) == Some(super::BYTE257_PROFILE)
+    {
+        doc.byte257_groups.insert(node_id);
+    }
 
     Ok(node_id)
 }

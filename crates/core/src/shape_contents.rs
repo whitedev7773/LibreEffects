@@ -300,6 +300,10 @@ pub struct ContentsNode {
     pub id: u64,
     pub name: String,
     pub enabled: bool,
+    /// Parametric geometry centered on its authored Position. Legacy nodes
+    /// retain their original top-left origin, including when resized.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub centered: bool,
     pub kind: ContentsKind,
     #[serde(default, skip_serializing_if = "PaintComposite::is_default")]
     pub composite: PaintComposite,
@@ -381,6 +385,7 @@ impl ContentsNode {
             id,
             name: format!("{} {id}", kind.label()),
             enabled: true,
+            centered: false,
             composite: PaintComposite::default(),
             blend: PaintBlend::Normal,
             parameters: kind.defaults(),
@@ -443,12 +448,9 @@ impl ContentsNode {
                         shape.parameters.insert(*p, t.clone());
                     }
                 }
-                let p = shape_conversion::geometry(
-                    &shape,
-                    self.value_at(ContentsParam::Width, f),
-                    self.value_at(ContentsParam::Height, f),
-                    f,
-                );
+                let width = self.value_at(ContentsParam::Width, f);
+                let height = self.value_at(ContentsParam::Height, f);
+                let p = shape_conversion::geometry(&shape, width, height, f);
                 Some(transformed(
                     p,
                     Affine([
@@ -456,8 +458,10 @@ impl ContentsNode {
                         0.,
                         0.,
                         1.,
-                        self.value_at(ContentsParam::Transform(Property::PositionX), f),
-                        self.value_at(ContentsParam::Transform(Property::PositionY), f),
+                        self.value_at(ContentsParam::Transform(Property::PositionX), f)
+                            - if self.centered { width / 2.0 } else { 0.0 },
+                        self.value_at(ContentsParam::Transform(Property::PositionY), f)
+                            - if self.centered { height / 2.0 } else { 0.0 },
                     ]),
                 ))
             }
@@ -479,6 +483,19 @@ impl Default for ShapeContents {
     }
 }
 impl ShapeContents {
+    /// Whether source geometry uses centered parametric coordinates.
+    pub fn has_centered_parametrics(&self) -> bool {
+        fn walk(nodes: &[ContentsNode]) -> bool {
+            nodes.iter().any(|node| {
+                node.centered
+                    || match &node.kind {
+                        ContentsKind::Group(children) => walk(children),
+                        _ => false,
+                    }
+            })
+        }
+        walk(&self.items)
+    }
     /// Build a validated tree with fresh layer-local, depth-first IDs. Input IDs
     /// are ignored. Geometry, names, parameters and sibling order are preserved.
     /// Construction applies the same 256-node/eight-group limits as editing.
@@ -565,6 +582,12 @@ impl ShapeContents {
             for n in nodes {
                 if matches!(n.kind, ContentsKind::TrimPaths) && version < 50 {
                     return Err("Trim Paths requires project version 50".into());
+                }
+                if n.centered && (version < 81 || !matches!(n.kind, ContentsKind::Parametric(_))) {
+                    return Err(
+                        "Centered geometry requires a parametric path and project version 81"
+                            .into(),
+                    );
                 }
                 if n.blend != PaintBlend::Normal && (version < 47 || !n.kind.is_paint()) {
                     return Err("Paint blending requires a paint item and project v47".into());
@@ -1522,6 +1545,7 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                     path: n.path_at(*frame).unwrap(),
                     animation: Default::default(),
                 };
+                n.centered = false;
                 n.parameters.clear();
             }
             ContentsEdit::FillRule { item, even_odd } => {

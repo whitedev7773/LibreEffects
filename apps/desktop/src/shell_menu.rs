@@ -1075,17 +1075,31 @@ mod luma_menu_tests {
                 })
                 .unwrap();
             let entries = items("Effect", &state);
-            let luma = entries.iter().find(|i| i.label == "Luma Key").unwrap();
-            assert_eq!(luma.target.is_some(), luma_allowed);
-            assert!(
-                entries
-                    .iter()
-                    .filter(|i| i.label != "Luma Key")
-                    .all(|i| i.target.is_some() == legacy_allowed)
+            let luma = entries.iter().find(|i| i.label == "Luma Key");
+            assert_eq!(luma.is_some(), luma_allowed);
+            for kind in EffectKind::ALL {
+                let entry = entries.iter().find(|entry| entry.label == kind.label());
+                let supported = state
+                    .editor
+                    .selected_layer()
+                    .unwrap()
+                    .supports_effect_kind(kind);
+                assert_eq!(entry.is_some(), supported);
+                if let Some(entry) = entry {
+                    assert_eq!(entry.target.is_some(), supported);
+                }
+            }
+            assert_eq!(
+                state
+                    .editor
+                    .selected_layer()
+                    .unwrap()
+                    .supports_effect_kind(EffectKind::GaussianBlur),
+                legacy_allowed
             );
             if luma_allowed {
                 assert!(matches!(
-                    &luma.target,
+                    &luma.unwrap().target,
                     Some(Target::Action(Action::Edit(Command::Effect {
                         id: 1,
                         edit: EffectEdit::Add(EffectKind::LumaKey)

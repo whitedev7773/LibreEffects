@@ -282,7 +282,15 @@ fn collect_text_chunks_impl(
             paint_order,
             font,
             font_size,
-            small_caps: parent.find_attribute::<&str>(AId::FontVariant) == Some("small-caps"),
+            small_caps: parent
+                .find_attribute::<&str>(AId::FontVariant)
+                .is_some_and(|v| v.split_ascii_whitespace().any(|v| v == "small-caps")),
+            proportional_widths: parent
+                .find_attribute::<&str>(AId::FontVariant)
+                .is_some_and(|v| {
+                    v.split_ascii_whitespace()
+                        .any(|v| v == "proportional-width")
+                }),
             apply_kerning,
             decoration: resolve_decoration(parent, state, cache),
             visible: visibility == Visibility::Visible,

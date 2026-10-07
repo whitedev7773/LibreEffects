@@ -1,12 +1,13 @@
 // Copyright 2021 the Resvg Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU32;
 use std::str::FromStr;
 
 #[rustfmt::skip] mod names;
 mod parse;
+pub(crate) use parse::parse_tag_name;
 mod text;
 
 use tiny_skia_path::Transform;
@@ -25,6 +26,32 @@ pub struct Document<'input> {
     nodes: Vec<NodeData>,
     attrs: Vec<Attribute<'input>>,
     links: HashMap<String, NodeId>,
+    box3_radii: HashMap<NodeId, [f64; 2]>,
+    byte257_groups: HashSet<NodeId>,
+}
+
+/// Private mathematical filter extension, separate from generated SVG names.
+pub(crate) const BOX3_ATTRIBUTE: &str = "data-libre-effects-box3-radius";
+pub(crate) const BYTE257_ATTRIBUTE: &str = "data-libre-effects-compositing";
+pub(crate) const BYTE257_PROFILE: &str = "opaque-opacity-byte257-v1";
+pub(crate) fn parse_box3_radius(text: &str) -> Option<[f64; 2]> {
+    if text.len() > 128 {
+        return None;
+    }
+    let mut p = svgtypes::NumberListParser::from(text);
+    let x = p.next()?.ok()?;
+    let y = match p.next() {
+        Some(value) => value.ok()?,
+        None => x,
+    };
+    if p.next().is_some()
+        || ![x, y]
+            .iter()
+            .all(|r| r.is_finite() && (0.0..=8192.0).contains(r))
+    {
+        return None;
+    }
+    Some([x, y])
 }
 
 impl<'input> Document<'input> {
@@ -149,7 +176,7 @@ impl ShortRange {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) struct NodeId(NonZeroU32);
 
 impl NodeId {
@@ -236,6 +263,12 @@ impl PartialEq for SvgNode<'_, '_> {
 }
 
 impl<'a, 'input: 'a> SvgNode<'a, 'input> {
+    pub(crate) fn box3_radius(&self) -> Option<[f64; 2]> {
+        self.doc.box3_radii.get(&self.id).copied()
+    }
+    pub(crate) fn opaque_opacity_byte257(&self) -> bool {
+        self.doc.byte257_groups.contains(&self.id)
+    }
     #[inline]
     fn id(&self) -> NodeId {
         self.id

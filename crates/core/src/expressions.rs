@@ -579,8 +579,8 @@ impl Project {
                     id: ae::LayerId(layer.id),
                     name: layer.name.clone(),
                     start_time: rate.frames_to_time(layer.start_frame() as f64),
-                    in_point: rate.frames_to_time(f64::from(layer.in_frame)),
-                    out_point: rate.frames_to_time(f64::from(layer.out_frame(comp.duration))),
+                    in_point: rate.frames_to_time(layer.in_frame_sample()),
+                    out_point: rate.frames_to_time(layer.out_frame_sample(comp.duration)),
                     position: layer.expression_sample(
                         ExpressionTarget::Position,
                         frame,
@@ -963,7 +963,7 @@ impl Project {
 fn validate_value(target: ExpressionTarget, value: &ae::PropertyValue) -> Result<(), String> {
     let valid = match (target, value) {
         (ExpressionTarget::Position, ae::PropertyValue::Vector2(v)) => {
-            Property::PositionX.accepts(v[0]) && Property::PositionY.accepts(v[1])
+            v.iter().all(|x| x.is_finite() && x.abs() <= 1_000_000.0)
         }
         (ExpressionTarget::Scale, ae::PropertyValue::Vector2(v)) => {
             Property::ScaleX.accepts(v[0]) && Property::ScaleY.accepts(v[1])

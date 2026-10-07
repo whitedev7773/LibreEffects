@@ -100,9 +100,6 @@ fn character(s: &ae::CharacterStyle) -> Result<core::TextCharacterStyle, String>
     })
 }
 fn text(d: &ae::TextDocument) -> Result<(core::TextStyle, core::RichText), String> {
-    if d.origin != ae::TextOrigin::NativeTopLeft {
-        return Err("AE point-text baseline conversion remains unverified; explicit native-normalized coordinates are required".into());
-    }
     if d.paragraph.box_size.is_some()
         || d.paragraph.left_indent != 0.
         || d.paragraph.right_indent != 0.
@@ -144,10 +141,12 @@ fn text(d: &ae::TextDocument) -> Result<(core::TextStyle, core::RichText), Strin
             })
             .collect::<Result<_, String>>()?
     };
-    Ok((
-        style,
-        core::RichText::from_utf16_runs(&d.text, default, runs)?,
-    ))
+    let mut rich = core::RichText::from_utf16_runs(&d.text, default, runs)?;
+    // Both coordinate systems have explicit native representations. Baseline
+    // origin keeps the authored transform and aligns the first baseline at zero;
+    // it must not be approximated by subtracting font size or source-rect bounds.
+    rich.point_origin = d.origin == ae::TextOrigin::AeBaseline;
+    Ok((style, rich))
 }
 fn track(
     p: &ae::NumericProperty,
@@ -407,6 +406,7 @@ pub(super) fn convert(document: &ae::ValidatedProject, root: u64) -> Result<core
     let mut max_layer = 0;
     let mut max_comp = 0;
     let mut rich = false;
+    let mut baseline_text = false;
     for id in &closure.composition_ids {
         let c = document.composition(*id).ok_or("Missing composition")?;
         if c.pixel_aspect.numerator != c.pixel_aspect.denominator {
@@ -428,6 +428,7 @@ pub(super) fn convert(document: &ae::ValidatedProject, root: u64) -> Result<core
         for l in &c.layers {
             let native = layer(l, c, document)?;
             rich |= native.get("rich_text").is_some();
+            baseline_text |= native["rich_text"]["point_origin"] == true;
             layers.push(native);
             max_layer = max_layer.max(l.id);
         }
@@ -439,7 +440,13 @@ pub(super) fn convert(document: &ae::ValidatedProject, root: u64) -> Result<core
             others.insert(id.to_string(), composition);
         }
     }
-    project["version"] = json!(if rich { 71 } else { 65 });
+    project["version"] = json!(if baseline_text {
+        74
+    } else if rich {
+        71
+    } else {
+        65
+    });
     project["composition_id"] = json!(root);
     project["next_layer_id"] = json!(max_layer.checked_add(1).ok_or("Layer ID overflow")?);
     project["next_composition_id"] =

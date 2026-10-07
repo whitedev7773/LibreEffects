@@ -329,6 +329,12 @@ fn write_filters(tree: &Tree, opt: &WriterOptions, xml: &mut XmlWriter) {
                         AId::StdDeviation.to_str(),
                         format_args!("{} {}", blur.std_dev_x.get(), blur.std_dev_y.get()),
                     );
+                    if let Some(radius) = blur.box3_radius {
+                        xml.write_attribute_fmt(
+                            "data-libre-effects-box3-radius",
+                            format_args!("{} {}", radius[0], radius[1]),
+                        );
+                    }
                     match blur.edge_mode {
                         filter::EdgeMode::None => {}
                         filter::EdgeMode::Duplicate => {
@@ -960,6 +966,12 @@ fn write_group_element(g: &Group, is_clip_path: bool, opt: &WriterOptions, xml: 
     }
 
     xml.start_svg_element(EId::G);
+    if g.opaque_opacity_byte257 {
+        xml.write_attribute(
+            "data-libre-effects-compositing",
+            "opaque-opacity-byte257-v1",
+        );
+    }
     if !g.id.is_empty() {
         xml.write_id_attribute(opt.object_id(g, &g.id), opt);
     };
@@ -1654,8 +1666,15 @@ fn write_span(
         xml.write_svg_attribute(AId::LengthAdjust, "spacingAndGlyphs");
     }
 
-    if span.small_caps {
-        xml.write_svg_attribute(AId::FontVariant, "small-caps");
+    if span.small_caps || span.proportional_widths {
+        xml.write_svg_attribute(
+            AId::FontVariant,
+            match (span.small_caps, span.proportional_widths) {
+                (true, true) => "small-caps proportional-width",
+                (true, false) => "small-caps",
+                _ => "proportional-width",
+            },
+        );
     }
 
     if span.paint_order == PaintOrder::StrokeAndFill {
@@ -1918,5 +1937,74 @@ mod gaussian_blur_edge_mode_tests {
         assert_eq!(blur(&restored).edge_mode(), filter::EdgeMode::None);
         assert_eq!(blur(&restored).std_dev_x().get(), 2.0);
         assert_eq!(blur(&restored).std_dev_y().get(), 2.0);
+    }
+    #[test]
+    fn private_box3_extension_roundtrips_and_rejects_malformed_or_conflicting_inputs() {
+        let tree = fixture(r#"data-libre-effects-box3-radius="7.871 18.93""#);
+        assert_eq!(blur(&tree).box3_radius(), Some([7.871, 18.93]));
+        for written in [
+            tree.to_string(&WriteOptions::default()),
+            tree.to_string_with_unique_resource_ids(&WriteOptions::default()),
+        ] {
+            let restored = Tree::from_str(&written, &Options::default()).unwrap();
+            assert_eq!(blur(&restored).box3_radius(), Some([7.871, 18.93]));
+            assert_eq!(blur(&restored).std_dev_x().get(), 2.0);
+        }
+        assert_eq!(blur(&fixture("")).box3_radius(), None);
+        for attribute in ["", "-1", "NaN", "inf", "1 2 3", "8193", "1 invalid"] {
+            let svg = format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><filter id="a"><feGaussianBlur data-libre-effects-box3-radius="{attribute}"/></filter><rect width="10" height="10" filter="url(#a)"/></svg>"#
+            );
+            assert!(
+                matches!(
+                    Tree::from_str(&svg, &Options::default()),
+                    Err(crate::Error::InvalidBox3Blur)
+                ),
+                "{attribute}"
+            );
+        }
+        for edge in ["duplicate", "wrap"] {
+            let svg = format!(
+                r#"<svg width="10" height="10"><filter id="a"><feGaussianBlur edgeMode="{edge}" data-libre-effects-box3-radius="1"/></filter></svg>"#
+            );
+            assert!(Tree::from_str(&svg, &Options::default()).is_err());
+        }
+    }
+    #[test]
+    fn private_opacity_profile_survives_both_writers_and_rejects_unknown_profiles() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><g id="layer" opacity="0.2" data-libre-effects-compositing="opaque-opacity-byte257-v1"><rect width="10" height="10" fill="#204060"/></g></svg>"##;
+        let tree = Tree::from_str(svg, &Options::default()).unwrap();
+        assert!(tree.has_opaque_opacity_byte257());
+        for written in [
+            tree.to_string(&WriteOptions::default()),
+            tree.to_string_with_unique_resource_ids(&WriteOptions::default()),
+        ] {
+            let restored = Tree::from_str(&written, &Options::default()).unwrap();
+            assert!(restored.has_opaque_opacity_byte257());
+            let Node::Group(group) = &restored.root().children()[0] else {
+                panic!("Expected layer group");
+            };
+            assert!(group.opaque_opacity_byte257());
+            assert_eq!(group.opacity().get(), 0.2);
+        }
+        let ordinary = Tree::from_str(
+            &svg.replace(
+                " data-libre-effects-compositing=\"opaque-opacity-byte257-v1\"",
+                "",
+            ),
+            &Options::default(),
+        )
+        .unwrap();
+        assert!(!ordinary.has_opaque_opacity_byte257());
+        for invalid in [
+            svg.replace("opaque-opacity-byte257-v1", "guess"),
+            svg.replace("<g id=\"layer\"", "<rect id=\"layer\"")
+                .replace("</g>", "</rect>"),
+        ] {
+            assert!(matches!(
+                Tree::from_str(&invalid, &Options::default()),
+                Err(crate::Error::InvalidCompositingProfile)
+            ));
+        }
     }
 }

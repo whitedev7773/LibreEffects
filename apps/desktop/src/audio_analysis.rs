@@ -2,7 +2,7 @@
 use crate::audio_mix::PcmCache;
 use crate::audio_selected::SelectedAudioPlan;
 use libre_effects_audio_spectrum::{
-    SpectrumAnalysisSpec, SpectrumAnalyzer, SpectrumFrame, SpectrumLimits,
+    SpectrumAnalysisProfile, SpectrumAnalysisSpec, SpectrumAnalyzer, SpectrumFrame, SpectrumLimits,
 };
 use libre_effects_core::{
     AudioSpectrumSettings, CompositionId, CompositionSample, CompositionSampleKey, Project,
@@ -23,6 +23,7 @@ const MAX_OUTPUT_BANDS: usize = 65_536;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct Key {
+    profile: u8,
     composition: CompositionId,
     layer: u64,
     time: CompositionSampleKey,
@@ -60,9 +61,10 @@ impl AudioAnalysis {
             return Err("Audio Spectrum canceled".into());
         }
         settings.validate()?;
-        match settings.profile {
-            SpectrumProfile::NativeV1 => {}
-        }
+        let profile = match settings.profile {
+            SpectrumProfile::NativeV1 => SpectrumAnalysisProfile::NativeV1,
+            SpectrumProfile::HammingV1 => SpectrumAnalysisProfile::HammingV1,
+        };
         let Some(source) = settings.source else {
             return Ok(None);
         };
@@ -81,6 +83,10 @@ impl AudioAnalysis {
         // This check precedes even a successful coefficient-cache hit.
         plan.validate_sources(&mut self.pcm, cancel)?;
         let key = Key {
+            profile: match settings.profile {
+                SpectrumProfile::NativeV1 => 0,
+                SpectrumProfile::HammingV1 => 1,
+            },
             composition,
             layer: source.layer,
             time: sample.key(),
@@ -99,7 +105,9 @@ impl AudioAnalysis {
             end_hz: settings.end_hz,
             bands: settings.bands,
         };
-        let work = spec.estimate_work().map_err(|e| e.to_string())?;
+        let work = spec
+            .estimate_profile_work(profile)
+            .map_err(|e| e.to_string())?;
         let pcm = plan.work_estimate(work.input_frames)?;
         // render_window has its own pre/post checks, in addition to this
         // service's admission/final checks. Charge all four dependency passes.
@@ -133,7 +141,7 @@ impl AudioAnalysis {
         let pcm = plan.render_window(origin, 0, work.input_frames, &mut self.pcm, cancel)?;
         let result = self
             .analyzer
-            .analyze(&pcm, &spec, &SpectrumLimits::default(), cancel)
+            .analyze_profile(&pcm, &spec, profile, &SpectrumLimits::default(), cancel)
             .map_err(|e| e.to_string())?;
         // A source may have changed during analysis; never memoize that frame.
         plan.validate_sources(&mut self.pcm, cancel)?;

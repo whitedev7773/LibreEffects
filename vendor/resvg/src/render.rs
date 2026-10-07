@@ -68,6 +68,14 @@ fn render_group(
     transform: tiny_skia::Transform,
     pixmap: &mut tiny_skia::PixmapMut,
 ) -> Option<()> {
+    if group.opaque_opacity_byte257() && group.blend_mode() != usvg::BlendMode::Normal {
+        if let Some(state) = ctx.checked {
+            state.fail(crate::RenderError::new(
+                crate::RenderErrorKind::UnsupportedContext,
+            ));
+        }
+        return None;
+    }
     let transform = transform.pre_concat(group.transform());
 
     if !group.should_isolate() {
@@ -77,7 +85,24 @@ fn render_group(
 
     let bbox = group.layer_bounding_box().transform(transform)?;
 
-    let mut ibbox = if let Some(state) = ctx.checked {
+    let legacy_bounds = ctx.checked.is_none_or(|state| state.legacy_group_bounds);
+    if let Some(state) = ctx.checked.filter(|_| legacy_bounds) {
+        // Validate before using historical integer rounding/cropping below.
+        // Its unchecked float casts and +/-2 expansion must not overflow in
+        // a checked opacity render, even when the eventual crop is offscreen.
+        let bounds = crate::checked::int_rect(bbox.to_rect()).and_then(|rect| {
+            if group.filters().is_empty() {
+                crate::checked::expand_rect(rect, 2, 2)
+            } else {
+                Ok(rect)
+            }
+        });
+        if let Err(kind) = bounds {
+            state.fail(crate::RenderError::new(kind));
+            return None;
+        }
+    }
+    let mut ibbox = if let Some(state) = ctx.checked.filter(|_| !legacy_bounds) {
         let checked_box = (|| {
             let rect = crate::checked::int_rect(bbox.to_rect())?;
             let rect = if group.filters().is_empty() {
@@ -85,9 +110,10 @@ fn render_group(
             } else {
                 rect
             };
-            if crate::geom::fit_to_rect(rect, ctx.max_bbox) != Some(rect) {
-                return Err(crate::RenderErrorKind::ClippedSupport);
-            }
+            // Checked filters need their complete support even when the
+            // viewport is small. The upstream five-viewport crop is only an
+            // unchecked allocation shortcut, not the declared filter region.
+            // image_bytes/reserve below bound the full allocation instead.
             Ok::<_, crate::RenderErrorKind>(rect)
         })();
         match checked_box {
@@ -109,7 +135,7 @@ fn render_group(
         crate::geom::fit_to_rect(bbox.to_int_rect(), ctx.max_bbox)?
     };
 
-    if ctx.checked.is_none() && group.filters().is_empty() {
+    if legacy_bounds && group.filters().is_empty() {
         ibbox = crate::geom::fit_to_rect(ibbox, ctx.max_bbox)?;
     }
 
@@ -143,7 +169,7 @@ fn render_group(
                 pixmap
             }
             Err(kind) => {
-                state.fail(crate::RenderError::new(kind));
+                state.fail(crate::RenderError::new(kind).with_buffer_bounds(ibbox));
                 return None;
             }
         }
@@ -181,14 +207,30 @@ fn render_group(
         quality: tiny_skia::FilterQuality::Nearest,
     };
 
-    pixmap.draw_pixmap(
-        ibbox.x(),
-        ibbox.y(),
-        sub_pixmap.as_ref(),
-        &paint,
-        tiny_skia::Transform::identity(),
-        None,
-    );
+    if group.opaque_opacity_byte257() {
+        if let Err(kind) = crate::opaque_opacity::draw(
+            sub_pixmap.as_ref(),
+            pixmap,
+            ibbox.x(),
+            ibbox.y(),
+            &paint,
+            ctx.checked,
+        ) {
+            if let Some(state) = ctx.checked {
+                state.fail(crate::RenderError::new(kind));
+            }
+            return None;
+        }
+    } else {
+        pixmap.draw_pixmap(
+            ibbox.x(),
+            ibbox.y(),
+            sub_pixmap.as_ref(),
+            &paint,
+            tiny_skia::Transform::identity(),
+            None,
+        );
+    }
 
     Some(())
 }

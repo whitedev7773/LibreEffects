@@ -1,8 +1,8 @@
 //! Synthetic native selected-character contracts, without installed fonts or AE data.
 use libre_effects_core::{
     Command, Content, Editor, MAX_TEXT_STYLE_RUNS, Project, PropertyPath, RichText,
-    TextCharacterPatch, TextCharacterStyle, TextFont, TextParam, TextStrokeJoin, TextStyle,
-    TextStyleRun, TrackEdit, project_file,
+    TextCharacterPatch, TextCharacterStyle, TextFont, TextLeading, TextParam, TextStrokeJoin,
+    TextStyle, TextStyleRun, TrackEdit, project_file,
 };
 
 fn style(color: u32) -> TextCharacterStyle {
@@ -79,8 +79,14 @@ fn selected_patch_splits_only_selection_and_preserves_unrelated_character_fields
             italic: false,
         }),
         TextCharacterPatch::FontSize(64.0),
+        TextCharacterPatch::Leading(Some(TextLeading::Fixed(72.0))),
+        TextCharacterPatch::Tracking(125.0),
         TextCharacterPatch::FillColor(0x00ff00),
         TextCharacterPatch::FillEnabled(true),
+        TextCharacterPatch::StrokeColor(0xff9900),
+        TextCharacterPatch::StrokeEnabled(false),
+        TextCharacterPatch::StrokeWidth(5.0),
+        TextCharacterPatch::StrokeJoin(TextStrokeJoin::Bevel),
     ] {
         let changed = rich.format_range(text, &(1..9), &patch).unwrap();
         assert_eq!(changed.default_style, red);
@@ -100,8 +106,14 @@ fn selected_patch_splits_only_selection_and_preserves_unrelated_character_fields
                     expected.italic = font.italic;
                 }
                 TextCharacterPatch::FontSize(value) => expected.font_size = *value,
+                TextCharacterPatch::Leading(value) => expected.leading = *value,
+                TextCharacterPatch::Tracking(value) => expected.tracking = *value,
                 TextCharacterPatch::FillColor(value) => expected.fill_color = *value,
                 TextCharacterPatch::FillEnabled(value) => expected.fill_enabled = *value,
+                TextCharacterPatch::StrokeColor(value) => expected.stroke_color = *value,
+                TextCharacterPatch::StrokeEnabled(value) => expected.stroke_enabled = *value,
+                TextCharacterPatch::StrokeWidth(value) => expected.stroke_width = *value,
+                TextCharacterPatch::StrokeJoin(value) => expected.stroke_join = *value,
             }
             assert_eq!(changed.style_at(at), &expected);
         }
@@ -140,6 +152,93 @@ fn selected_summary_reports_mixed_per_field_and_respects_exclusive_end() {
     let all = rich.selection_style("ABCD", &(0..4)).unwrap();
     assert!(all.font_family.is_none() && all.font.is_none() && all.font_size.is_none());
     assert!(all.fill_color.is_none() && all.fill_enabled.is_none());
+}
+
+#[test]
+fn selected_tracking_leading_and_stroke_summary_distinguishes_mixed_from_inherit() {
+    let first = style(0xff0000);
+    let mut second = first.clone();
+    second.leading = Some(TextLeading::Auto(1.5));
+    second.tracking = 150.0;
+    second.stroke_color = 0x00ff00;
+    second.stroke_enabled = false;
+    second.stroke_width = 0.0;
+    second.stroke_join = TextStrokeJoin::Bevel;
+    let rich = RichText::new(
+        "AB",
+        first.clone(),
+        vec![run(0, 1, &first), run(1, 2, &second)],
+    )
+    .unwrap();
+    let only_first = rich.selection_style("AB", &(0..1)).unwrap();
+    assert_eq!(only_first.leading, Some(None));
+    assert_eq!(only_first.tracking, Some(25.0));
+    assert_eq!(only_first.stroke_color, Some(0x123456));
+    assert_eq!(only_first.stroke_enabled, Some(true));
+    assert_eq!(only_first.stroke_width, Some(3.0));
+    assert_eq!(only_first.stroke_join, Some(TextStrokeJoin::Round));
+    let both = rich.selection_style("AB", &(0..2)).unwrap();
+    assert_eq!(both.leading, None);
+    assert_eq!(both.tracking, None);
+    assert_eq!(both.stroke_color, None);
+    assert_eq!(both.stroke_enabled, None);
+    assert_eq!(both.stroke_width, None);
+    assert_eq!(both.stroke_join, None);
+    let inherited = rich
+        .format_range("AB", &(0..2), &TextCharacterPatch::Leading(None))
+        .unwrap();
+    assert_eq!(
+        inherited.selection_style("AB", &(0..2)).unwrap().leading,
+        Some(None)
+    );
+    assert_eq!(inherited.style_at(1).stroke_join, TextStrokeJoin::Bevel);
+}
+
+#[test]
+fn selected_line_leading_changes_baselines_and_roundtrips_as_one_editor_edit() {
+    let source = "A\r\nB";
+    let mut editor = editor(source);
+    let original = editor.project().clone();
+    let base = editor
+        .selected_layer()
+        .unwrap()
+        .base_character_style()
+        .unwrap();
+    let rich = RichText::new(source, base.clone(), vec![run(0, source.len(), &base)]).unwrap();
+    let changed = rich
+        .format_range(
+            source,
+            &(3..4),
+            &TextCharacterPatch::Leading(Some(TextLeading::Fixed(72.0))),
+        )
+        .unwrap()
+        .format_range(source, &(3..4), &TextCharacterPatch::Tracking(200.0))
+        .unwrap()
+        .format_range(source, &(3..4), &TextCharacterPatch::StrokeWidth(6.0))
+        .unwrap();
+    let lines = changed.line_metrics(source, &TextStyle::default()).unwrap();
+    assert_eq!(lines[1].baseline - lines[0].baseline, 72.0);
+    editor
+        .execute(Command::SetRichText {
+            id: 1,
+            rich_text: Some(changed.clone()),
+        })
+        .unwrap();
+    let expected = editor.project().clone();
+    let bytes = project_file::encode(&expected, None).unwrap();
+    assert_eq!(project_file::decode(&bytes).unwrap().project, expected);
+    editor.undo();
+    assert_eq!(editor.project(), &original);
+    editor.redo();
+    assert_eq!(editor.project(), &expected);
+    let generation = editor.context_generation();
+    editor
+        .execute(Command::SetRichText {
+            id: 1,
+            rich_text: Some(changed),
+        })
+        .unwrap();
+    assert_eq!(editor.context_generation(), generation);
 }
 
 #[test]
@@ -288,6 +387,16 @@ fn selected_format_rejects_invalid_attribute_values_without_mutation() {
         TextCharacterPatch::FontSize(0.0),
         TextCharacterPatch::FontSize(2049.0),
         TextCharacterPatch::FillColor(0x1000000),
+        TextCharacterPatch::Leading(Some(TextLeading::Auto(f64::NAN))),
+        TextCharacterPatch::Leading(Some(TextLeading::Auto(0.0))),
+        TextCharacterPatch::Leading(Some(TextLeading::Fixed(20481.0))),
+        TextCharacterPatch::Tracking(f64::INFINITY),
+        TextCharacterPatch::Tracking(-1001.0),
+        TextCharacterPatch::Tracking(10001.0),
+        TextCharacterPatch::StrokeColor(0x1000000),
+        TextCharacterPatch::StrokeWidth(-1.0),
+        TextCharacterPatch::StrokeWidth(f64::NAN),
+        TextCharacterPatch::StrokeWidth(1001.0),
     ] {
         assert!(rich.format_range("AB", &(0..1), &patch).is_err());
         assert_eq!(rich, before);
@@ -448,6 +557,7 @@ fn exact_styled_source_noop_and_invalid_payload_preserve_history_and_project() {
     );
     let malformed = RichText {
         point_origin: false,
+        proportional_metrics: false,
         positioning: None,
         default_style: base.clone(),
         runs: vec![run(0, 1, &base), run(1, 2, &style(1))],

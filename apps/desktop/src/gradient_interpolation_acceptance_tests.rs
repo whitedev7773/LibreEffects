@@ -725,6 +725,9 @@ fn clipboard_retime_and_layer_shift_move_sparse_modes_with_exact_snapshots() {
     let mut wire = serde_json::to_value(&source).unwrap();
     wire["composition"]["layers"][0]["out_frame"] = json!(80);
     let before = Project::from_json(&wire.to_string()).unwrap();
+    // Moving the whole layer also stores its independent origin (schema 64).
+    wire["version"] = json!(64);
+    wire["composition"]["layers"][0]["start_frame"] = json!(5);
     wire["composition"]["layers"][0]["in_frame"] = json!(5);
     wire["composition"]["layers"][0]["out_frame"] = json!(85);
     gradient_wire(paint_wire(&mut wire))["colors_animation"] =

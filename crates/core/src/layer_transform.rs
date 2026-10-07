@@ -49,7 +49,10 @@ fn changed_value(
     {
         return Ok(());
     }
-    if !property.accepts(value) {
+    if !property.accepts(value)
+        || (matches!(property, Property::PositionX | Property::PositionY)
+            && value.abs() > 1_000_000.0)
+    {
         return Err(format!(
             "{} would be outside the supported range; adjust the layer or its parent first",
             property.label()

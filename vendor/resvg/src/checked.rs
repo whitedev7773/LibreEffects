@@ -61,6 +61,8 @@ pub struct RenderError {
     pub primitive_index: Option<usize>,
     /// Machine-readable reason.
     pub kind: RenderErrorKind,
+    /// Temporary group bounds [x, y, width, height], when an allocation fails.
+    pub buffer_bounds: Option<[i64; 4]>,
 }
 
 /// Failures are explicit; checked repeat rendering never silently disables blur.
@@ -91,6 +93,9 @@ impl std::fmt::Display for RenderError {
         if let Some(index) = self.primitive_index {
             write!(f, " primitive {index}")?;
         }
+        if let Some([x, y, width, height]) = self.buffer_bounds {
+            write!(f, " (buffer {width}x{height} at {x},{y})")?;
+        }
         Ok(())
     }
 }
@@ -102,6 +107,7 @@ impl RenderError {
             filter_id: None,
             primitive_index: None,
             kind,
+            buffer_bounds: None,
         }
     }
     pub(crate) fn primitive(id: &str, index: usize, kind: RenderErrorKind) -> Self {
@@ -109,11 +115,24 @@ impl RenderError {
             filter_id: Some(id.to_owned()),
             primitive_index: Some(index),
             kind,
+            buffer_bounds: None,
         }
+    }
+    pub(crate) fn with_buffer_bounds(mut self, rect: IntRect) -> Self {
+        self.buffer_bounds = Some([
+            i64::from(rect.x()),
+            i64::from(rect.y()),
+            i64::from(rect.width()),
+            i64::from(rect.height()),
+        ]);
+        self
     }
 }
 
 pub(crate) struct CheckedState<'a> {
+    // An opacity-only checked render retains the original ordinary-SVG layer
+    // crop contract. Explicit box/repeat filters still require unclipped support.
+    pub legacy_group_bounds: bool,
     pub options: &'a CheckedRenderOptions<'a>,
     pub error: RefCell<Option<RenderError>>,
     live: Cell<usize>,
@@ -128,6 +147,7 @@ impl<'a> CheckedState<'a> {
             return Err(RenderError::new(RenderErrorKind::AllocationLimit));
         }
         Ok(Self {
+            legacy_group_bounds: false,
             options,
             error: RefCell::new(None),
             live: Cell::new(target_bytes),
@@ -314,6 +334,61 @@ mod tests {
         assert_eq!(legacy.data(), checked.data());
     }
     #[test]
+    fn explicit_box3_keeps_literal_impulse_through_quarter_turn() {
+        for rotated in [false, true] {
+            let (width, height, transform) = if rotated {
+                (1, 9, "matrix(0 1 -1 0 1 0)")
+            } else {
+                (9, 1, "matrix(1 0 0 1 0 0)")
+            };
+            let svg = format!(
+                r##"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}"><defs><filter id="blur" filterUnits="userSpaceOnUse" x="0" y="0" width="9" height="1" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="2 0" data-libre-effects-box3-radius="1 0"/></filter></defs><g transform="{transform}" filter="url(#blur)"><rect x="4" width="1" height="1" fill="white"/></g></svg>"##
+            );
+            let tree = usvg::Tree::from_str(&svg, &usvg::Options::default()).unwrap();
+            let mut output = Pixmap::new(width, height).unwrap();
+            crate::render_checked(
+                &tree,
+                Transform::identity(),
+                &mut output.as_mut(),
+                &CheckedRenderOptions::default(),
+            )
+            .unwrap();
+            assert_eq!(
+                output
+                    .data()
+                    .chunks_exact(4)
+                    .map(|p| p[3])
+                    .collect::<Vec<_>>(),
+                [0, 3, 23, 59, 79, 59, 23, 3, 0],
+                "rotated: {rotated}"
+            );
+            assert!(output.data().chunks_exact(4).all(|p| p == [p[3]; 4]));
+        }
+    }
+    #[test]
+    fn explicit_box3_reports_transform_and_live_cap_errors() {
+        let svg = tree(r#"data-libre-effects-box3-radius="1 0""#, "2 0", "sRGB");
+        let error =
+            render(&svg, &[], Transform::from_row(1.0, 0.0, 0.2, 1.0, 0.0, 0.0)).unwrap_err();
+        assert_eq!(error.kind, RenderErrorKind::UnsupportedTransform);
+        assert_eq!(error.filter_id.as_deref(), Some("blur"));
+        assert_eq!(error.primitive_index, Some(0));
+        let mut output = Pixmap::new(5, 3).unwrap();
+        let options = CheckedRenderOptions {
+            limits: RenderLimits {
+                max_live_bytes: 200,
+                ..RenderLimits::default()
+            },
+            ..CheckedRenderOptions::default()
+        };
+        assert_eq!(
+            crate::render_checked(&svg, Transform::identity(), &mut output.as_mut(), &options)
+                .unwrap_err()
+                .kind,
+            RenderErrorKind::AllocationLimit
+        );
+    }
+    #[test]
     fn checked_duplicate_retains_constant_boundary() {
         for sigma in ["2 0", "1 1", "0 0", "0.049 0.049"] {
             let tree = tree(r#"edgeMode="duplicate""#, sigma, "sRGB");
@@ -451,11 +526,22 @@ mod tests {
     #[test]
     fn transformed_bounds_and_required_support_fail_explicitly() {
         let tree = tree(r#"edgeMode="duplicate""#, "2 0", "sRGB");
+        // Large complete support is valid while it fits the allocation limits.
+        // It must not be cropped to five times the tiny output viewport.
+        let output = render(&tree, &[domain()], Transform::from_scale(100.0, 100.0)).unwrap();
+        assert!(output
+            .data()
+            .chunks_exact(4)
+            .all(|p| p == [32, 64, 96, 255]));
         assert_eq!(
-            render(&tree, &[domain()], Transform::from_scale(100.0, 100.0))
-                .unwrap_err()
-                .kind,
-            RenderErrorKind::ClippedSupport
+            render(
+                &tree,
+                &[domain()],
+                Transform::from_scale(100_000.0, 100_000.0)
+            )
+            .unwrap_err()
+            .kind,
+            RenderErrorKind::AllocationLimit
         );
         let mut malformed = domain();
         malformed.transform.tx = f32::INFINITY;
@@ -469,6 +555,87 @@ mod tests {
             int_rect(Rect::from_xywh(1.0e20, 0.0, 1.0e20, 1.0).unwrap()).unwrap_err(),
             RenderErrorKind::Overflow
         );
+    }
+
+    #[test]
+    fn mixed_box3_and_gaussian_keep_full_support_outside_the_viewport() {
+        let svg = |size, shift| {
+            format!(
+                r##"<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}"><defs><filter id="box" filterUnits="userSpaceOnUse" x="-40" y="-40" width="88" height="88" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="3" data-libre-effects-box3-radius="3 3"/></filter><filter id="ordinary" filterUnits="userSpaceOnUse" x="-40" y="-40" width="88" height="88" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="20"/></filter></defs><g transform="translate({shift} {shift})" filter="url(#ordinary)"><g filter="url(#box)"><rect width="8" height="8" fill="#204060"/></g></g></svg>"##
+            )
+        };
+        let parse =
+            |source: String| usvg::Tree::from_str(&source, &usvg::Options::default()).unwrap();
+        let small = parse(svg(8, 0));
+        let large = parse(svg(96, 44));
+        let mut actual = Pixmap::new(8, 8).unwrap();
+        let mut oracle = Pixmap::new(96, 96).unwrap();
+        crate::render_checked(
+            &small,
+            Transform::identity(),
+            &mut actual.as_mut(),
+            &Default::default(),
+        )
+        .unwrap();
+        crate::render_checked(
+            &large,
+            Transform::identity(),
+            &mut oracle.as_mut(),
+            &Default::default(),
+        )
+        .unwrap();
+        let crop = oracle
+            .clone_rect(IntRect::from_xywh(44, 44, 8, 8).unwrap())
+            .unwrap();
+        assert_eq!(actual.data(), crop.data());
+        assert!(actual.pixels().iter().any(|p| p.alpha() > 0));
+        let capped = CheckedRenderOptions {
+            limits: RenderLimits {
+                max_pixels: 4096,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let error =
+            crate::render_checked(&small, Transform::identity(), &mut actual.as_mut(), &capped)
+                .unwrap_err();
+        assert_eq!(error.kind, RenderErrorKind::AllocationLimit);
+        assert_eq!(error.buffer_bounds, Some([-40, -40, 88, 88]));
+        assert!(error.to_string().contains("buffer 88x88 at -40,-40"));
+    }
+
+    #[test]
+    fn ordinary_gaussian_copies_and_scratch_share_checked_live_limits() {
+        for sigma in ["1", "3"] {
+            let svg = format!(
+                r##"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><defs><filter id="ordinary" filterUnits="userSpaceOnUse" x="0" y="0" width="8" height="8" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="{sigma}"/></filter></defs><g data-libre-effects-compositing="opaque-opacity-byte257-v1" filter="url(#ordinary)"><rect width="8" height="8" fill="#204060"/></g></svg>"##
+            );
+            let tree = usvg::Tree::from_str(&svg, &usvg::Options::default()).unwrap();
+            let mut actual = Pixmap::new(8, 8).unwrap();
+            let mut expected = actual.clone();
+            crate::render(&tree, Transform::identity(), &mut expected.as_mut());
+            crate::render_checked(
+                &tree,
+                Transform::identity(),
+                &mut actual.as_mut(),
+                &Default::default(),
+            )
+            .unwrap();
+            assert_eq!(actual.data(), expected.data());
+            let options = CheckedRenderOptions {
+                limits: RenderLimits {
+                    max_live_bytes: 900,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let error =
+                crate::render_checked(&tree, Transform::identity(), &mut actual.as_mut(), &options)
+                    .unwrap_err();
+            assert_eq!(error.kind, RenderErrorKind::AllocationLimit);
+            assert_eq!(error.filter_id.as_deref(), Some("ordinary"));
+            assert_eq!(error.primitive_index, Some(0));
+        }
     }
     #[test]
     fn frame_registry_may_include_unrendered_or_already_baked_stages() {

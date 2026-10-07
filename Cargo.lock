@@ -3009,6 +3009,7 @@ dependencies = [
 name = "libre-effects-editor-model"
 version = "0.1.0"
 dependencies = [
+ "fontdb 0.23.0",
  "libc",
  "libre-effects-ae-expressions",
  "libre-effects-ae-project",

@@ -643,9 +643,15 @@ pub struct GaussianBlur {
     pub(crate) std_dev_x: PositiveF32,
     pub(crate) std_dev_y: PositiveF32,
     pub(crate) edge_mode: EdgeMode,
+    pub(crate) box3_radius: Option<[f64; 2]>,
 }
 
 impl GaussianBlur {
+    /// Explicit Libre Effects fractional-box radius in filter user space.
+    /// None retains the standard Gaussian algorithm and its serialized output.
+    pub fn box3_radius(&self) -> Option<[f64; 2]> {
+        self.box3_radius
+    }
     /// Identifies input for the given filter primitive.
     ///
     /// `in` in the SVG.

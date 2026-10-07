@@ -13,6 +13,7 @@ mod component_transfer;
 mod composite;
 mod convolve_matrix;
 mod displacement_map;
+mod fractional_box3;
 mod iir_blur;
 mod lighting;
 mod morphology;
@@ -350,6 +351,7 @@ pub fn apply(
                 filter_id: Some(filter.id().to_owned()),
                 primitive_index: None,
                 kind: crate::RenderErrorKind::FilterFailed,
+                buffer_bounds: None,
             },
         });
         return;
@@ -384,6 +386,7 @@ fn apply_inner(
                     filter_id: Some(filter.id().to_owned()),
                     primitive_index: None,
                     kind,
+                    buffer_bounds: None,
                 })
             })
         } else {
@@ -401,6 +404,7 @@ fn apply_inner(
                     filter_id: Some(filter.id().to_owned()),
                     primitive_index: None,
                     kind: crate::RenderErrorKind::AllocationFailed,
+                    buffer_bounds: None,
                 })
             })?;
     }
@@ -451,7 +455,16 @@ fn apply_inner(
             }
             usvg::filter::Kind::Flood(ref fe) => apply_flood(fe, region),
             usvg::filter::Kind::GaussianBlur(ref fe) => {
-                if fe.edge_mode() == usvg::filter::EdgeMode::Duplicate && checked.is_some() {
+                if let Some(radii) = fe.box3_radius() {
+                    let input = get_input(fe.input(), region, source, &results)?;
+                    apply_box3(radii, cs, ts, input, checked).map_err(|kind| {
+                        Error::Checked(crate::RenderError::primitive(
+                            filter.id(),
+                            primitive_index,
+                            kind,
+                        ))
+                    })
+                } else if fe.edge_mode() == usvg::filter::EdgeMode::Duplicate && checked.is_some() {
                     repeat_blur::apply(
                         fe,
                         cs,
@@ -472,6 +485,52 @@ fn apply_inner(
                         ))
                     })
                 } else {
+                    // Ordinary Gaussian input copies and kernel scratch also
+                    // coexist with containing checked Box3/opacity buffers.
+                    // Reserve before get_input clones any source pixels.
+                    let _ordinary_live = checked
+                        .map(|state| {
+                            let image = match fe.input() {
+                                usvg::filter::Input::Reference(name) => results
+                                    .iter()
+                                    .rev()
+                                    .find(|r| r.name == *name)
+                                    .map(|r| r.image.as_ref())
+                                    .unwrap_or(source),
+                                _ => source,
+                            };
+                            let bytes = crate::checked::image_bytes(
+                                image.width(),
+                                image.height(),
+                                state.options.limits,
+                            )?;
+                            let copies = match resolve_std_dev(
+                                fe.std_dev_x().get(),
+                                fe.std_dev_y().get(),
+                                ts,
+                            ) {
+                                None => 1,
+                                Some((x, y, true)) => {
+                                    repeat_blur::box_support(x)?;
+                                    repeat_blur::box_support(y)?;
+                                    2 // RGBA input + RGBA backbuffer.
+                                }
+                                Some((_, _, false)) => 3, // RGBA input + f64 scalar plane.
+                            };
+                            state.reserve(
+                                bytes
+                                    .checked_mul(copies)
+                                    .ok_or(crate::RenderErrorKind::Overflow)?,
+                            )
+                        })
+                        .transpose()
+                        .map_err(|kind| {
+                            Error::Checked(crate::RenderError::primitive(
+                                filter.id(),
+                                primitive_index,
+                                kind,
+                            ))
+                        })?;
                     let input = get_input(fe.input(), region, source, &results)?;
                     apply_blur(fe, cs, ts, input)
                 }
@@ -708,6 +767,54 @@ fn apply_drop_shadow(
         None,
     );
 
+    Ok(Image::from_image(pixmap, cs))
+}
+
+fn apply_box3(
+    radii: [f64; 2],
+    cs: usvg::filter::ColorInterpolation,
+    ts: usvg::Transform,
+    input: Image,
+    checked_state: Option<&crate::checked::CheckedState<'_>>,
+) -> Result<Image, crate::RenderErrorKind> {
+    if !crate::checked::axis_aligned(ts) {
+        return Err(crate::RenderErrorKind::UnsupportedTransform);
+    }
+    let (sx, sy) = ts.get_scale();
+    let radii = if ts.sx == 0.0 && ts.sy == 0.0 {
+        [radii[1] * f64::from(sx), radii[0] * f64::from(sy)]
+    } else {
+        [radii[0] * f64::from(sx), radii[1] * f64::from(sy)]
+    };
+    if !radii
+        .iter()
+        .all(|r| r.is_finite() && (0.0..=8192.0).contains(r))
+    {
+        return Err(crate::RenderErrorKind::InvalidBounds);
+    }
+    let limits = checked_state.map(|s| s.options.limits).unwrap_or_default();
+    let bytes = crate::checked::image_bytes(input.width(), input.height(), limits)?;
+    // Source input and a possible color-space/take copy coexist with scratch.
+    let _live = checked_state
+        .map(|s| {
+            s.reserve(
+                bytes
+                    .checked_mul(2)
+                    .ok_or(crate::RenderErrorKind::Overflow)?,
+            )
+        })
+        .transpose()?;
+    let mut pixmap = input
+        .into_color_space(cs)
+        .map_err(|_| crate::RenderErrorKind::FilterFailed)?
+        .take()
+        .map_err(|_| crate::RenderErrorKind::FilterFailed)?;
+    fractional_box3::apply(
+        radii,
+        &mut pixmap,
+        checked_state,
+        ts.sx == 0.0 && ts.sy == 0.0,
+    )?;
     Ok(Image::from_image(pixmap, cs))
 }
 

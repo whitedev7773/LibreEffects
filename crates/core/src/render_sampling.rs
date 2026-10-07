@@ -191,6 +191,7 @@ pub(super) fn freeze(comp: &mut Composition, sample: CompositionSample) -> Resul
     let floor = sample.floor_frame()?;
     let seconds_per_frame = comp.fps.seconds(1);
     for layer in &mut comp.layers {
+        layer.visible = layer.active_at_sample(frame, comp.duration);
         let position = layer.position2_sample(frame, seconds_per_frame)?;
         let opacity = layer.opacity_sample(frame, seconds_per_frame)?;
         let text = layer.source_text_at(floor).map(str::to_owned);

@@ -241,6 +241,7 @@ mod tests {
             id,
             name: format!("Item {id}"),
             enabled: true,
+            centered: false,
             kind: children
                 .map(ContentsKind::Group)
                 .unwrap_or(ContentsKind::Fill { even_odd: false }),

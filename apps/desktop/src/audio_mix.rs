@@ -63,8 +63,8 @@ pub(crate) fn voice_position<'a>(
             return Err("Non-finite audio source clock".into());
         }
         // Preserve the existing mixer's tolerance at exact trim edges.
-        if frame + 1e-9 < f64::from(layer.in_frame())
-            || frame + 1e-9 >= f64::from(layer.out_frame(duration))
+        if frame + 1e-9 < layer.in_frame_sample()
+            || frame + 1e-9 >= layer.out_frame_sample(duration)
             || frame + 1e-9 >= f64::from(duration)
         {
             return Ok(None);

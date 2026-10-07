@@ -280,6 +280,7 @@ pub struct TextSpan {
     pub(crate) font: Font,
     pub(crate) font_size: NonZeroPositiveF32,
     pub(crate) small_caps: bool,
+    pub(crate) proportional_widths: bool,
     pub(crate) apply_kerning: bool,
     pub(crate) decoration: TextDecoration,
     pub(crate) dominant_baseline: DominantBaseline,
@@ -337,6 +338,11 @@ impl TextSpan {
     /// Set by `font-variant="small-caps"`
     pub fn small_caps(&self) -> bool {
         self.small_caps
+    }
+
+    /// OpenType proportional-width metrics requested by font-variant.
+    pub fn proportional_widths(&self) -> bool {
+        self.proportional_widths
     }
 
     /// Indicates that a kerning should be applied.

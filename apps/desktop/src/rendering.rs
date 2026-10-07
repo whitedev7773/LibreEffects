@@ -123,10 +123,16 @@ pub(crate) fn paint_svg_tree(
     pixels: &mut resvg::tiny_skia::PixmapMut<'_>,
     domains: &[resvg::RepeatEdgeDomain],
 ) -> Result<(), String> {
-    if domains.is_empty() {
+    let box3 = tree.filters().iter().any(|filter| filter.primitives().iter().any(|primitive| matches!(primitive.kind(), resvg::usvg::filter::Kind::GaussianBlur(blur) if blur.box3_radius().is_some())));
+    let byte257 = tree.has_opaque_opacity_byte257();
+    if domains.is_empty() && !box3 && !byte257 {
         resvg::render(tree, transform, pixels);
         return Ok(());
     }
+    // A measured source-project mixed mask needs a 6875x5077 Gaussian support
+    // buffer (34,904,375 pixels). Keep the output's 32-MP limit independent
+    // from bounded temporary support; ordinary opacity-only output is unchanged.
+    let mixed_masks = byte257 && box3 && domains.is_empty();
     resvg::render_checked(
         tree,
         transform,
@@ -134,13 +140,34 @@ pub(crate) fn paint_svg_tree(
         &resvg::CheckedRenderOptions {
             repeat_edge_domains: domains,
             limits: resvg::RenderLimits {
-                max_pixels: 33_554_432,
-                max_bytes: 128 * 1024 * 1024,
-                max_live_bytes: 256 * 1024 * 1024,
+                max_pixels: if mixed_masks { 67_108_864 } else { 33_554_432 },
+                max_bytes: if mixed_masks {
+                    256 * 1024 * 1024
+                } else {
+                    128 * 1024 * 1024
+                },
+                // Profiled compositions may combine Box3 masks with large
+                // ordinary Gaussian groups. Full support and retained filter
+                // buffers share this cap, including Gaussian scratch copies.
+                max_live_bytes: if mixed_masks {
+                    1024 * 1024 * 1024
+                } else if byte257 && domains.is_empty() {
+                    512 * 1024 * 1024
+                } else {
+                    256 * 1024 * 1024
+                },
             },
         },
     )
-    .map_err(|error| format!("Repeat Edge Pixels: {error}"))
+    .map_err(|error| {
+        if byte257 {
+            format!("Opacity compositing: {error}")
+        } else if box3 {
+            format!("Mask Feather: {error}")
+        } else {
+            format!("Repeat Edge Pixels: {error}")
+        }
+    })
 }
 
 pub(crate) struct RenderedFrame {
@@ -846,10 +873,10 @@ impl Renderer {
         let measure_effect_bounds = matches!(
             l.content(),
             Content::Text { .. } | Content::ShapeContents(_)
-        ) && l
-            .effect_stack()
-            .iter()
-            .any(|e| !e.bypassed() && e.kind() != libre_effects_core::EffectKind::SliderControl);
+        ) && (!l.path_masks().is_empty()
+            || l.effect_stack().iter().any(|e| {
+                !e.bypassed() && e.kind() != libre_effects_core::EffectKind::SliderControl
+            }));
         let mut text_bounds_svg = None;
         let sampled_svg = match l.content() {
             Content::ShapeContents(contents) => Some(
@@ -993,13 +1020,23 @@ impl Renderer {
             )?;
         }
         append_svg(&mut svg, format_args!("</defs>"))?;
-        let (path_defs, path_mask) = crate::path_mask_render::mask(l, &id, frame);
+        // AE point text and centered contents can have negative source bounds.
+        // Legacy box text keeps its fixed mask domain even when animators move ink.
+        let mask_bounds = if l.rich_text().is_some_and(|rich| rich.point_origin)
+            || matches!(l.content(), Content::ShapeContents(contents) if contents.has_centered_parametrics())
+        {
+            effect_bounds
+        } else {
+            [0.0, 0.0, l.width(), l.height()]
+        };
+        let (path_defs, path_mask) =
+            crate::path_mask_render::mask_in_bounds(l, &id, frame, mask_bounds);
         append_svg(&mut svg, format_args!("{path_defs}"))?;
         let a = matrix.0;
         append_svg(
             &mut svg,
             format_args!(
-                "<g transform='matrix({} {} {} {} {} {})' opacity='{}'>{effect_open}<g {}><g {}><g {path_mask}>",
+                "<g transform='matrix({} {} {} {} {} {})' opacity='{}'{}>{effect_open}<g {}><g {}><g {path_mask}>",
                 a[0],
                 a[1],
                 a[2],
@@ -1007,6 +1044,11 @@ impl Renderer {
                 a[4],
                 a[5],
                 l.opacity_at(frame, c.fps().seconds(1))?.clamp(0.0, 100.0) / 100.0,
+                match c.compositing_profile() {
+                    libre_effects_core::CompositingProfile::NativeV1 => "",
+                    libre_effects_core::CompositingProfile::OpaqueOpacityByte257V1 =>
+                        " data-libre-effects-compositing='opaque-opacity-byte257-v1'",
+                },
                 if e != libre_effects_core::Effects::default() {
                     format!("filter='url(#fx{id})'")
                 } else {
@@ -1202,6 +1244,28 @@ impl Renderer {
         max_dimension: u32,
     ) -> Result<RenderedFrame, String> {
         self.render_mode(project, frame, max_dimension, true, None)
+    }
+    /// RAM contains pixels for this exact authored project/frame already. Rebuild
+    /// only the root geometry, using the same isolated evaluator and roots as a
+    /// full preview. Never retain one evaluated Project per cached frame.
+    pub(crate) fn preview_view(
+        &self,
+        project: &Project,
+        frame: u32,
+    ) -> Result<Option<Arc<Project>>, String> {
+        self.check_cancel()?;
+        if frame >= project.composition().duration() {
+            return Err("Frame is outside the composition".into());
+        }
+        let view = self.expression_view(
+            project,
+            project.active_composition_id(),
+            frame,
+            true,
+            &mut self.frame_budget(),
+        )?;
+        self.check_cancel()?;
+        Ok(view)
     }
     pub fn render_output(
         &self,
@@ -1892,6 +1956,83 @@ mod tests {
         })
         .unwrap();
         e
+    }
+    #[test]
+    fn opaque_byte_opacity_profile_reopens_renders_and_preserves_partial_alpha_contract() {
+        use libre_effects_core::{CompositingProfile, Content, Project, Property};
+        let mut editor = scene();
+        for (name, color) in [("Gray destination", 0x808080), ("Black foreground", 0)] {
+            editor
+                .execute(Command::AddContent {
+                    content: Content::Solid,
+                    width: 100.0,
+                    height: 100.0,
+                    name: name.into(),
+                })
+                .unwrap();
+            editor
+                .execute(Command::SetColor {
+                    id: editor.selected().unwrap(),
+                    color,
+                })
+                .unwrap();
+        }
+        editor
+            .execute(Command::SetValue {
+                id: 2,
+                property: Property::Opacity,
+                frame: 0,
+                value: 20.0,
+            })
+            .unwrap();
+        let renderer = Renderer::new();
+        let original = editor.project().clone();
+        let legacy = renderer.render_output(&original, 0, 100, 100).unwrap();
+        assert_eq!(legacy.get_pixel(50, 50).0, [102, 102, 102, 255]);
+        editor
+            .execute(Command::SetCompositingProfile {
+                composition: 1,
+                profile: CompositingProfile::OpaqueOpacityByte257V1,
+            })
+            .unwrap();
+        let bytes = libre_effects_core::project_file::encode(editor.project(), None).unwrap();
+        let reopened = libre_effects_core::project_file::decode(&bytes)
+            .unwrap()
+            .project;
+        let output = renderer.render_output(&reopened, 0, 100, 100).unwrap();
+        assert!(output.pixels().all(|p| p.0 == [103, 103, 103, 255]));
+        assert_eq!(renderer.render_preview(&reopened, 0, 100).unwrap(), output);
+        editor
+            .execute(Command::SetValue {
+                id: 1,
+                property: Property::Opacity,
+                frame: 0,
+                value: 50.0,
+            })
+            .unwrap();
+        let partial = renderer
+            .render_output(editor.project(), 0, 100, 100)
+            .unwrap();
+        editor
+            .execute(Command::SetCompositingProfile {
+                composition: 1,
+                profile: CompositingProfile::NativeV1,
+            })
+            .unwrap();
+        assert_eq!(
+            renderer
+                .render_output(editor.project(), 0, 100, 100)
+                .unwrap(),
+            partial
+        );
+        assert_eq!(
+            Project::from_json(&original.to_json().unwrap()).unwrap(),
+            original
+        );
+        assert_eq!(
+            renderer.render_output(&original, 0, 100, 100).unwrap(),
+            legacy
+        );
     }
     #[test]
     fn composition_and_layer_markers_never_change_preview_or_export_pixels() {

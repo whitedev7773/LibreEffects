@@ -108,6 +108,11 @@ mod fractional_sample_tests {
 #[derive(Clone, Debug, PartialEq)]
 pub enum OpacityEdit {
     Value(f64),
+    /// Explicitly replace animation with a static authored value. Undo retains
+    /// every original key and dormant side; removing a key never implies this.
+    Collapse {
+        value: f64,
+    },
     Key {
         frame: Frame,
         value: f64,
@@ -133,6 +138,111 @@ pub enum OpacityEdit {
         frame: Frame,
         value: bool,
     },
+}
+
+#[cfg(test)]
+mod collapse_tests {
+    use super::*;
+    #[test]
+    fn explicit_static_collapse_preserves_appearance_source_metadata_and_exact_undo() {
+        let mut editor = Editor::default();
+        editor.execute(Command::AddSolid).unwrap();
+        for edit in [
+            OpacityEdit::Key {
+                frame: 0,
+                value: 50.0,
+            },
+            OpacityEdit::Key {
+                frame: 30,
+                value: 50.0,
+            },
+            OpacityEdit::Interpolation {
+                frame: 0,
+                incoming: OpacityInterpolation::Linear,
+                outgoing: OpacityInterpolation::Bezier,
+            },
+            OpacityEdit::Interpolation {
+                frame: 30,
+                incoming: OpacityInterpolation::Bezier,
+                outgoing: OpacityInterpolation::Linear,
+            },
+            OpacityEdit::TemporalEase {
+                frame: 0,
+                incoming: OpacityEase {
+                    speed: -1e-300,
+                    influence: 23.0,
+                },
+                outgoing: OpacityEase {
+                    speed: 100.0,
+                    influence: 100.0 / 3.0,
+                },
+            },
+            OpacityEdit::TemporalEase {
+                frame: 30,
+                incoming: OpacityEase {
+                    speed: -100.0,
+                    influence: 100.0 / 3.0,
+                },
+                outgoing: OpacityEase {
+                    speed: 2e-199,
+                    influence: 79.0,
+                },
+            },
+        ] {
+            editor
+                .execute(Command::SetOpacityTiming { id: 1, edit })
+                .unwrap();
+        }
+        editor.clear_history();
+        let before = project_file::encode(editor.project(), None).unwrap();
+        let source = editor.selected_layer().unwrap().clone();
+        let sample = source.opacity_at(15, 1.0 / 30.0).unwrap();
+        assert!((sample - 75.0).abs() < 1e-12);
+        for value in [f64::NAN, f64::INFINITY, -1.0, 101.0] {
+            assert!(
+                editor
+                    .execute(Command::SetOpacityTiming {
+                        id: 1,
+                        edit: OpacityEdit::Collapse { value }
+                    })
+                    .is_err()
+            );
+            assert_eq!(
+                project_file::encode(editor.project(), None).unwrap(),
+                before
+            );
+        }
+        editor
+            .execute(Command::SetOpacityTiming {
+                id: 1,
+                edit: OpacityEdit::Collapse { value: sample },
+            })
+            .unwrap();
+        let layer = editor.selected_layer().unwrap();
+        assert!(!layer.has_opacity_timing());
+        assert_eq!(layer.opacity_key_count(), 0);
+        assert_eq!(
+            layer.property(Property::Opacity).unwrap().value_at(0),
+            sample
+        );
+        assert_eq!(layer.color(), source.color());
+        assert_eq!(layer.content(), source.content());
+        for frame in [0, 15, 30, 100] {
+            assert_eq!(layer.opacity_at(frame, 1.0 / 30.0).unwrap(), sample);
+        }
+        let after = project_file::encode(editor.project(), None).unwrap();
+        assert_eq!(
+            project_file::decode(&after).unwrap().project,
+            *editor.project()
+        );
+        editor.undo();
+        assert_eq!(
+            project_file::encode(editor.project(), None).unwrap(),
+            before
+        );
+        editor.redo();
+        assert_eq!(project_file::encode(editor.project(), None).unwrap(), after);
+    }
 }
 impl Layer {
     pub fn has_opacity_timing(&self) -> bool {
@@ -427,12 +537,24 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
         let duration = state.project.composition.duration;
         let seconds_per_frame = state.project.composition.fps.seconds(1);
         let layer = editing::editable(state, id)?;
-        if let OpacityEdit::Value(value) | OpacityEdit::Key { value, .. } = &edit {
+        if let OpacityEdit::Value(value)
+        | OpacityEdit::Key { value, .. }
+        | OpacityEdit::Collapse { value } = &edit
+        {
             if !Property::Opacity.accepts(*value) {
                 return Err("Authored Opacity values must be finite and between 0 and 100".into());
             }
         }
         match edit {
+            OpacityEdit::Collapse { value } => {
+                let track = layer
+                    .properties
+                    .get_mut(&Property::Opacity)
+                    .ok_or("Missing Opacity value source")?;
+                track.keys.clear();
+                track.value = value;
+                layer.opacity_timing = None;
+            }
             OpacityEdit::Value(value) => {
                 let track = layer
                     .properties

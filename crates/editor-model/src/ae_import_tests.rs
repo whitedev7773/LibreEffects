@@ -90,13 +90,55 @@ fn selected_closure_excludes_unrelated_blockers_and_preserves_ids() {
     assert!(roots[1].blocker.is_none());
 }
 #[test]
+fn baseline_point_text_keeps_transform_source_styles_and_native_origin_after_reopen() {
+    let mut source = source();
+    let document = &mut source["items"][0]["layers"][0]["source"]["document"];
+    document["origin"] = json!("ae_baseline");
+    document["paragraph"]["leading"] = json!(2);
+    let imported = read(&source).convert(101).unwrap();
+    let layer = imported.composition().layer(1001).unwrap();
+    let rich = layer.rich_text().unwrap();
+    assert!(rich.point_origin);
+    assert_eq!(layer.source_text_at(0), Some("A🙂\r\nB"));
+    let metrics = rich
+        .line_metrics(layer.source_text_at(0).unwrap(), &layer.text_style())
+        .unwrap();
+    assert_eq!(metrics.len(), 2);
+    assert_eq!(metrics[0].baseline, 0.0);
+    assert_eq!(metrics[1].baseline, metrics[1].size * 2.0);
+    let old = read(&self::source()).convert(101).unwrap();
+    for property in [
+        Property::AnchorX,
+        Property::AnchorY,
+        Property::PositionX,
+        Property::PositionY,
+    ] {
+        assert_eq!(
+            layer.property(property),
+            old.composition().layer(1001).unwrap().property(property)
+        );
+    }
+    let saved = core::project_file::encode(&imported, None).unwrap();
+    let reopened = core::project_file::decode(&saved).unwrap().project;
+    assert_eq!(reopened, imported);
+    assert!(
+        reopened
+            .composition()
+            .layer(1001)
+            .unwrap()
+            .rich_text()
+            .unwrap()
+            .point_origin
+    );
+}
+#[test]
 fn nonrepresentable_timing_colors_and_unknown_metadata_fail_closed() {
     for (edit, expected) in [
         (0, "frame grid"),
         (1, "RGB"),
         (2, "required"),
         (3, "Marker"),
-        (4, "baseline"),
+        (4, "paragraph spacing"),
         (5, "Bezier"),
     ] {
         let mut p = source();
@@ -107,7 +149,10 @@ fn nonrepresentable_timing_colors_and_unknown_metadata_fail_closed() {
             3 => {
                 p["items"][0]["layers"][0]["markers"][0]["url"] = json!("https://example.invalid/")
             }
-            4 => p["items"][0]["layers"][0]["source"]["document"]["origin"] = json!("ae_baseline"),
+            4 => {
+                p["items"][0]["layers"][0]["source"]["document"]["paragraph"]["left_indent"] =
+                    json!(1)
+            }
             _ => {
                 p["items"][0]["layers"][0]["properties"][4]["keys"][0]["in_ease"] =
                     json!([{"speed":1.,"influence":25.}])

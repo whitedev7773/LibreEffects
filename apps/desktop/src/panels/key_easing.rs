@@ -329,7 +329,7 @@ mod tests {
         assert!(
             selected(e.project(), &[keys[0], path], true, true)
                 .unwrap_err()
-                .contains("path keys")
+                .contains("path and Source Text keys")
         );
         e.execute(Command::ToggleLocked(2)).unwrap();
         let locked = e.project().clone();

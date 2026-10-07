@@ -88,6 +88,26 @@ fn real_js_regex_unicode_closures_and_stable_layer_identity() {
 }
 
 #[test]
+fn jsx_reads_scale_keys_as_detached_two_component_values() {
+    let result = run(r#"
+        var p=app.project.activeItem.layer(1).transform.scale;
+        p.setValueAtTime(0,[100,50]);p.setValueAtTime(1,[200,25]);
+        if(p.numKeys!==2 || p.keyTime(2)!==1)throw Error('scale key identity');
+        var v=p.keyValue(2);
+        if(v.length!==2 || v[0]!==200 || v[1]!==25)throw Error('scale key value');
+        v[0]=0;
+        if(p.keyValue(2)[0]!==200)throw Error('scale key read aliased source');
+    "#)
+    .unwrap();
+    let layer = result.project.composition().layer(1).unwrap();
+    assert_eq!(
+        layer.property(Property::ScaleX).unwrap().value_at(30),
+        200.0
+    );
+    assert_eq!(layer.property(Property::ScaleY).unwrap().value_at(30), 25.0);
+}
+
+#[test]
 fn scriptui_preserves_callbacks_unicode_live_status_and_modal_confirm() {
     let (request_tx, request_rx) = mpsc::channel();
     let (response_tx, response_rx) = mpsc::channel();
@@ -777,6 +797,56 @@ fn jsx_independent_origin_and_labels_enable_frame_aligned_lyric_timing_sequence(
             .project,
         *editor.project()
     );
+}
+
+#[test]
+fn jsx_preserves_exact_source_endpoints_through_edit_reopen_and_history() {
+    let original = project();
+    let outcome = run_on(
+        original.clone(),
+        r#"
+        var l=app.project.activeItem.layer(1);
+        l.inPoint=-1.125; l.outPoint=20.025;
+        if(l.inPoint!==-1.125 || l.outPoint!==20.025)throw Error('source endpoint rounded');
+        l.inPoint=-0.75;
+        if(l.outPoint!==20.025)throw Error('other endpoint lost');
+    "#,
+    )
+    .unwrap();
+    let layer = outcome.project.composition().layer(1).unwrap();
+    assert_eq!(layer.in_frame_sample(), -22.5);
+    assert_eq!(layer.out_frame_sample(150), 600.75);
+    assert_eq!((layer.in_frame(), layer.out_frame(150)), (0, 150));
+    assert_eq!(layer.start_frame(), 0);
+    let saved = libre_effects_core::project_file::decode(
+        &libre_effects_core::project_file::encode(&outcome.project, None).unwrap(),
+    )
+    .unwrap()
+    .project;
+    assert_eq!(saved, outcome.project);
+    assert_eq!(
+        run_on(
+            saved.clone(),
+            "var l=app.project.activeItem.layer(1);l.inPoint=l.inPoint;l.outPoint=l.outPoint;"
+        )
+        .unwrap()
+        .project,
+        saved
+    );
+    let mut editor = Editor::default();
+    editor.replace_project(original.clone()).unwrap();
+    editor.clear_history();
+    editor.commit_automation_project(saved.clone()).unwrap();
+    editor.undo();
+    assert_eq!(editor.project(), &original);
+    editor.redo();
+    assert_eq!(editor.project(), &saved);
+    for invalid in ["NaN", "Infinity", "-2", "1e30"] {
+        let code = format!(
+            "var l=app.project.activeItem.layer(1);l.name='Draft';try{{l.outPoint={invalid};}}catch(e){{}}"
+        );
+        assert!(run_on(saved.clone(), &code).is_err(), "accepted {invalid}");
+    }
 }
 
 #[test]

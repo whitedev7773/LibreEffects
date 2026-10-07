@@ -131,7 +131,7 @@ impl Preview {
             if request.same_context(&ready) {
                 match result {
                     Ok(rendered) => {
-                        let pixels = std::sync::Arc::new(rendered.pixels);
+                        let pixels = rendered.pixels;
                         self.ram.insert(ready.frame, pixels.clone());
                         if request.accepts(&ready, playing) {
                             self.cache_pixels(ready, rendered.evaluated, pixels, channel, window);
@@ -159,21 +159,15 @@ impl Preview {
                 // Complete one in-flight frame while the pointer moves, then start the latest
                 // snapshot. Never insert an intermediate project's pixels into the latest RAM cache.
                 if let Ok(rendered) = result {
-                    self.cache_pixels(
-                        ready,
-                        rendered.evaluated,
-                        std::sync::Arc::new(rendered.pixels),
-                        channel,
-                        window,
-                    );
+                    self.cache_pixels(ready, rendered.evaluated, rendered.pixels, channel, window);
                 }
             }
         }
         let mut current = self.displayed.as_ref().is_some_and(|(shown, view)| {
             request.current_geometry(shown, view.as_deref()).is_some()
         });
-        // RAM stores only pixels. Expression scenes must produce a matching current
-        // view again rather than retaining an entire evaluated project per cached frame.
+        // Authored scenes can display RAM pixels immediately. Expression scenes
+        // refresh their root view in a worker, reusing the same pixels below.
         if !current && !request.needs_evaluated_view() {
             if let Some(pixels) = self.ram.get(request.frame) {
                 self.cache_pixels(request.clone(), None, pixels, channel, window);
@@ -217,6 +211,7 @@ impl Preview {
         }
     }
     fn start_render(&mut self, request: Request, cx: &mut Context<Self>) {
+        let cached = self.ram.get(request.frame);
         self.pending = Some(request.clone());
         self.cancel.store(false, Ordering::Release);
         let renderer = self.renderer.clone();
@@ -232,7 +227,13 @@ impl Preview {
                         renderer.clear_decoders();
                     }
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        renderer.render_preview_with_view(&job.project, job.frame, job.dimension)
+                        crate::preview_frame::render(
+                            &renderer,
+                            &job.project,
+                            job.frame,
+                            job.dimension,
+                            cached,
+                        )
                     }))
                     .unwrap_or_else(|_| Err("Composition preview failed".into()));
                     if cancel.load(Ordering::Acquire) {

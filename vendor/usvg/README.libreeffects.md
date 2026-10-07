@@ -88,3 +88,40 @@ existing default blur serialization remains unchanged. Focused regressions
 cover parsing, both writer round trips, invalid/default values and CSS blur.
 The editor's Repeat Edge Pixels option uses `duplicate`; retaining `wrap`
 in the tree and writer does not by itself establish renderer support for it.
+
+## Multi-span shaping repair
+
+Font overlays replace complete source intervals whose boundaries occur in both
+shaping results. UTF-8 cluster lengths are never used as glyph counts. This
+prevents a panic when a repeated span contains combining marks and preserves
+all glyphs when fonts produce different ligature/mark decompositions. The
+desktop selected-text source-join regression exercises this path with `e`, a
+space and a combining acute accent before a transactional edit.
+
+## Proportional font metrics
+
+`font-variant="proportional-width"` requests OpenType `palt` while shaping the
+whole text chunk, including fallback fonts. Small caps and proportional widths
+can be combined; both SVG writers retain the requested variant. Missing variants
+keep the existing shaping behavior. Libre Effects uses this for explicitly
+converted proportional rich-text metrics, rather than altering legacy documents.
+
+## Explicit fractional-box blur
+
+The private `data-libre-effects-box3-radius` attribute on `feGaussianBlur`
+retains one or two finite f64 radii in 0..8192, independently of stdDeviation.
+Primitive-unit conversion and both writers preserve those radii. CSS blur and
+ordinary Gaussian filters have no profile and keep their existing behavior.
+Malformed values, use on another element, or duplicate/wrap edge modes reject
+before tree conversion. The private parser table leaves generated SVG names
+unchanged. This is a mathematical rendering contract, not an AE compatibility
+declaration; the resvg patch specifies its passes, quantization and limits.
+## Private opaque layer-opacity profile
+
+Normal `<g>` elements can explicitly carry
+`data-libre-effects-compositing="opaque-opacity-byte257-v1"`. The parsed group
+retains a typed flag separate from generated SVG attribute names. Both writers
+preserve it; unknown values or use on another element reject. The tree exposes
+whether any group or resource subroot requests this profile so resvg can select
+checked rendering. This flag does not change ordinary SVGs or force isolation
+for a fully opaque group. Its limited pixel arithmetic is defined by resvg.

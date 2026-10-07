@@ -48,7 +48,9 @@ native top-left convention, not inferred AE baseline coordinates.
   Nonempty run arrays must completely cover the text without gaps or overlaps;
   UTF-16 offsets cannot split surrogate pairs. Empty arrays mean the default style
   applies throughout. Native conversion must additionally reject unsupported
-  shaping/grapheme boundaries, coordinate conventions, style fields and animation.
+  shaping/grapheme boundaries, unsupported coordinate conventions, style fields and
+  animation. The native converter now maps explicit point-text baseline origins to
+  its schema74 baseline representation while preserving transform tracks.
 - Markers preserve all declared metadata and unique times. Unsupported native
   metadata must block conversion; dropping it would violate this contract.
 - Provenance is retained but is descriptive data, never a conversion selector.
@@ -120,3 +122,16 @@ an explicit-null matrix accepts and preserves each documented absence. RIFX test
 check independently calculated offsets, all truncated prefixes, framing/padding/
 size/depth failures and bounded mutation smoke tests.
 Those mutation checks are not a replacement for a full fuzzing campaign.
+
+## Live reference diagnostics
+
+`apps/desktop/scripts/ae-reference-snapshot.jsx` captures the open project through
+AE's scripting API. Its diagnostic schema is separate from interchange schema 1.
+It preserves match-name property trees, keys, expression bytes, per-character font
+styles and exposed baseline locations. Captures belong in ignored local QA output;
+private media, source text and original programs are not committed as fixtures.
+
+`cargo run -p libre-effects-ae-project --example reference_inventory -- SNAPSHOT.json [ROOT_ID]`
+reports a bounded dependency inventory without opening captured media paths or
+running captured expressions. `native_conversion_verified` remains false. This
+report is evidence for implementation planning, not a native import result.

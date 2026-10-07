@@ -31,6 +31,10 @@ pub const NYQUIST_HZ: f64 = 24_000.0;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SpectrumAnalysisProfile {
     NativeV1,
+    /// Periodic Hamming, uncorrected window gain and an exclusive end frequency.
+    /// Independent AE tone captures motivate this profile; full parity is not
+    /// established. The exact native algorithm is documented in the README.
+    HammingV1,
 }
 
 /// A single native analysis request. Input sample rate is always [`SAMPLE_RATE`].
@@ -49,6 +53,13 @@ pub struct SpectrumAnalysisSpec {
 impl SpectrumAnalysisSpec {
     /// Validate all fields and estimate work without allocating or reading PCM.
     pub fn estimate_work(&self) -> Result<SpectrumWorkEstimate, SpectrumError> {
+        self.estimate_profile_work(SpectrumAnalysisProfile::NativeV1)
+    }
+
+    pub fn estimate_profile_work(
+        &self,
+        profile: SpectrumAnalysisProfile,
+    ) -> Result<SpectrumWorkEstimate, SpectrumError> {
         if !self.duration_ms.is_finite()
             || !(MIN_DURATION_MS..=MAX_DURATION_MS).contains(&self.duration_ms)
         {
@@ -72,9 +83,14 @@ impl SpectrumAnalysisSpec {
         if !(MIN_INPUT_FRAMES..=MAX_INPUT_FRAMES).contains(&input_frames) {
             return Err(SpectrumError::InvalidDuration);
         }
-        let fft_len = input_frames
+        let mut fft_len = input_frames
             .checked_next_power_of_two()
             .ok_or(SpectrumError::NumericRange)?;
+        if profile == SpectrumAnalysisProfile::HammingV1 {
+            // Denser frequency interpolation within the unchanged memory/work
+            // ceilings. Do not silently reduce the requested input window.
+            fft_len = (fft_len * 4).min(MAX_FFT_LEN);
+        }
         if fft_len > MAX_FFT_LEN {
             return Err(SpectrumError::NumericRange);
         }
@@ -235,7 +251,24 @@ impl SpectrumAnalyzer {
         limits: &SpectrumLimits,
         cancel: &AtomicBool,
     ) -> Result<SpectrumFrame, SpectrumError> {
-        self.analyze_checked(stereo, spec, limits, &mut |_| {
+        self.analyze_profile(
+            stereo,
+            spec,
+            SpectrumAnalysisProfile::NativeV1,
+            limits,
+            cancel,
+        )
+    }
+
+    pub fn analyze_profile(
+        &mut self,
+        stereo: &[[f32; 2]],
+        spec: &SpectrumAnalysisSpec,
+        profile: SpectrumAnalysisProfile,
+        limits: &SpectrumLimits,
+        cancel: &AtomicBool,
+    ) -> Result<SpectrumFrame, SpectrumError> {
+        self.analyze_profile_checked(stereo, spec, profile, limits, &mut |_| {
             if cancel.load(Ordering::Relaxed) {
                 Err(SpectrumError::Cancelled)
             } else {
@@ -244,6 +277,7 @@ impl SpectrumAnalyzer {
         })
     }
 
+    #[cfg(test)]
     fn analyze_checked(
         &mut self,
         stereo: &[[f32; 2]],
@@ -251,8 +285,25 @@ impl SpectrumAnalyzer {
         limits: &SpectrumLimits,
         check: &mut impl FnMut(CancelPoint) -> Result<(), SpectrumError>,
     ) -> Result<SpectrumFrame, SpectrumError> {
+        self.analyze_profile_checked(
+            stereo,
+            spec,
+            SpectrumAnalysisProfile::NativeV1,
+            limits,
+            check,
+        )
+    }
+
+    fn analyze_profile_checked(
+        &mut self,
+        stereo: &[[f32; 2]],
+        spec: &SpectrumAnalysisSpec,
+        profile: SpectrumAnalysisProfile,
+        limits: &SpectrumLimits,
+        check: &mut impl FnMut(CancelPoint) -> Result<(), SpectrumError>,
+    ) -> Result<SpectrumFrame, SpectrumError> {
         check(CancelPoint::Admission)?;
-        let work = spec.estimate_work()?;
+        let work = spec.estimate_profile_work(profile)?;
         work.check_limits(limits)?;
         if stereo.len() != work.input_frames {
             return Err(SpectrumError::InputLength {
@@ -314,8 +365,11 @@ impl SpectrumAnalyzer {
             if index % 256 == 0 {
                 check(CancelPoint::Window)?;
             }
-            let window =
-                0.5 - 0.5 * (std::f64::consts::TAU * index as f64 / work.input_frames as f64).cos();
+            let cosine = (std::f64::consts::TAU * index as f64 / work.input_frames as f64).cos();
+            let window = match profile {
+                SpectrumAnalysisProfile::NativeV1 => 0.5 - 0.5 * cosine,
+                SpectrumAnalysisProfile::HammingV1 => 0.54 - 0.46 * cosine,
+            };
             self.left[index].re = f64::from(sample[0]) * window;
             self.right[index].re = f64::from(sample[1]) * window;
         }
@@ -323,10 +377,17 @@ impl SpectrumAnalyzer {
         fft::transform(&mut self.right, check)?;
         // A periodic Hann's coherent gain is exactly N/2. Padding does not
         // change that gain: normalize by the real window, not by FFT length.
-        let coherent_sum = work.input_frames as f64 * 0.5;
+        let coherent_sum = work.input_frames as f64
+            * match profile {
+                SpectrumAnalysisProfile::NativeV1 => 0.5,
+                SpectrumAnalysisProfile::HammingV1 => 1.0,
+            };
         for index in 0..work.output_bands {
             check(CancelPoint::Output)?;
-            let frequency = if index == 0 {
+            let frequency = if profile == SpectrumAnalysisProfile::HammingV1 {
+                spec.start_hz
+                    + (spec.end_hz - spec.start_hz) * (index as f64 / work.output_bands as f64)
+            } else if index == 0 {
                 spec.start_hz
             } else if index == work.output_bands - 1 {
                 spec.end_hz
@@ -339,8 +400,8 @@ impl SpectrumAnalyzer {
             let low = (position.floor() as usize).min(work.fft_len / 2);
             let high = (low + 1).min(work.fft_len / 2);
             let fraction = position - low as f64;
-            let lower = self.bin_amplitude(low, coherent_sum);
-            let upper = self.bin_amplitude(high, coherent_sum);
+            let lower = self.bin_amplitude(low, coherent_sum, profile);
+            let upper = self.bin_amplitude(high, coherent_sum, profile);
             let amplitude = lower + (upper - lower) * fraction;
             if !amplitude.is_finite() || amplitude < 0.0 {
                 return Err(SpectrumError::NumericRange);
@@ -349,7 +410,7 @@ impl SpectrumAnalyzer {
         }
         check(CancelPoint::Complete)?;
         Ok(SpectrumFrame {
-            profile: SpectrumAnalysisProfile::NativeV1,
+            profile,
             amplitudes,
         })
     }
@@ -358,12 +419,24 @@ impl SpectrumAnalyzer {
         (self.left.capacity() + self.right.capacity()) * size_of::<Complex>()
     }
 
-    fn bin_amplitude(&self, index: usize, coherent_sum: f64) -> f64 {
+    fn bin_amplitude(
+        &self,
+        index: usize,
+        coherent_sum: f64,
+        profile: SpectrumAnalysisProfile,
+    ) -> f64 {
         let factor = if index == 0 || index == self.left.len() / 2 {
             1.0
         } else {
             2.0
         };
+        if profile == SpectrumAnalysisProfile::HammingV1 {
+            // Independent antiphase and one-channel AE probes identify a mono
+            // arithmetic mean before magnitude, not RMS channel magnitudes.
+            let real = (self.left[index].re + self.right[index].re) * 0.5;
+            let imaginary = (self.left[index].im + self.right[index].im) * 0.5;
+            return real.hypot(imaginary) * factor / coherent_sum;
+        }
         let left = self.left[index].magnitude() * factor / coherent_sum;
         let right = self.right[index].magnitude() * factor / coherent_sum;
         ((left * left + right * right) * 0.5).sqrt()

@@ -1530,7 +1530,7 @@ impl Render for Timeline {
                                     .flex_col()
                                     .text_size(px(11.0))
                                     .text_color(rgb(ui::MUTED))
-                                    .child("Opacity · native timing · read-only")
+                                    .child("Opacity · edit in Properties")
                                     .child(format!("{value} · {keys} keys")),
                             )
                             .when(!graph_open, |row| {

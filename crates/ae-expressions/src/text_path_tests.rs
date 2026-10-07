@@ -318,6 +318,70 @@ fn create_path_copies_coordinates_and_expands_empty_relative_handles() {
 }
 
 #[test]
+fn polygon_storage_matches_independent_ae_precision_and_boundary_probes() {
+    // Captured in an independently authored AE mask, not from the user's source
+    // expression. Constants are reference observations, not a duplicate formula.
+    for (input, expected) in [
+        (0.123456789, 0.1234588623046875),
+        (-0.123456789, -0.1234588623046875),
+        (0.000001, 0.0),
+        (-0.000001, 0.0),
+        (0.00000762939453125, 0.0000152587890625),
+        (-0.00000762939453125, -0.0000152587890625),
+        (0.00002288818359375, 0.000030517578125),
+        (127.99999, 128.0),
+        (128.00001, 128.000030517578125),
+        (-128.00002, -128.000030517578125),
+        (32767.99999, -32768.0),
+        (-32767.99999, -32768.0),
+        (40000.123456, -32768.0),
+        (1000000.0, -32768.0),
+    ] {
+        for handles in ["[]", "[[0,0],[0,0],[0,0]]"] {
+            let source = format!(
+                "const points=[[{input},{input}],[1,1],[0,1]]; const p=createPath(points,{handles},{handles},true); points[0][0]=999; p;"
+            );
+            let PropertyValue::Path(path) = evaluate_path(&source).unwrap() else {
+                panic!("Expected a path");
+            };
+            assert_eq!(path.vertices[0], [expected, expected], "{input}");
+            assert!(
+                path.in_tangents
+                    .iter()
+                    .chain(&path.out_tangents)
+                    .all(|point| *point == [0.0, 0.0])
+            );
+        }
+    }
+}
+
+#[test]
+fn polygon_storage_does_not_requantize_authored_or_native_curved_paths() {
+    let mut snapshot = path_scene("value;");
+    let PropertyValue::Path(authored) = &mut snapshot.layers[0].masks[0].property.authored_value
+    else {
+        panic!("Expected an authored path");
+    };
+    authored.vertices[0] = [0.123456789, -0.123456789];
+    let expected = authored.clone();
+    let before = snapshot.clone();
+    let key = address(1, ExpressionProperty::MaskPath(u64::MAX));
+    let result = ExpressionEvaluator::default()
+        .evaluate(&snapshot, std::slice::from_ref(&key))
+        .unwrap();
+    assert_eq!(result.get(&key), Some(&PropertyValue::Path(expected)));
+    assert_eq!(snapshot, before);
+    let PropertyValue::Path(curved) =
+        evaluate_path("createPath([[0.123456789,0],[1,1],[0,1]],[[0.1,0],[0,0],[0,0]],[],true)")
+            .unwrap()
+    else {
+        panic!("Expected a curved path");
+    };
+    assert_eq!(curved.vertices[0][0], 0.123456789);
+    assert_eq!(curved.in_tangents[0][0], 0.1);
+}
+
+#[test]
 fn path_results_cannot_be_forged_coerced_or_observed_through_getters() {
     for source in [
         "({vertices:[[0,0],[1,0],[1,1]],in_tangents:[],out_tangents:[],closed:true})",

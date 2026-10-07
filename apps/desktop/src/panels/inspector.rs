@@ -277,6 +277,7 @@ pub(crate) struct Inspector {
     shape_controls: Entity<super::shape_controls::ShapeControls>,
     contents_controls: Entity<super::contents::ContentsControls>,
     mask_values: Entity<super::mask_values::MaskValues>,
+    native_opacity: Entity<super::native_opacity::Controls>,
 }
 impl Inspector {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
@@ -509,6 +510,7 @@ impl Inspector {
             cx.new(|cx| super::audio_controls::AudioControls::new(state.clone(), cx));
         let text_animator = cx.new(|cx| super::text_animator::TextAnimator::new(state.clone(), cx));
         let mask_values = cx.new(|cx| super::mask_values::MaskValues::new(state.clone(), cx));
+        let native_opacity = cx.new(|cx| super::native_opacity::Controls::new(state.clone(), cx));
         let shape_controls =
             cx.new(|cx| super::shape_controls::ShapeControls::new(state.clone(), cx));
         let contents_controls =
@@ -531,6 +533,7 @@ impl Inspector {
             shape_controls,
             contents_controls,
             mask_values,
+            native_opacity,
         }
     }
 }
@@ -669,40 +672,8 @@ impl Render for Inspector {
                 );
                 continue;
             }
-            if label == "Opacity"
-                && let Some((value, keys)) =
-                    native_opacity_summary(&layer, frame, comp.fps().seconds(1))
-            {
-                contents = contents.child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap_1()
-                        .py_1()
-                        .text_size(px(11.0))
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_1()
-                                .child(div().flex_1().child(format!(
-                                    "Opacity · native timing · {keys} keys · read-only"
-                                )))
-                                .when(!layer.is_three_d(), |row| {
-                                    row.child(super::expression_editor::entry_button(
-                                        &self.state,
-                                        &layer,
-                                        libre_effects_core::ExpressionTarget::Opacity,
-                                    ))
-                                }),
-                        )
-                        .child(div().text_color(rgb(ui::MUTED)).child(value))
-                        .child(
-                            div()
-                                .text_color(rgb(ui::MUTED))
-                                .child("Paint clamps to 0–100%. Edit timing through scripting."),
-                        ),
-                );
+            if label == "Opacity" && layer.has_opacity_timing() {
+                contents = contents.child(self.native_opacity.clone());
                 continue;
             }
             let properties: Vec<_> = indices.iter().map(|i| Property::ALL[*i]).collect();

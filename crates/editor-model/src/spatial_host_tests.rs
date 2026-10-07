@@ -37,6 +37,20 @@ if(p.numKeys!==4 || p.keyTime(2)!==1 || p.keyValue(3)[2]!==60 || p.nearestKeyInd
 layer.name='Spatial 검증';
 app.endUndoGroup();
 "#;
+
+#[test]
+fn jsx_reads_joined_xyz_key_tangents_and_ease_without_editing() {
+    let project = run(scene().project().clone(), CURVE).unwrap().project;
+    let result = run(project.clone(), r#"
+        var p=app.project.activeItem.layer(1).transform.position;
+        if(p.keyInInterpolationType(2)!==KeyframeInterpolationType.BEZIER || p.keyOutInterpolationType(2)!==KeyframeInterpolationType.BEZIER) throw Error('sides');
+        var tangent=p.keyInSpatialTangent(1), ease=p.keyOutTemporalEase(4);
+        if(tangent.length!==3 || tangent[0]!==-3 || tangent[1]!==4 || tangent[2]!==-5) throw Error('XYZ tangent');
+        if(ease.length!==1 || ease[0].speed!==1e-199 || ease[0].influence!==17.25) throw Error('ease');
+        if(p.keySpatialContinuous(2)!==true || p.keySpatialAutoBezier(2)!==false) throw Error('spatial flags');
+    "#).unwrap();
+    assert_eq!(result.project, project);
+}
 #[test]
 fn actual_jsx_builds_joined_curves_in_one_atomic_history_entry() {
     let mut e = scene();

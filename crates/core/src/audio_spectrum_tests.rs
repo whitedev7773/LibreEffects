@@ -68,6 +68,44 @@ fn check_refs(comp: &Composition) {
     }
 }
 #[test]
+fn hamming_profile_upgrades_only_when_used_and_survives_history_and_native_reopen() {
+    let mut editor = scene();
+    let before = editor.project().clone();
+    let mut value = settings(&editor).clone();
+    value.profile = SpectrumProfile::HammingV1;
+    set(&mut editor, value).unwrap();
+    let changed = editor.project().clone();
+    assert_eq!(changed.version, 82);
+    let bytes = project_file::encode(&changed, None).unwrap();
+    assert_eq!(project_file::decode(&bytes).unwrap().project, changed);
+    let mut downgraded = serde_json::to_value(&changed).unwrap();
+    downgraded["version"] = 81.into();
+    assert!(
+        Project::from_json(&downgraded.to_string())
+            .unwrap_err()
+            .contains("82")
+    );
+    editor.undo();
+    assert_eq!(*editor.project(), before);
+    editor.redo();
+    assert_eq!(*editor.project(), changed);
+    let mut transaction = before.clone();
+    transaction
+        .apply_automation_command(
+            1,
+            Command::Effect {
+                id: 2,
+                edit: EffectEdit::SetAudioSpectrum {
+                    effect: 1,
+                    settings: settings(&editor).clone(),
+                },
+            },
+        )
+        .unwrap();
+    assert_eq!(transaction, changed);
+}
+
+#[test]
 fn spectrum_settings_schema_roundtrip_bounds_and_noop_history() {
     let mut editor = scene();
     let before = editor.project().clone();

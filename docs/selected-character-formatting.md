@@ -5,7 +5,10 @@ While editing point text, select a nonempty range in the preview and open
 
 - Font family and exact installed font face
 - Font size
+- Tracking in 1/1000 em, from -1000 to 10000
+- Incoming-line leading: 0.1–20480 pixels, `Auto 0.1–10`, or `Inherit`
 - Fill color and fill on/off
+- Stroke color, stroke on/off, width from 0 to 1000 pixels, and Miter/Round/Bevel joins
 
 A field shows **Mixed** when the selected characters differ. Changing one field
 preserves their other attributes. Choosing a family keeps each run's weight and
@@ -14,7 +17,7 @@ slant; choosing an exact face sets that face's family, weight and slant together
 The preview updates from the draft. **Undo draft** and **Redo draft** include both
 text and formatting. **Done** accepts the complete text draft as one document
 Undo step. **Cancel text** discards it. Clicking back into the preview continues
-editing the same draft. Enter accepts a size or fill field; Escape in that field
+editing the same draft. Enter accepts a numeric or color field; Escape in that field
 cancels its pending value. Finish or cancel native input composition before
 changing a character setting.
 
@@ -33,7 +36,10 @@ Install the desired fonts through the operating system before launching Libre
 Effects. Exact faces are saved by their PostScript identity. Missing fonts or
 faces are reported; the original identities remain in the project. Font Manager
 includes fonts used only by character runs. Its detailed glyph-coverage checker
-still reports rich-run analysis as incomplete.
+also inspects mixed-font point-text runs using the renderer's whole-line geometry.
+Requested and fallback faces are compared per positioned glyph. Disabled paint
+does not suppress inspection; unavailable faces and rejected saved positioning
+remain incomplete. The existing per-layer source, line and glyph limits apply.
 
 For the supplied reference typography, Japanese uses Noto Sans CJK KR Light
 (PostScript `NotoSansCJKkr-Light`), Korean uses A2Z 7 Bold (`-7Bold`), and other text

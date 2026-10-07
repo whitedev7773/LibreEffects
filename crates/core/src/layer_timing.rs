@@ -164,9 +164,15 @@ pub(super) fn shift(layer: &mut Layer, delta: i64, duration: Frame) -> Result<()
         })
         .transpose()?;
     opacity_timing::shift(layer, delta, duration)?;
-    let end = layer.out_frame(duration);
-    layer.in_frame = shifted(layer.in_frame, false)?;
-    layer.out_frame = Some(shifted(end, true)?);
+    if let Some(range) = &mut layer.precise_range {
+        range[0] += delta as f64;
+        range[1] += delta as f64;
+        layer.project_precise_range(duration);
+    } else {
+        let end = layer.out_frame(duration);
+        layer.in_frame = shifted(layer.in_frame, false)?;
+        layer.out_frame = Some(shifted(end, true)?);
+    }
     if let Content::Video { start_frame, .. }
     | Content::Audio { start_frame, .. }
     | Content::ImageSequence { start_frame, .. }

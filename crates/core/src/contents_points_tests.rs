@@ -59,6 +59,7 @@ fn node(id: u64, kind: ContentsKind) -> ContentsNode {
         id,
         name: format!("Item {id}"),
         enabled: true,
+        centered: false,
         kind,
         composite: PaintComposite::default(),
         blend: PaintBlend::Normal,

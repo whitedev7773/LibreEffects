@@ -509,6 +509,15 @@ Animated paths require matching topology. Cross-path selection, topology
 changes across keys and variable feather remain open. The bounded Contents
 Trim Paths operator is described below; other path operators remain separate.
 
+Schema83 can explicitly retain `MaskFeatherKernel::FractionalBox3V1` on a mask.
+The offline AE reference adapter supplies measured radii while preserving source
+Feather amounts and animation. `SetMaskFeatherKernel` changes only that profile,
+supports Undo/Redo and native reopen, and rejects invalid coefficients or locked
+layers. Legacy masks omit the field and retain GaussianV1. The mathematical
+profile uses three horizontal and then three vertical fractional-box passes;
+it does not declare full AE equivalence. Unsupported transforms, clipped support
+or checked memory limits produce an error rather than silently changing blur.
+
 With an explicitly selected **Contents Group**, starting Pen on empty canvas adds
 a new Path at the start of that Group and keeps the Group selected for repeated
 drawing. Points and tangents use the selected Group's evaluated local coordinates,
@@ -1302,6 +1311,23 @@ playhead, work area, layer boundaries, keys and marker endpoints within eight
 logical pixels. Hold Alt to bypass it. Selected keys move with one shared offset;
 hidden Shy layers are excluded. Save records the Snap preference with workspace metadata.
 
+### Imported per-side Opacity timing
+
+Layers converted with independent incoming/outgoing Opacity timing expose dedicated
+controls in **Properties**. Use **← Key / Key →** to seek, edit **Value (%)** at
+the playhead, and add or delete a key. At an existing key, incoming/outgoing speed
+and influence and each side's Linear/Bezier/Hold mode can be edited separately.
+Changing one side preserves the other side and dormant endpoint values. Influence
+is 0.1–100%; authored key values are 0–100%, while raw curve overshoot remains
+visible and is clamped only when painting. Unchanged input never adds a key.
+
+**Make static at current value** explicitly replaces the animation with its base
+value at the playhead. The final key cannot be deleted implicitly. Undo restores
+all original timing records; expressions remain attached and still determine the
+evaluated opacity. Locks and playback disable edits. These imported keys are
+edited in Properties; generic Timeline/Graph dragging and easing commands remain
+unavailable for this timing representation.
+
 ## Graph Editor
 
 ![Opacity value graph in the timeline](screenshots/graph-editor.png)
@@ -1945,7 +1971,32 @@ budget are session-only and do not affect project history, saved output settings
 or final render quality. There is no disk cache yet. Cached playback still performs
 channel conversion/GPU upload; it is not a guarantee of realtime FPS or A/V latency.
 
+Expression scenes also reuse resident pixels. The worker rebuilds only the root
+composition's evaluated geometry using the same isolated expression evaluator;
+pixels and coordinates must belong to the current project/frame receipt before
+selection is enabled. Cancellation or evaluation errors discard the view. Only
+the displayed frame retains an evaluated Project, so caching a long work area
+does not retain a full document per frame. Supported expressions are deterministic;
+random and external-state APIs remain unavailable.
+
+For read-only qualification, run `libre-effects --preview-benchmark PROJECT.lep
+--frames 300,4360 --dimension 1280` and optionally `--composition ID`. It measures
+one fresh render and one RAM hit for each of 1..16 explicit frames, checks shared
+pixel buffers, complete evaluated-view equality and unchanged authored bytes,
+and prints JSON. It uses a 128 MiB pixel budget and writes no project or image.
+`evaluated_geometry` distinguishes expression views from ordinary authored
+geometry. These timings exclude UI channel conversion/upload and audio playback.
+Development/test profiles optimize the software rasterizer's dependency loops
+while preserving editor debug code and assertions.
+
 ### Decoder validation and performance
+
+Persistent preview/export decoding and the still-frame path both use bicubic
+scaling with `accurate_rnd+full_chroma_int`. Enabling both removes the fast YUV
+conversion path's downward byte bias; resize sampling remains bicubic. A neutral
+limited-range FFV1 fixture verifies the production decoder against an independent
+0..255 RGB rounding oracle. This is still 8-bit SDR conversion; broader color
+management, chroma-siting and AE decoder equivalence remain unqualified.
 
 `cargo test -p libre-effects-desktop --release video_decoder -- --include-ignored --nocapture`
 compares sequential frames, random seeks, Hold/reverse/loop, scaled output and
@@ -2350,6 +2401,41 @@ use `--output native-study.png --start 30 --png-background`. Use `--help` for sy
 
 ## Output preflight
 
+For exact comparison with captured reference frames, run
+`--compare-reference PROJECT.lep --cases CASES.json --output NEW_REPORT.json`.
+The cases file is a UTF-8 JSON array (an optional UTF-8 BOM is accepted):
+
+```json
+[{"composition":616,"frame":300,"reference":"ae-frame300.png"}]
+```
+
+Composition identities belong to the native project. Relative reference paths
+resolve against the cases file's directory. Each reference must be a static
+8-bit RGBA PNG at the composition's full output size. This command uses the
+production output renderer and strict font preflight. It compares all four
+decoded channels, including RGB underneath zero alpha, without resampling,
+color conversion or tolerance. There is no audio comparison.
+
+References must use straight RGB, matching the native output contract. AE's
+diagnostic PNG capture can store premultiplied/matted RGB instead. Use
+`scripts/ae-render-queue-reference.jsx` with an explicitly selected installed
+Straight RGBA8 PNG template for transparent AE compositions. It verifies the
+actual output settings, renders one full-resolution frame per case, records a
+receipt, and removes only its temporary queue items. It requires an empty,
+stopped render queue and a new empty capture directory; it never saves the
+source project. Do not derive straight references by unpremultiplying rounded
+8-bit diagnostic pixels.
+
+The report records input and decoded-pixel SHA-256 hashes, differing pixel
+counts, per-channel mean absolute/RMS/maximum errors, mismatch bounds and the
+first differing pixel. Exact equality across the supplied cases exits zero;
+pixel differences produce a complete report and exit one. Invalid input fails
+without publishing a report. Reports are new files, published atomically and
+never replace an existing destination. Rendering preserves the authored project.
+Inputs are bounded to 1–64 cases, 32 megapixels per frame, 8192 pixels per axis,
+128 megapixels per job, 1 MiB of case JSON and 128 MiB per encoded PNG.
+Passing a finite set of frames does not establish complete animation parity.
+
 CLI renders, native exports and queue jobs share output checks before publishing
 any output. Diagnostics identify invalid settings/ranges, unavailable linked
 sources, protected project/source destinations, and unusable output folders.
@@ -2479,8 +2565,10 @@ criteria.
 
 Still pending: frame blending/optical flow, extended audio-device support,
 variable-feather/topology-changing masks, additional effects and general-property
-animation presets, per-character text styles, 3D, JSX, ExtendScript and expressions. PNG sequences can be
-assembled in an external video tool.
+animation presets, full 3D rendering and wider Adobe API compatibility. Static
+point-text character runs, bounded JSX/ScriptUI and read-only expressions have
+documented native subsets; see [SCRIPTING.md](SCRIPTING.md) and
+[EXPRESSIONS.md](EXPRESSIONS.md).
 There is no claim of AEP or Adobe script compatibility.
 
 ## Development
@@ -3386,6 +3474,21 @@ with 30 external media/device tests excluded, Cargo check, rustfmt and release
 build. Moon/proto were not on PATH, so Cargo equivalents were used.
 
 ## Automation and ScriptUI preview
+
+Schema 84 adds the explicit per-composition `OpaqueOpacityByte257V1` profile for
+normal layer-opacity interpolation of opaque source/destination pixel pairs.
+Existing LEPs retain `NativeV1`; partial-alpha pixels keep their original native
+calculation. The offline snapshot converter accepts an explicit resources
+`compositing_profile` and records its evidence. The renderer uses checked memory
+limits and rejects conflicting SVG blend modes. See
+[AE qualification](AE_PROJECT_COMPATIBILITY.md) for measured scope and gaps.
+
+The offline converter can select each captured Feather amount independently
+with `mask_feather_profiles` (`"GaussianV1"` or an explicit `box3_radius`).
+Mixed Box3/Gaussian checked rendering keeps full filter support, with bounded
+temporary buffers and reported allocation dimensions; final output retains
+the 32-megapixel limit. These explicit development profiles still need AE
+pixel qualification before a converted project is delivered.
 
 Use **File → Run script (.jsx / .js)…** for bounded JavaScript automation and
 native ScriptUI dialogs. Successful changes form one Undo; unsupported APIs or

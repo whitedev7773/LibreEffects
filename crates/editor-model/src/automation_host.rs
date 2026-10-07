@@ -96,8 +96,8 @@ impl AutomationHost {
             "enabled": layer.visible(), "locked": layer.locked(), "hasText": matches!(layer.content(), Content::Text { .. }),
             "selected": self.selected.contains(&layer.id()), "threeDLayer": layer.is_three_d(),
             "startTime": layer.start_frame() as f64 / comp.fps().as_f64(), "label": layer.label_index(),
-            "inPoint": comp.fps().seconds(layer.in_frame().into()),
-            "outPoint": comp.fps().seconds(layer.out_frame(comp.duration()).into()) })
+            "inPoint": layer.in_frame_sample() / comp.fps().as_f64(),
+            "outPoint": layer.out_frame_sample(comp.duration()) / comp.fps().as_f64() })
     }
 
     pub fn finish(self) -> Result<Project, String> {
@@ -235,6 +235,7 @@ impl AutomationHost {
             }
             "property_set" => self.property_set(comp, id, args),
             "property_key" => self.property_key(comp, id, args),
+            "property_key_metadata" => self.property_key_metadata(comp, id, args),
             "marker_set" => self.marker_set(comp, id, args),
             _ => Err(format!("Unsupported automation host operation: {op}")),
         }
@@ -278,22 +279,53 @@ impl AutomationHost {
             }
             "inPoint" | "outPoint" => {
                 let composition = self.composition(comp)?;
-                let assigned = frame_at(composition, number(value)?, field == "outPoint")?;
                 let layer = self.layer(comp, id)?;
+                let seconds = number(value)?;
+                let fps = composition.fps().as_f64();
+                let previous = if field == "inPoint" {
+                    layer.in_frame_sample()
+                } else {
+                    layer.out_frame_sample(composition.duration())
+                };
+                // Reading and assigning the same time must preserve exact source bytes.
+                if seconds == previous / fps {
+                    return Ok(Value::Null);
+                }
+                let sample = seconds * fps;
+                // Remove only multiplication noise around an authored integer frame.
+                let assigned = if (sample - sample.round()).abs()
+                    <= 4.0 * f64::EPSILON * sample.abs().max(1.0)
+                {
+                    sample.round()
+                } else {
+                    sample
+                };
                 let start = if field == "inPoint" {
                     assigned
                 } else {
-                    layer.in_frame()
+                    layer.in_frame_sample()
                 };
                 let end = if field == "outPoint" {
                     assigned
                 } else {
-                    layer.out_frame(composition.duration())
+                    layer.out_frame_sample(composition.duration())
                 };
-                if start == layer.in_frame() && end == layer.out_frame(composition.duration()) {
-                    return Ok(Value::Null);
+                if start >= 0.0
+                    && start.fract() == 0.0
+                    && end.fract() == 0.0
+                    && end <= f64::from(composition.duration())
+                {
+                    self.apply(
+                        comp,
+                        Command::SetLayerRange {
+                            id,
+                            start: start as Frame,
+                            end: end as Frame,
+                        },
+                    )
+                } else {
+                    self.apply(comp, Command::SetLayerRangeSamples { id, start, end })
                 }
-                self.apply(comp, Command::SetLayerRange { id, start, end })
             }
             "startTime" => {
                 let frame = origin_frame(self.composition(comp)?, number(value)?)?;
@@ -642,6 +674,45 @@ impl AutomationHost {
         )
     }
 
+    fn property_key_metadata(
+        &self,
+        comp: CompositionId,
+        id: LayerId,
+        args: &Value,
+    ) -> Result<Value, String> {
+        let property = text(args, "property")?;
+        let layer = self.layer(comp, id)?;
+        let frames = property_frames(layer, property)?;
+        let index = integer(args, "index")?
+            .checked_sub(1)
+            .ok_or("Key indexes are 1-based")?;
+        let index = usize::try_from(index).map_err(|_| "Key index is out of range")?;
+        let frame = *frames.get(index).ok_or("Key index is out of range")?;
+        let encoded = match property {
+            "opacity" => serde_json::to_value(
+                layer
+                    .opacity_timing()
+                    .and_then(|timing| timing.keys().get(&frame))
+                    .ok_or("Key metadata requires native per-side Opacity timing")?,
+            ),
+            "position" => {
+                if let Some(position) = layer.planar_position() {
+                    serde_json::to_value(position.keys.get(&frame).ok_or("Position key not found")?)
+                } else if let Some(position) = layer.spatial_position() {
+                    serde_json::to_value(position.keys.get(&frame).ok_or("Position key not found")?)
+                } else {
+                    return Err("Key metadata requires native joined Position; legacy axes are not inferred".into());
+                }
+            }
+            _ => {
+                return Err(
+                    "Key metadata reads currently support native Position and Opacity".into(),
+                );
+            }
+        };
+        encoded.map_err(|error| error.to_string())
+    }
+
     fn property_key(
         &mut self,
         comp: CompositionId,
@@ -703,6 +774,16 @@ impl AutomationHost {
                         .value_at(frame),
                     layer
                         .property(Property::PositionY)
+                        .expect("validated scalar host property")
+                        .value_at(frame)
+                ])),
+                "scale" => Ok(json!([
+                    layer
+                        .property(Property::ScaleX)
+                        .expect("validated scalar host property")
+                        .value_at(frame),
+                    layer
+                        .property(Property::ScaleY)
                         .expect("validated scalar host property")
                         .value_at(frame)
                 ])),
@@ -903,6 +984,13 @@ fn property_values(property: &str, value: &Value) -> Result<Vec<f64>, String> {
 }
 fn property_frames(layer: &Layer, property: &str) -> Result<Vec<Frame>, String> {
     match property {
+        "position" if layer.is_three_d() => Ok(layer
+            .spatial_position()
+            .ok_or("3D Position requires native joined XYZ data")?
+            .keys
+            .keys()
+            .copied()
+            .collect()),
         "position" if layer.planar_position().is_some() => Ok(layer
             .planar_position()
             .expect("checked joined XY Position")

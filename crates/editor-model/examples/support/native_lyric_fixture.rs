@@ -279,11 +279,16 @@ mod tests {
         let editor = build(TemplateOptions::default()).unwrap();
         let project = editor.project();
         let bytes = project_file::encode(project, None).unwrap();
-        assert_eq!(
-            bytes,
-            include_bytes!("../../../../examples/native-lyric-part-template.lep")
-        );
+        // The public fixture predates the current struct-field serialization
+        // order. JSON object order is not document content: compare the complete
+        // decoded project, then verify the current encoder's deterministic bytes.
+        let fixture = project_file::decode(include_bytes!(
+            "../../../../examples/native-lyric-part-template.lep"
+        ))
+        .unwrap();
+        assert_eq!(fixture.project, *project);
         assert_eq!(project_file::decode(&bytes).unwrap().project, *project);
+        assert_eq!(project_file::encode(&fixture.project, None).unwrap(), bytes);
         assert_eq!(project.active_composition_id(), LYRIC_COMPOSITION);
         assert!(!editor.can_undo() && !editor.can_redo());
         let lyric = project.composition_by_id(LYRIC_COMPOSITION).unwrap();
@@ -367,6 +372,9 @@ mod tests {
             ae::PropertyValue::Vector2(value) => value.to_vec(),
             ae::PropertyValue::Vector3(_) => {
                 panic!("Lyric expressions must remain two-dimensional")
+            }
+            ae::PropertyValue::Text(_) | ae::PropertyValue::Path(_) => {
+                panic!("Lyric transform expressions must return numeric values")
             }
         })
     }

@@ -784,6 +784,12 @@ fn convert_gaussian_blur(fe: SvgNode, scale: Size, primitives: &[Primitive]) -> 
         std_dev_x,
         std_dev_y,
         edge_mode,
+        box3_radius: fe.box3_radius().map(|r| {
+            [
+                r[0] * f64::from(scale.width()),
+                r[1] * f64::from(scale.height()),
+            ]
+        }),
     })
 }
 
@@ -1247,6 +1253,7 @@ fn convert_blur_function(node: SvgNode, std_dev: Length, state: &converter::Stat
         std_dev_x: std_dev,
         std_dev_y: std_dev,
         edge_mode: EdgeMode::None,
+        box3_radius: None,
     })
 }
 

@@ -49,11 +49,14 @@ mod paragraph_style_guard_review_tests;
 mod path_mask_render;
 #[cfg(test)]
 mod path_order_render_tests;
+mod preview_benchmark;
 mod preview_cache;
+mod preview_frame;
 mod project_browser;
 mod project_io;
 mod recent_projects;
 mod recovery;
+mod reference_compare;
 mod render_queue;
 mod rendering;
 mod rich_text_render;

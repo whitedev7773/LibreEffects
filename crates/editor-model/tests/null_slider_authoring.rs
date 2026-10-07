@@ -206,9 +206,9 @@ fn pixel_and_audio_layers_keep_their_existing_effect_capabilities() {
     for kind in EffectKind::ALL {
         assert_eq!(
             layer(&editor).supports_effect_kind(kind),
-            kind != EffectKind::LumaKey
+            !matches!(kind, EffectKind::LumaKey | EffectKind::AudioSpectrum)
         );
-        if kind == EffectKind::LumaKey {
+        if matches!(kind, EffectKind::LumaKey | EffectKind::AudioSpectrum) {
             reject_unchanged(&mut editor, EffectEdit::Add(kind));
         } else {
             edit(&mut editor, EffectEdit::Add(kind));

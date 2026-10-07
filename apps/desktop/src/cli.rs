@@ -227,6 +227,20 @@ pub(crate) fn run() -> Result<bool, String> {
     }
     if args.len() == 1 && args[0] == "--help" {
         println!("{HELP}");
+        println!(
+            "Read-only preview qualification: --preview-benchmark PROJECT.lep --frames 300,4360 [--dimension 1280] [--composition ID]"
+        );
+        println!(
+            "Exact reference qualification: --compare-reference PROJECT.lep --cases CASES.json --output NEW_REPORT.json"
+        );
+        return Ok(true);
+    }
+    if args[0] == "--preview-benchmark" {
+        crate::preview_benchmark::run(args.into_iter().skip(1).collect())?;
+        return Ok(true);
+    }
+    if args[0] == "--compare-reference" {
+        crate::reference_compare::run(args.into_iter().skip(1).collect())?;
         return Ok(true);
     }
     render(parse(args)?)?;

@@ -2,9 +2,9 @@ name: Desktop validation
 
 on:
   push:
-    paths: ['apps/desktop/**', 'crates/core/**', 'crates/editor-model/**', 'examples/**', 'vendor/grid/**', 'vendor/usvg/**', 'Cargo.*', '.prototools', '.github/workflows/desktop-ci.yml']
+    paths: ['apps/desktop/**', 'crates/**', 'examples/**', 'vendor/**', 'Cargo.*', '.prototools', '.moon/**', '.cargo/**', 'moon.yml', '.github/workflows/desktop-ci.yml']
   pull_request:
-    paths: ['apps/desktop/**', 'crates/core/**', 'crates/editor-model/**', 'examples/**', 'vendor/grid/**', 'vendor/usvg/**', 'Cargo.*', '.prototools', '.github/workflows/desktop-ci.yml']
+    paths: ['apps/desktop/**', 'crates/**', 'examples/**', 'vendor/**', 'Cargo.*', '.prototools', '.moon/**', '.cargo/**', 'moon.yml', '.github/workflows/desktop-ci.yml']
   workflow_dispatch:
 
 permissions:

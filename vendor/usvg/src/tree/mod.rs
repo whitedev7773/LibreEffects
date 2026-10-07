@@ -997,6 +997,7 @@ pub struct Group {
     pub(crate) transform: Transform,
     pub(crate) abs_transform: Transform,
     pub(crate) opacity: Opacity,
+    pub(crate) opaque_opacity_byte257: bool,
     pub(crate) blend_mode: BlendMode,
     pub(crate) isolate: bool,
     pub(crate) clip_path: Option<Arc<ClipPath>>,
@@ -1021,6 +1022,7 @@ impl Group {
             transform: Transform::default(),
             abs_transform: Transform::default(),
             opacity: Opacity::ONE,
+            opaque_opacity_byte257: false,
             blend_mode: BlendMode::Normal,
             isolate: false,
             clip_path: None,
@@ -1069,6 +1071,12 @@ impl Group {
     /// it with a parent group using the specified opacity.
     pub fn opacity(&self) -> Opacity {
         self.opacity
+    }
+
+    /// Private signed-byte layer-opacity interpolation for opaque pixel pairs.
+    /// Partial-alpha pairs keep the ordinary SVG compositing contract.
+    pub fn opaque_opacity_byte257(&self) -> bool {
+        self.opaque_opacity_byte257
     }
 
     /// Group blend mode.
@@ -1592,6 +1600,30 @@ impl Tree {
     /// Checks if the current tree has any text nodes.
     pub fn has_text_nodes(&self) -> bool {
         has_text_nodes(&self.root)
+    }
+
+    /// Whether any group, including resource subroots, requests private opaque
+    /// byte-opacity interpolation. Call the renderer's checked API for these trees.
+    pub fn has_opaque_opacity_byte257(&self) -> bool {
+        fn visit(group: &Group) -> bool {
+            if group.opaque_opacity_byte257 {
+                return true;
+            }
+            for node in &group.children {
+                if let Node::Group(child) = node {
+                    if visit(child) {
+                        return true;
+                    }
+                }
+                let mut found = false;
+                node.subroots(|subroot| found |= visit(subroot));
+                if found {
+                    return true;
+                }
+            }
+            false
+        }
+        visit(&self.root)
     }
 
     /// Returns a list of all unique [`LinearGradient`]s in the tree.

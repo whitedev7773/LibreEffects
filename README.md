@@ -14,9 +14,10 @@ Contents, masks, effects, scalar Value/Speed Graph editing, project recovery,
 render queues, and PNG/H.264/ProRes output. Preview and export share the compositor.
 The shared editing model lives in `crates/core`.
 
-This is not a complete After Effects replacement. JSX/ExtendScript, expressions,
-3D, tracking, Adobe project compatibility and the web editor remain separate
-future work. Audio-device preview currently targets Windows; file rendering and
+Bounded JSX/ScriptUI automation, read-only expressions and native joined XY/XYZ
+animation are available. Their documented subsets do not establish general Adobe
+script/project compatibility or a full 3D renderer. Motion tracking and the web editor
+remain future work. Audio-device preview currently targets Windows; file rendering and
 other editor workflows are also validated on Linux.
 
 See [the desktop guide](apps/desktop/README.md) for current behavior,

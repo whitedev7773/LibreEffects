@@ -7,6 +7,7 @@ mod tests;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SpectrumProfile {
     NativeV1,
+    HammingV1,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SpectrumInputScope {
@@ -194,6 +195,13 @@ pub(super) fn validate_project(project: &Project) -> Result<(), String> {
     for (comp_id, comp) in project.compositions() {
         for layer in &comp.layers {
             for effect in &layer.effect_stack {
+                if project.version < 82
+                    && effect
+                        .audio_spectrum()
+                        .is_some_and(|s| s.profile == SpectrumProfile::HammingV1)
+                {
+                    return Err("HammingV1 Audio Spectrum requires project version 82".into());
+                }
                 let Some(source) = effect.audio_spectrum().and_then(|s| s.source) else {
                     continue;
                 };
@@ -239,6 +247,23 @@ pub(super) fn materialized(project: &Project) -> bool {
                     .any(|effect| effect.audio_spectrum().is_some())
         })
     })
+}
+pub(super) fn required_version(project: &Project) -> Option<u32> {
+    if project.compositions().iter().any(|(_, comp)| {
+        comp.layers.iter().any(|layer| {
+            layer.effect_stack.iter().any(|effect| {
+                effect
+                    .audio_spectrum()
+                    .is_some_and(|s| s.profile == SpectrumProfile::HammingV1)
+            })
+        })
+    }) {
+        Some(82)
+    } else if materialized(project) {
+        Some(79)
+    } else {
+        None
+    }
 }
 pub(super) fn edits_only(command: &Command) -> bool {
     match command {

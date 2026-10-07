@@ -11,7 +11,10 @@ fn required_version(command: &Command, depth: usize) -> Result<u32, String> {
             .map(|command| required_version(command, depth + 1))
             .try_fold(1, |version, next| next.map(|next| version.max(next)))?,
         Command::SetOpacityTiming { .. } => 1,
+        Command::SetMaskFeatherKernel { .. } => 83,
+        Command::SetCompositingProfile { .. } => 84,
         Command::SetRichText { .. } => 71,
+        Command::SetLayerRangeSamples { .. } => 81,
         Command::ReplaceTextRange { .. } => 1,
         Command::DuplicateLayer(_)
         | Command::RenameLayer { .. }
@@ -99,6 +102,9 @@ impl Project {
             }
             if planar::materialized(&next.project) {
                 next.project.version = next.project.version.max(75);
+            }
+            if let Some(version) = audio_spectrum::required_version(&next.project) {
+                next.project.version = next.project.version.max(version);
             }
             next.project.validate_automation_project()?;
             *self = next.project;

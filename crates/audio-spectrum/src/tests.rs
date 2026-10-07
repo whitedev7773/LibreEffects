@@ -31,6 +31,146 @@ fn close(actual: f64, expected: f64) {
 }
 
 #[test]
+fn hamming_profile_matches_independent_dft_with_exclusive_end_and_raw_window_gain() {
+    let input: Vec<[f32; 2]> = (0..97)
+        .map(|i| {
+            [
+                (i as f64 * 0.17).sin() as f32,
+                (i as f64 * 0.31).cos() as f32,
+            ]
+        })
+        .collect();
+    let request = spec(input.len(), 187.5, 937.5, 4);
+    let result = SpectrumAnalyzer::new()
+        .analyze_profile(
+            &input,
+            &request,
+            SpectrumAnalysisProfile::HammingV1,
+            &SpectrumLimits::default(),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+    assert_eq!(result.profile, SpectrumAnalysisProfile::HammingV1);
+    for (band, actual) in result.amplitudes.iter().enumerate() {
+        // All frequencies fall on the independently known 512-point FFT bins;
+        // compute the unpadded DFT directly, with separate stereo magnitudes.
+        let frequency = 187.5 + 187.5 * band as f64;
+        let mut coefficients = [[0.0; 2]; 2];
+        for channel in 0..2 {
+            let (mut real, mut imaginary) = (0.0, 0.0);
+            for (i, frame) in input.iter().enumerate() {
+                let window = 0.54 - 0.46 * (std::f64::consts::TAU * i as f64 / 97.0).cos();
+                let phase = std::f64::consts::TAU * frequency * i as f64 / 48000.0;
+                real += f64::from(frame[channel]) * window * phase.cos();
+                imaginary -= f64::from(frame[channel]) * window * phase.sin();
+            }
+            coefficients[channel] = [real, imaginary];
+        }
+        close(
+            *actual,
+            (coefficients[0][0] + coefficients[1][0])
+                .hypot(coefficients[0][1] + coefficients[1][1])
+                / 97.0,
+        );
+    }
+    let frames = 4096;
+    let request = spec(frames, 234.375, 234.375, 1);
+    for (left, right, expected) in [
+        (0.5, 0.5, 0.27),
+        (0.5, -0.5, 0.0),
+        (0.5, 0.0, 0.135),
+        (0.5, 0.25, 0.2025),
+    ] {
+        let input = tone(frames, 20, left, right);
+        let result = SpectrumAnalyzer::new()
+            .analyze_profile(
+                &input,
+                &request,
+                SpectrumAnalysisProfile::HammingV1,
+                &SpectrumLimits::default(),
+                &AtomicBool::new(false),
+            )
+            .unwrap();
+        close(result.amplitudes[0], expected);
+    }
+}
+
+#[test]
+fn hamming_admission_cancellation_and_reuse_preserve_native_profile_identity() {
+    let request = spec(4320, 20.0, 800.0, 1920);
+    let work = request
+        .estimate_profile_work(SpectrumAnalysisProfile::HammingV1)
+        .unwrap();
+    assert_eq!(work.input_frames, 4320);
+    assert_eq!(work.fft_len, 32768);
+    work.check_limits(&SpectrumLimits::default()).unwrap();
+    let maximum = spec(48000, 0.0, 24000.0, 4096)
+        .estimate_profile_work(SpectrumAnalysisProfile::HammingV1)
+        .unwrap();
+    assert_eq!(maximum.fft_len, MAX_FFT_LEN);
+    maximum.check_limits(&SpectrumLimits::default()).unwrap();
+    let input = tone(4320, 9, 0.5, 0.5);
+    let mut analyzer = SpectrumAnalyzer::new();
+    let native = analyzer
+        .analyze(
+            &input,
+            &request,
+            &SpectrumLimits::default(),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+    let limits = SpectrumLimits {
+        max_work_units: work.work_units - 1,
+        ..Default::default()
+    };
+    assert_eq!(
+        analyzer.analyze_profile(
+            &input,
+            &request,
+            SpectrumAnalysisProfile::HammingV1,
+            &limits,
+            &AtomicBool::new(false)
+        ),
+        Err(SpectrumError::WorkBudgetExceeded)
+    );
+    assert_eq!(
+        analyzer.analyze_profile_checked(
+            &input,
+            &request,
+            SpectrumAnalysisProfile::HammingV1,
+            &SpectrumLimits::default(),
+            &mut |point| if matches!(point, CancelPoint::FftStage) {
+                Err(SpectrumError::Cancelled)
+            } else {
+                Ok(())
+            }
+        ),
+        Err(SpectrumError::Cancelled)
+    );
+    let hamming = analyzer
+        .analyze_profile(
+            &input,
+            &request,
+            SpectrumAnalysisProfile::HammingV1,
+            &SpectrumLimits::default(),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+    assert_ne!(native.amplitudes, hamming.amplitudes);
+    assert_eq!(
+        analyzer
+            .analyze(
+                &input,
+                &request,
+                &SpectrumLimits::default(),
+                &AtomicBool::new(false)
+            )
+            .unwrap(),
+        native
+    );
+}
+
+#[test]
 fn periodic_hann_bin_tones_preserve_two_amplitudes_and_neighbour_lobes() {
     let frames = 2_048;
     let bin = 31;

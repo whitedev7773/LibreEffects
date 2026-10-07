@@ -147,6 +147,16 @@
       pathValues.set(view, Object.freeze(path));
       return view;
     }
+    // Independent AE probes qualify the zero-handle polygon storage path.
+    // AE converts the input to float32, then to signed 16.16 with float32
+    // rounding of the biased scaled value. Out-of-range conversion produces
+    // INT32_MIN. Do not apply this to already authored Shape coordinates.
+    function polygonCoordinate(component) {
+      const single = Math.fround(component);
+      const scaled = Math.fround(single * 65536 + (single < 0 ? -0.5 : 0.5));
+      if (scaled >= 2147483648 || scaled < -2147483648) { return -32768; }
+      return Math.trunc(scaled) / 65536;
+    }
     function createPath(points, inTangents, outTangents, isClosed) {
       read();
       if (typeof isClosed !== "boolean") {
@@ -156,14 +166,31 @@
       if (count < (isClosed ? 3 : 2)) {
         reject("invalid_result", "Paths require at least three closed or two open vertices");
       }
-      const vertices = coordinateList(points, count, false, "Path vertices");
+      let vertices = coordinateList(points, count, false, "Path vertices");
       const incoming = coordinateList(inTangents, count, true, "Incoming path handles");
       const outgoing = coordinateList(outTangents, count, true, "Outgoing path handles");
       if (failure !== null) { throw new Error(failure.message); }
+      // Curved paths have a different AE storage pipeline, including changes
+      // to vertices when handles are nonzero. Retain the native curve contract
+      // until that pipeline is independently qualified.
+      if (incoming.every(point => point[0] === 0 && point[1] === 0) &&
+          outgoing.every(point => point[0] === 0 && point[1] === 0)) {
+        vertices = Object.freeze(vertices.map(point => Object.freeze([
+          polygonCoordinate(point[0]), polygonCoordinate(point[1]),
+        ])));
+      }
       return brandPath({ vertices, in_tangents: incoming, out_tangents: outgoing, closed: isClosed });
     }
-    function linear(t, tMin, tMax, first, last) {
+    function linear(...inputs) {
       read();
+      let t, tMin, tMax, first, last;
+      if (inputs.length === 3) {
+        [t, first, last] = inputs; tMin = 0; tMax = 1;
+      } else if (inputs.length === 5) {
+        [t, tMin, tMax, first, last] = inputs;
+      } else {
+        reject("invalid_result", "linear requires three or five arguments");
+      }
       finite(t, "Interpolation time");
       finite(tMin, "Interpolation start");
       finite(tMax, "Interpolation end");
@@ -216,7 +243,104 @@
       }
       return finite(frames / fps, "Converted time");
     }
+    function timeToFrames(t, fps, isDuration) {
+      read();
+      if (t === undefined) { t = data.time; }
+      if (fps === undefined) { fps = data.frame_rate.numerator / data.frame_rate.denominator; }
+      if (isDuration === undefined) { isDuration = false; }
+      finite(t, "Time"); finite(fps, "Frame rate");
+      if (fps <= 0 || typeof isDuration !== "boolean") {
+        reject("invalid_result", "timeToFrames requires a positive frame rate and boolean duration flag");
+      }
+      const frames = finite(t * fps, "Converted frames");
+      const rounded = isDuration ? frames < 0 ? Math.floor(frames) : Math.ceil(frames) : Math.floor(frames);
+      if (!Number.isSafeInteger(rounded)) {
+        reject("invalid_result", "Converted frame count exceeds the exact integer range");
+      }
+      return rounded;
+    }
+    function components(value, label) {
+      const count = arrayLength(value, 4, label);
+      if (count < 1) { reject("invalid_result", label + " requires one to four components"); }
+      const copy = [];
+      for (let index = 0; index < count; index += 1) {
+        copy.push(finite(dataItem(value, String(index), label), label));
+      }
+      if (failure !== null) { throw new Error(failure.message); }
+      return copy;
+    }
+    function combineVectors(first, last, operation) {
+      const a = components(first, "First vector"), b = components(last, "Second vector");
+      const result = [];
+      for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+        result.push(finite(operation(a[index] === undefined ? 0 : a[index],
+          b[index] === undefined ? 0 : b[index]), "Vector result"));
+      }
+      return vector(result);
+    }
+    function add(first, last) { read(); return combineVectors(first, last, (a, b) => a + b); }
+    function sub(first, last) { read(); return combineVectors(first, last, (a, b) => a - b); }
+    function mul(value, amount) {
+      read(); finite(amount, "Vector multiplier");
+      return vector(components(value, "Vector").map(component => finite(component * amount, "Vector result")));
+    }
+    function div(value, amount) {
+      read(); finite(amount, "Vector divisor");
+      if (amount === 0) { reject("invalid_result", "Vector division by zero is unsupported"); }
+      return vector(components(value, "Vector").map(component => finite(component / amount, "Vector result")));
+    }
+    function dot(first, last) {
+      read();
+      const a = components(first, "First vector"), b = components(last, "Second vector");
+      let result = 0;
+      for (let index = 0; index < Math.min(a.length, b.length); index += 1) {
+        result = finite(result + finite(a[index] * b[index], "Dot product"), "Dot product");
+      }
+      return result;
+    }
+    function cross(first, last) {
+      read();
+      const a = components(first, "First vector"), b = components(last, "Second vector");
+      if (a.length !== 3 || b.length !== 3) {
+        reject("invalid_result", "cross currently requires two three-component vectors");
+      }
+      return vector([finite(a[1] * b[2] - a[2] * b[1], "Cross product"),
+        finite(a[2] * b[0] - a[0] * b[2], "Cross product"),
+        finite(a[0] * b[1] - a[1] * b[0], "Cross product")]);
+    }
+    function length(first, last) {
+      read();
+      const value = last === undefined ? components(first, "Vector") : components(sub(first, last), "Distance");
+      return finite(Math.hypot(...value), "Vector length");
+    }
+    function normalize(value) {
+      read();
+      const copy = components(value, "Vector");
+      const scale = Math.max(...copy.map(component => Math.abs(component)));
+      if (scale === 0) { reject("invalid_result", "A zero-length vector cannot be normalized"); }
+      // Scaling first keeps both subnormal and near-maximum finite vectors usable.
+      const scaled = copy.map(component => component / scale);
+      const magnitude = Math.hypot(...scaled);
+      return vector(scaled.map(component => finite(component / magnitude, "Normalized vector")));
+    }
+    function clamp(value, first, last) {
+      read();
+      const constrain = (v, a, b) => Math.max(Math.min(a, b), Math.min(Math.max(a, b), v));
+      if (typeof value === "number" && typeof first === "number" && typeof last === "number") {
+        return constrain(finite(value, "Value"), finite(first, "First limit"), finite(last, "Second limit"));
+      }
+      const values = components(value, "Value"), a = components(first, "First limit"), b = components(last, "Second limit");
+      const result = [];
+      for (let index = 0; index < Math.max(values.length, a.length, b.length); index += 1) {
+        result.push(constrain(values[index] === undefined ? 0 : values[index],
+          a[index] === undefined ? 0 : a[index], b[index] === undefined ? 0 : b[index]));
+      }
+      return vector(result);
+    }
+    function degreesToRadians(value) { read(); return finite(finite(value, "Degrees") * (Math.PI / 180), "Radians"); }
+    function radiansToDegrees(value) { read(); return finite(finite(value, "Radians") * (180 / Math.PI), "Degrees"); }
     function markerView(layer) {
+      const keys = new Map();
       return record({
         numKeys: layer.markers.length,
         key(index) {
@@ -224,8 +348,11 @@
           if (!Number.isInteger(index) || index < 1 || index > layer.markers.length) {
             reject("missing_reference", "Marker key requires a valid one-based index");
           }
+          if (keys.has(index)) { return keys.get(index); }
           const marker = layer.markers[index - 1];
-          return record({ time: marker.time, comment: marker.comment, index }, "Marker key");
+          const result = record({ time: marker.time, comment: marker.comment, index }, "Marker key");
+          keys.set(index, result);
+          return result;
         },
       }, "Marker");
     }
@@ -234,6 +361,7 @@
         return layerViews.get(index);
       }
       const layer = data.layers[index];
+      const effects = new Map();
       const transform = Object.create(null);
       for (const property of ["position", "scale", "opacity"]) {
         Object.defineProperty(transform, property, { enumerable: true, get() { return sample(layer[property]); } });
@@ -254,17 +382,20 @@
           if (typeof name !== "string") {
             reject("unsupported", "Effect lookup requires an exact effect name");
           }
+          if (effects.has(name)) { return effects.get(name); }
           const slider = layer.sliders.find(entry => entry[0] === name);
           if (!slider) {
             reject("missing_reference", "Missing slider effect: " + name);
           }
-          return readonly(function (property) {
+          const result = readonly(function (property) {
             read();
             if (property !== 1 && property !== "Slider" && property !== "ADBE Slider Control-0001") {
               reject("unsupported", "Slider controls expose only property 1 (Slider)");
             }
             return sample(slider[1]);
           }, "Slider effect");
+          effects.set(name, result);
+          return result;
         },
       });
       for (const property of ["position", "scale", "opacity"]) {
@@ -279,6 +410,10 @@
       layerViews.set(index, result);
       return result;
     }
+    const layerNames = new Map();
+    for (let index = 0; index < data.layers.length; index += 1) {
+      if (!layerNames.has(data.layers[index].name)) { layerNames.set(data.layers[index].name, index); }
+    }
     const comp = record({
       width: data.width,
       height: data.height,
@@ -290,7 +425,7 @@
       layer(key) {
         read();
         const index = typeof key === "string"
-          ? data.layers.findIndex(layer => layer.name === key)
+          ? (layerNames.has(key) ? layerNames.get(key) : -1)
           : (Number.isInteger(key) ? key - 1 : -1);
         if (index < 0 || index >= data.layers.length) {
           reject("missing_reference", "Missing layer: " + String(key));
@@ -365,13 +500,15 @@
           if (program === undefined) {
             const declarations = locals.length ? 'let ' + arrayJoin.call(locals, ',') + ';\n' : '';
             program = new Function("thisComp", "thisLayer", "time", "inPoint", "outPoint", "startTime", "value", "framesToTime", "transform", "marker", "effect", "linear", "createPath",
+              "timeToFrames", "add", "sub", "mul", "div", "dot", "cross", "length", "normalize", "clamp", "degreesToRadians", "radiansToDegrees",
               '"use strict";\n' + declarations + 'return eval(' + JSON.stringify(data.sources[property.source_id]) + ');');
             Object.freeze(program.prototype);
             Object.freeze(program);
             programs.set(programKey, program);
           }
           result = program(comp, layer, data.time, layer.inPoint, layer.outPoint, layer.startTime,
-            result, framesToTime, layer.transform, layer.marker, layer.effect, linear, createPath);
+            result, framesToTime, layer.transform, layer.marker, layer.effect, linear, createPath,
+            timeToFrames, add, sub, mul, div, dot, cross, length, normalize, clamp, degreesToRadians, radiansToDegrees);
         }
         if (failure !== null) {
           throw new Error(failure.message);
@@ -457,6 +594,9 @@
     freezeIntrinsics(framesToTime);
     freezeIntrinsics(linear);
     freezeIntrinsics(createPath);
+    for (const helper of [timeToFrames, add, sub, mul, div, dot, cross, length, normalize, clamp, degreesToRadians, radiansToDegrees]) {
+      freezeIntrinsics(helper);
+    }
     freezeIntrinsics(globalThis);
 
     try {

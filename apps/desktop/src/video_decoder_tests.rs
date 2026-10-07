@@ -33,7 +33,7 @@ fn reference(path: &Path, size: &str) -> Vec<u8> {
         "0:v:0",
         "-an",
         "-vf",
-        &format!("scale={size},setsar=1"),
+        &format!("scale={size}:flags=bicubic+accurate_rnd+full_chroma_int,setsar=1"),
         "-fps_mode",
         "passthrough",
         "-pix_fmt",
@@ -75,6 +75,102 @@ fn invalid_requests_and_cancellation_do_not_launch_decoders() {
             .contains("canceled")
     );
     assert_eq!(pool.metrics.starts, 0);
+}
+
+#[test]
+#[ignore = "requires FFmpeg; verifies neutral limited-range YUV with an independent RGB oracle"]
+fn limited_range_video_decode_preserves_neutral_rgb_rounding() {
+    let dir = tempfile::tempdir().unwrap();
+    let raw = dir.path().join("neutral.yuv");
+    let path = dir.path().join("neutral.mkv");
+    let width = 96usize;
+    let height = 16usize;
+    let values = [16u8, 32, 64, 128, 180, 235];
+    let mut data = Vec::with_capacity(width * height * 3 / 2);
+    for _ in 0..height {
+        for y in values {
+            data.extend(std::iter::repeat_n(y, 16));
+        }
+    }
+    data.extend(std::iter::repeat_n(128, width * height / 2));
+    std::fs::write(&raw, &data).unwrap();
+    assert!(
+        command(&ffmpeg_path())
+            .args([
+                "-v",
+                "error",
+                "-nostdin",
+                "-f",
+                "rawvideo",
+                "-pixel_format",
+                "yuv420p",
+                "-video_size",
+                "96x16",
+                "-framerate",
+                "30",
+                "-color_range",
+                "tv",
+                "-colorspace",
+                "bt709",
+                "-i",
+            ])
+            .arg(&raw)
+            .args([
+                "-frames:v",
+                "1",
+                "-c:v",
+                "ffv1",
+                "-color_range",
+                "tv",
+                "-colorspace",
+                "bt709"
+            ])
+            .arg(&path)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let cancel = AtomicBool::new(false);
+    let mut pool = Pool::default();
+    let png = pool
+        .frame_png(
+            path.to_str().unwrap(),
+            0.0,
+            30.0,
+            width as u32,
+            height as u32,
+            width as u32,
+            &cancel,
+        )
+        .unwrap();
+    let decoded = pixels(&png);
+    // Neutral chroma contributes zero; limited luma spans 16..235 over 0..255.
+    for (i, y) in values.into_iter().enumerate() {
+        let gray = ((f64::from(y) - 16.0) * 255.0 / 219.0).round() as u8;
+        for row in 0..height {
+            for column in i * 16..(i + 1) * 16 {
+                assert_eq!(
+                    decoded.get_pixel(column as u32, row as u32).0,
+                    [gray, gray, gray, 255],
+                    "Y={y}"
+                );
+            }
+        }
+    }
+    let still = crate::footage::frame_png(
+        path.to_str().unwrap(),
+        0.0,
+        width as u32,
+        height as u32,
+        width as u32,
+    )
+    .unwrap();
+    assert_eq!(
+        pixels(&still),
+        decoded,
+        "still and persistent decode must agree"
+    );
+    assert_eq!(std::fs::read(raw).unwrap(), data);
 }
 
 #[test]

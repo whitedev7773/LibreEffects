@@ -8,6 +8,12 @@ mod source_pooling;
 #[path = "text_path_tests.rs"]
 mod text_paths;
 
+#[path = "math_helpers_tests.rs"]
+mod math_helpers;
+
+#[path = "host_cache_tests.rs"]
+mod host_caches;
+
 fn layer(id: u64, name: &str) -> LayerSnapshot {
     LayerSnapshot {
         id: LayerId(id),

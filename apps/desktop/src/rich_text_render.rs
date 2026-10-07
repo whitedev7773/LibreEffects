@@ -91,8 +91,13 @@ fn line_svg(
         libre_effects_core::TextAlign::Right => "end",
     };
     let mut svg = String::new();
+    let variant = if rich.proportional_metrics {
+        " font-variant='proportional-width'"
+    } else {
+        ""
+    };
     if let Some(authored) = authored {
-        append_svg(&mut svg, format_args!("<text x='"))?;
+        append_svg(&mut svg, format_args!("<text{variant} x='"))?;
         for glyph in &authored.glyphs {
             append_svg(&mut svg, format_args!("{} ", glyph.x))?;
         }
@@ -105,7 +110,7 @@ fn line_svg(
         append_svg(
             &mut svg,
             format_args!(
-                "<text x='{x}' y='{baseline}' text-anchor='{anchor}' xml:space='preserve'>"
+                "<text{variant} x='{x}' y='{baseline}' text-anchor='{anchor}' xml:space='preserve'>"
             ),
         )?;
     }
@@ -589,8 +594,137 @@ pub(crate) fn layer_svg(
     Ok((combine(&fill, &stroke)?, bounds))
 }
 
+/// Paint-independent trees for the explicit font check. Use the renderer's
+/// whole-line geometry and immutable verified font bytes for saved positions.
+/// Ranges are local to each tree and identify the requested face of each glyph.
+pub(crate) fn coverage_lines(
+    text: &str,
+    rich: &RichText,
+    width: f64,
+    style: &TextStyle,
+) -> Result<Vec<(usvg::Tree, Vec<(Range<usize>, usvg::fontdb::ID)>)>, String> {
+    // Retain all renderer admission checks, including exact authored-font and
+    // shaping verification; font inspection must not bypass a rejected render.
+    compose(text, rich, width, style)?;
+    let mut result = Vec::new();
+    for line in rich.line_metrics(text, style)? {
+        if line.range.is_empty() {
+            continue;
+        }
+        let authored = rich.positioning.as_ref().and_then(|positions| {
+            positions
+                .lines
+                .iter()
+                .find(|saved| saved.start == line.range.start)
+        });
+        let font = authored
+            .map(|saved| verify_font_and_script(text, saved))
+            .transpose()?;
+        let geometry = line_svg(
+            text,
+            rich,
+            line.range.clone(),
+            width,
+            line.baseline,
+            style,
+            Pass::Geometry,
+            authored,
+        )?;
+        let options = font.map_or_else(crate::fonts::render_options, |font| font.options());
+        let svg = svg_document(&geometry, width.max(1.0), (line.size * 3.0).max(1.0))?;
+        let tree = usvg::Tree::from_str(&svg, &options)
+            .map_err(|error| format!("Could not inspect rich text: {error}"))?;
+        let primary = rich
+            .runs
+            .iter()
+            .filter(|run| run.start < line.range.end && run.end > line.range.start)
+            .map(|run| {
+                (
+                    run.start.max(line.range.start) - line.range.start
+                        ..run.end.min(line.range.end) - line.range.start,
+                    font.map_or_else(
+                        || crate::fonts::matched(&font_style(&run.style)).id,
+                        |font| font.id,
+                    ),
+                )
+            })
+            .collect();
+        result.push((tree, primary));
+    }
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore = "requires installed NotoSansCJKkr-Light for the live AE font-metrics qualification"]
+    fn proportional_metrics_match_independent_ae_synthetic_baseline() {
+        use super::*;
+        use libre_effects_core::{TextAlign, TextStyleRun};
+        let text = "あいう";
+        let style = TextStyle {
+            font_family: "Noto Sans CJK KR".into(),
+            font_face: "NotoSansCJKkr-Light".into(),
+            weight: 300,
+            align: TextAlign::Center,
+            ..Default::default()
+        };
+        assert!(
+            crate::fonts::warning(&style).is_none(),
+            "The exact reference font is required"
+        );
+        let character = TextCharacterStyle::from_style(&style, 46.0, 0xffffff);
+        let mut rich = RichText::new(
+            text,
+            character.clone(),
+            vec![TextStyleRun {
+                start: 0,
+                end: text.len(),
+                style: character,
+            }],
+        )
+        .unwrap();
+        rich.point_origin = true;
+        let legacy = compose(text, &rich, 400.0, &style).unwrap();
+        rich.proportional_metrics = true;
+        let proportional = compose(text, &rich, 400.0, &style).unwrap();
+        // Captured independently from a temporary AE text layer using metrics
+        // kerning, centered point text and this exact face/size. No source
+        // project text or media is part of this synthetic fixture.
+        // AE's baselineLocs includes the first glyph's palt placement offset.
+        // Our cluster caret deliberately excludes that offset; inspect the
+        // same authoritative glyph transform used to paint instead.
+        let geometry = line_svg(
+            text,
+            &rich,
+            0..text.len(),
+            400.0,
+            0.0,
+            &style,
+            Pass::Geometry,
+            None,
+        )
+        .unwrap();
+        let tree = usvg::Tree::from_str(
+            &svg_document(&geometry, 400.0, 140.0).unwrap(),
+            &crate::fonts::render_options(),
+        )
+        .unwrap();
+        let node = find_text(tree.root()).unwrap();
+        let glyph = node
+            .layouted()
+            .iter()
+            .flat_map(|s| &s.positioned_glyphs)
+            .next()
+            .unwrap();
+        let first_origin = f64::from(glyph.transform().tx);
+        assert!(
+            (first_origin - (-63.802001953125)).abs() < 0.001,
+            "actual first glyph origin: {first_origin}"
+        );
+        assert!((legacy.lines[0].clusters[0].x - proportional.lines[0].clusters[0].x).abs() > 1.0);
+        assert_eq!(proportional.lines[0].clusters.len(), 3);
+    }
     use super::*;
     use libre_effects_core::{TextAlign, TextStyleRun};
 
@@ -822,6 +956,7 @@ mod tests {
             // the public constructor has rejected this unsupported boundary.
             let unchecked = RichText {
                 point_origin: false,
+                proportional_metrics: false,
                 positioning: None,
                 default_style: style(36.0, 0xff0000, 400),
                 runs: vec![

@@ -60,8 +60,14 @@ pub enum TextCharacterPatch {
     Family(String),
     Font(TextFont),
     FontSize(f64),
+    Leading(Option<TextLeading>),
+    Tracking(f64),
     FillColor(u32),
     FillEnabled(bool),
+    StrokeColor(u32),
+    StrokeEnabled(bool),
+    StrokeWidth(f64),
+    StrokeJoin(TextStrokeJoin),
 }
 
 impl TextCharacterPatch {
@@ -80,8 +86,14 @@ impl TextCharacterPatch {
                 style.italic = font.italic;
             }
             Self::FontSize(value) => style.font_size = *value,
+            Self::Leading(value) => style.leading = *value,
+            Self::Tracking(value) => style.tracking = *value,
             Self::FillColor(value) => style.fill_color = *value,
             Self::FillEnabled(value) => style.fill_enabled = *value,
+            Self::StrokeColor(value) => style.stroke_color = *value,
+            Self::StrokeEnabled(value) => style.stroke_enabled = *value,
+            Self::StrokeWidth(value) => style.stroke_width = *value,
+            Self::StrokeJoin(value) => style.stroke_join = *value,
         }
     }
 }
@@ -92,8 +104,15 @@ pub struct TextSelectionStyle {
     pub font_family: Option<String>,
     pub font: Option<TextFont>,
     pub font_size: Option<f64>,
+    /// Outer None means mixed; Some(None) inherits the layer's leading.
+    pub leading: Option<Option<TextLeading>>,
+    pub tracking: Option<f64>,
     pub fill_color: Option<u32>,
     pub fill_enabled: Option<bool>,
+    pub stroke_color: Option<u32>,
+    pub stroke_enabled: Option<bool>,
+    pub stroke_width: Option<f64>,
+    pub stroke_join: Option<TextStrokeJoin>,
 }
 impl TextCharacterStyle {
     pub fn from_style(style: &TextStyle, font_size: f64, fill_color: u32) -> Self {
@@ -180,6 +199,10 @@ pub struct RichText {
     /// legacy width-based horizontal anchor and first-line top at y=0.
     #[serde(default, skip_serializing_if = "is_false")]
     pub point_origin: bool,
+    /// Use the font's OpenType proportional-width metrics (`palt`). The
+    /// setting survives text/style edits; absent keeps legacy native shaping.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub proportional_metrics: bool,
     /// Exact saved horizontal point-text positions (schema 80). Absent retains
     /// the legacy serialized representation and ordinary native shaping.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -208,6 +231,7 @@ impl RichText {
             default_style,
             runs,
             point_origin: false,
+            proportional_metrics: false,
             positioning: None,
         };
         value.validate_ranges(text, false)?;
@@ -443,6 +467,7 @@ impl RichText {
             default_style: self.default_style.clone(),
             runs,
             point_origin: self.point_origin,
+            proportional_metrics: self.proportional_metrics,
             positioning: self.positioning.clone(),
         };
         // A temporary split may exceed the limit and then merge back within it.
@@ -465,8 +490,14 @@ impl RichText {
             font_family: Some(first.font_family.clone()),
             font: Some(first.font()),
             font_size: Some(first.font_size),
+            leading: Some(first.leading),
+            tracking: Some(first.tracking),
             fill_color: Some(first.fill_color),
             fill_enabled: Some(first.fill_enabled),
+            stroke_color: Some(first.stroke_color),
+            stroke_enabled: Some(first.stroke_enabled),
+            stroke_width: Some(first.stroke_width),
+            stroke_join: Some(first.stroke_join),
         };
         for run in self
             .runs
@@ -483,11 +514,29 @@ impl RichText {
             if style.font_size != first.font_size {
                 summary.font_size = None;
             }
+            if style.leading != first.leading {
+                summary.leading = None;
+            }
+            if style.tracking != first.tracking {
+                summary.tracking = None;
+            }
             if style.fill_color != first.fill_color {
                 summary.fill_color = None;
             }
             if style.fill_enabled != first.fill_enabled {
                 summary.fill_enabled = None;
+            }
+            if style.stroke_color != first.stroke_color {
+                summary.stroke_color = None;
+            }
+            if style.stroke_enabled != first.stroke_enabled {
+                summary.stroke_enabled = None;
+            }
+            if style.stroke_width != first.stroke_width {
+                summary.stroke_width = None;
+            }
+            if style.stroke_join != first.stroke_join {
+                summary.stroke_join = None;
             }
         }
         Ok(summary)
@@ -553,6 +602,7 @@ impl RichText {
             },
             runs,
             point_origin: self.point_origin,
+            proportional_metrics: self.proportional_metrics,
             positioning: None,
         };
         next.canonicalize();
@@ -654,6 +704,9 @@ pub(super) fn validate(layer: &Layer, version: u32) -> Result<(), String> {
     if version < 80 && rich.positioning.is_some() {
         return Err("Saved text spacing requires project version 80".into());
     }
+    if version < 81 && rich.proportional_metrics {
+        return Err("Proportional text metrics require project version 81".into());
+    }
     layer.rich_text_eligibility()?;
     rich.validate_positioning(text, &layer.text_style)
 }
@@ -665,7 +718,9 @@ pub(super) fn required_version(project: &Project) -> Option<u32> {
         .flat_map(|(_, comp)| &comp.layers)
         .filter_map(|layer| layer.rich_text.as_ref())
         .map(|rich| {
-            if rich.positioning.is_some() {
+            if rich.proportional_metrics {
+                81
+            } else if rich.positioning.is_some() {
                 80
             } else if rich.has_explicit_line_metrics() {
                 74
@@ -792,7 +847,7 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                 *source = text.clone();
             }
             layer.rich_text = Some(rich_text);
-            validate(layer, 80)
+            validate(layer, PROJECT_VERSION)
         })()),
         Command::SetRichText { id, rich_text } => Some((|| {
             let layer = editing::editable(state, *id)?;
@@ -808,7 +863,7 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
             layer.rich_text = rich_text;
             // Feature validation uses the future floor; the transaction handles
             // the actual schema upgrade only if this edit changes stored data.
-            validate(layer, 80)
+            validate(layer, PROJECT_VERSION)
         })()),
         Command::ReplaceTextRange {
             id,

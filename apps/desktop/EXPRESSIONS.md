@@ -34,6 +34,26 @@ For example, a script can set an existing layer's position expression to
 `[value[0] + time * 40, value[1]]`. Disable the program to return to the unchanged
 base animation. Layer creation and importing AE project files are separate features.
 
+## Math and time helpers
+
+Expressions can use `add`, `sub`, `mul`, `div`, `dot`, `cross`, `length`,
+`normalize`, `clamp`, `degreesToRadians`, `radiansToDegrees`, and `timeToFrames`.
+For example, `add(value, mul(normalize([3, 4]), time * 100))` moves a 2D Position
+100 pixels per second in a fixed direction. `linear(time, 0, 2, 0, 100)` animates
+an Opacity from 0 to 100 over two seconds; `linear(time / 2, 0, 100)` also works.
+
+Vectors contain one to four finite components, with missing add/subtract/dot/
+distance axes treated as zero. `cross` requires two three-component vectors.
+Clamp accepts three numbers or three vectors. Final results must match the
+target property's dimensions. Invalid inputs, zero-vector normalization,
+division by zero and nonfinite results fail the complete evaluation.
+
+`timeToFrames()` uses the composition-local snapshot time and rational frame rate.
+Explicit times round down, including negative values; pass `true` as its third
+argument to round durations away from zero. Native snapshots have no Adobe
+display-start offset. These helpers are read-only and retain the evaluator's
+existing resource limits. See the [complete helper bounds](../../crates/ae-expressions/README.md#bounded-math-and-time-helpers).
+
 ## One evaluated scene per render context
 
 The core constructs immutable snapshots with rational frame rate, independent
@@ -131,11 +151,17 @@ compilation alone is not evidence that the above raster checks passed.
 
 ## Remaining supplied-template gaps
 
-The current priority is JSX/ScriptUI operating on native LibreEffects layers and
-compositions. Opening/importing AEP files is no longer required; the supplied AEP
-is reference material and import gaps are not acceptance blockers. Remaining
-script/workflow dependencies include genuine 3D/spatial Position, per-side scalar
-Opacity timing, needed expression APIs and AE TextDocument behavior. Additional
-effects and signed/out-of-composition key/range storage require separately bounded
-native contracts where the script needs them. The supplied original
-files have not been executed or visually qualified in this milestone.
+The current acceptance goal is analysing the supplied AEP in After Effects and
+converting it to an editable LEP with matching operation and output. Direct AEP
+importing is outside the requested scope. Faithful media, typography, expressions,
+effects, timing and rendering are acceptance requirements.
+The previous native-only JSX milestone does not satisfy this goal. Remaining
+script/workflow dependencies include general 3D rendering, further expression
+APIs and AE TextDocument behavior. Native joined XY/fixed-plane XYZ Position and
+per-side Opacity timing have bounded scripting contracts; see [SCRIPTING.md](SCRIPTING.md).
+Additional effects and signed/out-of-composition key/range storage require separately bounded
+native contracts where the project needs them. The original AEP has been opened
+and played in After Effects; captured property values and reference frames are
+local QA evidence. Its original automation script has not been run. See
+[AE_PROJECT_COMPATIBILITY.md](AE_PROJECT_COMPATIBILITY.md) for the verified scope
+and remaining import/render blockers.

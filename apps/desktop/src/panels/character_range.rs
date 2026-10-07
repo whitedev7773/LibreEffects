@@ -1,14 +1,47 @@
 //! Character formatting belongs to a selected source range in the text draft.
 use crate::{components::TextField, editor::EditorState, text_edit::SelectionTarget, ui};
 use gpui::{Context, Entity, FocusHandle, SharedString, Window, div, prelude::*, px, rgb};
-use libre_effects_core::{TextCharacterPatch, TextFont, TextSelectionStyle};
+use libre_effects_core::{
+    TextCharacterPatch, TextFont, TextLeading, TextSelectionStyle, TextStrokeJoin,
+};
 use unicode_segmentation::UnicodeSegmentation;
+
+#[derive(Clone, Copy)]
+enum Input {
+    Size,
+    Leading,
+    Tracking,
+    Fill,
+    Stroke,
+    StrokeWidth,
+}
+impl Input {
+    fn key(self) -> &'static str {
+        match self {
+            Self::Size => "size",
+            Self::Leading => "leading",
+            Self::Tracking => "tracking",
+            Self::Fill => "fill",
+            Self::Stroke => "stroke",
+            Self::StrokeWidth => "stroke-width",
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            Self::Size => "Font size (px)",
+            Self::Leading => "Leading (px, Auto ratio, or Inherit)",
+            Self::Tracking => "Tracking (1/1000 em)",
+            Self::Fill => "Fill (hex)",
+            Self::Stroke => "Stroke (hex)",
+            Self::StrokeWidth => "Stroke width (px)",
+        }
+    }
+}
 
 pub(super) struct CharacterRange {
     state: Entity<EditorState>,
     focus: FocusHandle,
-    size: Entity<TextField>,
-    fill: Entity<TextField>,
+    fields: [(Input, Entity<TextField>); 6],
     search: Entity<TextField>,
     picker: Option<(SelectionTarget, bool)>,
 }
@@ -16,15 +49,26 @@ impl CharacterRange {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
         let focus = cx.focus_handle();
-        let size = cx.new(|cx| TextField::new(cx, |_, _, _| {}).return_focus(focus.clone()));
-        let fill = cx.new(|cx| TextField::new(cx, |_, _, _| {}).return_focus(focus.clone()));
+        let fields = [
+            Input::Size,
+            Input::Leading,
+            Input::Tracking,
+            Input::Fill,
+            Input::Stroke,
+            Input::StrokeWidth,
+        ]
+        .map(|input| {
+            (
+                input,
+                cx.new(|cx| TextField::new(cx, |_, _, _| {}).return_focus(focus.clone())),
+            )
+        });
         let search = cx.new(|cx| TextField::new(cx, |_, _, _| {}).return_focus(focus.clone()));
         cx.observe(&search, |_, _, cx| cx.notify()).detach();
         Self {
             state,
             focus,
-            size,
-            fill,
+            fields,
             search,
             picker: None,
         }
@@ -132,41 +176,71 @@ fn summary(state: &EditorState) -> Option<TextSelectionStyle> {
     let session = state.text_session.as_ref()?;
     session.buffer.selection_style(&session.baseline_style).ok()
 }
-fn display(state: &EditorState, fill: bool) -> String {
+fn display(state: &EditorState, input: Input) -> String {
     let Some(style) = summary(state) else {
         return String::new();
     };
-    if fill {
-        style
-            .fill_color
-            .map(|v| format!("{v:06X}"))
-            .unwrap_or_else(|| "Mixed".into())
-    } else {
-        style
-            .font_size
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| "Mixed".into())
-    }
+    let value = match input {
+        Input::Size => style.font_size.map(|v| v.to_string()),
+        Input::Leading => style.leading.map(|leading| match leading {
+            None => "Inherit".into(),
+            Some(TextLeading::Auto(ratio)) => format!("Auto {ratio}"),
+            Some(TextLeading::Fixed(pixels)) => pixels.to_string(),
+        }),
+        Input::Tracking => style.tracking.map(|v| v.to_string()),
+        Input::Fill => style.fill_color.map(|v| format!("{v:06X}")),
+        Input::Stroke => style.stroke_color.map(|v| format!("{v:06X}")),
+        Input::StrokeWidth => style.stroke_width.map(|v| v.to_string()),
+    };
+    value.unwrap_or_else(|| "Mixed".into())
 }
-fn field_patch(text: &str, fill: bool) -> Result<TextCharacterPatch, String> {
-    if fill {
-        let hex = text.trim().strip_prefix('#').unwrap_or(text.trim());
+fn field_patch(text: &str, input: Input) -> Result<TextCharacterPatch, String> {
+    let text = text.trim();
+    if matches!(input, Input::Fill | Input::Stroke) {
+        let hex = text.strip_prefix('#').unwrap_or(text);
         if hex.len() != 6 || !hex.bytes().all(|c| c.is_ascii_hexdigit()) {
-            return Err("Enter six hexadecimal digits for the selected text fill".into());
+            return Err("Enter six hexadecimal digits for the selected text color".into());
         }
-        Ok(TextCharacterPatch::FillColor(
-            u32::from_str_radix(hex, 16).unwrap(),
-        ))
-    } else {
-        let value = text
-            .trim()
-            .parse::<f64>()
-            .map_err(|_| "Enter a font size from 1 to 2048 pixels")?;
-        if !value.is_finite() || !(1.0..=2048.0).contains(&value) {
-            return Err("Enter a font size from 1 to 2048 pixels".into());
-        }
-        Ok(TextCharacterPatch::FontSize(value))
+        let color = u32::from_str_radix(hex, 16).unwrap();
+        return Ok(if matches!(input, Input::Fill) {
+            TextCharacterPatch::FillColor(color)
+        } else {
+            TextCharacterPatch::StrokeColor(color)
+        });
     }
+    if matches!(input, Input::Leading) {
+        if text.eq_ignore_ascii_case("inherit") {
+            return Ok(TextCharacterPatch::Leading(None));
+        }
+        let parts: Vec<_> = text.split_whitespace().collect();
+        let leading = match parts.as_slice() {
+            [mode, ratio] if mode.eq_ignore_ascii_case("auto") => {
+                ratio.parse().ok().map(TextLeading::Auto)
+            }
+            [pixels] => pixels.parse().ok().map(TextLeading::Fixed),
+            _ => None,
+        };
+        return leading
+            .filter(|value| value.valid())
+            .map(|value| TextCharacterPatch::Leading(Some(value)))
+            .ok_or_else(|| "Enter 0.1–20480 pixels, Auto 0.1–10, or Inherit".into());
+    }
+    let (minimum, maximum, error) = match input {
+        Input::Size => (1.0, 2048.0, "Enter a font size from 1 to 2048 pixels"),
+        Input::Tracking => (-1000.0, 10000.0, "Enter tracking from -1000 to 10000"),
+        Input::StrokeWidth => (0.0, 1000.0, "Enter a stroke width from 0 to 1000 pixels"),
+        _ => unreachable!(),
+    };
+    let value = text.parse::<f64>().map_err(|_| error.to_string())?;
+    if !value.is_finite() || !(minimum..=maximum).contains(&value) {
+        return Err(error.into());
+    }
+    Ok(match input {
+        Input::Size => TextCharacterPatch::FontSize(value),
+        Input::Tracking => TextCharacterPatch::Tracking(value),
+        Input::StrokeWidth => TextCharacterPatch::StrokeWidth(value),
+        _ => unreachable!(),
+    })
 }
 fn button(
     id: impl Into<gpui::ElementId>,
@@ -245,21 +319,21 @@ impl Render for CharacterRange {
             {
                 self.picker = None;
             }
-            for (is_fill, field) in [(false, self.size.clone()), (true, self.fill.clone())] {
-                let value = display(self.state.read(cx), is_fill);
-                let binding = target.binding(if is_fill { "fill" } else { "size" });
+            for (input, field) in self.fields.clone() {
+                let value = display(self.state.read(cx), input);
+                let binding = target.binding(input.key());
                 let target = target.clone();
                 let state = self.state.clone();
                 field.update(cx, |field, _| {
                     field.sync_guarded(binding, value, window, move |text, _, cx| {
-                        match field_patch(text, is_fill) {
+                        match field_patch(text, input) {
                             Ok(patch) => apply_patch_to_selection(&state, &target, patch, cx),
                             Err(error) => state.update(cx, |s, cx| {
                                 s.status = error;
                                 cx.notify();
                             }),
                         }
-                        display(state.read(cx), is_fill)
+                        display(state.read(cx), input)
                     })
                 });
             }
@@ -375,11 +449,11 @@ impl Render for CharacterRange {
                 }
                 panel = panel.child(choices);
             }
-            panel = panel
-                .child(div().text_size(px(10.0)).child("Font size (px)"))
-                .child(self.size.clone())
-                .child(div().text_size(px(10.0)).child("Fill (hex)"))
-                .child(self.fill.clone());
+            for (input, field) in &self.fields {
+                panel = panel
+                    .child(div().text_size(px(10.0)).child(input.label()))
+                    .child(field.clone());
+            }
             let owner = target.clone();
             let next = !style.fill_enabled.unwrap_or(false);
             panel = panel.child(
@@ -395,6 +469,50 @@ impl Render for CharacterRange {
                     this.apply(&owner, TextCharacterPatch::FillEnabled(next), w, cx)
                 })),
             );
+            let owner = target.clone();
+            let next = !style.stroke_enabled.unwrap_or(false);
+            panel = panel.child(
+                button(
+                    "selection-stroke-enabled",
+                    match style.stroke_enabled {
+                        Some(true) => "Stroke: On",
+                        Some(false) => "Stroke: Off",
+                        None => "Stroke: Mixed",
+                    },
+                )
+                .on_click(cx.listener(move |this, _, w, cx| {
+                    this.apply(&owner, TextCharacterPatch::StrokeEnabled(next), w, cx)
+                })),
+            );
+            let mut joins = div().flex().flex_wrap().gap_1();
+            for (key, label, join) in [
+                ("selection-join-miter", "Miter", TextStrokeJoin::Miter),
+                ("selection-join-round", "Round", TextStrokeJoin::Round),
+                ("selection-join-bevel", "Bevel", TextStrokeJoin::Bevel),
+            ] {
+                let owner = target.clone();
+                let label = if style.stroke_join == Some(join) {
+                    format!("✓ {label}")
+                } else {
+                    label.into()
+                };
+                joins = joins.child(ui::text_button(key, label).on_click(cx.listener(
+                    move |this, _, w, cx| {
+                        this.apply(&owner, TextCharacterPatch::StrokeJoin(join), w, cx)
+                    },
+                )));
+            }
+            panel = panel
+                .child(
+                    div()
+                        .text_size(px(10.0))
+                        .child(if style.stroke_join.is_some() {
+                            "Stroke join"
+                        } else {
+                            "Stroke join: Mixed"
+                        }),
+                )
+                .child(joins);
             let fonts: std::collections::BTreeSet<_> = if let Some(rich) = &session.buffer.rich_text
             {
                 rich.runs
@@ -487,5 +605,56 @@ impl Render for CharacterRange {
             })
         })
         .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selection_fields_parse_explicit_leading_tracking_and_stroke_without_coercion() {
+        assert!(matches!(
+            field_patch("Inherit", Input::Leading).unwrap(),
+            TextCharacterPatch::Leading(None)
+        ));
+        assert!(matches!(
+            field_patch(" auto 1.5 ", Input::Leading).unwrap(),
+            TextCharacterPatch::Leading(Some(TextLeading::Auto(1.5)))
+        ));
+        assert!(matches!(
+            field_patch("72", Input::Leading).unwrap(),
+            TextCharacterPatch::Leading(Some(TextLeading::Fixed(72.0)))
+        ));
+        assert!(matches!(
+            field_patch("-125", Input::Tracking).unwrap(),
+            TextCharacterPatch::Tracking(-125.0)
+        ));
+        assert!(matches!(
+            field_patch("0", Input::StrokeWidth).unwrap(),
+            TextCharacterPatch::StrokeWidth(0.0)
+        ));
+        assert!(matches!(
+            field_patch(" #12AbCd ", Input::Stroke).unwrap(),
+            TextCharacterPatch::StrokeColor(0x12abcd)
+        ));
+        for (input, values) in [
+            (
+                Input::Leading,
+                vec![
+                    "Mixed", "Auto", "Auto 0", "Auto 11", "0", "20481", "NaN", "72 px",
+                ],
+            ),
+            (
+                Input::Tracking,
+                vec!["Mixed", "-1001", "10001", "NaN", "inf"],
+            ),
+            (Input::StrokeWidth, vec!["-1", "1001", "NaN"]),
+            (Input::Stroke, vec!["#FFF", "1234567", "XX0000"]),
+        ] {
+            for text in values {
+                assert!(field_patch(text, input).is_err(), "{text}");
+            }
+        }
     }
 }

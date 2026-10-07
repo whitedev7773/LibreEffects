@@ -209,6 +209,7 @@ fn paste(state: &mut Snapshot, clipboard: &LayerClipboard) -> Result<(), String>
             );
         }
         layer.out_frame = Some(end);
+        layer.rescale_precise_range(comp.fps.as_f64() / clipboard.fps.as_f64(), comp.duration);
         if let Some(origin) = layer.start_frame {
             layer.start_frame = Some(
                 clipboard

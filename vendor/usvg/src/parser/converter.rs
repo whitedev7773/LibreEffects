@@ -710,6 +710,7 @@ pub(crate) fn convert_group(
         transform,
         abs_transform,
         opacity,
+        opaque_opacity_byte257: node.opaque_opacity_byte257(),
         blend_mode,
         isolate,
         clip_path: None,

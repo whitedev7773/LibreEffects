@@ -641,6 +641,14 @@ pub(super) fn apply_extended(
                             .split(&mut copy.markers, *frame)?;
                         state.project.composition.layers[index].out_frame = Some(*frame);
                         copy.in_frame = *frame;
+                        if let Some(range) =
+                            &mut state.project.composition.layers[index].precise_range
+                        {
+                            range[1] = f64::from(*frame);
+                        }
+                        if let Some(range) = &mut copy.precise_range {
+                            range[0] = f64::from(*frame);
+                        }
                     } else if copy.name.len() < 1000 {
                         copy.name.push_str(" copy");
                     }

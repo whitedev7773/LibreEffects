@@ -19,6 +19,7 @@ pub use usvg;
 
 mod checked;
 mod clip;
+mod opaque_opacity;
 
 pub use checked::{
     CheckedRenderOptions, RenderError, RenderErrorKind, RenderLimits, RepeatEdgeDomain,
@@ -57,19 +58,24 @@ pub fn render(
     render::render_nodes(tree.root(), &ctx, transform, pixmap);
 }
 
-/// Renders with explicit errors and frame-local domains for duplicate-edge blur.
+/// Renders with explicit errors for private blur and opacity-compositing profiles.
 ///
-/// Legacy SVGs with no non-default Gaussian edge mode use [`render`] unchanged.
+/// Legacy SVGs with no non-default mathematical profile use [`render`] unchanged.
 /// On failure the destination may be partially painted and must be discarded.
 /// Repeat mode supports sRGB, axis-aligned transformed source domains, and an
 /// unclipped filter buffer; unsupported inputs fail instead of changing pixels.
+/// Explicit fractional-box blur needs no repeat domain and preserves authored
+/// directional pass order under exact quarter turns. Its buffers share the
+/// checked allocation limits; unsupported transforms fail explicitly.
+/// Opaque byte-opacity interpolation also shares checked temporary limits.
+/// Without explicit box/repeat blur, ordinary group crop pixels remain legacy.
 pub fn render_checked(
     tree: &usvg::Tree,
     transform: tiny_skia::Transform,
     pixmap: &mut tiny_skia::PixmapMut,
     options: &CheckedRenderOptions<'_>,
 ) -> Result<(), RenderError> {
-    let mut has_repeat = false;
+    let mut needs_checked_blur = false;
     for filter in tree.filters() {
         for (index, primitive) in filter.primitives().iter().enumerate() {
             if let usvg::filter::Kind::GaussianBlur(fe) = primitive.kind() {
@@ -80,19 +86,21 @@ pub fn render_checked(
                         RenderErrorKind::UnsupportedEdgeMode,
                     ));
                 }
-                if fe.edge_mode() == usvg::filter::EdgeMode::Duplicate {
-                    has_repeat = true;
+                if fe.edge_mode() == usvg::filter::EdgeMode::Duplicate || fe.box3_radius().is_some()
+                {
+                    needs_checked_blur = true;
                 }
             }
         }
     }
-    if !has_repeat {
+    if !needs_checked_blur && !tree.has_opaque_opacity_byte257() {
         render(tree, transform, pixmap);
         return Ok(());
     }
     let bytes = checked::image_bytes(pixmap.width(), pixmap.height(), options.limits)
         .map_err(RenderError::new)?;
-    let state = checked::CheckedState::new(options, bytes)?;
+    let mut state = checked::CheckedState::new(options, bytes)?;
+    state.legacy_group_bounds = !needs_checked_blur;
     let w =
         i32::try_from(pixmap.width()).map_err(|_| RenderError::new(RenderErrorKind::Overflow))?;
     let h =

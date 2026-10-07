@@ -103,7 +103,7 @@ impl Stream {
                 "-sn",
                 "-dn",
                 "-vf",
-                &format!("scale={}:{},setsar=1", source.width, source.height),
+                &crate::footage::video_scale_filter(source.width, source.height),
                 "-fps_mode",
                 "passthrough",
                 "-threads",

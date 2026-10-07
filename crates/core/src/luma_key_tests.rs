@@ -99,7 +99,7 @@ fn audio() -> Content {
 
 #[test]
 fn luma_defaults_specs_mode_and_legacy_wire_shape_are_explicit() {
-    assert_eq!(EffectKind::ALL.len(), 14);
+    assert_eq!(EffectKind::ALL.len(), 15);
     assert_eq!(
         EffectKind::ALL
             .iter()
@@ -769,10 +769,19 @@ fn luma_presets_version4_roundtrip_fresh_ids_mode_temporal_and_fps_conversion() 
             .collect::<Vec<_>>(),
         [0, 30]
     );
-    for version in [1, 2, 3, 5] {
+    for version in [0, 1, 2, 3, 7] {
         let mut bad = wire.clone();
         bad["version"] = version.into();
         assert!(EffectPreset::from_json(&bad.to_string()).is_err());
+    }
+    for version in [5, 6] {
+        let mut newer = wire.clone();
+        newer["version"] = version.into();
+        let retained = EffectPreset::from_json(&newer.to_string()).unwrap();
+        assert_eq!(retained.effects(), preset.effects());
+        let encoded: serde_json::Value =
+            serde_json::from_str(&retained.to_json().unwrap()).unwrap();
+        assert_eq!(encoded["version"], version);
     }
     for field in ["luma_key_mode", "color_space"] {
         let mut bad = wire.clone();
@@ -862,8 +871,13 @@ fn luma_preset_collisions_and_duration_reject_atomically_and_legacy_versions_sta
     );
     for kind in EffectKind::ALL
         .into_iter()
-        // Slider Control has its own schema-65 coverage; this loop checks legacy effects.
-        .filter(|k| !matches!(k, EffectKind::LumaKey | EffectKind::SliderControl))
+        // Slider Control and Audio Spectrum have separate versioned coverage.
+        .filter(|k| {
+            !matches!(
+                k,
+                EffectKind::LumaKey | EffectKind::SliderControl | EffectKind::AudioSpectrum
+            )
+        })
     {
         let mut old = Editor::default();
         old.execute(Command::AddRectangle).unwrap();

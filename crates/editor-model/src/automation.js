@@ -139,6 +139,21 @@
     prop.setValueAtTime = function (time,value) { return host(property === 'marker' ? 'marker_set' : 'property_set',Object.assign({},base,{time,value})); };
     prop.keyTime = function (index) { return key('get_time',index); };
     prop.keyValue = function (index) { return value(key('get_value',index)); };
+    function keyMetadata(index,field) {
+      const metadata = host('property_key_metadata',Object.assign({},base,{index}));
+      if (!own.call(metadata,field)) return unsupported('Property key metadata '+field);
+      return metadata[field];
+    }
+    prop.keyInInterpolationType = function (index) { return keyMetadata(index,'in_interpolation').toUpperCase(); };
+    prop.keyOutInterpolationType = function (index) { return keyMetadata(index,'out_interpolation').toUpperCase(); };
+    prop.keyInTemporalEase = function (index) { const ease = keyMetadata(index,'in_ease'); return [new KeyframeEase(ease.speed,ease.influence)]; };
+    prop.keyOutTemporalEase = function (index) { const ease = keyMetadata(index,'out_ease'); return [new KeyframeEase(ease.speed,ease.influence)]; };
+    prop.keyTemporalContinuous = function (index) { return keyMetadata(index,'temporal_continuous'); };
+    prop.keyTemporalAutoBezier = function (index) { return keyMetadata(index,'temporal_auto_bezier'); };
+    prop.keyInSpatialTangent = function (index) { return keyMetadata(index,'in_tangent'); };
+    prop.keyOutSpatialTangent = function (index) { return keyMetadata(index,'out_tangent'); };
+    prop.keySpatialContinuous = function (index) { return keyMetadata(index,'spatial_continuous'); };
+    prop.keySpatialAutoBezier = function (index) { return keyMetadata(index,'spatial_auto_bezier'); };
     prop.nearestKeyIndex = function (time) { return key('nearest',undefined,{time}); };
     prop.removeKey = function (index) { return key('remove',index); };
     prop.setInterpolationTypeAtKey = function (index,inType,outType) { return key('interpolation',index,{inType,outType:outType === undefined ? inType : outType}); };

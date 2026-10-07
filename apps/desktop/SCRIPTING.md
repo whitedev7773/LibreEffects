@@ -1,6 +1,6 @@
 # JavaScript / JSX automation and ScriptUI preview
 
-This is a **bounded, synchronous 2D compatibility subset**, not an After Effects
+This is a **bounded, synchronous compatibility subset**, not an After Effects
 runtime or AEP importer. Ordinary JavaScript executes in a separate headless QuickJS worker process.
 Unsupported host operations reject the whole run, even if a script catches the
 reported exception. The supplied AE lyric/part script and AEP remain outside the
@@ -50,10 +50,24 @@ file/network access. Only the explicitly selected source file is read by the app
   transform match-name aliases cover the supplied script's lookup pattern.
 - Layer marker comments and frame-aligned duration; setting a marker at an
   existing time replaces it rather than creating duplicate timestamps.
-- LINEAR/HOLD interpolation, with matching incoming/outgoing types. Independent
+- Legacy scalar tracks support LINEAR/HOLD interpolation, with matching incoming/outgoing types. Independent
   scalar temporal ease is supported where existing adjacent segments can express
   its speed/influence. Spatial/vector ease, incompatible endpoint cases, mixed
   in/out modes, BEZIER mode and ease adjacent to Hold segments explicitly reject.
+- Native joined XY/fixed-plane XYZ Position and native per-side Opacity timing
+  additionally support independent LINEAR/BEZIER/HOLD sides and exact stored ease.
+  See [NATIVE_PLANAR_POSITION.md](NATIVE_PLANAR_POSITION.md),
+  [NATIVE_SPATIAL_POSITION.md](NATIVE_SPATIAL_POSITION.md) and
+  [NATIVE_OPACITY_TIMING.md](NATIVE_OPACITY_TIMING.md) for their admission limits.
+- On those native key owners: `keyInInterpolationType`, `keyOutInterpolationType`,
+  `keyInTemporalEase`, `keyOutTemporalEase`, `keyTemporalContinuous` and
+  `keyTemporalAutoBezier` return authored metadata. Ease is a fresh one-element
+  `KeyframeEase` array, retaining raw speed and influence, including dormant and
+  tiny signed Opacity values. Native Position also exposes `keyInSpatialTangent`,
+  `keyOutSpatialTangent`, `keySpatialContinuous` and `keySpatialAutoBezier`.
+  Tangent arrays retain two or three axes and are detached copies. Indexes are
+  1-based; missing keys, legacy timing and incompatible properties reject rather
+  than infer metadata. Reads do not migrate schemas or create an edit.
 - Numeric `expression` / `expressionEnabled` on Position, Scale and Opacity, plus
   evaluated `.value` reads. See [EXPRESSIONS.md](EXPRESSIONS.md) for persisted
   programs, named slider controls and evaluated preview/export semantics.
@@ -63,7 +77,7 @@ file/network access. Only the explicitly selected source file is read by the app
   regexes, loops, closures and Unicode. Last output appears in the status line.
 
 Unknown APIs fail explicitly. In particular: out-of-composition stored layer
-timing, custom AE label palettes, 3D/Z, spatial Bezier tangents, expression APIs outside the supported numeric
+timing, custom AE label palettes, general 3D rendering/Scale/orientation, expression APIs outside the supported numeric
 subset, rich character-style runs,
 layer creation APIs, arbitrary effects/plugins, files/folders/sockets, module
 loading, shell/processes, timers and asynchronous Promise work are unsupported.

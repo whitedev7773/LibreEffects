@@ -495,7 +495,10 @@ impl Controls {
             .child(
                 div()
                     .text_color(rgb(ui::MUTED))
-                    .child("NativeV1 · native, not AE-calibrated"),
+                    .child(match settings.profile {
+                        libre_effects_core::SpectrumProfile::NativeV1 => "NativeV1",
+                        libre_effects_core::SpectrumProfile::HammingV1 => "HammingV1",
+                    }),
             )
             .child(
                 div()

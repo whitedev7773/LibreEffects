@@ -53,7 +53,17 @@ fn files(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
         .unwrap()
         .map(|entry| {
             let path = entry.unwrap().path();
-            let bytes = std::fs::read(&path).unwrap();
+            let bytes = if path
+                .extension()
+                .is_some_and(|extension| extension == "lock")
+            {
+                // Windows denies reads while the session owns the lease. These
+                // files have no payload; retain their names and verify emptiness.
+                assert_eq!(std::fs::metadata(&path).unwrap().len(), 0);
+                Vec::new()
+            } else {
+                std::fs::read(&path).unwrap()
+            };
             (path, bytes)
         })
         .collect()
@@ -283,12 +293,12 @@ fn recovery_validates_editor_replacement_before_copying_or_discarding_slots() {
     abandon(&recovery_root, &Project::default());
     let mut state = dirty_state(&recovery_root);
     let candidate = state.recovery.as_mut().unwrap();
-    // This serializes within budget, so the recovery writer alone cannot catch
-    // the invalid editor replacement. Validation must precede all disk changes.
+    // The raw candidate remains serializable, but the native writer and editor
+    // both reject its version. Validation must precede all disk changes.
     let mut value = serde_json::to_value(&candidate.project).unwrap();
     value["version"] = u32::MAX.into();
     candidate.project = serde_json::from_value(value).unwrap();
-    candidate.project.to_json().unwrap();
+    serde_json::to_vec(&candidate.project).unwrap();
     let before = Before::capture(&state, &recovery_root);
     let error = state.apply_recovery(true).unwrap_err();
     assert!(error.contains("Unsupported project version"), "{error}");

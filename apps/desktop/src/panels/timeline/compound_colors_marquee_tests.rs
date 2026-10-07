@@ -361,5 +361,7 @@ fn compound_marquee_ui_uses_guarded_capture_and_lane_clipped_overlay() {
     let rows = include_str!("compound_colors.rs");
     assert!(rows.contains("input.marquee.as_ref().is_some_and"));
     assert!(rows.contains("self.marquee_overlay(lane, node.id)"));
-    assert!(rows.contains("event.keystroke.key != \"alt\" {\n            self.input.borrow_mut().cancel_pointer();\n            cx.notify();"));
+    assert!(rows.split_whitespace().collect::<String>().contains(
+        "event.keystroke.key!=\"alt\"{self.input.borrow_mut().cancel_pointer();cx.notify();"
+    ));
 }
