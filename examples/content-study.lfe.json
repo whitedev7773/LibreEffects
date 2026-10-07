@@ -1,0 +1,352 @@
+{
+  "version": 3,
+  "next_layer_id": 6,
+  "composition": {
+    "name": "Content & Motion Study",
+    "width": 1280,
+    "height": 720,
+    "fps": 30,
+    "duration": 90,
+    "layers": [
+      {
+        "content": {
+          "Text": {
+            "text": "Create. Animate. Make it yours.",
+            "font_size": 30.0
+          }
+        },
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "mask": null,
+        "id": 5,
+        "name": "Subtitle",
+        "visible": true,
+        "locked": false,
+        "width": 760.0,
+        "height": 60.0,
+        "color": 11187916,
+        "properties": {
+          "PositionX": {
+            "value": 510.0,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 420.0,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 380.0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 30.0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100.0,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100.0,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0.0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100.0,
+            "keys": {
+              "0": {
+                "value": 100.0,
+                "interpolation": "Smooth"
+              },
+              "60": {
+                "value": 45.0,
+                "interpolation": "Linear"
+              }
+            }
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "content": {
+          "Text": {
+            "text": "Libre Effects",
+            "font_size": 92.0
+          }
+        },
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "mask": null,
+        "id": 4,
+        "name": "Title",
+        "visible": true,
+        "locked": false,
+        "width": 760.0,
+        "height": 130.0,
+        "color": 16777215,
+        "properties": {
+          "PositionX": {
+            "value": 510.0,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 300.0,
+            "keys": {
+              "0": {
+                "value": 300.0,
+                "interpolation": "Smooth"
+              },
+              "60": {
+                "value": 330.0,
+                "interpolation": "Linear"
+              }
+            }
+          },
+          "AnchorX": {
+            "value": 380.0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 65.0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100.0,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100.0,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0.0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100.0,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "content": "Rectangle",
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "mask": {
+          "x": 35.0,
+          "y": 35.0,
+          "width": 110.0,
+          "height": 110.0,
+          "inverted": true
+        },
+        "id": 3,
+        "name": "Masked accent",
+        "visible": true,
+        "locked": false,
+        "width": 180.0,
+        "height": 180.0,
+        "color": 16760696,
+        "properties": {
+          "PositionX": {
+            "value": 1025.0,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 445.0,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 90.0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 90.0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100.0,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100.0,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 18.0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100.0,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "content": "Rectangle",
+        "effects": {
+          "blur": 24.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "mask": null,
+        "id": 2,
+        "name": "Soft violet",
+        "visible": true,
+        "locked": false,
+        "width": 410.0,
+        "height": 330.0,
+        "color": 7758824,
+        "properties": {
+          "PositionX": {
+            "value": 950.0,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 360.0,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 205.0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 165.0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100.0,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100.0,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0.0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100.0,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "content": "Rectangle",
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "mask": null,
+        "id": 1,
+        "name": "Background",
+        "visible": true,
+        "locked": true,
+        "width": 1280.0,
+        "height": 720.0,
+        "color": 1316899,
+        "properties": {
+          "PositionX": {
+            "value": 640.0,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 360.0,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 640.0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 360.0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100.0,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100.0,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0.0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100.0,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      }
+    ]
+  }
+}

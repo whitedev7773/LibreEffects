@@ -17,6 +17,7 @@ tasks:
       - 'vite.config.ts'
       - 'tsconfig.json'
       - 'package.json'
+      - 'bun.lock'
     outputs:
       - 'dist'
 
@@ -25,8 +26,14 @@ tasks:
     inputs:
       - 'src/**/*'
       - 'tsconfig.json'
+      - 'vitest.config.ts'
+      - 'package.json'
+      - 'bun.lock'
 
   deploy:
     command: 'bun run deploy'
     deps:
       - '~:build'
+    options:
+      runInCI: false
+      cache: false

@@ -1,0 +1,236 @@
+{
+  "version": 16,
+  "next_layer_id": 4,
+  "composition": {
+    "name": "Masked Adjustment",
+    "width": 960,
+    "height": 540,
+    "fps": 30,
+    "display_start": 0,
+    "duration": 90,
+    "background_color": 1581359,
+    "layers": [
+      {
+        "content": "Solid",
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 3,
+        "name": "Upper solid stays blue",
+        "visible": true,
+        "locked": false,
+        "width": 120,
+        "height": 120,
+        "color": 4957183,
+        "properties": {
+          "PositionX": {
+            "value": 560,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 270,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 60,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 60,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100.0,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100.0,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0.0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "content": "Adjustment",
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "effect_stack": [
+          {
+            "id": 1,
+            "kind": "Grayscale",
+            "name": "Grayscale",
+            "bypassed": false,
+            "color_space": "Srgb",
+            "parameters": {}
+          }
+        ],
+        "next_effect_id": 2,
+        "mask": {
+          "x": 240.0,
+          "y": 135.0,
+          "width": 480.0,
+          "height": 270.0,
+          "inverted": false
+        },
+        "id": 2,
+        "name": "Animated Grayscale",
+        "visible": true,
+        "locked": false,
+        "width": 960.0,
+        "height": 540.0,
+        "color": 16777215,
+        "properties": {
+          "PositionX": {
+            "value": 480.0,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 270.0,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 480.0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 270.0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100.0,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100.0,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0.0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100.0,
+            "keys": {
+              "0": {
+                "value": 0,
+                "interpolation": "Smooth"
+              },
+              "30": {
+                "value": 100,
+                "interpolation": "Smooth"
+              },
+              "60": {
+                "value": 100,
+                "interpolation": "Smooth"
+              },
+              "89": {
+                "value": 0,
+                "interpolation": "Smooth"
+              }
+            }
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "content": "Solid",
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 1,
+        "name": "Red Solid",
+        "visible": true,
+        "locked": false,
+        "width": 480.0,
+        "height": 360.0,
+        "color": 16733760,
+        "properties": {
+          "PositionX": {
+            "value": 480.0,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 270.0,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 320.0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 180.0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100.0,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100.0,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0.0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 60,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      }
+    ]
+  },
+  "composition_id": 1,
+  "next_composition_id": 2
+}

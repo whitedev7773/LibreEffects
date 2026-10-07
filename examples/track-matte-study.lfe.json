@@ -1,0 +1,869 @@
+{
+  "version": 18,
+  "next_layer_id": 13,
+  "composition": {
+    "name": "Traveling Track Mattes",
+    "width": 960,
+    "height": 400,
+    "fps": 30,
+    "display_start": 0,
+    "duration": 90,
+    "background_color": 1581359,
+    "layers": [
+      {
+        "content": {
+          "Text": {
+            "text": "Luma inverted",
+            "font_size": 18
+          }
+        },
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 12,
+        "name": "Luma inverted label",
+        "visible": true,
+        "locked": false,
+        "width": 200,
+        "height": 30,
+        "color": 16777215,
+        "properties": {
+          "PositionX": {
+            "value": 730,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 100,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "content": "Solid",
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 11,
+        "name": "Luma inverted traveling source",
+        "visible": false,
+        "locked": false,
+        "width": 80,
+        "height": 120,
+        "color": 8421504,
+        "properties": {
+          "PositionX": {
+            "value": 730,
+            "keys": {
+              "0": {
+                "value": 650,
+                "interpolation": "Smooth"
+              },
+              "45": {
+                "value": 790,
+                "interpolation": "Smooth"
+              },
+              "89": {
+                "value": 940,
+                "interpolation": "Smooth"
+              }
+            }
+          },
+          "PositionY": {
+            "value": 155,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "content": {
+          "Text": {
+            "text": "MATTE",
+            "font_size": 46
+          }
+        },
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 10,
+        "name": "Luma inverted text",
+        "visible": true,
+        "locked": false,
+        "width": 200,
+        "height": 80,
+        "color": 5221119,
+        "properties": {
+          "PositionX": {
+            "value": 730,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 180,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "track_matte": {
+          "source": 11,
+          "mode": "LumaInverted"
+        }
+      },
+      {
+        "content": {
+          "Text": {
+            "text": "Luma",
+            "font_size": 18
+          }
+        },
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 9,
+        "name": "Luma label",
+        "visible": true,
+        "locked": false,
+        "width": 200,
+        "height": 30,
+        "color": 16777215,
+        "properties": {
+          "PositionX": {
+            "value": 500,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 100,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "content": "Solid",
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 8,
+        "name": "Luma traveling source",
+        "visible": false,
+        "locked": false,
+        "width": 80,
+        "height": 120,
+        "color": 8421504,
+        "properties": {
+          "PositionX": {
+            "value": 500,
+            "keys": {
+              "0": {
+                "value": 420,
+                "interpolation": "Smooth"
+              },
+              "45": {
+                "value": 560,
+                "interpolation": "Smooth"
+              },
+              "89": {
+                "value": 710,
+                "interpolation": "Smooth"
+              }
+            }
+          },
+          "PositionY": {
+            "value": 155,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "content": {
+          "Text": {
+            "text": "MATTE",
+            "font_size": 46
+          }
+        },
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 7,
+        "name": "Luma text",
+        "visible": true,
+        "locked": false,
+        "width": 200,
+        "height": 80,
+        "color": 5221119,
+        "properties": {
+          "PositionX": {
+            "value": 500,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 180,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "track_matte": {
+          "source": 8,
+          "mode": "Luma"
+        }
+      },
+      {
+        "content": {
+          "Text": {
+            "text": "Alpha inverted",
+            "font_size": 18
+          }
+        },
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 6,
+        "name": "Alpha inverted label",
+        "visible": true,
+        "locked": false,
+        "width": 200,
+        "height": 30,
+        "color": 16777215,
+        "properties": {
+          "PositionX": {
+            "value": 270,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 100,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "content": "Solid",
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 5,
+        "name": "Alpha inverted traveling source",
+        "visible": false,
+        "locked": false,
+        "width": 80,
+        "height": 120,
+        "color": 8421504,
+        "properties": {
+          "PositionX": {
+            "value": 270,
+            "keys": {
+              "0": {
+                "value": 190,
+                "interpolation": "Smooth"
+              },
+              "45": {
+                "value": 330,
+                "interpolation": "Smooth"
+              },
+              "89": {
+                "value": 480,
+                "interpolation": "Smooth"
+              }
+            }
+          },
+          "PositionY": {
+            "value": 155,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "content": {
+          "Text": {
+            "text": "MATTE",
+            "font_size": 46
+          }
+        },
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 4,
+        "name": "Alpha inverted text",
+        "visible": true,
+        "locked": false,
+        "width": 200,
+        "height": 80,
+        "color": 5221119,
+        "properties": {
+          "PositionX": {
+            "value": 270,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 180,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "track_matte": {
+          "source": 5,
+          "mode": "AlphaInverted"
+        }
+      },
+      {
+        "content": {
+          "Text": {
+            "text": "Alpha",
+            "font_size": 18
+          }
+        },
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 3,
+        "name": "Alpha label",
+        "visible": true,
+        "locked": false,
+        "width": 200,
+        "height": 30,
+        "color": 16777215,
+        "properties": {
+          "PositionX": {
+            "value": 40,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 100,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "content": "Solid",
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 2,
+        "name": "Alpha traveling source",
+        "visible": false,
+        "locked": false,
+        "width": 80,
+        "height": 120,
+        "color": 8421504,
+        "properties": {
+          "PositionX": {
+            "value": 40,
+            "keys": {
+              "0": {
+                "value": -40,
+                "interpolation": "Smooth"
+              },
+              "45": {
+                "value": 100,
+                "interpolation": "Smooth"
+              },
+              "89": {
+                "value": 250,
+                "interpolation": "Smooth"
+              }
+            }
+          },
+          "PositionY": {
+            "value": 155,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "content": {
+          "Text": {
+            "text": "MATTE",
+            "font_size": 46
+          }
+        },
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 1,
+        "name": "Alpha text",
+        "visible": true,
+        "locked": false,
+        "width": 200,
+        "height": 80,
+        "color": 5221119,
+        "properties": {
+          "PositionX": {
+            "value": 40,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 180,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "track_matte": {
+          "source": 2,
+          "mode": "Alpha"
+        }
+      }
+    ]
+  },
+  "composition_id": 1,
+  "next_composition_id": 2
+}

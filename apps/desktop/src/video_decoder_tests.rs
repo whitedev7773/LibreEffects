@@ -1,0 +1,305 @@
+use super::*;
+use crate::footage::{command, output};
+use crate::video_export::ffmpeg_path;
+use std::path::Path;
+
+fn generate(path: &Path, rate: &str, codec: &str, size: &str, frames: u32) {
+    let filter = format!("testsrc2=size={size}:rate={rate},format=rgba,colorchannelmixer=aa=0.5");
+    let mut c = command(&ffmpeg_path());
+    c.args([
+        "-v",
+        "error",
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        &filter,
+        "-frames:v",
+        &frames.to_string(),
+        "-c:v",
+        codec,
+        "-threads",
+        "2",
+    ]);
+    if codec == "libx264" {
+        c.args(["-pix_fmt", "yuv420p", "-g", "48", "-bf", "3"]);
+    }
+    assert!(c.arg(path).status().unwrap().success());
+}
+fn reference(path: &Path, size: &str) -> Vec<u8> {
+    let mut c = command(&ffmpeg_path());
+    c.args(["-v", "error", "-i"]).arg(path).args([
+        "-map",
+        "0:v:0",
+        "-an",
+        "-vf",
+        &format!("scale={size},setsar=1"),
+        "-fps_mode",
+        "passthrough",
+        "-pix_fmt",
+        "rgba",
+        "-f",
+        "rawvideo",
+        "pipe:1",
+    ]);
+    output(c, 128 * 1024 * 1024).unwrap()
+}
+fn pixels(png: &str) -> image::RgbaImage {
+    image::load_from_memory(&STANDARD.decode(png).unwrap())
+        .unwrap()
+        .into_rgba8()
+}
+
+#[test]
+fn invalid_requests_and_cancellation_do_not_launch_decoders() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("empty");
+    std::fs::write(&file, []).unwrap();
+    let path = file.to_str().unwrap();
+    let cancel = AtomicBool::new(false);
+    let mut pool = Pool::default();
+    for (fps, w, h, t) in [
+        (f64::NAN, 64, 48, 0.),
+        (30., 0, 48, 0.),
+        (30., 64, 5000, 0.),
+        (30., 64, 48, f64::INFINITY),
+        (30., 64, 48, -1.),
+    ] {
+        assert!(pool.frame_png(path, t, fps, w, h, 64, &cancel).is_err());
+    }
+    assert_eq!(pool.metrics.starts, 0);
+    cancel.store(true, Ordering::Release);
+    assert!(
+        pool.frame_png(path, 0., 30., 64, 48, 64, &cancel)
+            .unwrap_err()
+            .contains("canceled")
+    );
+    assert_eq!(pool.metrics.starts, 0);
+}
+
+#[test]
+#[ignore = "requires FFmpeg; verifies persistent CFR decoding, seeks, alpha, scaling, replacement and bounded caches"]
+fn sequential_seek_loop_and_source_changes_match_continuous_reference() {
+    let dir = tempfile::tempdir().unwrap();
+    for (name, rate, fps, codec) in [
+        ("fractional.mkv", "30000/1001", 30000. / 1001., "ffv1"),
+        ("gop.mp4", "24000/1001", 24000. / 1001., "libx264"),
+        ("alpha.mov", "30", 30., "qtrle"),
+    ] {
+        let path = dir.path().join(name);
+        generate(&path, rate, codec, "64x48", 96);
+        let all = reference(&path, "64:48");
+        assert_eq!(all.len(), 96 * 64 * 48 * 4);
+        let mut pool = Pool::default();
+        let cancel = AtomicBool::new(false);
+        for frame in 0..96 {
+            let png = pool
+                .frame_png(
+                    path.to_str().unwrap(),
+                    frame as f64 / fps,
+                    fps,
+                    64,
+                    48,
+                    64,
+                    &cancel,
+                )
+                .unwrap();
+            assert_eq!(
+                pixels(&png).as_raw(),
+                &all[frame * 64 * 48 * 4..(frame + 1) * 64 * 48 * 4],
+                "{name} {frame}"
+            );
+        }
+        assert_eq!(
+            pool.metrics.starts, 1,
+            "sequential playback must reuse the process"
+        );
+        assert_eq!(pool.metrics.frames, 96);
+        for frame in [0, 53, 7, 95, 12, 1, 71, 71, 42] {
+            let png = pool
+                .frame_png(
+                    path.to_str().unwrap(),
+                    frame as f64 / fps,
+                    fps,
+                    64,
+                    48,
+                    64,
+                    &cancel,
+                )
+                .unwrap();
+            assert_eq!(
+                pixels(&png).as_raw(),
+                &all[frame * 64 * 48 * 4..(frame + 1) * 64 * 48 * 4]
+            );
+        }
+        assert_eq!(
+            pool.metrics.starts, 1,
+            "cached reverse/hold/loop should not restart"
+        );
+        pool.clear();
+        for frame in [74, 75, 77, 12, 13, 90, 91, 0, 1] {
+            let png = pool
+                .frame_png(
+                    path.to_str().unwrap(),
+                    frame as f64 / fps,
+                    fps,
+                    64,
+                    48,
+                    64,
+                    &cancel,
+                )
+                .unwrap();
+            assert_eq!(
+                pixels(&png).as_raw(),
+                &all[frame * 64 * 48 * 4..(frame + 1) * 64 * 48 * 4],
+                "{name} seek {frame}"
+            );
+            assert!(pool.streams.len() <= SESSIONS);
+            assert!(pool.bytes <= CACHE_BYTES);
+        }
+        let small = reference(&path, "32:24");
+        let png = pool
+            .frame_png(path.to_str().unwrap(), 11. / fps, fps, 64, 48, 32, &cancel)
+            .unwrap();
+        assert_eq!(
+            pixels(&png).as_raw(),
+            &small[11 * 32 * 24 * 4..12 * 32 * 24 * 4]
+        );
+        // Metadata changes invalidate cached frames and the open source handle.
+        let before = pool.metrics.starts;
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(SystemTime::now() + Duration::from_secs(2))
+            .unwrap();
+        pool.frame_png(path.to_str().unwrap(), 11. / fps, fps, 64, 48, 32, &cancel)
+            .unwrap();
+        assert_eq!(pool.metrics.starts, before + 1);
+        pool.clear();
+        assert!(pool.streams.is_empty());
+        assert_eq!(pool.bytes, 0);
+        assert!(
+            pool.frame_png(path.to_str().unwrap(), 200. / fps, fps, 64, 48, 64, &cancel)
+                .is_err()
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires FFmpeg; records cold seek and sequential decode/PNG costs against per-frame processes"]
+fn decoder_process_and_latency_benchmark() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("benchmark.mp4");
+    generate(&path, "30", "libx264", "640x360", 90);
+    let path = path.to_str().unwrap();
+    let mut old = Vec::new();
+    let start = Instant::now();
+    for f in 0..60 {
+        old.push(pixels(
+            &crate::footage::frame_png(path, f as f64 / 30., 640, 360, 640).unwrap(),
+        ));
+    }
+    let baseline = start.elapsed();
+    let mut pool = Pool::default();
+    let cancel = AtomicBool::new(false);
+    let start = Instant::now();
+    let first = pool
+        .frame_png(path, 0., 30., 640, 360, 640, &cancel)
+        .unwrap();
+    let cold = start.elapsed();
+    assert_eq!(pixels(&first), old[0]);
+    for f in 1..60 {
+        let p = pool
+            .frame_png(path, f as f64 / 30., 30., 640, 360, 640, &cancel)
+            .unwrap();
+        assert_eq!(pixels(&p), old[f]);
+    }
+    let sequential = start.elapsed();
+    assert_eq!(pool.metrics.starts, 1);
+    assert!(pool.bytes <= CACHE_BYTES && pool.cache.len() <= 120);
+    eprintln!(
+        "Decoder benchmark 640x360 H264 60 frames: old={baseline:?}, persistent={sequential:?}, cold={cold:?}, metrics={:?}, PNG cache={} bytes",
+        pool.metrics, pool.bytes
+    );
+    // Do not assert timing thresholds on shared CI machines.
+}
+
+#[test]
+#[ignore = "requires FFmpeg; cancels a waiting reader and reaps a process with a full prefetch channel"]
+fn cancellation_unblocks_waiting_reads_and_full_prefetch_shutdown() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("cancel.mkv");
+    generate(&path, "30", "ffv1", "64x48", 180);
+    let source = Source::new(path.to_str().unwrap(), 30., 64, 48, 64).unwrap();
+    let mut stream = Stream::open(source, 0).unwrap();
+    let flag = Arc::new(AtomicBool::new(false));
+    assert_eq!(stream.read(&flag).unwrap().len(), 64 * 48 * 4);
+    // Keep the real pipe's channel full while injecting a deterministic pending
+    // receive. Cancellation must work without the decoder delivering another frame.
+    let actual = stream.receiver.take();
+    let (_sender, pending) = mpsc::channel();
+    stream.receiver = Some(pending);
+    let cancel = flag.clone();
+    let signal = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(20));
+        cancel.store(true, Ordering::Release);
+    });
+    let started = Instant::now();
+    assert!(stream.read(&flag).unwrap_err().contains("canceled"));
+    signal.join().unwrap();
+    drop(actual);
+    drop(stream);
+    assert!(started.elapsed() < Duration::from_secs(2));
+    // Windows will reject deletion if the old decoder still holds this source.
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+#[ignore = "requires FFmpeg; interleaves four sources beyond the frame-cache capacity"]
+fn interleaved_sources_keep_sessions_and_evict_old_frames() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = dir.path().join("first.mkv");
+    generate(&first, "30", "ffv1", "64x48", 150);
+    let mut paths = vec![first.clone()];
+    for i in 1..4 {
+        let path = dir.path().join(format!("source-{i}.mkv"));
+        std::fs::copy(&first, &path).unwrap();
+        paths.push(path);
+    }
+    let all = reference(&first, "64:48");
+    let flag = AtomicBool::new(false);
+    let mut pool = Pool::default();
+    for f in 0..150 {
+        for path in &paths {
+            let p = pool
+                .frame_png(
+                    path.to_str().unwrap(),
+                    f as f64 / 30.,
+                    30.,
+                    64,
+                    48,
+                    64,
+                    &flag,
+                )
+                .unwrap();
+            assert_eq!(
+                pixels(&p).as_raw(),
+                &all[f * 64 * 48 * 4..(f + 1) * 64 * 48 * 4]
+            );
+        }
+    }
+    assert_eq!(pool.metrics.starts, 4);
+    assert_eq!(pool.streams.len(), 4);
+    assert_eq!(pool.cache.len(), 120);
+    assert!(pool.bytes <= CACHE_BYTES);
+    let p = pool
+        .frame_png(first.to_str().unwrap(), 0., 30., 64, 48, 64, &flag)
+        .unwrap();
+    assert_eq!(pixels(&p).as_raw(), &all[..64 * 48 * 4]);
+    assert_eq!(pool.metrics.starts, 5);
+    assert_eq!(pool.streams.len(), 4);
+    pool.clear();
+    assert_eq!(pool.bytes, 0);
+    assert!(pool.streams.is_empty());
+}

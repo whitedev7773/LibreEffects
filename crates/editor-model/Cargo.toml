@@ -1,0 +1,22 @@
+[package]
+name = "libre-effects-editor-model"
+description = "Lightweight, UI-independent editor view models"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+libre-effects-core = { path = "../core" }
+libre-effects-ae-project = { path = "../ae-project" }
+unicode-segmentation = "1"
+
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+rquickjs = { version = "0.14", default-features = false, features = ["std"] }
+
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+libre-effects-ae-expressions = { path = "../ae-expressions" }
+sha2 = "0.10.9"

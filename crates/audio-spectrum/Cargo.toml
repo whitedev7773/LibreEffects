@@ -1,0 +1,8 @@
+[package]
+name = "libre-effects-audio-spectrum"
+description = "Bounded deterministic native stereo spectral analysis"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

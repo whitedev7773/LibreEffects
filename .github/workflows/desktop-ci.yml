@@ -1,0 +1,50 @@
+name: Desktop validation
+
+on:
+  push:
+    paths: ['apps/desktop/**', 'crates/core/**', 'crates/editor-model/**', 'examples/**', 'vendor/grid/**', 'vendor/usvg/**', 'Cargo.*', '.prototools', '.github/workflows/desktop-ci.yml']
+  pull_request:
+    paths: ['apps/desktop/**', 'crates/core/**', 'crates/editor-model/**', 'examples/**', 'vendor/grid/**', 'vendor/usvg/**', 'Cargo.*', '.prototools', '.github/workflows/desktop-ci.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust and media tools
+        shell: pwsh
+        run: |
+          $rustVersion = ((Get-Content .prototools | Select-String '^rust\s*=\s*"([^"]+)"').Matches.Groups[1].Value)
+          rustup toolchain install $rustVersion --profile minimal --component rustfmt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustup default $rustVersion
+          choco install ffmpeg --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $compiler = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\fxc.exe' | Sort-Object FullName -Descending | Select-Object -First 1
+          if (!$compiler) { throw 'Windows SDK fxc.exe not found' }
+          "GPUI_FXC_PATH=$($compiler.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Check formatting
+        run: cargo fmt --all --check
+      - name: Test grid security backport
+        run: cargo test --manifest-path vendor/grid/Cargo.toml --locked --all-features
+      - name: Test grid security backport in release mode
+        run: cargo test --manifest-path vendor/grid/Cargo.toml --locked --all-features --release
+      - name: Check grid no-std compatibility
+        run: cargo check --manifest-path vendor/grid/Cargo.toml --locked --no-default-features
+      - name: Test authoritative text-cluster extension
+        run: cargo test --manifest-path vendor/usvg/Cargo.toml --lib --locked
+      - name: Check SVG parser without text features
+        run: cargo check --manifest-path vendor/usvg/Cargo.toml --no-default-features --locked
+      - name: Type check
+        run: cargo check -p libre-effects-desktop --locked
+      - name: Unit and regression tests
+        run: cargo test --workspace --locked
+      - name: Explicit media integration tests
+        run: cargo test -p libre-effects-desktop --locked -- --ignored --skip device_clock_minute --skip verify_recorded_native_contents_animation_save --skip verify_recorded_native_contents_clipboard_save --skip verify_recorded_native_cross_path_save --skip export_paragraph_style_acceptance_fixtures --skip verify_recorded_native_paragraph_style_save --skip export_text_animator_acceptance_fixtures --skip verify_recorded_native_text_animator_save --skip animator_system_font_ffi_ligature_protects_partial_source_selection
+      - name: Build release
+        run: cargo build -p libre-effects-desktop --release --locked

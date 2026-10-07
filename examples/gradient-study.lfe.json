@@ -1,0 +1,352 @@
+{
+  "composition": {
+    "background_color": 0,
+    "display_start": 0,
+    "duration": 90,
+    "fps": 30,
+    "height": 720,
+    "layers": [
+      {
+        "color": 16777215,
+        "content": {
+          "ShapeContents": {
+            "items": [
+              {
+                "enabled": true,
+                "id": 1,
+                "kind": {
+                  "Group": [
+                    {
+                      "enabled": true,
+                      "id": 2,
+                      "kind": {
+                        "Parametric": "Rectangle"
+                      },
+                      "name": "Rectangle 2",
+                      "parameters": {
+                        "Height": {
+                          "keys": {},
+                          "value": 480.0
+                        },
+                        "Transform.PositionX": {
+                          "keys": {},
+                          "value": 0.0
+                        },
+                        "Transform.PositionY": {
+                          "keys": {},
+                          "value": 0.0
+                        },
+                        "Width": {
+                          "keys": {},
+                          "value": 960.0
+                        }
+                      }
+                    },
+                    {
+                      "composite": "AbovePrevious",
+                      "enabled": true,
+                      "id": 5,
+                      "kind": {
+                        "GradientFill": {
+                          "even_odd": false,
+                          "gradient": {
+                            "colors": [
+                              1,
+                              2
+                            ],
+                            "next_stop": 5,
+                            "opacities": [
+                              3,
+                              4
+                            ],
+                            "radial": false
+                          }
+                        }
+                      },
+                      "name": "Gradient Fill 5",
+                      "parameters": {
+                        "Gradient.Blue(1)": {
+                          "keys": {},
+                          "value": 240.0
+                        },
+                        "Gradient.Blue(2)": {
+                          "keys": {},
+                          "value": 170.0
+                        },
+                        "Gradient.ColorMidpoint(1)": {
+                          "keys": {},
+                          "value": 50.0
+                        },
+                        "Gradient.ColorMidpoint(2)": {
+                          "keys": {},
+                          "value": 50.0
+                        },
+                        "Gradient.ColorPosition(1)": {
+                          "keys": {},
+                          "value": 0.0
+                        },
+                        "Gradient.ColorPosition(2)": {
+                          "keys": {},
+                          "value": 100.0
+                        },
+                        "Gradient.EndX": {
+                          "keys": {},
+                          "value": 960.0
+                        },
+                        "Gradient.EndY": {
+                          "keys": {},
+                          "value": 240.0
+                        },
+                        "Gradient.Green(1)": {
+                          "keys": {},
+                          "value": 85.0
+                        },
+                        "Gradient.Green(2)": {
+                          "keys": {},
+                          "value": 130.0
+                        },
+                        "Gradient.HighlightAngle": {
+                          "keys": {},
+                          "value": 0.0
+                        },
+                        "Gradient.HighlightLength": {
+                          "keys": {},
+                          "value": 0.0
+                        },
+                        "Gradient.Opacity(3)": {
+                          "keys": {},
+                          "value": 100.0
+                        },
+                        "Gradient.Opacity(4)": {
+                          "keys": {},
+                          "value": 100.0
+                        },
+                        "Gradient.OpacityMidpoint(3)": {
+                          "keys": {},
+                          "value": 50.0
+                        },
+                        "Gradient.OpacityMidpoint(4)": {
+                          "keys": {},
+                          "value": 50.0
+                        },
+                        "Gradient.OpacityPosition(3)": {
+                          "keys": {},
+                          "value": 0.0
+                        },
+                        "Gradient.OpacityPosition(4)": {
+                          "keys": {},
+                          "value": 100.0
+                        },
+                        "Gradient.Red(1)": {
+                          "keys": {},
+                          "value": 40.0
+                        },
+                        "Gradient.Red(2)": {
+                          "keys": {},
+                          "value": 255.0
+                        },
+                        "Gradient.StartX": {
+                          "keys": {},
+                          "value": 0.0
+                        },
+                        "Gradient.StartY": {
+                          "keys": {},
+                          "value": 240.0
+                        },
+                        "Shape.FillOpacity": {
+                          "keys": {},
+                          "value": 100.0
+                        }
+                      }
+                    },
+                    {
+                      "enabled": true,
+                      "id": 3,
+                      "kind": {
+                        "Stroke": {
+                          "cap": "Butt",
+                          "dash_offset": 0.0,
+                          "dashes": [],
+                          "join": "Round",
+                          "miter_limit": 4.0
+                        }
+                      },
+                      "name": "Stroke 3",
+                      "parameters": {
+                        "Shape.DashOffset": {
+                          "keys": {},
+                          "value": 0.0
+                        },
+                        "Shape.MiterLimit": {
+                          "keys": {},
+                          "value": 4.0
+                        },
+                        "Shape.StrokeBlue": {
+                          "keys": {},
+                          "value": 255.0
+                        },
+                        "Shape.StrokeGreen": {
+                          "keys": {},
+                          "value": 255.0
+                        },
+                        "Shape.StrokeOpacity": {
+                          "keys": {},
+                          "value": 100.0
+                        },
+                        "Shape.StrokeRed": {
+                          "keys": {},
+                          "value": 255.0
+                        },
+                        "Shape.StrokeWidth": {
+                          "keys": {},
+                          "value": 0.0
+                        }
+                      }
+                    },
+                    {
+                      "enabled": true,
+                      "id": 4,
+                      "kind": {
+                        "Fill": {
+                          "even_odd": false
+                        }
+                      },
+                      "name": "Fill 4",
+                      "parameters": {
+                        "Shape.FillBlue": {
+                          "keys": {},
+                          "value": 255.0
+                        },
+                        "Shape.FillGreen": {
+                          "keys": {},
+                          "value": 255.0
+                        },
+                        "Shape.FillOpacity": {
+                          "keys": {},
+                          "value": 100.0
+                        },
+                        "Shape.FillRed": {
+                          "keys": {},
+                          "value": 255.0
+                        }
+                      }
+                    }
+                  ]
+                },
+                "name": "Group 1",
+                "parameters": {
+                  "Skew": {
+                    "keys": {},
+                    "value": 0.0
+                  },
+                  "SkewAxis": {
+                    "keys": {},
+                    "value": 0.0
+                  },
+                  "Transform.AnchorX": {
+                    "keys": {},
+                    "value": 0.0
+                  },
+                  "Transform.AnchorY": {
+                    "keys": {},
+                    "value": 0.0
+                  },
+                  "Transform.Opacity": {
+                    "keys": {},
+                    "value": 100.0
+                  },
+                  "Transform.PositionX": {
+                    "keys": {},
+                    "value": 0.0
+                  },
+                  "Transform.PositionY": {
+                    "keys": {},
+                    "value": 0.0
+                  },
+                  "Transform.Rotation": {
+                    "keys": {},
+                    "value": 0.0
+                  },
+                  "Transform.ScaleX": {
+                    "keys": {},
+                    "value": 100.0
+                  },
+                  "Transform.ScaleY": {
+                    "keys": {},
+                    "value": 100.0
+                  }
+                }
+              }
+            ],
+            "next_id": 6
+          }
+        },
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "height": 480.0,
+        "id": 1,
+        "in_frame": 0,
+        "locked": false,
+        "mask": null,
+        "name": "Select Gradient Fill 5 in Contents",
+        "next_effect_id": 1,
+        "next_mask_id": 1,
+        "out_frame": null,
+        "parent": null,
+        "properties": {
+          "AnchorX": {
+            "keys": {},
+            "value": 480.0
+          },
+          "AnchorY": {
+            "keys": {},
+            "value": 240.0
+          },
+          "Opacity": {
+            "keys": {},
+            "value": 100.0
+          },
+          "PositionX": {
+            "keys": {},
+            "value": 640.0
+          },
+          "PositionY": {
+            "keys": {},
+            "value": 360.0
+          },
+          "Rotation": {
+            "keys": {},
+            "value": 0.0
+          },
+          "ScaleX": {
+            "keys": {},
+            "value": 100.0
+          },
+          "ScaleY": {
+            "keys": {},
+            "value": 100.0
+          }
+        },
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "visible": true,
+        "width": 960.0
+      }
+    ],
+    "name": "Gradient Editing Study",
+    "width": 1280
+  },
+  "composition_id": 1,
+  "next_composition_id": 2,
+  "next_layer_id": 2,
+  "version": 46
+}

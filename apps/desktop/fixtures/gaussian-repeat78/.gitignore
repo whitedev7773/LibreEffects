@@ -1,0 +1,6 @@
+/renders/
+/*.native.json
+/preparation-checks.json
+/run-receipts.json
+/*.stdout
+/*.stderr

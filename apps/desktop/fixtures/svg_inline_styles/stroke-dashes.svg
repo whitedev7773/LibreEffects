@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160">
+  <path id="dashed" d="M18 24 L222 24" style="fill:none;stroke:#b84432;stroke-width:12;stroke-linecap:butt;stroke-dasharray:18 9;stroke-dashoffset:6"/>
+  <path id="round-dashes" d="M18 57 L222 57" style="fill:none;stroke:#2a739e;stroke-width:9;stroke-linecap:round;stroke-dasharray:9,6,3;stroke-dashoffset:-3"/>
+  <path id="paint-order" d="M24 93 C44 93 64 93 84 93 C84 109 84 125 84 141 C64 141 44 141 24 141 C24 125 24 109 24 93 Z" style="fill:#e4bd45;fill-opacity:0.75;stroke:#4b3082;stroke-opacity:0.8;stroke-width:18;stroke-linejoin:miter;stroke-miterlimit:4"/>
+  <path id="square-bevel" d="M132 138 L165 90 L198 138" style="fill:none;stroke:#29815b;stroke-width:12;stroke-linecap:square;stroke-linejoin:bevel;stroke-miterlimit:2"/>
+</svg>

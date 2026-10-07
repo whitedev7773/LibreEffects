@@ -10,14 +10,18 @@ on:
     paths-ignore:
       - "*.md"
   pull_request:
-    branches: [main]
     paths-ignore:
       - "*.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   ci:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
 
@@ -33,5 +37,13 @@ jobs:
           auto-install: true
           auto-setup: true
 
+      - name: Install web dependencies
+        run: bun install --cwd apps/web --frozen-lockfile
+
+      - name: Install API dependencies
+        run: bun install --cwd apps/api --frozen-lockfile
+
       - name: Run CI
-        run: moon ci
+        # Desktop validation has its own platform prerequisites and workflow.
+        # Keep publishing tasks out of this validation-only pipeline.
+        run: moon ci web:build web:test api:build

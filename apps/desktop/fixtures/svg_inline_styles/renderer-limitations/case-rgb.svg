@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160" style="FILL:blue;FiLl:rgb(12, 96, 168);STROKE:NONE">
+  <path id="last-declaration" d="M18 18 C42 18 66 18 90 18 C90 42 90 66 90 90 C66 90 42 90 18 90 C18 66 18 42 18 18 Z" style="FiLl:RED;fill:rgb(100%, 20%, 0%);FILL-OPACITY:0.2;fill-opacity:0.7;STROKE:#172F49;STROKE-WIDTH:6;stroke-linejoin:ROUND"/>
+  <path id="named-color" d="M132 18 C156 18 180 18 204 18 C204 42 204 66 204 90 C180 90 156 90 132 90 C132 66 132 42 132 18 Z" style="FILL:PuRpLe;fill:NAVY;stroke:RGB(210, 155, 34);stroke-width:9;stroke-linejoin:BEVEL"/>
+  <path id="root-rgb" d="M18 120 C84 120 150 120 216 120 C216 128 216 136 216 144 C150 144 84 144 18 144 C18 136 18 128 18 120 Z"/>
+</svg>

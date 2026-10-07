@@ -1,0 +1,550 @@
+{
+  "asset_library": {
+    "assets": {
+      "1": {
+        "content": {
+          "Image": {
+            "asset": "image-1"
+          }
+        },
+        "folder": 2,
+        "height": 32.0,
+        "name": "Shared tile.png",
+        "width": 32.0
+      }
+    },
+    "composition_folders": {
+      "1": 3,
+      "2": 3
+    },
+    "folders": {
+      "2": {
+        "name": "Footage",
+        "parent": null
+      },
+      "3": {
+        "name": "Compositions",
+        "parent": null
+      }
+    },
+    "next_id": 4
+  },
+  "composition": {
+    "background_color": 0,
+    "display_start": 0,
+    "duration": 90,
+    "fps": 30,
+    "height": 720,
+    "layers": [
+      {
+        "asset": 1,
+        "color": 16777215,
+        "content": {
+          "Image": {
+            "asset": "image-1"
+          }
+        },
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "height": 32.0,
+        "id": 6,
+        "in_frame": 0,
+        "locked": false,
+        "mask": null,
+        "name": "Shared tile.png",
+        "next_effect_id": 1,
+        "out_frame": null,
+        "parent": null,
+        "properties": {
+          "AnchorX": {
+            "keys": {},
+            "value": 16.0
+          },
+          "AnchorY": {
+            "keys": {},
+            "value": 16.0
+          },
+          "Opacity": {
+            "keys": {},
+            "value": 100.0
+          },
+          "PositionX": {
+            "keys": {},
+            "value": 1080.0
+          },
+          "PositionY": {
+            "keys": {},
+            "value": 500.0
+          },
+          "Rotation": {
+            "keys": {},
+            "value": 0.0
+          },
+          "ScaleX": {
+            "keys": {},
+            "value": 400.0
+          },
+          "ScaleY": {
+            "keys": {},
+            "value": 400.0
+          }
+        },
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "visible": true,
+        "width": 32.0
+      },
+      {
+        "color": 11187916,
+        "content": {
+          "Text": {
+            "font_size": 30.0,
+            "text": "Create. Animate. Make it yours."
+          }
+        },
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "height": 60.0,
+        "id": 5,
+        "in_frame": 0,
+        "locked": false,
+        "mask": null,
+        "name": "Subtitle",
+        "next_effect_id": 1,
+        "out_frame": null,
+        "parent": null,
+        "properties": {
+          "AnchorX": {
+            "keys": {},
+            "value": 380.0
+          },
+          "AnchorY": {
+            "keys": {},
+            "value": 30.0
+          },
+          "Opacity": {
+            "keys": {
+              "0": {
+                "interpolation": "Smooth",
+                "value": 100.0
+              },
+              "60": {
+                "interpolation": "Linear",
+                "value": 45.0
+              }
+            },
+            "value": 100.0
+          },
+          "PositionX": {
+            "keys": {},
+            "value": 510.0
+          },
+          "PositionY": {
+            "keys": {},
+            "value": 420.0
+          },
+          "Rotation": {
+            "keys": {},
+            "value": 0.0
+          },
+          "ScaleX": {
+            "keys": {},
+            "value": 100.0
+          },
+          "ScaleY": {
+            "keys": {},
+            "value": 100.0
+          }
+        },
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "visible": true,
+        "width": 760.0
+      },
+      {
+        "color": 16777215,
+        "content": {
+          "Text": {
+            "font_size": 92.0,
+            "text": "Libre Effects"
+          }
+        },
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "height": 130.0,
+        "id": 4,
+        "in_frame": 0,
+        "locked": false,
+        "mask": null,
+        "name": "Title",
+        "next_effect_id": 1,
+        "out_frame": null,
+        "parent": null,
+        "properties": {
+          "AnchorX": {
+            "keys": {},
+            "value": 380.0
+          },
+          "AnchorY": {
+            "keys": {},
+            "value": 65.0
+          },
+          "Opacity": {
+            "keys": {},
+            "value": 100.0
+          },
+          "PositionX": {
+            "keys": {},
+            "value": 510.0
+          },
+          "PositionY": {
+            "keys": {
+              "0": {
+                "interpolation": "Smooth",
+                "value": 300.0
+              },
+              "60": {
+                "interpolation": "Linear",
+                "value": 330.0
+              }
+            },
+            "value": 300.0
+          },
+          "Rotation": {
+            "keys": {},
+            "value": 0.0
+          },
+          "ScaleX": {
+            "keys": {},
+            "value": 100.0
+          },
+          "ScaleY": {
+            "keys": {},
+            "value": 100.0
+          }
+        },
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "visible": true,
+        "width": 760.0
+      },
+      {
+        "color": 16760696,
+        "content": "Rectangle",
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "height": 180.0,
+        "id": 3,
+        "in_frame": 0,
+        "locked": false,
+        "mask": {
+          "height": 110.0,
+          "inverted": true,
+          "width": 110.0,
+          "x": 35.0,
+          "y": 35.0
+        },
+        "name": "Masked accent",
+        "next_effect_id": 1,
+        "out_frame": null,
+        "parent": null,
+        "properties": {
+          "AnchorX": {
+            "keys": {},
+            "value": 90.0
+          },
+          "AnchorY": {
+            "keys": {},
+            "value": 90.0
+          },
+          "Opacity": {
+            "keys": {},
+            "value": 100.0
+          },
+          "PositionX": {
+            "keys": {},
+            "value": 1025.0
+          },
+          "PositionY": {
+            "keys": {},
+            "value": 445.0
+          },
+          "Rotation": {
+            "keys": {},
+            "value": 18.0
+          },
+          "ScaleX": {
+            "keys": {},
+            "value": 100.0
+          },
+          "ScaleY": {
+            "keys": {},
+            "value": 100.0
+          }
+        },
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "visible": true,
+        "width": 180.0
+      },
+      {
+        "color": 7758824,
+        "content": "Rectangle",
+        "effects": {
+          "blur": 24.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "height": 330.0,
+        "id": 2,
+        "in_frame": 0,
+        "locked": false,
+        "mask": null,
+        "name": "Soft violet",
+        "next_effect_id": 1,
+        "out_frame": null,
+        "parent": null,
+        "properties": {
+          "AnchorX": {
+            "keys": {},
+            "value": 205.0
+          },
+          "AnchorY": {
+            "keys": {},
+            "value": 165.0
+          },
+          "Opacity": {
+            "keys": {},
+            "value": 100.0
+          },
+          "PositionX": {
+            "keys": {},
+            "value": 950.0
+          },
+          "PositionY": {
+            "keys": {},
+            "value": 360.0
+          },
+          "Rotation": {
+            "keys": {},
+            "value": 0.0
+          },
+          "ScaleX": {
+            "keys": {},
+            "value": 100.0
+          },
+          "ScaleY": {
+            "keys": {},
+            "value": 100.0
+          }
+        },
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "visible": true,
+        "width": 410.0
+      },
+      {
+        "color": 1316899,
+        "content": "Rectangle",
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "height": 720.0,
+        "id": 1,
+        "in_frame": 0,
+        "locked": true,
+        "mask": null,
+        "name": "Background",
+        "next_effect_id": 1,
+        "out_frame": null,
+        "parent": null,
+        "properties": {
+          "AnchorX": {
+            "keys": {},
+            "value": 640.0
+          },
+          "AnchorY": {
+            "keys": {},
+            "value": 360.0
+          },
+          "Opacity": {
+            "keys": {},
+            "value": 100.0
+          },
+          "PositionX": {
+            "keys": {},
+            "value": 640.0
+          },
+          "PositionY": {
+            "keys": {},
+            "value": 360.0
+          },
+          "Rotation": {
+            "keys": {},
+            "value": 0.0
+          },
+          "ScaleX": {
+            "keys": {},
+            "value": 100.0
+          },
+          "ScaleY": {
+            "keys": {},
+            "value": 100.0
+          }
+        },
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "visible": true,
+        "width": 1280.0
+      }
+    ],
+    "name": "Content & Motion Study",
+    "width": 1280
+  },
+  "composition_id": 1,
+  "image_assets": {
+    "image-1": "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAP0lEQVR4nO3OMQEAEBQA0d/FqIQe2gmlDgWsfMMbbr4XpbbILHUOcAT0OdbNAAAAAAAAAAAAAAD+B7wOIB2wAe+CUWp8C9hoAAAAAElFTkSuQmCC"
+  },
+  "next_composition_id": 3,
+  "next_layer_id": 8,
+  "other_compositions": {
+    "2": {
+      "background_color": 0,
+      "display_start": 0,
+      "duration": 90,
+      "fps": 30,
+      "height": 256,
+      "layers": [
+        {
+          "asset": 1,
+          "color": 16777215,
+          "content": {
+            "Image": {
+              "asset": "image-1"
+            }
+          },
+          "effects": {
+            "blur": 0.0,
+            "brightness": 1.0,
+            "grayscale": false
+          },
+          "height": 32.0,
+          "id": 7,
+          "in_frame": 0,
+          "locked": false,
+          "mask": null,
+          "name": "Shared tile.png",
+          "next_effect_id": 1,
+          "out_frame": null,
+          "parent": null,
+          "properties": {
+            "AnchorX": {
+              "keys": {},
+              "value": 16.0
+            },
+            "AnchorY": {
+              "keys": {},
+              "value": 16.0
+            },
+            "Opacity": {
+              "keys": {},
+              "value": 100.0
+            },
+            "PositionX": {
+              "keys": {},
+              "value": 128.0
+            },
+            "PositionY": {
+              "keys": {},
+              "value": 128.0
+            },
+            "Rotation": {
+              "keys": {
+                "0": {
+                  "interpolation": "Linear",
+                  "value": 0.0
+                },
+                "89": {
+                  "interpolation": "Linear",
+                  "value": 360.0
+                }
+              },
+              "value": 0.0
+            },
+            "ScaleX": {
+              "keys": {},
+              "value": 400.0
+            },
+            "ScaleY": {
+              "keys": {},
+              "value": 400.0
+            }
+          },
+          "transform_offset": [
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ],
+          "visible": true,
+          "width": 32.0
+        }
+      ],
+      "name": "Shared tile animation",
+      "width": 256
+    }
+  },
+  "version": 22
+}
