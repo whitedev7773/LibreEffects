@@ -578,6 +578,7 @@ mod tests {
                     .selected_layer()
                     .unwrap()
                     .property(Property::PositionX)
+                    .expect("2D test layer has independent Position tracks")
                     .keys()
                     .keys()
                     .map(|&frame| KeyRef {

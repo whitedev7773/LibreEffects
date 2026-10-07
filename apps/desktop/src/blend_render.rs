@@ -16,6 +16,7 @@ fn channel(b: f64, s: f64, mode: BlendMode) -> f64 {
                 1.0 - 2.0 * (1.0 - b) * (1.0 - s)
             }
         }
+        BlendMode::Difference => (b - s).abs(),
     }
 }
 fn byte(value: f64) -> u8 {
@@ -69,12 +70,15 @@ impl Renderer {
         width: u32,
         height: u32,
         max_dimension: u32,
+        domains: &[resvg::RepeatEdgeDomain],
     ) -> Result<String, String> {
         if lower.is_empty() {
             return Ok(source.into());
         }
-        let mut backdrop = self.raster_canvas(lower, width, height, max_dimension)?;
-        let pixels = self.raster_canvas(source, width, height, max_dimension)?;
+        let mut backdrop =
+            self.raster_canvas_with_domains(lower, width, height, max_dimension, domains)?;
+        let pixels =
+            self.raster_canvas_with_domains(source, width, height, max_dimension, domains)?;
         for (b, s) in backdrop
             .data_mut()
             .chunks_exact_mut(4)
@@ -100,6 +104,7 @@ mod tests {
             [208, 160, 224, 255],
             [255, 192, 255, 255],
             [96, 65, 192, 255],
+            [128, 64, 64, 255],
         ];
         let partial = [
             [112, 64, 112, 192],
@@ -107,6 +112,9 @@ mod tests {
             [116, 88, 136, 192],
             [128, 96, 144, 192],
             [88, 64, 128, 192],
+            // Difference: RGB numerators (24448, 16288, 24416) / 255,
+            // alpha 128 + 128 * 127 / 255, rounded to nearest byte.
+            [96, 64, 96, 192],
         ];
         for (index, mode) in BlendMode::ALL.into_iter().enumerate() {
             assert_eq!(
@@ -132,6 +140,59 @@ mod tests {
                 128
             );
         }
+    }
+    // This renderer composites in sRGB with 8-bit premultiplied pixels.
+    // 10% opacity rounds to alpha 26/255; 20% is exactly 51/255.
+    // White Difference over opaque byte b has result
+    // a + b * (255 - 2a) / 255. These expected bytes are independently
+    // calculated from that expression, not from channel/source_over.
+    // They establish native behavior, not After Effects color-space parity.
+    const WHITE_DIFFERENCE_CASES: [(f64, u8, [u8; 4], [u8; 4]); 6] = [
+        (10.0, 26, [0, 0, 0, 255], [26, 26, 26, 255]),
+        (10.0, 26, [255, 255, 255, 255], [229, 229, 229, 255]),
+        (10.0, 26, [64, 128, 192, 255], [77, 128, 179, 255]),
+        (20.0, 51, [0, 0, 0, 255], [51, 51, 51, 255]),
+        (20.0, 51, [255, 255, 255, 255], [204, 204, 204, 255]),
+        (20.0, 51, [64, 128, 192, 255], [89, 128, 166, 255]),
+    ];
+    #[test]
+    fn difference_white_at_ten_and_twenty_percent_has_literal_coverage_results() {
+        for (percent, alpha, backdrop, expected) in WHITE_DIFFERENCE_CASES {
+            assert_eq!(
+                source_over(&backdrop, &[alpha; 4], BlendMode::Difference),
+                expected,
+                "{percent}% white over {backdrop:?}"
+            );
+        }
+    }
+    #[test]
+    fn difference_adjustment_retains_filtered_alpha_and_blends_straight_colors() {
+        assert_eq!(
+            adjusted_pixel(
+                &[64, 128, 192, 255],
+                &[192, 64, 128, 255],
+                BlendMode::Difference
+            ),
+            [128, 64, 64, 255]
+        );
+        // Filtered source alpha is retained, with no second backdrop composite:
+        // RGB numerators (20384, 8160, 12224) / 255, rounded to nearest byte.
+        assert_eq!(
+            adjusted_pixel(
+                &[32, 64, 96, 128],
+                &[96, 32, 64, 128],
+                BlendMode::Difference
+            ),
+            [80, 32, 48, 128]
+        );
+        assert_eq!(
+            adjusted_pixel(&[0; 4], &[96, 32, 64, 128], BlendMode::Difference),
+            [96, 32, 64, 128]
+        );
+        assert_eq!(
+            adjusted_pixel(&[32, 64, 96, 128], &[0; 4], BlendMode::Difference),
+            [0; 4]
+        );
     }
     fn scene(mode: BlendMode) -> Editor {
         let mut e = Editor::default();
@@ -169,6 +230,36 @@ mod tests {
         }
         e.execute(Command::SetBlendMode { id: 2, mode }).unwrap();
         e
+    }
+    #[test]
+    fn difference_white_layer_opacity_renders_literal_coverage_results() {
+        for (percent, _, backdrop, expected) in WHITE_DIFFERENCE_CASES {
+            let mut e = scene(BlendMode::Difference);
+            let color = (u32::from(backdrop[0]) << 16)
+                | (u32::from(backdrop[1]) << 8)
+                | u32::from(backdrop[2]);
+            e.execute(Command::SetColor { id: 1, color }).unwrap();
+            e.execute(Command::SetColor {
+                id: 2,
+                color: 0xffffff,
+            })
+            .unwrap();
+            for (id, value) in [(1, 100.0), (2, percent)] {
+                e.execute(Command::SetValue {
+                    id,
+                    property: Property::Opacity,
+                    frame: 0,
+                    value,
+                })
+                .unwrap();
+            }
+            let rendered = Renderer::new().render(e.project(), 0, 100).unwrap();
+            assert_eq!(
+                rendered.get_pixel(50, 50).0,
+                expected,
+                "rendered {percent}% white over {backdrop:?}"
+            );
+        }
     }
     #[test]
     fn blend_render_retains_non_overlap_masks_timing_and_precomposition_pixels() {
@@ -233,6 +324,7 @@ mod tests {
             BlendMode::Screen,
             BlendMode::Add,
             BlendMode::Overlay,
+            BlendMode::Difference,
         ] {
             e.execute(Command::SetBlendMode { id: 3, mode }).unwrap();
             let saved = Project::from_json(&e.project().to_json().unwrap()).unwrap();

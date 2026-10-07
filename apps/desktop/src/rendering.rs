@@ -1,6 +1,10 @@
 //! One compositing path for preview, stills and frame sequences.
 use base64::{Engine, engine::general_purpose::STANDARD};
-use libre_effects_core::{Content, Project, Property, TextPaint, TextParam};
+#[cfg(test)]
+use libre_effects_core::Property;
+use libre_effects_core::{
+    CompositionSample, CompositionSampleKey, Content, Project, TextPaint, TextParam,
+};
 use std::{fmt, io::Cursor, path::Path, sync::Arc};
 
 /// The ceiling includes wrappers and copies, not only Contents' path payload.
@@ -46,7 +50,103 @@ pub(crate) fn svg_document(body: &str, width: f64, height: f64) -> Result<String
 #[derive(Default)]
 pub(crate) struct FrameRenderBudget {
     layer_instances: usize,
+    audio_analysis: crate::audio_analysis::FrameAnalysis,
+    pub(crate) repeat_domains: Vec<resvg::RepeatEdgeDomain>,
     contents: libre_effects_core::ContentsRenderBudget,
+    expression_source: Option<Arc<Project>>,
+    expression_values: std::collections::BTreeMap<
+        (u64, CompositionSampleKey, bool),
+        Arc<libre_effects_core::expression_runtime::EvaluatedProperties>,
+    >,
+    expression_modes: std::collections::BTreeMap<(u64, CompositionSampleKey), bool>,
+    expression_root: Option<(u64, CompositionSampleKey, bool)>,
+    sampled_views: std::collections::BTreeMap<(u64, CompositionSampleKey, bool), Arc<Project>>,
+    sample_times: std::collections::BTreeMap<u64, CompositionSample>,
+    expression_view: Option<Arc<Project>>,
+}
+
+impl FrameRenderBudget {
+    pub(crate) fn register_repeat_domains(
+        &mut self,
+        domains: Vec<resvg::RepeatEdgeDomain>,
+    ) -> Result<(), String> {
+        for domain in domains {
+            if let Some(previous) = self.repeat_domains.iter().find(|previous| {
+                previous.filter_id == domain.filter_id
+                    && previous.primitive_index == domain.primitive_index
+            }) {
+                if previous.rect != domain.rect || previous.transform != domain.transform {
+                    return Err("Conflicting Repeat Edge Pixels source domains".into());
+                }
+                continue;
+            }
+            if self.repeat_domains.len() >= 4096 {
+                return Err("A frame exceeds 4096 Repeat Edge Pixels domains".into());
+            }
+            self.repeat_domains
+                .try_reserve(1)
+                .map_err(|_| "Could not allocate repeat-edge metadata")?;
+            self.repeat_domains.push(domain);
+        }
+        Ok(())
+    }
+}
+
+pub(crate) fn frame_pixmap(
+    width: u32,
+    height: u32,
+    checked: bool,
+) -> Result<resvg::tiny_skia::Pixmap, String> {
+    if !checked {
+        return resvg::tiny_skia::Pixmap::new(width, height)
+            .ok_or_else(|| "Could not allocate render buffer".into());
+    }
+    let count = u64::from(width)
+        .checked_mul(u64::from(height))
+        .filter(|n| *n > 0 && *n <= 33_554_432)
+        .ok_or("Checked render exceeds 32 megapixels")?;
+    let bytes = usize::try_from(count.checked_mul(4).ok_or("Render allocation overflow")?)
+        .map_err(|_| "Render allocation overflow")?;
+    let mut data = Vec::new();
+    data.try_reserve_exact(bytes)
+        .map_err(|_| "Could not allocate checked render buffer")?;
+    data.resize(bytes, 0);
+    let size =
+        resvg::tiny_skia::IntSize::from_wh(width, height).ok_or("Invalid render dimensions")?;
+    resvg::tiny_skia::Pixmap::from_vec(data, size)
+        .ok_or_else(|| "Invalid checked render buffer".into())
+}
+
+pub(crate) fn paint_svg_tree(
+    tree: &resvg::usvg::Tree,
+    transform: resvg::tiny_skia::Transform,
+    pixels: &mut resvg::tiny_skia::PixmapMut<'_>,
+    domains: &[resvg::RepeatEdgeDomain],
+) -> Result<(), String> {
+    if domains.is_empty() {
+        resvg::render(tree, transform, pixels);
+        return Ok(());
+    }
+    resvg::render_checked(
+        tree,
+        transform,
+        pixels,
+        &resvg::CheckedRenderOptions {
+            repeat_edge_domains: domains,
+            limits: resvg::RenderLimits {
+                max_pixels: 33_554_432,
+                max_bytes: 128 * 1024 * 1024,
+                max_live_bytes: 256 * 1024 * 1024,
+            },
+        },
+    )
+    .map_err(|error| format!("Repeat Edge Pixels: {error}"))
+}
+
+pub(crate) struct RenderedFrame {
+    pub pixels: image::RgbaImage,
+    /// Exact, nonserializable geometry used for the root composition's pixels.
+    pub evaluated: Option<Arc<Project>>,
 }
 
 #[cfg(test)]
@@ -80,6 +180,7 @@ fn xml(s: &str) -> String {
 pub(crate) struct Renderer {
     pub(crate) options: resvg::usvg::Options<'static>,
     decoders: std::sync::Mutex<crate::video_decoder::Pool>,
+    audio_analysis: std::sync::Mutex<crate::audio_analysis::AudioAnalysis>,
     cancel: Arc<std::sync::atomic::AtomicBool>,
     #[cfg(test)]
     contents_budget: libre_effects_core::ContentsRenderBudget,
@@ -97,10 +198,11 @@ pub(crate) fn text_svg(
         libre_effects_core::TextAlign::Center => (width / 2.0, "middle"),
         libre_effects_core::TextAlign::Right => (width, "end"),
     };
-    text.lines().enumerate().map(|(line,s)| format!("<text x='{x}' y='{}' text-anchor='{anchor}' letter-spacing='{}' font-family='{}' font-weight='{}' font-style='{}' font-size='{font_size}' fill='{color}' xml:space='preserve'>{}</text>",font_size * (1.0 + style.leading * line as f64),style.tracking * font_size / 1000.0,xml(crate::fonts::svg_family(&style)),style.weight, if style.italic { "italic" } else { "normal" },xml(s))).collect()
+    libre_effects_core::text_paragraphs::paragraphs(text).enumerate().map(|(line,paragraph)| format!("<text x='{x}' y='{}' text-anchor='{anchor}' letter-spacing='{}' font-family='{}' font-weight='{}' font-style='{}' font-size='{font_size}' fill='{color}' xml:space='preserve'>{}</text>",font_size * (1.0 + style.leading * line as f64),style.tracking * font_size / 1000.0,xml(crate::fonts::svg_family(&style)),style.weight, if style.italic { "italic" } else { "normal" },xml(paragraph.text))).collect()
 }
 /// Compose the same complete fill and stroke passes used at full opacity. The
 /// optional second SVG retains their unattenuated geometry for effect bounds.
+#[cfg(test)]
 fn layer_text_svg(
     text: &str,
     size: f64,
@@ -110,9 +212,57 @@ fn layer_text_svg(
     style: libre_effects_core::TextStyle,
     opacity: [f64; 2],
     retain_bounds: bool,
-) -> (String, Option<String>) {
+    animator: libre_effects_core::TextAnimatorSample,
+    prefix: &str,
+) -> Result<(String, Option<String>), String> {
+    layer_text_animators_svg(
+        text,
+        size,
+        color,
+        width,
+        height,
+        style,
+        opacity,
+        retain_bounds,
+        &[animator],
+        prefix,
+    )
+}
+
+fn layer_text_animators_svg(
+    text: &str,
+    size: f64,
+    color: &str,
+    width: f64,
+    height: f64,
+    style: libre_effects_core::TextStyle,
+    opacity: [f64; 2],
+    retain_bounds: bool,
+    animators: &[libre_effects_core::TextAnimatorSample],
+    prefix: &str,
+) -> Result<(String, Option<String>), String> {
+    let active: Vec<_> = animators
+        .iter()
+        .filter(|animator| !animator.is_identity())
+        .map(|animator| {
+            (
+                crate::text_animator::Selection::new(text, animator),
+                animator,
+            )
+        })
+        .filter(|(selection, _)| !selection.is_empty())
+        .collect();
+    let geometry = |color: &str| {
+        if !active.is_empty() {
+            crate::text_animator_render::source_geometry_svg(
+                text, size, color, width, height, &style,
+            )
+        } else {
+            Ok(text_geometry_svg(text, size, color, width, height, &style))
+        }
+    };
     let fill = if style.fill_enabled {
-        text_geometry_svg(text, size, color, width, height, &style)
+        geometry(color)?
     } else {
         String::new()
     };
@@ -126,16 +276,48 @@ fn layer_text_svg(
             "<g stroke='#{:06x}' stroke-width='{}' stroke-linejoin='{join}' stroke-miterlimit='4'>{}</g>",
             style.stroke_color,
             style.stroke_width,
-            text_geometry_svg(text, size, "none", width, height, &style)
+            geometry("none")?
         )
     } else {
         String::new()
     };
-    // Reuse the generated geometry instead of laying out paragraphs again.
-    // At full opacity the paint SVG itself is also the bounds representation.
-    let attenuated =
-        (!fill.is_empty() && opacity[0] != 100.0) || (!stroke.is_empty() && opacity[1] != 100.0);
+    let animate = |pass: String, paint: &str| {
+        let prefix = format!("{prefix}-animator-{paint}-");
+        match active.as_slice() {
+            [] => Ok((pass, None)),
+            // Identity extras and empty selectors must not change the established
+            // single-animator geometry, float association or paint aggregation.
+            [(selection, sample)] => crate::text_animator_render::animate_pass(
+                &pass,
+                text,
+                selection,
+                sample,
+                width,
+                height,
+                &prefix,
+                retain_bounds,
+            ),
+            _ => crate::text_animator_render::animate_stack_pass(
+                &pass,
+                text,
+                &active,
+                width,
+                height,
+                &prefix,
+                retain_bounds,
+            ),
+        }
+    };
+    let (fill, fill_bounds) = animate(fill, "fill")?;
+    let (stroke, stroke_bounds) = animate(stroke, "stroke")?;
+    // Retain translated geometry before either protected-unit or pass opacity.
+    let attenuated = (!fill.is_empty() && opacity[0] != 100.0)
+        || (!stroke.is_empty() && opacity[1] != 100.0)
+        || fill_bounds.is_some()
+        || stroke_bounds.is_some();
     let bounds = (retain_bounds && attenuated).then(|| {
+        let fill = fill_bounds.as_deref().unwrap_or(&fill);
+        let stroke = stroke_bounds.as_deref().unwrap_or(&stroke);
         if style.stroke_over_fill {
             format!("{fill}{stroke}")
         } else {
@@ -151,7 +333,7 @@ fn layer_text_svg(
     } else {
         format!("{stroke}{fill}")
     };
-    (paint, bounds)
+    Ok((paint, bounds))
 }
 
 fn text_pass_opacity(pass: String, percent: f64) -> String {
@@ -181,19 +363,18 @@ pub(crate) fn text_geometry_svg(
     }
     let lines = crate::text_flow::lines(text, size, width, style);
     let mut svg = format!("<svg width='{width}' height='{height}' overflow='hidden'>");
-    for (i, line) in lines
+    for line in lines
         .iter()
         .take(crate::text_flow::composed_count(&lines, height))
-        .enumerate()
     {
-        let y = i as f64 * size * style.leading;
+        let (x, y) = (line.x, line.y);
         svg.push_str(&format!(
-            "<g transform='translate(0 {y})'>{}</g>",
+            "<g transform='translate({x} {y})'>{}</g>",
             text_svg(
                 &text[line.range.start..line.visible_end],
                 size,
                 color,
-                width,
+                line.width,
                 style.clone()
             )
         ));
@@ -271,6 +452,7 @@ impl Renderer {
         Self {
             options,
             decoders: Default::default(),
+            audio_analysis: Default::default(),
             cancel,
             #[cfg(test)]
             contents_budget: TEST_CONTENTS_BUDGET
@@ -280,6 +462,15 @@ impl Renderer {
     fn frame_budget(&self) -> FrameRenderBudget {
         FrameRenderBudget {
             layer_instances: 0,
+            audio_analysis: Default::default(),
+            repeat_domains: Vec::new(),
+            expression_source: None,
+            expression_values: Default::default(),
+            expression_modes: Default::default(),
+            expression_root: None,
+            sampled_views: Default::default(),
+            sample_times: Default::default(),
+            expression_view: None,
             #[cfg(test)]
             contents: self.contents_budget.clone(),
             #[cfg(not(test))]
@@ -288,9 +479,119 @@ impl Renderer {
     }
     pub fn clear_decoders(&self) {
         self.decoders.lock().unwrap().clear();
+        *self.audio_analysis.lock().unwrap() = Default::default();
     }
     fn check_cancel(&self) -> Result<(), String> {
         crate::video_decoder::check_cancel(&self.cancel)
+    }
+    fn expression_view(
+        &self,
+        project: &Project,
+        composition: u64,
+        frame: u32,
+        include_guides: bool,
+        budget: &mut FrameRenderBudget,
+    ) -> Result<Option<Arc<Project>>, String> {
+        let sample = budget
+            .sample_times
+            .get(&composition)
+            .copied()
+            .map(Ok)
+            .unwrap_or_else(|| {
+                let comp = project
+                    .composition_by_id(composition)
+                    .ok_or("Missing source composition")?;
+                CompositionSample::from_frame(frame, comp.fps())
+            })?;
+        if project.evaluated_at_sample(composition, sample) {
+            return Ok(None);
+        }
+        // Never take the next child snapshot from an already-frozen ancestor.
+        let (source, roots) = if let Some(source) = budget.expression_source.clone() {
+            let roots = source.expression_roots_at_sample(composition, sample, include_guides)?;
+            if roots.is_empty() && !sample.is_fractional() {
+                return Ok(None);
+            }
+            (source, roots)
+        } else {
+            if project.evaluated_frame().is_some() {
+                return Err("Evaluated scene lost its authored source".into());
+            }
+            let roots = project.expression_roots_at_sample(composition, sample, include_guides)?;
+            if roots.is_empty() && !sample.is_fractional() {
+                return Ok(None);
+            }
+            let source = Arc::new(project.clone());
+            budget.expression_source = Some(source.clone());
+            (source, roots)
+        };
+        let key = (composition, sample.key(), include_guides);
+        if let Some(view) = budget.sampled_views.get(&key) {
+            return Ok(Some(view.clone()));
+        }
+        if budget.sampled_views.len() >= 128 {
+            return Err("A frame exceeds 128 sampled composition/time views".into());
+        }
+        let values = if roots.is_empty() {
+            // Pure authored fractional sampling still needs a detached view.
+            Arc::new(
+                libre_effects_core::expression_runtime::EvaluatedProperties {
+                    composition: libre_effects_core::expression_runtime::CompositionId(composition),
+                    time: sample.seconds(),
+                    values: Default::default(),
+                    dependencies: Default::default(),
+                    expression_evaluations: 0,
+                    host_reads: 0,
+                },
+            )
+        } else if let Some(values) = budget.expression_values.get(&key) {
+            values.clone()
+        } else {
+            if budget.expression_values.len() >= 128 {
+                return Err("A frame exceeds 128 expression composition/time evaluations".into());
+            }
+            let snapshot = source.expression_snapshot_at_sample(composition, sample)?;
+            let values = crate::automation_process::evaluate_expressions(
+                &snapshot,
+                &roots,
+                self.cancel.clone(),
+            )
+            .map_err(|error| {
+                let property = error
+                    .property
+                    .as_ref()
+                    .map(|property| {
+                        let layer = source
+                            .composition_by_id(property.composition.0)
+                            .and_then(|comp| comp.layer(property.layer.0));
+                        format!(
+                            " · layer '{}' ({}) {:?}",
+                            layer.map_or("unknown", |layer| layer.name()),
+                            property.layer.0,
+                            property.property
+                        )
+                    })
+                    .unwrap_or_default();
+                format!(
+                    "Expression {:?} in composition {composition}{property}: {}",
+                    error.kind, error.message
+                )
+            })?;
+            let values = Arc::new(values);
+            budget.expression_values.insert(key, values.clone());
+            values
+        };
+        let view = Arc::new(source.with_evaluated_properties_at_sample(
+            composition,
+            sample,
+            include_guides,
+            &values,
+        )?);
+        if budget.expression_root == Some(key) {
+            budget.expression_view = Some(view.clone());
+        }
+        budget.sampled_views.insert(key, view.clone());
+        Ok(Some(view))
     }
     fn layers_svg(
         &self,
@@ -302,19 +603,87 @@ impl Renderer {
         budget: &mut FrameRenderBudget,
         include_guides: bool,
     ) -> Result<String, String> {
+        let comp = project
+            .composition_by_id(composition)
+            .ok_or("Missing source composition")?;
+        self.layers_svg_at_sample(
+            project,
+            composition,
+            CompositionSample::from_frame(frame, comp.fps())?,
+            max_dimension,
+            prefix,
+            budget,
+            include_guides,
+        )
+    }
+    fn layers_svg_at_sample(
+        &self,
+        project: &Project,
+        composition: libre_effects_core::CompositionId,
+        sample: CompositionSample,
+        max_dimension: u32,
+        prefix: &str,
+        budget: &mut FrameRenderBudget,
+        include_guides: bool,
+    ) -> Result<String, String> {
+        let comp = project
+            .composition_by_id(composition)
+            .ok_or("Missing source composition")?;
+        let sample = sample.in_rate(comp.fps())?;
+        let frame = sample.floor_frame()?;
+        let previous = budget.sample_times.insert(composition, sample);
+        let result = self.layers_svg_sampled(
+            project,
+            composition,
+            frame,
+            max_dimension,
+            prefix,
+            budget,
+            include_guides,
+        );
+        if let Some(previous) = previous {
+            budget.sample_times.insert(composition, previous);
+        } else {
+            budget.sample_times.remove(&composition);
+        }
+        result
+    }
+    fn layers_svg_sampled(
+        &self,
+        project: &Project,
+        composition: libre_effects_core::CompositionId,
+        frame: u32,
+        max_dimension: u32,
+        prefix: &str,
+        budget: &mut FrameRenderBudget,
+        include_guides: bool,
+    ) -> Result<String, String> {
+        let sample = *budget
+            .sample_times
+            .get(&composition)
+            .ok_or("Missing render sample context")?;
+        budget
+            .expression_modes
+            .insert((composition, sample.key()), include_guides);
+        let evaluated =
+            self.expression_view(project, composition, frame, include_guides, budget)?;
+        let project = evaluated.as_deref().unwrap_or(project);
         let c = project
             .composition_by_id(composition)
             .ok_or("Missing source composition")?;
         let mut svg = String::new();
-        for l in c.layers().iter().rev().filter(|l| {
-            c.layer_active(l, frame, include_guides)
-                && !matches!(l.content(), Content::Null | Content::Audio { .. })
-        }) {
+        // Projection and ordering are shared with preview geometry. Unsupported
+        // spatial scenes fail before painting instead of becoming empty pixels.
+        for id in c.render_order(frame, include_guides)? {
+            let l = c
+                .layer(id)
+                .ok_or("Render order references a missing layer")?;
+            if matches!(l.content(), Content::Null | Content::Audio { .. }) {
+                continue;
+            }
             self.check_cancel()?;
             if matches!(l.content(), Content::Adjustment) {
-                let Some(matrix) = c.world_transform(l.id(), frame) else {
-                    continue;
-                };
+                let matrix = c.projected_geometry(l.id(), frame)?.transform;
                 count_layer(budget)?;
                 let id = format!("{prefix}-{}", l.id());
                 let matte =
@@ -323,12 +692,14 @@ impl Renderer {
                     &svg,
                     l,
                     frame,
+                    c.fps().seconds(1),
                     matrix,
                     c.width(),
                     c.height(),
                     max_dimension,
                     &id,
                     matte.as_ref().map(|(p, m)| (p, *m)),
+                    budget,
                 )?;
             } else {
                 let source = self.isolated_layer_svg(
@@ -350,6 +721,7 @@ impl Renderer {
                         c.width(),
                         c.height(),
                         max_dimension,
+                        &budget.repeat_domains,
                     )?;
                 }
             }
@@ -371,6 +743,26 @@ impl Renderer {
         prefix: &str,
         budget: &mut FrameRenderBudget,
     ) -> Result<String, String> {
+        let incoming_project = project;
+        let sample = budget
+            .sample_times
+            .get(&composition)
+            .copied()
+            .map(Ok)
+            .unwrap_or_else(|| {
+                let comp = project
+                    .composition_by_id(composition)
+                    .ok_or("Missing source composition")?;
+                CompositionSample::from_frame(frame, comp.fps())
+            })?;
+        let include_guides = budget
+            .expression_modes
+            .get(&(composition, sample.key()))
+            .copied()
+            .unwrap_or(false);
+        let evaluated =
+            self.expression_view(project, composition, frame, include_guides, budget)?;
+        let project = evaluated.as_deref().unwrap_or(project);
         let c = project
             .composition_by_id(composition)
             .ok_or("Missing source composition")?;
@@ -381,13 +773,63 @@ impl Renderer {
         {
             return Ok(String::new());
         }
-        let Some(matrix) = c.world_transform(l.id(), frame) else {
-            return Ok(String::new());
-        };
+        let matrix = c.projected_geometry(l.id(), frame)?.transform;
         count_layer(budget)?;
         let id = format!("{prefix}-{}", l.id());
         let mut svg = String::new();
         let e = l.effects();
+        let generated_spectrum = if let Some(effect) = l.effect_stack().iter().find(|effect| {
+            !effect.bypassed() && effect.kind() == libre_effects_core::EffectKind::AudioSpectrum
+        }) {
+            if !matches!(l.content(), Content::Rectangle | Content::Solid) || l.is_three_d() {
+                return Err("Audio Spectrum requires a 2D Rectangle or Solid".into());
+            }
+            let settings = effect
+                .audio_spectrum()
+                .ok_or("Missing Audio Spectrum settings")?;
+            let source_snapshot = budget.expression_source.clone();
+            let authored = source_snapshot.as_deref().unwrap_or(incoming_project);
+            let context = |error: String| {
+                format!(
+                    "Audio Spectrum in composition '{}' ({composition}), layer '{}' ({}), effect '{}' ({}) at {:.9}s, source {:?}: {error}",
+                    c.name(),
+                    l.name(),
+                    l.id(),
+                    effect.name(),
+                    effect.id(),
+                    sample.seconds(),
+                    settings.source.map(|source| source.layer),
+                )
+            };
+            let frame = self
+                .audio_analysis
+                .lock()
+                .map_err(|_| "Audio analysis worker state is unavailable".to_string())?
+                .analyze(
+                    authored,
+                    composition,
+                    sample,
+                    settings,
+                    &mut budget.audio_analysis,
+                    &self.cancel,
+                )
+                .map_err(context)?;
+            let paint = match frame {
+                Some(frame) => crate::audio_spectrum_render::spectrum_svg(
+                    settings,
+                    &frame.amplitudes,
+                    l.width(),
+                    l.height(),
+                    &format!("{id}-spectrum"),
+                    &self.cancel,
+                )
+                .map_err(context)?,
+                None => String::new(),
+            };
+            Some((effect.id(), settings.composite_original, paint))
+        } else {
+            None
+        };
         // Sample geometry and paint once for both measurement and painting.
         // Keep the source layer untouched, including during in-between frames.
         let text_paint = matches!(l.content(), Content::Text { .. }).then(|| {
@@ -404,7 +846,10 @@ impl Renderer {
         let measure_effect_bounds = matches!(
             l.content(),
             Content::Text { .. } | Content::ShapeContents(_)
-        ) && l.effect_stack().iter().any(|e| !e.bypassed());
+        ) && l
+            .effect_stack()
+            .iter()
+            .any(|e| !e.bypassed() && e.kind() != libre_effects_core::EffectKind::SliderControl);
         let mut text_bounds_svg = None;
         let sampled_svg = match l.content() {
             Content::ShapeContents(contents) => Some(
@@ -427,16 +872,31 @@ impl Renderer {
             Content::Text { .. } => {
                 let text = l.source_text_at(frame).unwrap();
                 let (fill, style, font_size, opacity) = text_paint.as_ref().unwrap();
-                let (paint, bounds) = layer_text_svg(
-                    text,
-                    *font_size,
-                    fill,
-                    l.width(),
-                    l.height(),
-                    style.clone(),
-                    *opacity,
-                    measure_effect_bounds,
-                );
+                let (paint, bounds) = if let Some(rich) = l.rich_text() {
+                    crate::rich_text_render::layer_svg(
+                        text,
+                        rich,
+                        l.width(),
+                        style,
+                        *opacity,
+                        measure_effect_bounds,
+                    )
+                    .map_err(|error| format!("Layer '{}' ({}): {error}", l.name(), l.id()))?
+                } else {
+                    // Keep the exact established path for every legacy layer.
+                    layer_text_animators_svg(
+                        text,
+                        *font_size,
+                        fill,
+                        l.width(),
+                        l.height(),
+                        style.clone(),
+                        *opacity,
+                        measure_effect_bounds,
+                        &l.text_animators_at(frame).unwrap(),
+                        &id,
+                    )?
+                };
                 text_bounds_svg = bounds;
                 Some(paint)
             }
@@ -470,8 +930,21 @@ impl Renderer {
             }
             effect_bounds = [left, top, right - left, bottom - top];
         }
-        let (effect_defs, effect_open, effect_close) =
-            crate::effect_render::stack(l, frame, &id, effect_bounds)?;
+        let domain = crate::effect_render::InputDomain::local(effect_bounds);
+        let stack = if let Some((effect, _, _)) = &generated_spectrum {
+            crate::effect_render::stack_with_generated_spectrum(
+                l,
+                frame,
+                &id,
+                effect_bounds,
+                domain,
+                *effect,
+            )?
+        } else {
+            crate::effect_render::stack_with_domain(l, frame, &id, effect_bounds, domain)?
+        };
+        budget.register_repeat_domains(stack.repeat_domains)?;
+        let (effect_defs, effect_open, effect_close) = (stack.definitions, stack.open, stack.close);
         append_svg(&mut svg, format_args!("{effect_defs}"))?;
         append_svg(
             &mut svg,
@@ -533,10 +1006,7 @@ impl Renderer {
                 a[3],
                 a[4],
                 a[5],
-                l.property(Property::Opacity)
-                    .value_at(frame)
-                    .clamp(0.0, 100.0)
-                    / 100.0,
+                l.opacity_at(frame, c.fps().seconds(1))?.clamp(0.0, 100.0) / 100.0,
                 if e != libre_effects_core::Effects::default() {
                     format!("filter='url(#fx{id})'")
                 } else {
@@ -552,14 +1022,24 @@ impl Renderer {
         let color = format!("#{:06x}", l.color());
         match l.content() {
             Content::Null | Content::Adjustment => {}
-            Content::Rectangle | Content::Solid => append_svg(
-                &mut svg,
-                format_args!(
-                    "<rect width='{}' height='{}' fill='{color}'/>",
-                    l.width(),
-                    l.height()
-                ),
-            )?,
+            Content::Rectangle | Content::Solid => {
+                if generated_spectrum
+                    .as_ref()
+                    .is_none_or(|(_, original, _)| *original)
+                {
+                    append_svg(
+                        &mut svg,
+                        format_args!(
+                            "<rect width='{}' height='{}' fill='{color}'/>",
+                            l.width(),
+                            l.height()
+                        ),
+                    )?;
+                }
+                if let Some((_, _, paint)) = &generated_spectrum {
+                    append_svg(&mut svg, format_args!("{paint}"))?;
+                }
+            }
             Content::Shape(shape) => append_svg(
                 &mut svg,
                 format_args!("{}", shape.svg_at(l.width(), l.height(), l.color(), frame)),
@@ -585,11 +1065,14 @@ impl Renderer {
                 let source = project
                     .composition_by_id(*composition)
                     .ok_or("Missing source composition")?;
-                if let Some(source_frame) = l.composition_frame(frame, c.fps(), source) {
-                    let inner = self.layers_svg(
+                // The containing sample is restored after every recursive call,
+                // so hidden mattes and sibling instances retain their own time.
+                let parent_sample = sample;
+                if let Some(source_sample) = l.composition_sample(parent_sample, c.fps(), source)? {
+                    let inner = self.layers_svg_at_sample(
                         project,
                         *composition,
-                        source_frame,
+                        source_sample,
                         max_dimension,
                         &id,
                         budget,
@@ -679,7 +1162,13 @@ impl Renderer {
         if let Some((matte, mode)) =
             self.matte_pixels(project, composition, l, frame, max_dimension, &id, budget)?
         {
-            let mut source = self.raster_canvas(&svg, c.width(), c.height(), max_dimension)?;
+            let mut source = self.raster_canvas_with_domains(
+                &svg,
+                c.width(),
+                c.height(),
+                max_dimension,
+                &budget.repeat_domains,
+            )?;
             crate::matte_render::apply_matte(&mut source, &matte, mode);
             svg = crate::adjustment_render::embedded(&source, c.width(), c.height())?;
         }
@@ -695,6 +1184,7 @@ impl Renderer {
         max_dimension: u32,
     ) -> Result<image::RgbaImage, String> {
         self.render_mode(project, frame, max_dimension, false, None)
+            .map(|frame| frame.pixels)
     }
     pub fn render_preview(
         &self,
@@ -702,6 +1192,15 @@ impl Renderer {
         frame: u32,
         max_dimension: u32,
     ) -> Result<image::RgbaImage, String> {
+        self.render_preview_with_view(project, frame, max_dimension)
+            .map(|frame| frame.pixels)
+    }
+    pub fn render_preview_with_view(
+        &self,
+        project: &Project,
+        frame: u32,
+        max_dimension: u32,
+    ) -> Result<RenderedFrame, String> {
         self.render_mode(project, frame, max_dimension, true, None)
     }
     pub fn render_output(
@@ -715,6 +1214,7 @@ impl Renderer {
             return Err("Invalid output dimensions".into());
         }
         self.render_mode(project, frame, u32::MAX, false, Some([width, height]))
+            .map(|frame| frame.pixels)
     }
     fn render_mode(
         &self,
@@ -723,7 +1223,7 @@ impl Renderer {
         max_dimension: u32,
         include_guides: bool,
         output_size: Option<[u32; 2]>,
-    ) -> Result<image::RgbaImage, String> {
+    ) -> Result<RenderedFrame, String> {
         self.check_cancel()?;
         let c = project.composition();
         if frame >= c.duration() {
@@ -737,6 +1237,12 @@ impl Renderer {
             return Err("Rendering supports up to 32 megapixels per frame".into());
         }
         let mut budget = self.frame_budget();
+        let root_sample = CompositionSample::from_frame(frame, c.fps())?;
+        budget.expression_root = Some((
+            project.active_composition_id(),
+            root_sample.key(),
+            include_guides,
+        ));
         let body = self.layers_svg(
             project,
             project.active_composition_id(),
@@ -750,16 +1256,16 @@ impl Renderer {
         self.check_cancel()?;
         let tree = resvg::usvg::Tree::from_str(&svg, &self.options).map_err(|e| e.to_string())?;
         self.check_cancel()?;
-        let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)
-            .ok_or("Could not allocate render buffer")?;
-        resvg::render(
+        let mut pixmap = frame_pixmap(width, height, !budget.repeat_domains.is_empty())?;
+        paint_svg_tree(
             &tree,
             resvg::tiny_skia::Transform::from_scale(
                 width as f32 / c.width() as f32,
                 height as f32 / c.height() as f32,
             ),
             &mut pixmap.as_mut(),
-        );
+            &budget.repeat_domains,
+        )?;
         let pixels: Vec<u8> = pixmap
             .pixels()
             .iter()
@@ -769,7 +1275,12 @@ impl Renderer {
             })
             .collect();
         self.check_cancel()?;
-        image::RgbaImage::from_raw(width, height, pixels).ok_or("Invalid render buffer".into())
+        let pixels =
+            image::RgbaImage::from_raw(width, height, pixels).ok_or("Invalid render buffer")?;
+        Ok(RenderedFrame {
+            pixels,
+            evaluated: budget.expression_view,
+        })
     }
 }
 pub(crate) fn import_image(path: &Path) -> Result<(Content, u32, u32), String> {

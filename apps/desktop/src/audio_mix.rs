@@ -5,13 +5,16 @@ use libre_effects_core::{AudioMetadata, Content, FrameRate, Layer, Project};
 use std::{
     collections::VecDeque,
     io::Write,
-    path::Path,
+    path::{Path, PathBuf},
     sync::atomic::{AtomicBool, AtomicU32, Ordering},
     time::SystemTime,
 };
 
 pub(crate) const SAMPLE_RATE: u32 = 48_000;
 const CACHE_CHUNKS: usize = 128;
+const CACHE_BYTES: usize = 64 * 1024 * 1024;
+const CACHE_SOURCES: usize = 4096;
+const MAX_SOURCE_PATH_BYTES: usize = 16 * 1024;
 const BLOCK: usize = 4096;
 // Valid video frame counts are below 2^31 (24 h at up to 240 fps).
 const AUDIO_PHASE: u32 = 1 << 31;
@@ -38,47 +41,73 @@ struct Voice {
     steps: Vec<Step>,
 }
 impl Voice {
-    fn position(&self, seconds: f64) -> Option<(f64, f64, [f64; 4])> {
-        let (mut a, mut b) = (seconds, seconds + 1.0 / f64::from(SAMPLE_RATE));
-        let mut matrix = [1.0, 0.0, 0.0, 1.0];
-        for step in &self.steps {
-            let fps = step.fps.as_f64();
-            let (frame, next) = (a * fps, b * fps);
-            // Small arithmetic roundoff at an exact frame edge must not add/drop
-            // a sample. The tolerance is much less than one audio sample.
-            if frame + 1e-9 < f64::from(step.layer.in_frame())
-                || frame + 1e-9 >= f64::from(step.layer.out_frame(step.duration))
-                || frame + 1e-9 >= f64::from(step.duration)
-            {
-                return None;
-            }
-            let m = step.layer.audio_matrix(frame);
-            matrix = [
-                matrix[0] * m[0] + matrix[1] * m[2],
-                matrix[0] * m[1] + matrix[1] * m[3],
-                matrix[2] * m[0] + matrix[3] * m[2],
-                matrix[2] * m[1] + matrix[3] * m[3],
-            ];
-            if let Content::Composition { start_frame, .. } = step.layer.content() {
-                if let Some(track) = step.layer.time_remap() {
-                    a = track.sample(frame);
-                    b = track.sample(next);
-                } else {
-                    a = (frame - *start_frame as f64) / fps;
-                    b = (next - *start_frame as f64) / fps;
-                }
-            } else {
-                a = step.layer.audio_source_seconds(frame, step.fps)?;
-                b = step.layer.audio_source_seconds(next, step.fps)?;
-            }
-        }
-        // A held source has no advancing waveform: output silence rather than DC.
-        (a.is_finite() && b.is_finite() && (b - a).abs() > 1e-12).then_some((a, b - a, matrix))
+    fn position(&self, seconds: f64) -> Result<Option<(f64, f64, [f64; 4])>, String> {
+        voice_position(
+            self.steps.iter().map(|s| (&s.layer, s.fps, s.duration)),
+            seconds,
+        )
     }
+}
+/// Shared continuous audio clock. This intentionally never uses visual sampling,
+/// expressions, masks, or effect references.
+pub(crate) fn voice_position<'a>(
+    steps: impl Iterator<Item = (&'a Layer, FrameRate, u32)>,
+    seconds: f64,
+) -> Result<Option<(f64, f64, [f64; 4])>, String> {
+    let (mut a, mut b) = (seconds, seconds + 1.0 / f64::from(SAMPLE_RATE));
+    let mut matrix = [1.0, 0.0, 0.0, 1.0];
+    for (layer, rate, duration) in steps {
+        let fps = rate.as_f64();
+        let (frame, next) = (a * fps, b * fps);
+        if !frame.is_finite() || !next.is_finite() {
+            return Err("Non-finite audio source clock".into());
+        }
+        // Preserve the existing mixer's tolerance at exact trim edges.
+        if frame + 1e-9 < f64::from(layer.in_frame())
+            || frame + 1e-9 >= f64::from(layer.out_frame(duration))
+            || frame + 1e-9 >= f64::from(duration)
+        {
+            return Ok(None);
+        }
+        let m = layer.audio_matrix(frame);
+        matrix = [
+            matrix[0] * m[0] + matrix[1] * m[2],
+            matrix[0] * m[1] + matrix[1] * m[3],
+            matrix[2] * m[0] + matrix[3] * m[2],
+            matrix[2] * m[1] + matrix[3] * m[3],
+        ];
+        if matrix.iter().any(|v| !v.is_finite()) {
+            return Err("Non-finite audio matrix".into());
+        }
+        if let Content::Composition { start_frame, .. } = layer.content() {
+            if let Some(track) = layer.time_remap() {
+                a = track.sample(frame);
+                b = track.sample(next);
+            } else {
+                a = (frame - *start_frame as f64) / fps;
+                b = (next - *start_frame as f64) / fps;
+            }
+        } else {
+            a = layer
+                .audio_source_seconds(frame, rate)
+                .ok_or("Invalid audio source clock")?;
+            b = layer
+                .audio_source_seconds(next, rate)
+                .ok_or("Invalid audio source clock")?;
+        }
+        if !a.is_finite() || !b.is_finite() {
+            return Err("Non-finite audio source clock".into());
+        }
+    }
+    // A held source has no advancing waveform: output silence rather than DC.
+    Ok(((b - a).abs() > 1e-12).then_some((a, b - a, matrix)))
 }
 struct Source {
     path: String,
     audio: AudioMetadata,
+    // Retain both the requested path and its resolved identity. Repointing a
+    // symlink must invalidate the session just like replacing the file itself.
+    canonical: Option<PathBuf>,
     stamp: Option<(u64, SystemTime)>,
 }
 struct Chunk {
@@ -86,18 +115,294 @@ struct Chunk {
     second: u32,
     pcm: Vec<[f32; 2]>,
 }
-pub(crate) struct Mixer {
-    voices: Vec<Voice>,
+#[cfg(test)]
+type TestDecoder =
+    dyn FnMut(&str, &AudioMetadata, u32, &AtomicBool) -> Result<Vec<[f32; 2]>, String> + Send;
+
+/// Session cache shared by independently constructed selected-layer plans.
+/// Keys include the path, full metadata and pinned resolved file stamp. Pins
+/// survive PCM eviction; explicit footage refresh starts a new cache/session.
+#[derive(Default)]
+pub(crate) struct PcmCache {
     sources: Vec<Source>,
     chunks: VecDeque<Chunk>,
+    #[cfg(test)]
+    decoder: Option<Box<TestDecoder>>,
+}
+impl PcmCache {
+    pub(crate) fn register(&mut self, path: &str, audio: &AudioMetadata) -> Result<usize, String> {
+        if !audio.valid() || path.is_empty() || path.len() > MAX_SOURCE_PATH_BYTES {
+            return Err("Invalid source audio metadata or path".into());
+        }
+        if let Some(index) = self
+            .sources
+            .iter()
+            .position(|s| s.path == path && s.audio == *audio)
+        {
+            return Ok(index);
+        }
+        if self.sources.len() >= CACHE_SOURCES {
+            return Err("Audio cache exceeds 4096 sources".into());
+        }
+        let mut source_path = String::new();
+        source_path
+            .try_reserve_exact(path.len())
+            .map_err(|_| "Cannot allocate audio source path")?;
+        source_path.push_str(path);
+        let mut layout = String::new();
+        layout
+            .try_reserve_exact(audio.channel_layout.len())
+            .map_err(|_| "Cannot allocate audio metadata")?;
+        layout.push_str(&audio.channel_layout);
+        let metadata = AudioMetadata {
+            stream_index: audio.stream_index,
+            sample_rate: audio.sample_rate,
+            channels: audio.channels,
+            channel_layout: layout,
+            duration: audio.duration,
+            start_time: audio.start_time,
+            file_offset: audio.file_offset,
+        };
+        self.sources
+            .try_reserve_exact(1)
+            .map_err(|_| "Cannot allocate audio source table")?;
+        self.make_room(source_path.capacity() + metadata.channel_layout.capacity())?;
+        self.sources.push(Source {
+            path: source_path,
+            audio: metadata,
+            canonical: None,
+            stamp: None,
+        });
+        Ok(self.sources.len() - 1)
+    }
+    fn memory_bytes(&self) -> usize {
+        self.sources.capacity() * std::mem::size_of::<Source>()
+            + self.chunks.capacity() * std::mem::size_of::<Chunk>()
+            + self
+                .sources
+                .iter()
+                .map(|s| {
+                    s.path.capacity()
+                        + s.audio.channel_layout.capacity()
+                        + s.canonical.as_ref().map_or(0, PathBuf::capacity)
+                })
+                .sum::<usize>()
+            + self
+                .chunks
+                .iter()
+                .map(|c| c.pcm.capacity() * std::mem::size_of::<[f32; 2]>())
+                .sum::<usize>()
+    }
+    fn make_room(&mut self, additional: usize) -> Result<(), String> {
+        while self
+            .memory_bytes()
+            .checked_add(additional)
+            .is_none_or(|n| n > CACHE_BYTES)
+        {
+            if self.chunks.pop_front().is_none() {
+                return Err("Audio PCM cache exceeds 64 MiB".into());
+            }
+        }
+        Ok(())
+    }
+    /// Called for every selected request, including cache hits and zero-padded
+    /// windows. Offline/changed sources must never become cached silent success.
+    pub(crate) fn validate_source(
+        &mut self,
+        index: usize,
+        cancel: &AtomicBool,
+    ) -> Result<(), String> {
+        check_cancel(cancel)?;
+        let source = self
+            .sources
+            .get(index)
+            .ok_or("Invalid audio source handle")?;
+        let canonical = std::fs::canonicalize(&source.path)
+            .map_err(|e| format!("Audio offline: {}: {e}", source.path))?;
+        if canonical.as_os_str().as_encoded_bytes().len() > MAX_SOURCE_PATH_BYTES {
+            return Err("Resolved audio path exceeds limit".into());
+        }
+        let metadata = std::fs::metadata(&canonical)
+            .map_err(|e| format!("Audio offline: {}: {e}", source.path))?;
+        if !metadata.is_file() {
+            return Err(format!("Audio offline: not a file: {}", source.path));
+        }
+        let stamp = (
+            metadata.len(),
+            metadata.modified().map_err(|e| e.to_string())?,
+        );
+        if self.sources.iter().any(|old| {
+            // A second plan/stream or path alias must not repin a file that this
+            // session already observed, even when full audio metadata differs.
+            (old.path == source.path
+                && old
+                    .canonical
+                    .as_ref()
+                    .is_some_and(|resolved| *resolved != canonical))
+                || ((old.path == source.path || old.canonical.as_ref() == Some(&canonical))
+                    && old.stamp.is_some_and(|pinned| pinned != stamp))
+        }) {
+            return Err(
+                "Audio source changed during rendering; retry with the updated source".into(),
+            );
+        }
+        if source.canonical.is_none() {
+            self.make_room(canonical.capacity())?;
+            self.sources[index].canonical = Some(canonical);
+        }
+        self.sources[index].stamp = Some(stamp);
+        check_cancel(cancel)
+    }
+    fn insert_chunk(&mut self, chunk: Chunk, cancel: &AtomicBool) -> Result<(), String> {
+        if chunk.pcm.is_empty() || chunk.pcm.len() > SAMPLE_RATE as usize {
+            return Err("Audio decoder returned invalid sample count".into());
+        }
+        for samples in chunk.pcm.chunks(256) {
+            check_cancel(cancel)?;
+            if samples.iter().flatten().any(|v| !v.is_finite()) {
+                return Err("Audio contains non-finite samples".into());
+            }
+        }
+        if self.chunks.len() >= CACHE_CHUNKS {
+            self.chunks.pop_front();
+        }
+        self.chunks
+            .try_reserve_exact(1)
+            .map_err(|_| "Cannot allocate audio chunk table")?;
+        self.make_room(
+            chunk
+                .pcm
+                .capacity()
+                .checked_mul(std::mem::size_of::<[f32; 2]>())
+                .ok_or("Audio PCM cache size overflow")?,
+        )?;
+        check_cancel(cancel)?;
+        self.chunks.push_back(chunk);
+        Ok(())
+    }
+    fn sample(
+        &mut self,
+        source: usize,
+        index: i64,
+        cancel: &AtomicBool,
+    ) -> Result<[f32; 2], String> {
+        let audio = &self.sources[source].audio;
+        if index < 0 || index as f64 / f64::from(SAMPLE_RATE) >= audio.duration {
+            return Ok([0.0; 2]);
+        }
+        let second = (index as u64 / u64::from(SAMPLE_RATE)) as u32;
+        let offset = (index as u64 % u64::from(SAMPLE_RATE)) as usize;
+        let found = self
+            .chunks
+            .iter()
+            .position(|c| c.source == source && c.second == second);
+        let index = if let Some(index) = found {
+            index
+        } else {
+            self.validate_source(source, cancel)?;
+            let source_data = &self.sources[source];
+            #[cfg(test)]
+            let pcm = if let Some(decoder) = &mut self.decoder {
+                decoder(&source_data.path, &source_data.audio, second, cancel)?
+            } else {
+                decode_second(&source_data.path, &source_data.audio, second, cancel)?
+            };
+            #[cfg(not(test))]
+            let pcm = decode_second(&source_data.path, &source_data.audio, second, cancel)?;
+            // Never admit partial/canceled chunks or a source changed by decoding.
+            self.validate_source(source, cancel)?;
+            self.insert_chunk(
+                Chunk {
+                    source,
+                    second,
+                    pcm,
+                },
+                cancel,
+            )?;
+            self.chunks.len() - 1
+        };
+        let value = self.chunks[index]
+            .pcm
+            .get(offset)
+            .copied()
+            .unwrap_or([0.0; 2]);
+        // Preserve the existing cache promotion policy at chunk boundaries.
+        if offset == 0 && index + 1 != self.chunks.len() {
+            let chunk = self.chunks.remove(index).unwrap();
+            self.chunks.push_back(chunk);
+        }
+        Ok(value)
+    }
+    /// Existing 48 kHz linear interpolation, including the tiny-fraction cutoff.
+    pub(crate) fn interpolated(
+        &mut self,
+        source: usize,
+        time: f64,
+        cancel: &AtomicBool,
+    ) -> Result<[f64; 2], String> {
+        if !time.is_finite() {
+            return Err("Non-finite audio sample position".into());
+        }
+        let audio = &self
+            .sources
+            .get(source)
+            .ok_or("Invalid audio source handle")?
+            .audio;
+        if time < 0.0 || time >= audio.duration {
+            return Ok([0.0; 2]);
+        }
+        let sample = time * f64::from(SAMPLE_RATE);
+        let index = sample.floor() as i64;
+        let fraction = sample - index as f64;
+        let a = self.sample(source, index, cancel)?;
+        let b = if fraction < 1e-7 {
+            a
+        } else {
+            self.sample(source, index + 1, cancel)?
+        };
+        if a.iter().chain(&b).any(|v| !v.is_finite()) {
+            return Err("Audio contains non-finite samples".into());
+        }
+        Ok(std::array::from_fn(|c| {
+            f64::from(a[c]) + (f64::from(b[c]) - f64::from(a[c])) * fraction
+        }))
+    }
+    #[cfg(test)]
+    pub(crate) fn with_decoder(decoder: Box<TestDecoder>) -> Self {
+        Self {
+            decoder: Some(decoder),
+            ..Self::default()
+        }
+    }
+}
+pub(crate) fn check_cancel(cancel: &AtomicBool) -> Result<(), String> {
+    if cancel.load(Ordering::Relaxed) {
+        Err("Audio processing canceled".into())
+    } else {
+        Ok(())
+    }
+}
+pub(crate) fn silent_window(count: usize) -> Result<Vec<[f32; 2]>, String> {
+    if count > SAMPLE_RATE as usize {
+        return Err("Audio window exceeds 48000 stereo frames".into());
+    }
+    let mut output = Vec::new();
+    output
+        .try_reserve_exact(count)
+        .map_err(|_| "Cannot allocate audio window")?;
+    output.resize(count, [0.0; 2]);
+    Ok(output)
+}
+pub(crate) struct Mixer {
+    voices: Vec<Voice>,
+    cache: PcmCache,
     pub levels: Levels,
 }
 impl Mixer {
     pub fn new(project: &Project, include_guides: bool) -> Result<Self, String> {
         let mut this = Self {
             voices: Vec::new(),
-            sources: Vec::new(),
-            chunks: VecDeque::new(),
+            cache: PcmCache::default(),
             levels: Levels::default(),
         };
         let mut nodes = 0;
@@ -153,18 +458,7 @@ impl Mixer {
                 if !audio.valid() {
                     return Err("Invalid source audio metadata".into());
                 }
-                let source = self
-                    .sources
-                    .iter()
-                    .position(|s| s.path == path && s.audio == *audio)
-                    .unwrap_or_else(|| {
-                        self.sources.push(Source {
-                            path: path.into(),
-                            audio: audio.clone(),
-                            stamp: None,
-                        });
-                        self.sources.len() - 1
-                    });
+                let source = self.cache.register(path, audio)?;
                 self.voices.push(Voice {
                     source,
                     steps: ancestors
@@ -184,61 +478,6 @@ impl Mixer {
     pub fn has_audio(&self) -> bool {
         !self.voices.is_empty()
     }
-    fn sample(
-        &mut self,
-        source: usize,
-        index: i64,
-        cancel: &AtomicBool,
-    ) -> Result<[f32; 2], String> {
-        let audio = &self.sources[source].audio;
-        if index < 0 || index as f64 / f64::from(SAMPLE_RATE) >= audio.duration {
-            return Ok([0.0; 2]);
-        }
-        let second = (index as u64 / u64::from(SAMPLE_RATE)) as u32;
-        let offset = (index as u64 % u64::from(SAMPLE_RATE)) as usize;
-        let found = self
-            .chunks
-            .iter()
-            .position(|c| c.source == source && c.second == second);
-        let index = if let Some(index) = found {
-            index
-        } else {
-            let source_data = &mut self.sources[source];
-            let metadata = std::fs::metadata(&source_data.path)
-                .map_err(|e| format!("Audio offline: {}: {e}", source_data.path))?;
-            let stamp = (
-                metadata.len(),
-                metadata.modified().map_err(|e| e.to_string())?,
-            );
-            if source_data.stamp.is_some_and(|old| old != stamp) {
-                return Err(
-                    "Audio source changed during rendering; retry with the updated source".into(),
-                );
-            }
-            source_data.stamp = Some(stamp);
-            let pcm = decode_second(&source_data.path, &source_data.audio, second, cancel)?;
-            self.chunks.push_back(Chunk {
-                source,
-                second,
-                pcm,
-            });
-            if self.chunks.len() > CACHE_CHUNKS {
-                self.chunks.pop_front();
-            }
-            self.chunks.len() - 1
-        };
-        // Promote only at a chunk boundary, avoiding a VecDeque move per sample.
-        let value = self.chunks[index]
-            .pcm
-            .get(offset)
-            .copied()
-            .unwrap_or([0.0; 2]);
-        if offset == 0 && index + 1 != self.chunks.len() {
-            let chunk = self.chunks.remove(index).unwrap();
-            self.chunks.push_back(chunk);
-        }
-        Ok(value)
-    }
     /// Output sample indexes are absolute relative to origin, so block size cannot
     /// accumulate clock error. End clips the work area; FPS-rounded tails are silent.
     pub fn render(
@@ -252,7 +491,7 @@ impl Mixer {
         if count > SAMPLE_RATE as usize || !origin.is_finite() || !end.is_finite() {
             return Err("Invalid audio block".into());
         }
-        let mut output = vec![[0.0_f32; 2]; count];
+        let mut output = silent_window(count)?;
         self.levels.frames += count as u64;
         for (offset, value) in output.iter_mut().enumerate() {
             if offset % 256 == 0 && cancel.load(Ordering::Relaxed) {
@@ -264,24 +503,11 @@ impl Mixer {
             }
             let mut mixed = [0.0_f64; 2];
             for voice in 0..self.voices.len() {
-                let Some((time, _rate, matrix)) = self.voices[voice].position(seconds) else {
+                let Some((time, _rate, matrix)) = self.voices[voice].position(seconds)? else {
                     continue;
                 };
                 let source = self.voices[voice].source;
-                if time < 0.0 || time >= self.sources[source].audio.duration {
-                    continue;
-                }
-                let sample = time * f64::from(SAMPLE_RATE);
-                let index = sample.floor() as i64;
-                let fraction = sample - index as f64;
-                let a = self.sample(source, index, cancel)?;
-                let b = if fraction < 1e-7 {
-                    a
-                } else {
-                    self.sample(source, index + 1, cancel)?
-                };
-                let l = f64::from(a[0]) + (f64::from(b[0]) - f64::from(a[0])) * fraction;
-                let r = f64::from(a[1]) + (f64::from(b[1]) - f64::from(a[1])) * fraction;
+                let [l, r] = self.cache.interpolated(source, time, cancel)?;
                 mixed[0] += matrix[0] * l + matrix[1] * r;
                 mixed[1] += matrix[2] * l + matrix[3] * r;
             }
@@ -353,8 +579,11 @@ fn decode_second(
             "Audio decoder returned no complete stereo samples: {path}"
         ));
     }
-    let mut pcm = Vec::with_capacity(bytes.len() / 8);
+    let mut pcm = Vec::new();
+    pcm.try_reserve_exact((bytes.len() / 8).min(SAMPLE_RATE as usize))
+        .map_err(|_| "Cannot allocate decoded audio chunk")?;
     for sample in bytes.chunks_exact(8).take(SAMPLE_RATE as usize) {
+        check_cancel(cancel)?;
         let value = [
             f32::from_le_bytes(sample[..4].try_into().unwrap()),
             f32::from_le_bytes(sample[4..].try_into().unwrap()),

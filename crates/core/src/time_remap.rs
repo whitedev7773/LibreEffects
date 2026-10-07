@@ -152,9 +152,19 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                             .project
                             .composition_by_id(composition)
                             .ok_or("Missing source composition")?;
-                        layer
-                            .composition_frame(*frame, fps, source)
-                            .map(|f| f64::from(f) / source.fps.as_f64())
+                        if source.preserve_nested_frame_rate() == Some(false) {
+                            layer
+                                .composition_sample(
+                                    CompositionSample::from_frame(*frame, fps)?,
+                                    fps,
+                                    source,
+                                )?
+                                .map(CompositionSample::seconds)
+                        } else {
+                            layer
+                                .composition_frame(*frame, fps, source)
+                                .map(|f| f64::from(f) / source.fps.as_f64())
+                        }
                     }
                     _ => None,
                 }

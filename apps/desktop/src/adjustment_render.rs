@@ -1,8 +1,12 @@
 //! Adjustment filters evaluate the accumulated lower composite in layer space.
 //! Interpolation uses premultiplied RGBA: source-over would incorrectly increase alpha.
-use crate::rendering::{Renderer, SVG_LIMIT, append_svg, svg_document};
+use crate::rendering::{
+    FrameRenderBudget, Renderer, SVG_LIMIT, append_svg, frame_pixmap, paint_svg_tree, svg_document,
+};
 use base64::{Engine, engine::general_purpose::STANDARD};
-use libre_effects_core::{Affine, Effects, Layer, Property};
+#[cfg(test)]
+use libre_effects_core::Property;
+use libre_effects_core::{Affine, Effects, Layer};
 use resvg::tiny_skia::Pixmap;
 
 fn transform(matrix: Affine) -> String {
@@ -46,6 +50,16 @@ impl Renderer {
         height: u32,
         max_dimension: u32,
     ) -> Result<Pixmap, String> {
+        self.raster_canvas_with_domains(svg, width, height, max_dimension, &[])
+    }
+    pub(crate) fn raster_canvas_with_domains(
+        &self,
+        svg: &str,
+        width: u32,
+        height: u32,
+        max_dimension: u32,
+        domains: &[resvg::RepeatEdgeDomain],
+    ) -> Result<Pixmap, String> {
         let scale = (f64::from(max_dimension) / f64::from(width.max(height))).min(1.0);
         let pw = (f64::from(width) * scale).round().max(1.0) as u32;
         let ph = (f64::from(height) * scale).round().max(1.0) as u32;
@@ -55,15 +69,16 @@ impl Renderer {
         let source = svg_document(svg, f64::from(width), f64::from(height))?;
         let tree =
             resvg::usvg::Tree::from_str(&source, &self.options).map_err(|e| e.to_string())?;
-        let mut pixels = Pixmap::new(pw, ph).ok_or("Could not allocate adjustment frame")?;
-        resvg::render(
+        let mut pixels = frame_pixmap(pw, ph, !domains.is_empty())?;
+        paint_svg_tree(
             &tree,
             resvg::tiny_skia::Transform::from_scale(
                 pw as f32 / width as f32,
                 ph as f32 / height as f32,
             ),
             &mut pixels.as_mut(),
-        );
+            domains,
+        )?;
         Ok(pixels)
     }
 
@@ -72,29 +87,38 @@ impl Renderer {
         lower: &str,
         layer: &Layer,
         frame: u32,
+        seconds_per_frame: f64,
         matrix: Affine,
         width: u32,
         height: u32,
         max_dimension: u32,
         id: &str,
         matte: Option<(&Pixmap, libre_effects_core::MatteMode)>,
+        budget: &mut FrameRenderBudget,
     ) -> Result<String, String> {
         let opacity = layer
-            .property(Property::Opacity)
-            .value_at(frame)
+            .opacity_at(frame, seconds_per_frame)?
             .clamp(0.0, 100.0)
             / 100.0;
         if lower.is_empty()
             || opacity == 0.0
             || (layer.effects() == Effects::default()
-                && layer.effect_stack().iter().all(|e| e.bypassed()))
+                && layer.effect_stack().iter().all(|e| {
+                    e.bypassed() || e.kind() == libre_effects_core::EffectKind::SliderControl
+                }))
         {
             return Ok(lower.into());
         }
         let Some(inverse) = matrix.inverse() else {
             return Ok(lower.into());
         };
-        let mut original = self.raster_canvas(lower, width, height, max_dimension)?;
+        let mut original = self.raster_canvas_with_domains(
+            lower,
+            width,
+            height,
+            max_dimension,
+            &budget.repeat_domains,
+        )?;
         let input = embedded(&original, width, height)?;
         let points = [
             [0.0, 0.0],
@@ -113,8 +137,18 @@ impl Renderer {
             .iter()
             .map(|p| p[1])
             .fold(f64::NEG_INFINITY, f64::max);
-        let (defs, open, close) =
-            crate::effect_render::stack(layer, frame, id, [left, top, right - left, bottom - top])?;
+        let stack = crate::effect_render::stack_with_domain(
+            layer,
+            frame,
+            id,
+            [left, top, right - left, bottom - top],
+            crate::effect_render::InputDomain {
+                rect: [0.0, 0.0, f64::from(width), f64::from(height)],
+                transform: inverse,
+            },
+        )?;
+        budget.register_repeat_domains(stack.repeat_domains)?;
+        let (defs, open, close) = (stack.definitions, stack.open, stack.close);
         let forward = transform(matrix);
         let back = transform(inverse);
         let e = layer.effects();
@@ -143,7 +177,13 @@ impl Renderer {
                 "<defs>{defs}<filter id='{id}-legacy-adjustment' x='-100%' y='-100%' width='300%' height='300%'>{legacy}</filter></defs><g transform='{forward}'>{open}<g {legacy_group}><g transform='{back}'>{input}</g></g>{close}</g>"
             ),
         )?;
-        let filtered = self.raster_canvas(&filtered_svg, width, height, max_dimension)?;
+        let filtered = self.raster_canvas_with_domains(
+            &filtered_svg,
+            width,
+            height,
+            max_dimension,
+            &budget.repeat_domains,
+        )?;
         let mut region = String::new();
         let clip = if let Some(m) = layer.mask() {
             let outer = if m.inverted {

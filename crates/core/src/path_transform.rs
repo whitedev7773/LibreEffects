@@ -1,7 +1,7 @@
 //! Selected path-local affine transforms shared by the editor and all-pose commands.
 use super::*;
 
-/// UI units: translation/pivot in path coordinates, clockwise rotation in degrees,
+/// UI units: translation/pivot in the command's coordinate space, clockwise rotation in degrees,
 /// and signed scale percentages (100 is identity). Zero scale is supported.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PathTransformSpec {
@@ -51,32 +51,12 @@ pub fn transform_path(
     if indices.iter().any(|index| *index >= source.vertices.len()) {
         return Err("Selected path vertex no longer exists".into());
     }
+    let matrix = linear_matrix(transform)?;
     let PathTransformSpec {
         translation: [dx, dy],
-        rotation_degrees: rotation,
-        scale_percent: [sx, sy],
         pivot: [px, py],
+        ..
     } = *transform;
-    if [dx, dy, rotation, sx, sy, px, py]
-        .iter()
-        .any(|value| !value.is_finite())
-    {
-        return Err("Enter finite numeric values".into());
-    }
-    // Signed remainder preserves tiny negative turns that adding 360 would round
-    // away. Exact cardinal coefficients avoid trigonometric no-op drift.
-    let angle = rotation % 360.;
-    let (sin, cos) = match angle {
-        0. => (0., 1.),
-        90. | -270. => (1., 0.),
-        180. | -180. => (0., -1.),
-        270. | -90. => (-1., 0.),
-        _ => angle.to_radians().sin_cos(),
-    };
-    let matrix = [
-        [cos * (sx / 100.), -sin * (sy / 100.)],
-        [sin * (sx / 100.), cos * (sy / 100.)],
-    ];
     if matrix == [[1., 0.], [0., 1.]] && dx == 0. && dy == 0. {
         return Ok(source.clone());
     }
@@ -108,7 +88,40 @@ pub fn transform_path(
     Ok(path)
 }
 
-fn transform_anchor_component(
+pub(super) fn linear_matrix(transform: &PathTransformSpec) -> Result<[[f64; 2]; 2], String> {
+    let PathTransformSpec {
+        translation: [dx, dy],
+        rotation_degrees: rotation,
+        scale_percent: [sx, sy],
+        pivot: [px, py],
+    } = *transform;
+    if [dx, dy, rotation, sx, sy, px, py]
+        .iter()
+        .any(|value| !value.is_finite())
+    {
+        return Err("Enter finite numeric values".into());
+    }
+    // Signed remainder preserves tiny negative turns that adding 360 would round
+    // away. Exact cardinal coefficients avoid trigonometric no-op drift.
+    let angle = rotation % 360.;
+    let (sin, cos) = match angle {
+        0. => (0., 1.),
+        90. | -270. => (1., 0.),
+        180. | -180. => (0., -1.),
+        270. | -90. => (-1., 0.),
+        _ => angle.to_radians().sin_cos(),
+    };
+    let matrix = [
+        [cos * (sx / 100.), -sin * (sy / 100.)],
+        [sin * (sx / 100.), cos * (sy / 100.)],
+    ];
+    if matrix.iter().flatten().any(|value| !value.is_finite()) {
+        return Err("Transform coefficients must be finite".into());
+    }
+    Ok(matrix)
+}
+
+pub(super) fn transform_anchor_component(
     row: [f64; 2],
     axis: usize,
     source: [f64; 2],
@@ -152,7 +165,7 @@ fn transform_anchor_component(
     }
 }
 
-fn linear_component(row: [f64; 2], point: [f64; 2]) -> f64 {
+pub(super) fn linear_component(row: [f64; 2], point: [f64; 2]) -> f64 {
     // Zero coefficients also avoid unnecessary 0 × overflow intermediates.
     match row {
         [0., 0.] => 0.,
@@ -167,7 +180,7 @@ fn linear_component(row: [f64; 2], point: [f64; 2]) -> f64 {
 // A mixed batch, or any empty nested batch, retains the existing migration path.
 pub(super) fn edits_only(command: &Command) -> bool {
     match command {
-        Command::TransformPathPoses { .. } => true,
+        Command::TransformPathPoses { .. } | Command::TransformContentsPoints { .. } => true,
         Command::Batch(commands) => !commands.is_empty() && commands.iter().all(edits_only),
         _ => false,
     }

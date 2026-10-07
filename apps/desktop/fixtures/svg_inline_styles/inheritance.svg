@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160" style="fill:#cf543c;fill-opacity:0.6;stroke:#173b69;stroke-opacity:0.8;stroke-width:6;stroke-linejoin:bevel;stroke-linecap:round;stroke-miterlimit:3;stroke-dasharray:12 6;stroke-dashoffset:3;fill-rule:evenodd">
+  <g id="inherited-group" style="fill:#47a176;stroke-width:9">
+    <path id="compound" d="M18 18 C48 18 78 18 108 18 C108 48 108 78 108 108 C78 108 48 108 18 108 C18 78 18 48 18 18 Z M42 42 C56 42 70 42 84 42 C84 56 84 70 84 84 C70 84 56 84 42 84 C42 70 42 56 42 42 Z"/>
+    <g id="nested" style="stroke-dasharray:none;fill-opacity:0.9">
+      <path id="solid-child" d="M144 18 C166 18 188 18 210 18 C210 48 210 78 210 108 C188 108 166 108 144 108 C144 78 144 48 144 18 Z"/>
+    </g>
+  </g>
+  <path id="root-paint" d="M24 138 C84 138 144 138 204 138" style="fill:none;stroke-dashoffset:-3"/>
+</svg>

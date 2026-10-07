@@ -18,7 +18,7 @@ pub(super) fn shortcut(event: &KeyDownEvent) -> Option<(bool, bool)> {
 }
 
 /// Validate the whole selection before creating a single undo transaction.
-/// Opaque Path poses and Hold-only Source Text are rejected explicitly.
+/// Native timing, opaque Path poses and Hold-only Source Text are rejected explicitly.
 pub(super) fn selected(
     project: &Project,
     keys: &[KeyRef],
@@ -33,7 +33,7 @@ pub(super) fn selected(
                 | libre_effects_core::PropertyPath::SourceText
         ) {
             return Err(
-                "Easy Ease currently supports scalar keys; deselect path keys and Source Text keys"
+                "Easy Ease supports scalar keys; deselect native timing, path and Source Text keys"
                     .into(),
             );
         }
@@ -45,7 +45,7 @@ pub(super) fn selected(
             return Err("Unlock the selected layers before easing keyframes".into());
         }
         let track = layer.track(key.property).ok_or(
-            "Easy Ease currently supports scalar keys; deselect path keys and Source Text keys",
+            "Easy Ease supports scalar keys; deselect native timing, path and Source Text keys",
         )?;
         if !track.keys().contains_key(&key.frame) {
             return Err("Selected keyframe no longer exists".into());

@@ -153,6 +153,14 @@ fn precompose(state: &mut Snapshot, layers: &[LayerId], name: &str) -> Result<()
     }
     for layer in &parent.layers {
         let selected = ids.contains(&layer.id);
+        if layer
+            .spectrum_sources()
+            .any(|source| ids.contains(&source) != selected)
+        {
+            return Err(
+                "Include Audio Spectrum sources and all their consumers when pre-composing".into(),
+            );
+        }
         if selected && layer.guide() {
             return Err("Turn off Guide on selected layers before pre-composing; nested guides are excluded".into());
         }

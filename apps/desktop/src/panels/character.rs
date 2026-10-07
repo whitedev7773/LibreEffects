@@ -6,7 +6,8 @@ use crate::{
 };
 use gpui::{Context, Entity, SharedString, Window, div, prelude::*, px, rgb};
 use libre_effects_core::{
-    Command, Content, Frame, Layer, PropertyPath, TextAlign, TextPaint, TextParam, TrackEdit,
+    Command, Content, Frame, Layer, PropertyPath, TextAlign, TextPaint, TextParagraphField,
+    TextParam, TrackEdit,
 };
 use std::{
     cell::{Cell, RefCell},
@@ -169,6 +170,7 @@ pub(super) fn color_watch(
 
 pub(crate) struct Character {
     state: Entity<EditorState>,
+    selection: Entity<super::character_range::CharacterRange>,
     input_source: Option<InputTarget>,
     input_targets: Vec<Rc<RefCell<Option<InputTarget>>>>,
     fields: Vec<Entity<TextField>>,
@@ -216,8 +218,10 @@ impl Character {
             .collect();
         let font_search = cx.new(|cx| TextField::new(cx, |_, _, _| {}));
         cx.observe(&font_search, |_, _, cx| cx.notify()).detach();
+        let selection = cx.new(|cx| super::character_range::CharacterRange::new(state.clone(), cx));
         Self {
             state,
+            selection,
             input_source: None,
             input_targets,
             fields,
@@ -311,6 +315,9 @@ impl Character {
 }
 impl Render for Character {
     fn render(&mut self, w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.state.read(cx).text_session.is_some() {
+            return div().child(self.selection.clone());
+        }
         let frame = self.state.read(cx).frame;
         let mut panel = div().p_3().flex().flex_col().gap_2();
         let Some(l) = self.state.read(cx).editor.selected_layer().cloned() else {
@@ -326,6 +333,20 @@ impl Render for Character {
             .map(InputTarget::binding)
             .unwrap_or_default();
         let style = l.text_style();
+        if l.has_authored_text_positions() {
+            panel = panel
+                .child(
+                    div()
+                        .text_size(px(10.0))
+                        .text_color(rgb(ui::MUTED))
+                        .child(crate::authored_spacing_notice::RETAINED),
+                )
+                .child(super::authored_spacing::reset_button(
+                    &self.state,
+                    l.id(),
+                    (!l.locked()).then(|| self.input_source.clone()).flatten(),
+                ));
+        }
         let family_bounds = self.picker_bounds[0].clone();
         let style_bounds = self.picker_bounds[1].clone();
         panel = panel.child(
@@ -674,108 +695,403 @@ fn paragraph_command(
     }
 }
 
-fn dispatch_paragraph(
-    state: &Entity<EditorState>,
-    target: &Option<InputTarget>,
+const PARAGRAPH_FIELDS: usize = 7;
+const PARAGRAPH_LABELS: [&str; PARAGRAPH_FIELDS] = [
+    "Box width (px)",
+    "Box height (px)",
+    "Left indent (px)",
+    "Right indent (px)",
+    "First-line indent (px)",
+    "Space before (px)",
+    "Space after (px)",
+];
+const PARAGRAPH_STALE: &str = "Paragraph editing context changed; value was not applied";
+const PARAGRAPH_HELP: &str = "Layer-wide, static style. First-line indent is relative to left indent; negative hanging indent is clipped to the box. Only hard newlines start paragraphs; Unicode line separators keep their existing line-break behavior. Type pixel values; drag scrubbing is disabled.";
+
+fn paragraph_field(index: usize) -> Option<TextParagraphField> {
+    match index {
+        2 => Some(TextParagraphField::LeftIndent),
+        3 => Some(TextParagraphField::RightIndent),
+        4 => Some(TextParagraphField::FirstLineIndent),
+        5 => Some(TextParagraphField::SpaceBefore),
+        6 => Some(TextParagraphField::SpaceAfter),
+        _ => None,
+    }
+}
+
+fn paragraph_values(layer: &Layer) -> [f64; PARAGRAPH_FIELDS] {
+    let style = layer.text_style();
+    [
+        layer.width(),
+        layer.height(),
+        style.paragraph_left_indent,
+        style.paragraph_right_indent,
+        style.paragraph_first_line_indent,
+        style.paragraph_space_before,
+        style.paragraph_space_after,
+    ]
+}
+
+fn paragraph_field_command(
+    layer: &Layer,
+    index: usize,
+    text: &str,
+) -> Result<Option<Command>, String> {
+    if layer.locked()
+        || !matches!(layer.content(), Content::Text { .. })
+        || !layer.text_style().paragraph
+    {
+        return Err("Select unlocked paragraph text".into());
+    }
+    let value = text
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite())
+        .ok_or("Enter a finite number of pixels")?;
+    if let Some(field) = paragraph_field(index) {
+        let (min, max) = field.bounds();
+        if !(min..=max).contains(&value) {
+            return Err(format!(
+                "{} must be from {min} to {max}",
+                PARAGRAPH_LABELS[index]
+            ));
+        }
+        return layer.text_paragraph_value_command(field, value);
+    }
+    if index >= 2 {
+        return Err("Unknown paragraph field".into());
+    }
+    if !(1.0..=16384.0).contains(&value) {
+        return Err("Paragraph box dimensions must be 1–16384 pixels".into());
+    }
+    if paragraph_values(layer)[index] == value {
+        return Ok(None);
+    }
+    Ok(Some(Command::SetTextBox {
+        id: layer.id(),
+        width: if index == 0 { value } else { layer.width() },
+        height: if index == 1 { value } else { layer.height() },
+    }))
+}
+
+fn paragraph_blocked(state: &EditorState) -> bool {
+    state.playing
+        || state.text_session.is_some()
+        || state.colors.session.is_some()
+        || state.gradient_editor.is_some()
+        || state.vertex_editor.is_some()
+        || state.expression_editor.is_some()
+        || state.gradient_preview.is_some()
+        || state.media_open
+        || state.fonts_open
+        || state.queue_open
+        || state.recovery.is_some()
+        || state.new_composition_requested
+        || state.close_after_save
+}
+
+/// Preserve the frozen source receipt while additionally retiring controls on
+/// transport/action round trips and pending source-text or modal editing.
+#[derive(Clone)]
+struct ParagraphTarget {
+    input: InputTarget,
+    transport: u64,
+    generation: u64,
+    tool: crate::editor::Tool,
+    selected_layers: std::collections::BTreeSet<u64>,
+    values: [f64; PARAGRAPH_FIELDS],
+}
+impl ParagraphTarget {
+    fn capture(state: &EditorState) -> Option<Self> {
+        if paragraph_blocked(state) {
+            return None;
+        }
+        let layer = state
+            .editor
+            .selected_layer()
+            .filter(|l| matches!(l.content(), Content::Text { .. }))?;
+        Some(Self {
+            input: InputTarget::new(state)?,
+            transport: state.transport_generation(),
+            generation: state.input_context_generation(),
+            tool: state.tool,
+            selected_layers: state.selected_layers.clone(),
+            values: paragraph_values(layer),
+        })
+    }
+    fn same_owner(&self, state: &EditorState) -> bool {
+        !paragraph_blocked(state)
+            && self.input.same_context(state)
+            && self.tool == state.tool
+            && self.selected_layers == state.selected_layers
+            && state
+                .editor
+                .selected_layer()
+                .is_some_and(|l| matches!(l.content(), Content::Text { .. }))
+    }
+    fn current(&self, state: &EditorState) -> bool {
+        self.same_owner(state)
+            && self.input.current(state)
+            && self.transport == state.transport_generation()
+            && self.generation == state.input_context_generation()
+    }
+    fn key(&self) -> String {
+        format!(
+            "paragraph-{}-{}-{}",
+            self.input.binding(),
+            self.transport,
+            self.generation
+        )
+    }
+    fn field_key(&self, index: usize) -> String {
+        format!("{}-{index}", self.key())
+    }
+    fn display(&self, state: &EditorState, index: usize) -> String {
+        if self.same_owner(state) {
+            paragraph_values(state.editor.selected_layer().unwrap())[index].to_string()
+        } else {
+            self.values[index].to_string()
+        }
+    }
+}
+
+#[derive(Default)]
+struct ParagraphInput {
+    target: Option<ParagraphTarget>,
+    // Exactly one pending paragraph field may grant a synchronous rebase.
+    armed: Option<(String, Option<usize>)>,
+    flushed: Option<(String, ParagraphTarget)>,
+}
+impl ParagraphInput {
+    fn observe(&mut self, state: &EditorState) {
+        if self.target.as_ref().is_some_and(|t| t.current(state)) {
+            return;
+        }
+        self.target = ParagraphTarget::capture(state);
+        self.armed = None;
+        self.flushed = None;
+    }
+    fn current(&self, target: &ParagraphTarget, state: &EditorState) -> bool {
+        self.target
+            .as_ref()
+            .is_some_and(|current| current.key() == target.key())
+            && target.current(state)
+    }
+    fn prepare(
+        &mut self,
+        target: &ParagraphTarget,
+        state: &EditorState,
+        pending: Option<String>,
+    ) -> bool {
+        self.armed = None;
+        self.flushed = None;
+        if !self.current(target, state) {
+            return false;
+        }
+        let index = match pending {
+            Some(pending) => {
+                let Some(index) =
+                    (0..PARAGRAPH_FIELDS).find(|index| target.field_key(*index) == pending)
+                else {
+                    return false;
+                };
+                Some(index)
+            }
+            None => None,
+        };
+        self.armed = Some((target.key(), index));
+        true
+    }
+    fn action_target(
+        &self,
+        target: &ParagraphTarget,
+        state: &EditorState,
+    ) -> Option<ParagraphTarget> {
+        let (origin, next) = self.flushed.as_ref()?;
+        ((*origin == target.key() || next.key() == target.key()) && self.current(next, state))
+            .then(|| next.clone())
+    }
+    fn finish_flush(&mut self, target: &ParagraphTarget, state: &EditorState) -> bool {
+        let next = if self.armed == Some((target.key(), None)) && self.current(target, state) {
+            Some(target.clone())
+        } else {
+            self.action_target(target, state)
+        };
+        // A canceled pointer must never leave field permission armed.
+        self.armed = None;
+        self.flushed = next.map(|next| (target.key(), next));
+        self.flushed.is_some()
+    }
+    fn take_action(
+        &mut self,
+        target: &ParagraphTarget,
+        state: &EditorState,
+        pointer: bool,
+    ) -> Option<ParagraphTarget> {
+        let next = if pointer {
+            self.action_target(target, state)
+        } else {
+            self.current(target, state).then(|| target.clone())
+        };
+        self.armed = None;
+        self.flushed = None;
+        next
+    }
+}
+
+/// Shared by the real guarded TextField callback and headless input tests.
+/// Never finish a Source Text session from a paragraph numeric-field callback.
+fn submit_paragraph_field(
+    session: &Rc<RefCell<ParagraphInput>>,
+    target: &ParagraphTarget,
+    state: &mut EditorState,
+    index: usize,
+    text: &str,
+    active: bool,
+    apply: impl FnOnce(&mut EditorState, Command) -> bool,
+) -> String {
+    let armed = session.borrow().armed.clone();
+    let current = session.borrow().current(target, state);
+    let expected = armed
+        .as_ref()
+        .is_none_or(|(origin, field)| *origin == target.key() && *field == Some(index));
+    let mut valid = false;
+    if index >= PARAGRAPH_FIELDS {
+        return String::new();
+    }
+    if !active || !expected || !current {
+        state.status = PARAGRAPH_STALE.into();
+    } else {
+        match paragraph_field_command(state.editor.selected_layer().unwrap(), index, text) {
+            Ok(None) => valid = true,
+            Ok(Some(command)) => {
+                valid = apply(state, command)
+                    && target.same_owner(state)
+                    && target.generation.checked_add(1) == Some(state.input_context_generation())
+                    && target.transport.wrapping_add(1) == state.transport_generation();
+            }
+            Err(error) => state.status = error,
+        }
+    }
+    let mut session = session.borrow_mut();
+    // A late callback cannot retire a newer source-bound field or click receipt.
+    if !session
+        .target
+        .as_ref()
+        .is_some_and(|current| current.key() == target.key())
+    {
+        return target.display(state, index);
+    }
+    session.armed = None;
+    session.flushed = None;
+    if valid {
+        let next = ParagraphTarget::capture(state);
+        if let (Some((origin, Some(_))), Some(next)) = (&armed, &next) {
+            session.flushed = Some((origin.clone(), next.clone()));
+        }
+        session.target = next;
+    }
+    target.display(state, index)
+}
+
+fn paragraph_button(
+    button: gpui::Stateful<gpui::Div>,
+    control: &'static str,
     edit: ParagraphEdit,
-    control: &str,
-    event: &gpui::ClickEvent,
-    window: &mut Window,
-    cx: &mut gpui::App,
-) {
-    let Some(target) =
-        crate::color_edit::input_click_target(control, event, target, state, window, cx)
-    else {
-        return;
+    state: &Entity<EditorState>,
+    session: &Rc<RefCell<ParagraphInput>>,
+    target: Option<ParagraphTarget>,
+    disabled_input: Option<InputTarget>,
+) -> gpui::Stateful<gpui::Div> {
+    let Some(target) = target else {
+        // A pending Source Text session can have a valid generic source target
+        // while paragraph editing is blocked. Reject its press before blur.
+        return crate::color_edit::input_pointer_button_guarded(
+            button,
+            control.into(),
+            disabled_input,
+            |_, _, _| false,
+        );
     };
-    TextField::commit_active(window, cx);
-    state.update(cx, |s, cx| {
-        if !target.same_context(s) {
+    let state = state.clone();
+    let session = session.clone();
+    let guard_session = session.clone();
+    let guard_target = target.clone();
+    let input = Some(target.input.clone());
+    crate::color_edit::input_pointer_button_guarded(
+        button,
+        control.into(),
+        input.clone(),
+        move |state, cx, after_flush| {
+            let mut session = guard_session.borrow_mut();
+            if after_flush {
+                session.finish_flush(&guard_target, state)
+            } else {
+                session.prepare(&guard_target, state, TextField::active_pending_binding(cx))
+            }
+        },
+    )
+    .on_click(move |event, w, cx| {
+        cx.stop_propagation();
+        let pointer = matches!(event, gpui::ClickEvent::Mouse(_));
+        if event.modifiers().modified()
+            || matches!(event, gpui::ClickEvent::Mouse(click) if click.down.modifiers.modified())
+            || TextField::is_composing(w, cx)
+            || (!pointer
+                && (TextField::active_has_focus(w, cx)
+                    || TextField::active_pending_binding(cx).is_some()))
+            || crate::color_edit::input_click_target(control, event, &input, &state, w, cx)
+                .is_none()
+        {
             return;
         }
-        s.finish_text(true, cx);
-        if !target.same_context(s) {
-            return;
-        }
-        let Some(layer) = s.editor.selected_layer() else {
+        let Some(target) = session
+            .borrow_mut()
+            .take_action(&target, state.read(cx), pointer)
+        else {
             return;
         };
-        match paragraph_command(layer, s.frame, edit) {
-            Ok(Some(command)) => s.dispatch(&Action::Edit(command), window, cx),
-            Ok(None) => {}
-            Err(error) => {
-                s.status = error;
-                cx.notify();
+        state.update(cx, |state, cx| {
+            if !target.current(state) {
+                return;
             }
-        }
-    });
+            match paragraph_command(state.editor.selected_layer().unwrap(), state.frame, edit) {
+                Ok(Some(command)) => state.dispatch(&Action::Edit(command), w, cx),
+                Ok(None) => {}
+                Err(error) => {
+                    state.status = error;
+                    cx.notify();
+                }
+            }
+        });
+    })
 }
 
 pub(crate) struct Paragraph {
     state: Entity<EditorState>,
     fields: Vec<Entity<TextField>>,
-    input_source: Option<InputTarget>,
-    input_targets: Vec<Rc<RefCell<Option<InputTarget>>>>,
+    input: Rc<RefCell<ParagraphInput>>,
 }
 impl Paragraph {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
-        let input_targets: Vec<Rc<RefCell<Option<InputTarget>>>> =
-            (0..2).map(|_| Default::default()).collect();
-        let fields = (0..2)
-            .map(|index| {
-                let state = state.clone();
-                let target = input_targets[index].clone();
-                cx.new(|cx| {
-                    TextField::new(cx, move |text, w, cx| {
-                        state.update(cx, |s, cx| {
-                            if !target.borrow().as_ref().is_some_and(|t| t.current(s)) {
-                                return;
-                            }
-                            s.finish_text(true, cx);
-                            if !target.borrow().as_ref().is_some_and(|t| t.same_context(s)) {
-                                return;
-                            }
-                            let Some(layer) = s.editor.selected_layer().filter(|l| {
-                                matches!(l.content(), Content::Text { .. })
-                                    && l.text_style().paragraph
-                            }) else {
-                                return;
-                            };
-                            let Ok(value) = text.trim().parse::<f64>() else {
-                                s.status = "Enter a box size in pixels".into();
-                                cx.notify();
-                                return;
-                            };
-                            let command = Command::SetTextBox {
-                                id: layer.id(),
-                                width: if index == 0 { value } else { layer.width() },
-                                height: if index == 1 { value } else { layer.height() },
-                            };
-                            s.dispatch(&Action::Edit(command), w, cx);
-                        })
-                    })
-                    .numeric()
-                })
-            })
-            .collect();
         Self {
             state,
-            fields,
-            input_source: None,
-            input_targets,
+            fields: (0..PARAGRAPH_FIELDS)
+                .map(|_| cx.new(|cx| TextField::new(cx, |_, _, _| {})))
+                .collect(),
+            input: Default::default(),
         }
     }
 }
 impl Render for Paragraph {
     fn render(&mut self, w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.state.read(cx);
-        InputTarget::refresh(&mut self.input_source, state);
-        let binding = self
-            .input_source
-            .as_ref()
-            .map(InputTarget::binding)
-            .unwrap_or_default();
+        self.input.borrow_mut().observe(state);
+        let target = self.input.borrow().target.clone();
+        let disabled_input = InputTarget::new(state);
+        let source_editing = state.text_session.is_some();
         let frame = state.frame;
         let layer = state
             .editor
@@ -786,121 +1102,137 @@ impl Render for Paragraph {
         let Some(l) = layer else {
             return panel.child("Select a text layer.");
         };
+        let style = l.text_style();
         let mut alignment = div().flex().gap_2();
         for (align, icon, label) in [
             (TextAlign::Left, "text-align-left", "Align text left"),
             (TextAlign::Center, "text-align-center", "Center text"),
             (TextAlign::Right, "text-align-right", "Align text right"),
         ] {
-            let state = self.state.clone();
-            let target = self.input_source.clone();
-            alignment = alignment.child(
-                crate::color_edit::input_pointer_button(
-                    ui::tool(icon, icon, label, l.text_style().align == align),
-                    icon.into(),
-                    target.clone(),
-                )
-                .when(!l.locked(), |b| {
-                    b.on_click(move |event, w, cx| {
-                        dispatch_paragraph(
-                            &state,
-                            &target,
-                            ParagraphEdit::Align(align),
-                            icon,
-                            event,
-                            w,
-                            cx,
-                        )
-                    })
-                }),
-            );
+            alignment = alignment.child(paragraph_button(
+                ui::tool(icon, icon, label, style.align == align),
+                icon,
+                ParagraphEdit::Align(align),
+                &self.state,
+                &self.input,
+                target.clone(),
+                disabled_input.clone(),
+            ));
         }
         panel = panel.child(alignment);
         let mut modes = div().flex().gap_2();
         for (paragraph, label) in [(false, "Point text"), (true, "Paragraph text")] {
-            let state = self.state.clone();
-            let target = self.input_source.clone();
-            modes = modes.child(
-                crate::color_edit::input_pointer_button(
-                    ui::text_button(label, label),
-                    label.into(),
-                    target.clone(),
-                )
-                .when(l.text_style().paragraph == paragraph, |b| {
+            modes = modes.child(paragraph_button(
+                ui::text_button(label, label).when(style.paragraph == paragraph, |b| {
                     b.text_color(rgb(ui::BLUE))
-                })
-                .when(!l.locked(), |b| {
-                    b.on_click(move |event, w, cx| {
-                        dispatch_paragraph(
-                            &state,
-                            &target,
-                            ParagraphEdit::Mode(paragraph),
-                            label,
-                            event,
-                            w,
-                            cx,
-                        )
-                    })
                 }),
-            );
+                label,
+                ParagraphEdit::Mode(paragraph),
+                &self.state,
+                &self.input,
+                target.clone(),
+                disabled_input.clone(),
+            ));
         }
         panel = panel.child(modes);
-        if l.text_style().paragraph {
-            for (i, label, value) in [
-                (0, "Box width (px)", l.width()),
-                (1, "Box height (px)", l.height()),
-            ] {
-                *self.input_targets[i].borrow_mut() = self.input_source.clone();
-                self.fields[i].update(cx, |f, _| f.sync(binding.clone(), value.to_string(), w));
+        if source_editing {
+            panel = panel.child(
+                div()
+                    .text_color(rgb(ui::MUTED))
+                    .child("Finish Source Text editing to change paragraph settings."),
+            );
+        }
+        if style.paragraph {
+            let values = paragraph_values(&l);
+            for (index, label) in PARAGRAPH_LABELS.into_iter().enumerate() {
+                if let Some(target) = target.clone() {
+                    let state = self.state.clone();
+                    let session = self.input.clone();
+                    self.fields[index].update(cx, |field, _| {
+                        field.sync_guarded(
+                            target.field_key(index),
+                            values[index].to_string(),
+                            w,
+                            move |text, w, cx| {
+                                state.update(cx, |state, cx| {
+                                    let display = submit_paragraph_field(
+                                        &session,
+                                        &target,
+                                        state,
+                                        index,
+                                        text,
+                                        w.is_window_active(),
+                                        |state, command| {
+                                            state.dispatch(&Action::Edit(command), w, cx);
+                                            state.status == "Edited"
+                                        },
+                                    );
+                                    cx.notify();
+                                    display
+                                })
+                            },
+                        );
+                    });
+                }
                 panel = panel.child(
                     div()
                         .flex()
                         .items_center()
-                        .child(div().w(px(108.0)).child(label))
+                        .child(div().w(px(124.0)).child(label))
                         .child(
                             div()
                                 .flex_1()
                                 .min_w_0()
-                                .when(l.locked(), |d| d.child(value.to_string()))
-                                .when(!l.locked(), |d| d.child(self.fields[i].clone())),
+                                .when(target.is_none(), |d| d.child(values[index].to_string()))
+                                .when(target.is_some(), |d| d.child(self.fields[index].clone())),
                         ),
                 );
             }
+            panel = panel.child(
+                div()
+                    .text_color(rgb(ui::MUTED))
+                    .text_size(px(10.))
+                    .child(PARAGRAPH_HELP),
+            );
             if let Some(lines) = crate::text_flow::layer_lines(&l, frame) {
                 let needed = crate::text_flow::fit_height(&l, frame).unwrap().ceil();
-                if crate::text_flow::composed_count(&lines, l.height()) < lines.len() {
-                    let state = self.state.clone();
-                    let target = self.input_source.clone();
-                    panel = panel
-                        .child(
-                            div()
-                                .text_color(rgb(0xffaa88))
-                                .child("Overflow: Point conversion removes hidden text"),
-                        )
-                        .when(needed > l.height() && needed <= 16384.0, |panel| {
-                            panel.child(
-                                crate::color_edit::input_pointer_button(
-                                    ui::text_button("fit-text-height", "Fit box height"),
-                                    "fit-text-height".into(),
-                                    target.clone(),
-                                )
-                                .when(!l.locked(), |b| {
-                                    b.on_click(move |event, w, cx| {
-                                        dispatch_paragraph(
-                                            &state,
-                                            &target,
-                                            ParagraphEdit::FitHeight,
-                                            "fit-text-height",
-                                            event,
-                                            w,
-                                            cx,
-                                        )
-                                    })
-                                }),
-                            )
-                        });
+                let hidden = crate::text_flow::composed_count(&lines, l.height()) < lines.len();
+                if hidden {
+                    panel = panel.child(
+                        div()
+                            .text_color(rgb(0xffaa88))
+                            .child("Overflow: Point conversion removes hidden text"),
+                    );
+                } else if needed > l.height() {
+                    panel = panel.child(
+                        div()
+                            .text_color(rgb(0xffaa88))
+                            .child("Paragraph spacing exceeds box height"),
+                    );
+                }
+                if lines.iter().any(|line| !line.fits_width) {
+                    panel = panel.child(
+                        div()
+                            .text_color(rgb(0xffaa88))
+                            .child("Overflow: text exceeds available line width"),
+                    );
+                }
+                if needed.is_finite() && needed > l.height() && needed <= 16384.0 {
+                    panel = panel.child(paragraph_button(
+                        ui::text_button("fit-text-height", "Fit box height"),
+                        "fit-text-height",
+                        ParagraphEdit::FitHeight,
+                        &self.state,
+                        &self.input,
+                        target.clone(),
+                        disabled_input.clone(),
+                    ));
                 }
             }
+        } else {
+            panel = panel.child(div().text_color(rgb(ui::MUTED)).text_size(px(10.)).child(
+                "Paragraph indents and spacing are preserved and apply only in Paragraph text.",
+            ));
         }
         panel
     }
@@ -1434,6 +1766,7 @@ mod text_paint_controls_tests {
             assert_eq!(
                 layer
                     .property(libre_effects_core::Property::Opacity)
+                    .expect("every layer has a scalar Opacity track")
                     .value_at(17),
                 100.
             );
@@ -1467,3 +1800,7 @@ mod text_paint_controls_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "paragraph_style_controls_tests.rs"]
+mod paragraph_style_controls_tests;

@@ -2,6 +2,39 @@ use super::*;
 use libre_effects_core::{KeyRef, TemporalHandle};
 use std::collections::BTreeSet;
 
+/// Check the complete raw selection before Graph narrows it to visible scalar
+/// lanes. Dropping unavailable native timing would turn a rejected mixed
+/// operation into a partial scalar edit or overwrite the existing clipboard.
+pub(super) fn validate_scalar_selection(state: &EditorState) -> Result<(), String> {
+    for key in &state.selected_keys {
+        if key.property == libre_effects_core::Property::Opacity.into()
+            && state
+                .editor
+                .project()
+                .composition()
+                .layer(key.id)
+                .is_some_and(|layer| layer.has_opacity_timing())
+        {
+            return Err("Native Opacity timing cannot be edited or copied as scalar Graph keys. Clear it from the selection first.".into());
+        }
+        if matches!(
+            key.property,
+            PropertyPath::Transform(
+                libre_effects_core::Property::PositionX | libre_effects_core::Property::PositionY
+            )
+        ) && state
+            .editor
+            .project()
+            .composition()
+            .layer(key.id)
+            .is_some_and(|layer| layer.spatial_position().is_some())
+        {
+            return Err("Joined XYZ Position cannot be edited or copied as scalar Graph keys. Clear it from the selection first.".into());
+        }
+    }
+    Ok(())
+}
+
 #[derive(Clone)]
 pub(super) struct Sample {
     pub key: KeyRef,
@@ -143,6 +176,7 @@ pub(super) fn scale(
     time: bool,
     factor: f64,
 ) -> Result<(Command, Vec<KeyRef>), String> {
+    validate_scalar_selection(state)?;
     let keys = included(state);
     if !time && planning::multiple_channels(&keys) {
         return Err("Select one channel to scale values".into());
@@ -287,11 +321,16 @@ mod tests {
             .selected_layer()
             .unwrap()
             .property(Property::PositionX)
+            .expect("2D test layer has independent Position tracks")
             .keys()[&20]
             .clone();
         e.execute(translate(&samples(&e, selected, Some(false)), 5, 0.0, Some(false)).unwrap())
             .unwrap();
-        let track = e.selected_layer().unwrap().property(Property::PositionX);
+        let track = e
+            .selected_layer()
+            .unwrap()
+            .property(Property::PositionX)
+            .expect("2D test layer has independent Position tracks");
         assert_eq!(track.keys()[&25], before);
         assert!(!track.keys().contains_key(&20));
         e.undo();
@@ -310,7 +349,11 @@ mod tests {
         let original = e.project().clone();
         e.execute(translate(&samples(&e, &keys, None), 20, 10.0, None).unwrap())
             .unwrap();
-        let t = e.selected_layer().unwrap().property(Property::PositionX);
+        let t = e
+            .selected_layer()
+            .unwrap()
+            .property(Property::PositionX)
+            .expect("2D test layer has independent Position tracks");
         assert_eq!(
             t.keys().keys().copied().collect::<Vec<_>>(),
             vec![20, 40, 60]
@@ -365,7 +408,11 @@ mod tests {
         assert!(data[2].handle.is_none());
         e.execute(translate(&data, 5, -2.0, Some(false)).unwrap())
             .unwrap();
-        let t = e.selected_layer().unwrap().property(Property::PositionX);
+        let t = e
+            .selected_layer()
+            .unwrap()
+            .property(Property::PositionX)
+            .expect("2D test layer has independent Position tracks");
         assert!((t.keys()[&5].temporal.outgoing.unwrap().slope + 0.5).abs() < 1e-12);
         assert_eq!(t.keys()[&25].temporal.mode, TemporalMode::Continuous);
         assert_eq!(t.keys()[&25].temporal.incoming.unwrap().slope, -2.0);
@@ -406,9 +453,17 @@ mod tests {
             .unwrap();
         }
         let before = e.project().clone();
-        let t = e.selected_layer().unwrap().property(Property::PositionX);
+        let t = e
+            .selected_layer()
+            .unwrap()
+            .property(Property::PositionX)
+            .expect("2D test layer has independent Position tracks");
         e.execute(ease(t, &keys, true, true)).unwrap();
-        let t = e.selected_layer().unwrap().property(Property::PositionX);
+        let t = e
+            .selected_layer()
+            .unwrap()
+            .property(Property::PositionX)
+            .expect("2D test layer has independent Position tracks");
         for k in &keys {
             let h = t.keys()[&k.frame].temporal;
             assert_eq!(h.mode, TemporalMode::Independent);
@@ -426,6 +481,7 @@ mod tests {
             e.selected_layer()
                 .unwrap()
                 .property(Property::PositionX)
+                .expect("2D test layer has independent Position tracks")
                 .keys()
                 .is_empty()
         );

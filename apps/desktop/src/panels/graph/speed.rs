@@ -83,7 +83,11 @@ mod tests {
     #[test]
     fn strokes_split_at_keys_and_endpoints_keep_signed_units_per_second() {
         let e = scene();
-        let t = e.selected_layer().unwrap().property(Property::PositionX);
+        let t = e
+            .selected_layer()
+            .unwrap()
+            .property(Property::PositionX)
+            .expect("2D test layer has independent Position tracks");
         let lines = curves(t, 0, 90, 30.0);
         assert_eq!(lines.len(), 3);
         for (line, want) in lines.iter().zip([90.0, -60.0, 0.0]) {
@@ -103,11 +107,19 @@ mod tests {
             interpolation: Interpolation::Hold,
         })
         .unwrap();
-        let t = e.selected_layer().unwrap().property(Property::PositionX);
+        let t = e
+            .selected_layer()
+            .unwrap()
+            .property(Property::PositionX)
+            .expect("2D test layer has independent Position tracks");
         let lines = curves(t, 0, 60, 30.0);
         assert!(lines[0].last().unwrap().0 < 30.0);
         assert_eq!(ends(t, 30, 30.0), vec![(false, -60.0)]);
-        let static_track = e.selected_layer().unwrap().property(Property::PositionY);
+        let static_track = e
+            .selected_layer()
+            .unwrap()
+            .property(Property::PositionY)
+            .expect("2D test layer has independent Position tracks");
         assert!(
             curves(static_track, 0, 60, 30.0)[0]
                 .iter()

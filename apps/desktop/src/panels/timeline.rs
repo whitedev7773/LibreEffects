@@ -1,6 +1,12 @@
+pub(crate) mod compound_colors;
+mod filter_safety;
 mod key_menu;
+mod layer_filter;
+mod layer_navigation;
+mod layer_rename;
 use super::parent_drag::ParentDrag;
 use crate::color_edit::InputTarget;
+use crate::timeline_filter::LayerTypeFilter;
 use crate::view_state::GraphChannel;
 use crate::{
     components::TextField,
@@ -12,7 +18,8 @@ use gpui::{
     SharedString, Window, canvas, div, fill, point, prelude::*, px, relative, rgb, size,
 };
 use libre_effects_core::{
-    Command, KeyRef, LayerId, LayerSwitch, Property, PropertyPath, TextPaint, TextParam, TrackEdit,
+    Command, KeyRef, LayerId, LayerSwitch, Property, PropertyPath, TextPaint, TextParam,
+    TextSelectorParam, TrackEdit,
 };
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -26,7 +33,7 @@ fn text_groups(layer: &libre_effects_core::Layer) -> Vec<(String, Vec<PropertyPa
     if !matches!(layer.content(), libre_effects_core::Content::Text { .. }) {
         return vec![];
     }
-    vec![
+    let mut groups = vec![
         ("Source Text · Hold".into(), vec![PropertyPath::SourceText]),
         (
             "Fill Color".into(),
@@ -63,16 +70,100 @@ fn text_groups(layer: &libre_effects_core::Layer) -> Vec<(String, Vec<PropertyPa
             "Stroke Opacity".into(),
             vec![PropertyPath::Text(TextParam::StrokeOpacity)],
         ),
-    ]
+        (
+            "Range Start".into(),
+            vec![PropertyPath::Text(TextParam::AnimatorStart)],
+        ),
+        (
+            "Range End".into(),
+            vec![PropertyPath::Text(TextParam::AnimatorEnd)],
+        ),
+        (
+            "Range Offset".into(),
+            vec![PropertyPath::Text(TextParam::AnimatorOffset)],
+        ),
+        (
+            "Amount".into(),
+            vec![PropertyPath::Text(TextParam::AnimatorAmount)],
+        ),
+        (
+            "Scale X".into(),
+            vec![PropertyPath::Text(TextParam::AnimatorScaleX)],
+        ),
+        (
+            "Scale Y".into(),
+            vec![PropertyPath::Text(TextParam::AnimatorScaleY)],
+        ),
+        (
+            "Rotation".into(),
+            vec![PropertyPath::Text(TextParam::AnimatorRotation)],
+        ),
+        (
+            "Position X".into(),
+            vec![PropertyPath::Text(TextParam::AnimatorPositionX)],
+        ),
+        (
+            "Position Y".into(),
+            vec![PropertyPath::Text(TextParam::AnimatorPositionY)],
+        ),
+        (
+            "Opacity".into(),
+            vec![PropertyPath::Text(TextParam::AnimatorOpacity)],
+        ),
+    ];
+    for selector in layer.text_range_selectors() {
+        groups.extend(TextSelectorParam::ALL.map(|parameter| {
+            (
+                parameter.label().to_string(),
+                vec![PropertyPath::TextSelector {
+                    selector: selector.id,
+                    parameter,
+                }],
+            )
+        }));
+    }
+    for animator in layer.text_animators() {
+        groups.extend(super::text_animator::ANIMATOR_PARAMETERS.map(|parameter| {
+            (
+                parameter
+                    .label()
+                    .trim_start_matches("Animator · ")
+                    .to_string(),
+                vec![PropertyPath::TextAnimator {
+                    animator: animator.id,
+                    parameter,
+                }],
+            )
+        }));
+    }
+    groups
 }
 
 fn text_channel_label(parameter: TextParam) -> &'static str {
     match parameter {
-        TextParam::FillOpacity | TextParam::StrokeOpacity => "%",
+        TextParam::FillOpacity
+        | TextParam::StrokeOpacity
+        | TextParam::AnimatorStart
+        | TextParam::AnimatorEnd
+        | TextParam::AnimatorOffset
+        | TextParam::AnimatorAmount
+        | TextParam::AnimatorScaleX
+        | TextParam::AnimatorScaleY
+        | TextParam::AnimatorOpacity => "%",
+        TextParam::AnimatorRotation => "°",
         TextParam::Tracking => "‰ em",
         TextParam::Leading => "×",
         _ => TextPaint::component_label(parameter).unwrap_or("px"),
     }
+}
+
+fn animator_section_label(layer: &libre_effects_core::Layer) -> String {
+    let selector = layer.text_selector();
+    format!(
+        "Text Animator · {} · {}",
+        selector.units.label(),
+        selector.shape.label()
+    )
 }
 
 fn group_animated(layer: &libre_effects_core::Layer, properties: &[PropertyPath]) -> bool {
@@ -85,6 +176,13 @@ fn group_visible(
     properties: &[PropertyPath],
     filter: Option<PropertyFilter>,
 ) -> bool {
+    // Native Position/Opacity timing has no editable legacy scalar lanes. Never
+    // expose a partial group that could edit only the surviving components.
+    if properties.iter().any(|property| {
+        matches!(property, PropertyPath::Transform(_)) && layer.track(*property).is_none()
+    }) {
+        return false;
+    }
     filter.is_none_or(|f| {
         properties.iter().any(|p| {
             (match p {
@@ -94,6 +192,38 @@ fn group_visible(
                 || layer.track(*p).is_some_and(|t| !t.keys().is_empty()))
         })
     })
+}
+
+fn joined_position_visible(
+    layer: &libre_effects_core::Layer,
+    filter: Option<PropertyFilter>,
+) -> bool {
+    layer
+        .spatial_position()
+        .map(|p| p.keys.len())
+        .or_else(|| layer.planar_position().map(|p| p.keys.len()))
+        .is_some_and(|keys| {
+            filter.is_none_or(|filter| {
+                if filter == PropertyFilter::Animated {
+                    keys != 0
+                } else {
+                    filter.includes(Property::PositionX)
+                }
+            })
+        })
+}
+fn native_opacity_visible(
+    layer: &libre_effects_core::Layer,
+    filter: Option<PropertyFilter>,
+) -> bool {
+    layer.has_opacity_timing()
+        && filter.is_none_or(|filter| {
+            if filter == PropertyFilter::Animated {
+                layer.opacity_key_count() != 0
+            } else {
+                filter.includes(Property::Opacity)
+            }
+        })
 }
 fn group_watch(
     layer: &libre_effects_core::Layer,
@@ -281,6 +411,8 @@ pub(crate) struct Timeline {
     fields:
         BTreeMap<(LayerId, PropertyPath), (Entity<TextField>, Rc<RefCell<Option<InputTarget>>>)>,
     input_source: Option<InputTarget>,
+    animator: super::text_animator::TimelineAnimator,
+    colors: compound_colors::TimelineColors,
     parent_open: Option<LayerId>,
     bar_drag: Option<(Vec<LayerId>, i32, f64, i64)>,
     marquee: Option<(gpui::Point<Pixels>, gpui::Point<Pixels>)>,
@@ -288,6 +420,19 @@ pub(crate) struct Timeline {
     hit_keys: Rc<RefCell<Vec<(KeyRef, Bounds<Pixels>)>>>,
     hit_layers: Rc<RefCell<Vec<(LayerId, Bounds<Pixels>)>>>,
     search: Entity<TextField>,
+    layer_type: LayerTypeFilter,
+    selected_only: bool,
+    type_open: bool,
+    type_cursor: usize,
+    type_focus: FocusHandle,
+    type_scroll: gpui::ScrollHandle,
+    filter_context: Option<(u64, libre_effects_core::CompositionId)>,
+    filter_signature: (String, LayerTypeFilter, bool),
+    visible_layers: BTreeSet<LayerId>,
+    layer_navigation: libre_effects_editor_model::timeline_navigation::LayerNavigation,
+    row_scroll: gpui::ScrollHandle,
+    reveal_layer: Option<LayerId>,
+    rename: Option<layer_rename::RenameInput>,
     graph: Entity<super::graph::Graph>,
     marker_editor: Entity<super::markers::MarkerEditor>,
     state: Entity<EditorState>,
@@ -298,7 +443,7 @@ pub(crate) struct Timeline {
     drag: Option<KeyDrag>,
     selected_key: Option<(LayerId, PropertyPath, u32)>,
     key_menu: Option<key_menu::Menu>,
-    menu_focus_watch: Option<[gpui::Subscription; 2]>,
+    menu_focus_watch: Option<[gpui::Subscription; 3]>,
 }
 fn frame_at(x: f32, left: f32, width: f32, start: u32, visible: u32, duration: u32) -> f64 {
     (f64::from(start)
@@ -319,8 +464,13 @@ impl Timeline {
             cx.notify();
         })
         .detach();
-        let search = cx.new(|cx| TextField::new(cx, |_, _, _| {}));
-        cx.observe(&search, |_, _, cx| cx.notify()).detach();
+        let focus = cx.focus_handle();
+        let search = cx.new(|cx| TextField::new(cx, |_, _, _| {}).return_focus(focus.clone()));
+        cx.observe(&search, |this, _, cx| {
+            this.cancel_filtered_gestures();
+            cx.notify();
+        })
+        .detach();
         let waveforms = cx.new(|_| super::audio_waveform::AudioWaveforms::new());
         cx.observe(&waveforms, |_, _, cx| cx.notify()).detach();
         Self {
@@ -331,6 +481,8 @@ impl Timeline {
             resizing: false,
             fields: BTreeMap::new(),
             input_source: None,
+            animator: Default::default(),
+            colors: Default::default(),
             parent_open: None,
             bar_drag: None,
             marquee: None,
@@ -338,13 +490,26 @@ impl Timeline {
             hit_keys: Default::default(),
             hit_layers: Default::default(),
             search,
+            layer_type: LayerTypeFilter::All,
+            selected_only: false,
+            type_open: false,
+            type_cursor: 0,
+            type_focus: cx.focus_handle(),
+            type_scroll: gpui::ScrollHandle::new(),
+            filter_context: None,
+            filter_signature: (String::new(), LayerTypeFilter::All, false),
+            visible_layers: BTreeSet::new(),
+            layer_navigation: Default::default(),
+            row_scroll: gpui::ScrollHandle::new(),
+            reveal_layer: None,
+            rename: None,
             graph: cx.new(|cx| super::graph::Graph::new(state.clone(), cx)),
             marker_editor: cx.new(|cx| super::markers::MarkerEditor::new(state.clone(), cx)),
             state,
             key_menu: None,
             menu_focus_watch: None,
             ruler: Rc::new(Cell::new(None)),
-            focus: cx.focus_handle(),
+            focus,
             scrubbing: false,
             snapped_to: None,
             drag: None,
@@ -536,6 +701,19 @@ impl Timeline {
                 cx.notify();
             });
         }
+        let visible = self.visible_layer_ids(cx);
+        if self
+            .bar_drag
+            .as_ref()
+            .is_some_and(|(ids, _, _, _)| ids.iter().any(|id| !visible.contains(id)))
+        {
+            self.bar_drag = None;
+            self.blocked_filter_edit(cx);
+        }
+        if self.drag.is_some() && self.scope_blocked(filter_safety::TargetScope::Keys, cx) {
+            self.drag = None;
+            self.blocked_filter_edit(cx);
+        }
         if let Some((ids, edge, _, delta)) = self.bar_drag.take()
             && delta != 0
         {
@@ -644,18 +822,31 @@ impl Render for Timeline {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.menu_focus_watch.is_none() {
             self.menu_focus_watch = Some([
+                cx.observe_window_bounds(window, |this, _, cx| {
+                    if this.colors.cancel_pointer() {
+                        cx.notify();
+                    }
+                }),
                 cx.on_blur(&self.focus.clone(), window, |this, _, cx| {
+                    this.layer_navigation.reset();
+                    this.reveal_layer = None;
                     this.key_menu = None;
+                    this.colors.cancel_pointer();
                     cx.notify();
                 }),
                 cx.observe_window_activation(window, |this, window, cx| {
                     if !window.is_window_active() {
                         this.key_menu = None;
+                        this.colors.cancel_pointer();
                         cx.notify();
                     }
                 }),
             ]);
         }
+        self.prepare_layer_filters(window, cx);
+        self.prepare_layer_rename(window, cx);
+        self.reveal_project_usage(window, cx);
+        let layer_filters = self.render_layer_filters(cx);
         let key_menu = self.render_key_menu(cx);
         self.left = self.state.read(cx).workspace.timeline_left;
         self.hit_keys.borrow_mut().clear();
@@ -665,6 +856,9 @@ impl Render for Timeline {
         let show_mattes = left >= 750.0;
         let state = self.state.read(cx);
         InputTarget::refresh(&mut self.input_source, state);
+        self.animator.observe(state);
+        self.colors.observe(state);
+        self.colors.observe_pointer_ui(&self.focus, window, cx);
         let input_binding = self
             .input_source
             .as_ref()
@@ -717,10 +911,12 @@ impl Render for Timeline {
                 )
             })
             .collect();
-        let mut rows = div().flex().flex_col().w_full();
-        let query = self.search.read(cx).value().trim().to_lowercase();
+        let reorder_allowed = self.layer_reorder_allowed(cx);
+        let mut rows = div().flex().flex_col().min_w_0();
+        let mut row_index = 0;
+        let reveal_layer = self.reveal_layer.take();
         for (index, layer) in comp.layers().iter().enumerate() {
-            if !layer.name().to_lowercase().contains(&query) || (comp.hide_shy() && layer.shy()) {
+            if !self.visible_layers.contains(&layer.id()) {
                 continue;
             }
             let id = layer.id();
@@ -835,7 +1031,13 @@ impl Render for Timeline {
                         });
                     })),
                 )
-                .child(div().w(px(8.0)).h(px(14.0)).mr_2().bg(rgb(layer.color())))
+                .child(
+                    div()
+                        .w(px(8.0))
+                        .h(px(14.0))
+                        .mr_2()
+                        .bg(rgb(layer.label_color().unwrap_or_else(|| layer.color()))),
+                )
                 .child(
                     div()
                         .w(px(20.0))
@@ -844,48 +1046,67 @@ impl Render for Timeline {
                         .child((index + 1).to_string()),
                 )
                 .child(
-                    ui::text_button(control_id("name"), layer.name().to_string())
-                        .flex_1()
-                        .min_w_0()
-                        .justify_start()
-                        .overflow_hidden()
-                        .drag_over::<ParentDrag>({
-                            let state = self.state.clone();
-                            move |style, drag, _, cx| {
-                                if drag.command(state.read(cx), id).is_some() {
-                                    style.bg(rgb(0x164a7b))
-                                } else {
-                                    style
+                    if let Some(input) = self
+                        .rename
+                        .as_ref()
+                        .filter(|input| input.target.layer() == id)
+                    {
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(input.field.clone())
+                            .into_any_element()
+                    } else {
+                        ui::text_button(control_id("name"), layer.name().to_string())
+                            .flex_1()
+                            .min_w_0()
+                            .justify_start()
+                            .overflow_hidden()
+                            .tooltip(|_, cx| {
+                                cx.new(|_| {
+                                    ui::Tip("Double-click or press F2 to rename this layer".into())
+                                })
+                                .into()
+                            })
+                            .drag_over::<ParentDrag>({
+                                let state = self.state.clone();
+                                move |style, drag, _, cx| {
+                                    if drag.command(state.read(cx), id).is_some() {
+                                        style.bg(rgb(0x164a7b))
+                                    } else {
+                                        style
+                                    }
                                 }
-                            }
-                        })
-                        .on_drop(cx.listener(move |this, drag: &ParentDrag, window, cx| {
-                            let command = drag.command(this.state.read(cx), id);
-                            if let Some(command) = command {
-                                this.parent_open = None;
-                                this.state.update(cx, |s, cx| {
-                                    s.dispatch(&Action::Edit(command), window, cx)
-                                });
-                            }
-                            cx.stop_propagation();
-                        }))
-                        .on_click(cx.listener(
-                            move |this, event: &gpui::ClickEvent, window, cx| {
-                                window.focus(&this.focus);
-                                this.selected_key = None;
-                                this.state.update(cx, |state, cx| {
-                                    state.dispatch(
-                                        &Action::SelectMany(
-                                            id,
-                                            event.modifiers().control,
-                                            event.modifiers().shift,
-                                        ),
+                            })
+                            .on_drop(cx.listener(move |this, drag: &ParentDrag, window, cx| {
+                                let command = drag.command(this.state.read(cx), id);
+                                if let Some(command) = command {
+                                    this.parent_open = None;
+                                    this.state.update(cx, |s, cx| {
+                                        s.dispatch(&Action::Edit(command), window, cx)
+                                    });
+                                }
+                                cx.stop_propagation();
+                            }))
+                            .on_click(cx.listener(
+                                move |this, event: &gpui::ClickEvent, window, cx| {
+                                    if event.click_count() == 2 && !event.modifiers().modified() {
+                                        this.begin_layer_rename(id, window, cx);
+                                        cx.stop_propagation();
+                                        return;
+                                    }
+                                    window.focus(&this.focus);
+                                    this.select_visible_layer(
+                                        id,
+                                        event.modifiers().control,
+                                        event.modifiers().shift,
                                         window,
                                         cx,
-                                    )
-                                });
-                            },
-                        )),
+                                    );
+                                },
+                            ))
+                            .into_any_element()
+                    },
                 );
             if show_modes {
                 let picker = self.blend_pickers.entry(id).or_insert_with(|| {
@@ -991,29 +1212,29 @@ impl Render for Timeline {
                         )
                     }),
             );
-            controls = controls
-                .child(ui::action_tool(
-                    control_id("up"),
-                    "arrow-up",
-                    "Move layer up",
-                    &self.state,
-                    Action::Edit(Command::MoveLayer {
-                        id,
-                        index: index.saturating_sub(1),
-                    }),
-                    false,
-                ))
-                .child(ui::action_tool(
-                    control_id("down"),
-                    "arrow-down",
-                    "Move layer down",
-                    &self.state,
-                    Action::Edit(Command::MoveLayer {
-                        id,
-                        index: (index + 1).min(comp.layers().len() - 1),
-                    }),
-                    false,
-                ));
+            controls = controls.children(
+                [
+                    (-1, "up", "arrow-up", "Move layer up"),
+                    (1, "down", "arrow-down", "Move layer down"),
+                ]
+                .into_iter()
+                .map(|(direction, suffix, icon, label)| {
+                    ui::tool(
+                        control_id(suffix),
+                        icon,
+                        if reorder_allowed {
+                            label
+                        } else {
+                            "Clear layer filters and Hide Shy before reordering"
+                        },
+                        false,
+                    )
+                    .when(!reorder_allowed, |d| d.opacity(0.35))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.move_visible_layer(id, direction, window, cx)
+                    }))
+                }),
+            );
             let bar_offset = self
                 .bar_drag
                 .as_ref()
@@ -1074,7 +1295,7 @@ impl Render for Timeline {
                             .w(relative((right - bar_left).max(0.0)))
                             .top(px(3.0))
                             .h(px(17.0))
-                            .bg(rgb(layer.color()))
+                            .bg(rgb(layer.label_color().unwrap_or_else(|| layer.color())))
                             .opacity(
                                 if if matches!(
                                     layer.content(),
@@ -1118,20 +1339,22 @@ impl Render for Timeline {
                                                     0
                                                 }
                                             });
-                                        this.state.update(cx, |s, cx| {
-                                            if !s.selected_layers.contains(&id) {
-                                                s.dispatch(
-                                                    &Action::SelectMany(
-                                                        id,
-                                                        event.modifiers.control,
-                                                        event.modifiers.shift,
-                                                    ),
-                                                    window,
-                                                    cx,
-                                                );
-                                            }
-                                            s.selected_keys.clear();
-                                        });
+                                        if !this.state.read(cx).selected_layers.contains(&id) {
+                                            this.select_visible_layer(
+                                                id,
+                                                event.modifiers.control,
+                                                event.modifiers.shift,
+                                                window,
+                                                cx,
+                                            );
+                                        }
+                                        if this
+                                            .scope_blocked(filter_safety::TargetScope::Layers, cx)
+                                        {
+                                            this.blocked_filter_edit(cx);
+                                            return;
+                                        }
+                                        this.state.update(cx, |s, _| s.selected_keys.clear());
                                         this.bar_drag = Some((
                                             this.state
                                                 .read(cx)
@@ -1164,6 +1387,12 @@ impl Render for Timeline {
                         )
                     }),
             );
+            if reveal_layer == Some(id) {
+                // Reveal the header after the new selection has expanded its
+                // lanes, using the current layout rather than stale bounds.
+                self.row_scroll.scroll_to_item(row_index);
+            }
+            row_index += 1;
             rows = rows.child(
                 div()
                     .flex()
@@ -1176,13 +1405,42 @@ impl Render for Timeline {
                     .when(!graph_open, |s| s.child(time_area)),
             );
             if selected_row && expanded {
+                row_index += 1;
+                rows = rows.child(
+                    self.colors
+                        .render_rows(
+                            &self.state,
+                            layer,
+                            left,
+                            start,
+                            visible,
+                            frame,
+                            filter,
+                            graph_open,
+                            self.input_source.clone(),
+                            self.focus.clone(),
+                            window,
+                            cx,
+                        )
+                        .flex_none(),
+                );
                 let is_audio = matches!(layer.content(), libre_effects_core::Content::Audio { .. });
                 if !is_audio
                     && (filter != Some(PropertyFilter::Animated)
-                        || Property::ALL
-                            .into_iter()
-                            .any(|p| !layer.property(p).keys().is_empty()))
+                        || layer
+                            .spatial_position()
+                            .is_some_and(|position| !position.keys.is_empty())
+                        || layer
+                            .planar_position()
+                            .is_some_and(|position| !position.keys.is_empty())
+                        || (layer.has_opacity_timing() && layer.opacity_key_count() != 0)
+                        || Property::ALL.into_iter().any(|p| {
+                            layer
+                                .property(p)
+                                .is_some_and(|track| !track.keys().is_empty())
+                        }))
                 {
+                    row_index += 1;
                     rows = rows.child(
                         div()
                             .flex()
@@ -1207,6 +1465,83 @@ impl Render for Timeline {
                                     .h_full()
                                     .child(grid(start, visible, frame)),
                             ),
+                    );
+                }
+                if !is_audio
+                    && joined_position_visible(layer, filter)
+                    && let Some((value, keys)) = super::inspector::joined_position_summary(
+                        layer,
+                        frame,
+                        comp.fps().seconds(1),
+                    )
+                {
+                    row_index += 1;
+                    rows = rows.child(
+                        div()
+                            .flex()
+                            .h(px(42.0))
+                            .flex_none()
+                            .child(
+                                div()
+                                    .w(px(left))
+                                    .flex_none()
+                                    .pl(px(128.0))
+                                    .flex()
+                                    .flex_col()
+                                    .text_size(px(11.0))
+                                    .text_color(rgb(ui::MUTED))
+                                    .child(format!(
+                                        "Position {} · joined · {keys} keys · read-only",
+                                        if layer.is_three_d() { "XYZ" } else { "XY" }
+                                    ))
+                                    .child(value),
+                            )
+                            .when(!graph_open, |row| {
+                                row.child(
+                                    div()
+                                        .relative()
+                                        .flex_1()
+                                        .h_full()
+                                        .child(grid(start, visible, frame)),
+                                )
+                            }),
+                    );
+                }
+                if !is_audio
+                    && native_opacity_visible(layer, filter)
+                    && let Some((value, keys)) = super::inspector::native_opacity_summary(
+                        layer,
+                        frame,
+                        comp.fps().seconds(1),
+                    )
+                {
+                    row_index += 1;
+                    rows = rows.child(
+                        div()
+                            .flex()
+                            .h(px(42.0))
+                            .flex_none()
+                            .child(
+                                div()
+                                    .w(px(left))
+                                    .flex_none()
+                                    .pl(px(128.0))
+                                    .flex()
+                                    .flex_col()
+                                    .text_size(px(11.0))
+                                    .text_color(rgb(ui::MUTED))
+                                    .child("Opacity · native timing · read-only")
+                                    .child(format!("{value} · {keys} keys")),
+                            )
+                            .when(!graph_open, |row| {
+                                row.child(
+                                    div()
+                                        .relative()
+                                        .flex_1()
+                                        .h_full()
+                                        .child(grid(start, visible, frame)),
+                                )
+                            }),
                     );
                 }
                 let mut groups: Vec<(String, Vec<PropertyPath>)> = [
@@ -1312,6 +1647,40 @@ impl Render for Timeline {
                             };
                             Some(((3, item), format!("Contents · {name}")))
                         }
+                        PropertyPath::Text(parameter) if parameter.is_animator() => {
+                            Some(((4, 1), animator_section_label(layer)))
+                        }
+                        PropertyPath::TextSelector { selector, .. } => {
+                            let range = layer
+                                .text_range_selectors()
+                                .iter()
+                                .find(|range| range.id == selector)
+                                .unwrap();
+                            Some((
+                                (5, selector),
+                                format!(
+                                    "Text Animator · Selector #{selector} · {} · {} · {}",
+                                    range.mode.label(),
+                                    range.selector.units.label(),
+                                    range.selector.shape.label()
+                                ),
+                            ))
+                        }
+                        PropertyPath::TextAnimator { animator, .. } => {
+                            let item = layer
+                                .text_animators()
+                                .iter()
+                                .find(|item| item.id == animator)
+                                .unwrap();
+                            Some((
+                                (6, animator),
+                                format!(
+                                    "Text Animator #{animator} · {} · {}",
+                                    item.selector.units.label(),
+                                    item.selector.shape.label()
+                                ),
+                            ))
+                        }
                         PropertyPath::Text(_) | PropertyPath::SourceText => {
                             Some(((4, 0), "Text".to_string()))
                         }
@@ -1349,6 +1718,7 @@ impl Render for Timeline {
                     if let Some((section_id, name)) = section {
                         if last_section != Some(section_id) {
                             last_section = Some(section_id);
+                            row_index += 1;
                             rows = rows.child(
                                 div()
                                     .flex()
@@ -1398,6 +1768,51 @@ impl Render for Timeline {
                                 "timeline",
                             )
                             .into_any_element()
+                        } else if let PropertyPath::Text(parameter) = channel
+                            && parameter.is_animator()
+                        {
+                            self.animator
+                                .control(
+                                    &self.state,
+                                    layer,
+                                    parameter,
+                                    frame,
+                                    true,
+                                    self.input_source.clone(),
+                                )
+                                .into_any_element()
+                        } else if let PropertyPath::TextAnimator {
+                            animator,
+                            parameter,
+                        } = channel
+                        {
+                            self.animator
+                                .animator_control(
+                                    &self.state,
+                                    layer,
+                                    animator,
+                                    parameter,
+                                    frame,
+                                    true,
+                                    self.input_source.clone(),
+                                )
+                                .into_any_element()
+                        } else if let PropertyPath::TextSelector {
+                            selector,
+                            parameter,
+                        } = channel
+                        {
+                            self.animator
+                                .selector_control(
+                                    &self.state,
+                                    layer,
+                                    selector,
+                                    parameter,
+                                    frame,
+                                    true,
+                                    self.input_source.clone(),
+                                )
+                                .into_any_element()
                         } else {
                             ui::action_tool(
                                 prop_id("watch"),
@@ -1471,103 +1886,116 @@ impl Render for Timeline {
                             ));
                             continue;
                         }
-                        let (input, input_target) = self
-                            .fields
-                            .entry((id, property))
-                            .or_insert_with(|| {
-                                let edit = self.state.clone();
-                                let target: Rc<RefCell<Option<InputTarget>>> = Default::default();
-                                let captured = target.clone();
-                                let input = cx.new(|cx| {
-                                    TextField::new(cx, move |text, window, cx| {
-                                        edit.update(cx, |s, cx| {
-                                            if !captured
-                                                .borrow()
-                                                .as_ref()
-                                                .is_some_and(|t| t.current(s))
-                                                || s.editor.selected() != Some(id)
-                                            {
-                                                return;
-                                            }
-                                            if let Ok(value) = parse_scalar(text) {
-                                                if let PropertyPath::Text(parameter) = property {
-                                                    s.finish_text(true, cx);
-                                                    if !captured
-                                                        .borrow()
-                                                        .as_ref()
-                                                        .is_some_and(|t| t.same_context(s))
-                                                    {
-                                                        return;
-                                                    }
-                                                    let command = s
-                                                        .editor
-                                                        .selected_layer()
-                                                        .unwrap()
-                                                        .text_value_command(
-                                                            parameter, value, s.frame,
-                                                        );
-                                                    match command {
-                                                        Ok(Some(command)) => s.dispatch(
-                                                            &Action::Edit(command),
-                                                            window,
-                                                            cx,
-                                                        ),
-                                                        Ok(None) => {}
-                                                        Err(error) => {
-                                                            s.status = error;
-                                                            cx.notify();
-                                                        }
-                                                    }
+                        let animator_channel = matches!(
+                            property,
+                            PropertyPath::TextSelector { .. } | PropertyPath::TextAnimator { .. }
+                        ) || matches!(property, PropertyPath::Text(parameter) if parameter.is_animator());
+                        let input = if !animator_channel {
+                            let (input, input_target) = self
+                                .fields
+                                .entry((id, property))
+                                .or_insert_with(|| {
+                                    let edit = self.state.clone();
+                                    let target: Rc<RefCell<Option<InputTarget>>> =
+                                        Default::default();
+                                    let captured = target.clone();
+                                    let input = cx.new(|cx| {
+                                        TextField::new(cx, move |text, window, cx| {
+                                            edit.update(cx, |s, cx| {
+                                                if !captured
+                                                    .borrow()
+                                                    .as_ref()
+                                                    .is_some_and(|t| t.current(s))
+                                                    || s.editor.selected() != Some(id)
+                                                {
                                                     return;
                                                 }
-                                                s.dispatch(
-                                                    &Action::Edit(Command::EditTrack {
-                                                        id,
-                                                        property,
-                                                        edit: TrackEdit::Value {
-                                                            frame: s.frame,
-                                                            value,
-                                                        },
-                                                    }),
-                                                    window,
-                                                    cx,
-                                                );
-                                            } else {
-                                                s.status = "Enter a finite number".into();
-                                                cx.notify();
-                                            }
+                                                if let Ok(value) = parse_scalar(text) {
+                                                    if let PropertyPath::Text(parameter) = property
+                                                    {
+                                                        s.finish_text(true, cx);
+                                                        if !captured
+                                                            .borrow()
+                                                            .as_ref()
+                                                            .is_some_and(|t| t.same_context(s))
+                                                        {
+                                                            return;
+                                                        }
+                                                        let command = s
+                                                            .editor
+                                                            .selected_layer()
+                                                            .unwrap()
+                                                            .text_value_command(
+                                                                parameter, value, s.frame,
+                                                            );
+                                                        match command {
+                                                            Ok(Some(command)) => s.dispatch(
+                                                                &Action::Edit(command),
+                                                                window,
+                                                                cx,
+                                                            ),
+                                                            Ok(None) => {}
+                                                            Err(error) => {
+                                                                s.status = error;
+                                                                cx.notify();
+                                                            }
+                                                        }
+                                                        return;
+                                                    }
+                                                    s.dispatch(
+                                                        &Action::Edit(Command::EditTrack {
+                                                            id,
+                                                            property,
+                                                            edit: TrackEdit::Value {
+                                                                frame: s.frame,
+                                                                value,
+                                                            },
+                                                        }),
+                                                        window,
+                                                        cx,
+                                                    );
+                                                } else {
+                                                    s.status = "Enter a finite number".into();
+                                                    cx.notify();
+                                                }
+                                            })
                                         })
-                                    })
-                                    .numeric()
-                                });
-                                (input, target)
-                            })
-                            .clone();
-                        *input_target.borrow_mut() = self.input_source.clone();
-                        input.update(cx, |field, _| {
-                            field.sync(
-                                input_binding.clone(),
-                                {
-                                    let value = layer
-                                        .track_value(property, frame)
-                                        .expect("visible property");
-                                    if matches!(property, PropertyPath::Text(_)) {
-                                        value.to_string()
-                                    } else if property == PropertyPath::TimeRemap {
-                                        format!("{value:.12}")
-                                    } else {
-                                        format!("{value:.2}")
-                                    }
-                                },
-                                window,
-                            )
-                        });
+                                        .numeric()
+                                    });
+                                    (input, target)
+                                })
+                                .clone();
+                            *input_target.borrow_mut() = self.input_source.clone();
+                            input.update(cx, |field, _| {
+                                field.sync(
+                                    input_binding.clone(),
+                                    {
+                                        let value = layer
+                                            .track_value(property, frame)
+                                            .expect("visible property");
+                                        if matches!(property, PropertyPath::Text(_)) {
+                                            value.to_string()
+                                        } else if property == PropertyPath::TimeRemap {
+                                            format!("{value:.12}")
+                                        } else {
+                                            format!("{value:.2}")
+                                        }
+                                    },
+                                    window,
+                                )
+                            });
+                            Some(input)
+                        } else {
+                            None
+                        };
                         controls = controls
                             .child(
                                 ui::text_button(
                                     SharedString::from(format!("channel-{id}-{property:?}")),
-                                    if let PropertyPath::Text(p) = property {
+                                    if let PropertyPath::Text(p) | PropertyPath::TextAnimator { parameter: p, .. } = property {
                                         text_channel_label(p)
+                                    } else if matches!(property, PropertyPath::TextSelector { .. }) {
+                                        "%"
                                     } else if let PropertyPath::Shape(p) = property {
                                         libre_effects_core::ShapePaint::component_label(p)
                                             .unwrap_or("")
@@ -1651,8 +2079,14 @@ impl Render for Timeline {
                             .child(
                                 div()
                                     .w(px(60.0))
-                                    .when(!layer.locked(), |s| s.child(input))
-                                    .when(layer.locked(), |s| {
+                                    .when(animator_channel, |s| {
+                                        let value = layer.track_value(property, frame).expect("visible property").to_string();
+                                        s.child(div().id(SharedString::from(format!("animator-sample-{id}-{property:?}")))
+                                            .text_color(rgb(ui::MUTED)).overflow_hidden().child(value.clone())
+                                            .tooltip(move |_, cx| cx.new(|_| ui::Tip(format!("{value} · edit in Properties → Text Animator; press Enter before using Timeline buttons").into())).into()))
+                                    })
+                                    .when(!animator_channel && !layer.locked(), |s| s.child(input.unwrap()))
+                                    .when(!animator_channel && layer.locked(), |s| {
                                         s.child(format!(
                                             "{:.1}",
                                             layer
@@ -1686,6 +2120,51 @@ impl Render for Timeline {
                             "timeline",
                         )
                         .into_any_element()
+                    } else if let PropertyPath::Text(parameter) = channel
+                        && parameter.is_animator()
+                    {
+                        self.animator
+                            .control(
+                                &self.state,
+                                layer,
+                                parameter,
+                                frame,
+                                false,
+                                self.input_source.clone(),
+                            )
+                            .into_any_element()
+                    } else if let PropertyPath::TextAnimator {
+                        animator,
+                        parameter,
+                    } = channel
+                    {
+                        self.animator
+                            .animator_control(
+                                &self.state,
+                                layer,
+                                animator,
+                                parameter,
+                                frame,
+                                false,
+                                self.input_source.clone(),
+                            )
+                            .into_any_element()
+                    } else if let PropertyPath::TextSelector {
+                        selector,
+                        parameter,
+                    } = channel
+                    {
+                        self.animator
+                            .selector_control(
+                                &self.state,
+                                layer,
+                                selector,
+                                parameter,
+                                frame,
+                                false,
+                                self.input_source.clone(),
+                            )
+                            .into_any_element()
                     } else {
                         ui::action_tool(
                             prop_id("key"),
@@ -1799,6 +2278,7 @@ impl Render for Timeline {
                                             window.focus(&this.focus);
                                             cx.stop_propagation();
                                             this.scrubbing = false;
+                                            this.colors.clear_selection();
                                             this.state.update(cx, |s, cx| {
                                                 if event.modifiers.control || event.modifiers.shift
                                                 {
@@ -1830,6 +2310,12 @@ impl Render for Timeline {
                                                 }
                                                 s.dispatch(&Action::Seek(key_frame), window, cx);
                                             });
+                                            if this
+                                                .scope_blocked(filter_safety::TargetScope::Keys, cx)
+                                            {
+                                                this.blocked_filter_edit(cx);
+                                                return;
+                                            }
                                             this.drag = Some(KeyDrag {
                                                 from: key_frame,
                                                 to: key_frame,
@@ -1840,6 +2326,7 @@ impl Render for Timeline {
                                 ),
                         );
                     }
+                    row_index += 1;
                     rows = rows.child(
                         div()
                             .flex()
@@ -1851,7 +2338,7 @@ impl Render for Timeline {
                 }
             }
         }
-        if comp.layers().is_empty() {
+        if self.visible_layers.is_empty() {
             rows = rows.child(
                 div()
                     .h(px(90.0))
@@ -1859,11 +2346,16 @@ impl Render for Timeline {
                     .items_center()
                     .justify_center()
                     .text_color(rgb(ui::MUTED))
-                    .child("No layers. Create a solid with Ctrl+Y."),
+                    .child(if comp.layers().is_empty() {
+                        "No layers. Create a solid with Ctrl+Y."
+                    } else {
+                        "No matching layers. Clear the layer filters or turn off Hide Shy."
+                    }),
             );
         }
         let work_left = (work_start.saturating_sub(start) as f32 / visible as f32).clamp(0.0, 1.0);
         let work_right = (work_end.saturating_sub(start) as f32 / visible as f32).clamp(0.0, 1.0);
+        let pointer_owner = cx.entity();
         div()
             .id("timeline")
             .relative()
@@ -1873,15 +2365,104 @@ impl Render for Timeline {
             .size_full()
             .min_h_0()
             .bg(rgb(ui::BG))
+            .on_modifiers_changed(cx.listener(
+                |this, event: &gpui::ModifiersChangedEvent, _, cx| {
+                    if this.colors.pointer_modifiers_changed(event.modifiers) {
+                        cx.notify();
+                    }
+                },
+            ))
+            .child(
+                canvas(
+                    |_, _, _| (),
+                    move |_, _, window, _| {
+                        // Installed before the first press, independently of hover and
+                        // before any sibling can consume movement or outside release.
+                        let down = pointer_owner.clone();
+                        window.on_mouse_event(move |_: &gpui::MouseDownEvent, phase, _, cx| {
+                            if phase.capture() {
+                                down.update(cx, |this, cx| {
+                                    if this.colors.cancel_pointer() {
+                                        cx.notify();
+                                    }
+                                });
+                            }
+                        });
+                        let moving = pointer_owner.clone();
+                        window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+                            if phase.capture() {
+                                moving.update(cx, |this, cx| {
+                                    this.colors.pointer_move(
+                                        event,
+                                        &this.state,
+                                        &this.focus,
+                                        window,
+                                        cx,
+                                    )
+                                });
+                            }
+                        });
+                        let ending = pointer_owner.clone();
+                        window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
+                            if phase.capture() {
+                                ending.update(cx, |this, cx| {
+                                    this.colors.pointer_up(
+                                        event,
+                                        &this.state,
+                                        &this.focus,
+                                        window,
+                                        cx,
+                                    )
+                                });
+                            }
+                        });
+                        let scrolling = pointer_owner.clone();
+                        window.on_mouse_event(move |_: &gpui::ScrollWheelEvent, phase, _, cx| {
+                            if phase.capture() {
+                                scrolling.update(cx, |this, cx| {
+                                    if this.colors.cancel_pointer() {
+                                        cx.notify();
+                                    }
+                                });
+                            }
+                        });
+                    },
+                )
+                .absolute()
+                .size_full(),
+            )
             .on_mouse_move(cx.listener(Self::moving))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::up))
             .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+                if this.layer_filter_key(event, window, cx) {
+                    cx.stop_propagation();
+                    return;
+                }
                 if this.key_menu_key(event, window, cx) {
                     cx.stop_propagation();
                     return;
                 }
                 if !this.focus.is_focused(window) {
+                    return;
+                }
+                if this.layer_rename_key(event, window, cx) {
+                    cx.stop_propagation();
+                    return;
+                }
+                if this.layer_navigation_key(event, window, cx) {
+                    cx.stop_propagation();
+                    return;
+                }
+                if filter_safety::shortcut_scope(event)
+                    .is_some_and(|scope| this.scope_blocked(scope, cx))
+                {
+                    this.blocked_filter_edit(cx);
+                    cx.stop_propagation();
+                    return;
+                }
+                if this.colors.key_down(event, &this.state, window, cx) {
+                    cx.stop_propagation();
                     return;
                 }
                 if let Some((incoming, outgoing)) = super::key_easing::shortcut(event)
@@ -1918,29 +2499,17 @@ impl Render for Timeline {
                     this.parent_open = None;
                     cx.notify();
                 }
-                if event.keystroke.key == "a" && event.keystroke.modifiers.control {
+                if event.keystroke.key == "a"
+                    && event.keystroke.modifiers.control
+                    && !event.keystroke.modifiers.shift
+                    && !event.keystroke.modifiers.alt
+                    && !event.keystroke.modifiers.platform
+                    && !event.keystroke.modifiers.function
+                {
+                    this.colors.clear_selection();
                     let keys = this.hit_keys.borrow().iter().map(|(k, _)| *k).collect();
                     this.state.update(cx, |s, cx| {
-                        if s.selected_keys.is_empty() {
-                            s.selected_layers = s
-                                .editor
-                                .project()
-                                .composition()
-                                .layers()
-                                .iter()
-                                .filter(|l| {
-                                    !(s.editor.project().composition().hide_shy() && l.shy())
-                                })
-                                .map(|l| l.id())
-                                .collect();
-                            if let Some(id) = s.selected_layers.first() {
-                                s.editor.select(*id);
-                            } else {
-                                s.editor.clear_selection();
-                            }
-                        } else {
-                            s.selected_keys = keys;
-                        }
+                        s.selected_keys = keys;
                         cx.notify();
                     });
                     cx.stop_propagation();
@@ -1981,15 +2550,6 @@ impl Render for Timeline {
                                     .text_color(rgb(ui::MUTED))
                                     .child(format!("{frame:05}  ({} fps)", comp.fps().label())),
                             ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_1()
-                            .w(px(165.0))
-                            .child(ui::icon("magnifier"))
-                            .child(div().flex_1().child(self.search.clone())),
                     )
                     .child(
                         ui::tool(
@@ -2125,6 +2685,7 @@ impl Render for Timeline {
                         false,
                     )),
             )
+            .child(layer_filters)
             .child(
                 div()
                     .flex()
@@ -2310,6 +2871,7 @@ impl Render for Timeline {
                                 return;
                             }
                             window.focus(&this.focus);
+                            this.colors.clear_selection();
                             this.marquee_additive =
                                 event.modifiers.shift || event.modifiers.control;
                             this.marquee = Some((event.position, event.position));
@@ -2320,15 +2882,15 @@ impl Render for Timeline {
                     .flex_1()
                     .min_h_0()
                     .child(
-                        div()
-                            .id("timeline-rows")
+                        rows.id("timeline-rows")
+                            .min_w_0()
                             .min_h_0()
                             .overflow_y_scroll()
+                            .track_scroll(&self.row_scroll)
                             .when(graph_open, |s| {
                                 s.w(px(left)).flex_none().overflow_x_hidden()
                             })
-                            .when(!graph_open, |s| s.flex_1())
-                            .child(rows),
+                            .when(!graph_open, |s| s.flex_1()),
                     )
                     .when(graph_open, |s| {
                         s.child(div().flex_1().min_w_0().min_h_0().child(self.graph.clone()))
@@ -2479,8 +3041,120 @@ impl Render for Timeline {
 #[cfg(test)]
 mod tests {
     use libre_effects_core::{
-        Command, Content, Editor, PropertyPath, TextPaint, TextParam, TrackEdit,
+        Command, Content, Editor, PropertyPath, TextPaint, TextParam, TextSelectorParam, TrackEdit,
     };
+    #[test]
+    fn native_opacity_has_one_filtered_read_only_row_and_no_scalar_graph_lane() {
+        let editor = crate::opacity_test_support::overshoot_editor(true);
+        let layer = editor.selected_layer().unwrap();
+        let properties = [libre_effects_core::Property::Opacity.into()];
+        for filter in [
+            None,
+            Some(super::PropertyFilter::Opacity),
+            Some(super::PropertyFilter::Animated),
+        ] {
+            assert!(super::native_opacity_visible(layer, filter));
+            assert!(!super::group_visible(layer, &properties, filter));
+        }
+        assert!(!super::native_opacity_visible(
+            layer,
+            Some(super::PropertyFilter::Position)
+        ));
+        assert!(
+            !crate::view_state::GraphChannel {
+                id: 1,
+                property: properties[0]
+            }
+            .available(editor.project().composition())
+        );
+        assert_eq!(layer.opacity_key_count(), 2);
+    }
+
+    #[test]
+    fn ordinary_2d_position_keeps_scalar_lanes_and_has_no_joined_row() {
+        let mut editor = Editor::default();
+        editor.execute(Command::AddRectangle).unwrap();
+        let layer = editor.selected_layer().unwrap();
+        let position = [
+            libre_effects_core::Property::PositionX.into(),
+            libre_effects_core::Property::PositionY.into(),
+        ];
+        assert!(super::group_visible(layer, &position, None));
+        assert!(super::group_visible(
+            layer,
+            &position,
+            Some(super::PropertyFilter::Position)
+        ));
+        for filter in [
+            None,
+            Some(super::PropertyFilter::Position),
+            Some(super::PropertyFilter::Animated),
+        ] {
+            assert!(!super::joined_position_visible(layer, filter));
+        }
+    }
+
+    #[test]
+    fn joined_position_has_one_read_only_row_and_no_scalar_position_group() {
+        let mut editor = Editor::default();
+        editor.execute(Command::AddRectangle).unwrap();
+        editor
+            .execute(Command::SetThreeD {
+                id: 1,
+                enabled: true,
+            })
+            .unwrap();
+        let layer = editor.selected_layer().unwrap();
+        let position = [
+            libre_effects_core::Property::PositionX.into(),
+            libre_effects_core::Property::PositionY.into(),
+        ];
+        for filter in [
+            None,
+            Some(super::PropertyFilter::Position),
+            Some(super::PropertyFilter::Animated),
+        ] {
+            assert!(!super::group_visible(layer, &position, filter));
+        }
+        assert!(super::joined_position_visible(layer, None));
+        assert!(super::joined_position_visible(
+            layer,
+            Some(super::PropertyFilter::Position)
+        ));
+        assert!(!super::joined_position_visible(
+            layer,
+            Some(super::PropertyFilter::Animated)
+        ));
+        assert!(!super::joined_position_visible(
+            layer,
+            Some(super::PropertyFilter::Opacity)
+        ));
+        assert!(super::group_visible(
+            layer,
+            &[libre_effects_core::Property::Opacity.into()],
+            None
+        ));
+        editor
+            .execute(Command::SetSpatialPosition {
+                id: 1,
+                edit: libre_effects_core::SpatialEdit::Key {
+                    frame: 10,
+                    value: [12.0, 34.0, 56.0],
+                },
+            })
+            .unwrap();
+        let layer = editor.selected_layer().unwrap();
+        assert!(super::joined_position_visible(
+            layer,
+            Some(super::PropertyFilter::Animated)
+        ));
+        assert!(!super::group_visible(
+            layer,
+            &position,
+            Some(super::PropertyFilter::Animated)
+        ));
+    }
+
     #[test]
     fn typography_timeline_numeric_formatting_is_noop_at_interpolated_frames() {
         let mut e = Editor::default();
@@ -2572,18 +3246,30 @@ mod tests {
                 ("Tracking", 1),
                 ("Leading", 1),
                 ("Fill Opacity", 1),
-                ("Stroke Opacity", 1)
+                ("Stroke Opacity", 1),
+                ("Range Start", 1),
+                ("Range End", 1),
+                ("Range Offset", 1),
+                ("Amount", 1),
+                ("Scale X", 1),
+                ("Scale Y", 1),
+                ("Rotation", 1),
+                ("Position X", 1),
+                ("Position Y", 1),
+                ("Opacity", 1)
             ]
         );
+        // Source enums append new channels for stable storage; the UI groups
+        // Offset beside Start/End. Every source channel still appears once.
         assert_eq!(
             groups
                 .iter()
                 .flat_map(|(_, p)| p.iter())
                 .copied()
-                .collect::<Vec<_>>(),
+                .collect::<std::collections::BTreeSet<_>>(),
             std::iter::once(PropertyPath::SourceText)
                 .chain(TextParam::ALL.map(PropertyPath::Text))
-                .collect::<Vec<_>>()
+                .collect::<std::collections::BTreeSet<_>>()
         );
         for (_, properties) in &groups {
             assert!(super::group_visible(
@@ -2661,6 +3347,233 @@ mod tests {
     }
 
     #[test]
+    fn text_animator_timeline_groups_keep_independent_sparse_values_units_and_filters() {
+        let mut e = Editor::default();
+        e.execute(Command::AddContent {
+            content: Content::Text {
+                text: "Range".into(),
+                font_size: 48.,
+            },
+            width: 400.,
+            height: 120.,
+            name: "Animator lanes".into(),
+        })
+        .unwrap();
+        let groups = super::text_groups(e.selected_layer().unwrap());
+        let original = e.project().clone();
+        for (index, (parameter, default)) in [
+            (TextParam::AnimatorStart, 0.),
+            (TextParam::AnimatorEnd, 100.),
+            (TextParam::AnimatorOffset, 0.),
+            (TextParam::AnimatorAmount, 100.),
+            (TextParam::AnimatorScaleX, 100.),
+            (TextParam::AnimatorScaleY, 100.),
+            (TextParam::AnimatorRotation, 0.),
+            (TextParam::AnimatorPositionX, 0.),
+            (TextParam::AnimatorPositionY, 0.),
+            (TextParam::AnimatorOpacity, 100.),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let paths = &groups[index + 9].1;
+            assert_eq!(paths, &[PropertyPath::Text(parameter)]);
+            assert_eq!(
+                super::text_channel_label(parameter),
+                match parameter {
+                    TextParam::AnimatorPositionX | TextParam::AnimatorPositionY => "px",
+                    TextParam::AnimatorRotation => "°",
+                    _ => "%",
+                }
+            );
+            assert_eq!(
+                e.selected_layer().unwrap().track_value(paths[0], 30),
+                Some(default)
+            );
+            assert!(e.selected_layer().unwrap().track(paths[0]).is_none());
+            assert!(!super::group_visible(
+                e.selected_layer().unwrap(),
+                paths,
+                Some(super::PropertyFilter::Animated)
+            ));
+        }
+        assert_eq!(e.project(), &original);
+        for (index, (_, paths)) in groups[9..].iter().enumerate() {
+            e.execute(super::group_watch(e.selected_layer().unwrap(), paths, 30))
+                .unwrap();
+            assert!(super::group_visible(
+                e.selected_layer().unwrap(),
+                paths,
+                Some(super::PropertyFilter::Animated)
+            ));
+            for (_, other) in groups[9..].iter().skip(index + 1) {
+                assert!(!super::group_animated(e.selected_layer().unwrap(), other));
+            }
+            e.execute(super::group_watch(e.selected_layer().unwrap(), paths, 30))
+                .unwrap();
+            assert!(!super::group_animated(e.selected_layer().unwrap(), paths));
+        }
+    }
+
+    #[test]
+    fn secondary_selector_timeline_lanes_follow_order_but_keep_stable_scalar_identity() {
+        let mut editor = Editor::default();
+        editor
+            .execute(Command::AddContent {
+                content: Content::Text {
+                    text: "Selectors".into(),
+                    font_size: 48.,
+                },
+                width: 400.,
+                height: 120.,
+                name: "Text".into(),
+            })
+            .unwrap();
+        let legacy = super::text_groups(editor.selected_layer().unwrap());
+        for _ in 0..2 {
+            editor
+                .execute(Command::AddTextRangeSelector { id: 1 })
+                .unwrap();
+        }
+        let source = editor.project().clone();
+        let groups = super::text_groups(editor.selected_layer().unwrap());
+        assert_eq!(&groups[..legacy.len()], legacy.as_slice());
+        assert_eq!(groups.len(), legacy.len() + 8);
+        for (index, (label, paths)) in groups[legacy.len()..].iter().enumerate() {
+            let selector = 1 + (index / 4) as u64;
+            let parameter = TextSelectorParam::ALL[index % 4];
+            assert_eq!(label, parameter.label());
+            assert_eq!(
+                paths,
+                &[PropertyPath::TextSelector {
+                    selector,
+                    parameter
+                }]
+            );
+            assert!(editor.selected_layer().unwrap().track(paths[0]).is_none());
+            assert!(
+                editor
+                    .selected_layer()
+                    .unwrap()
+                    .track_value(paths[0], 30)
+                    .is_some()
+            );
+            assert!(!super::group_visible(
+                editor.selected_layer().unwrap(),
+                paths,
+                Some(super::PropertyFilter::Animated)
+            ));
+        }
+        assert_eq!(editor.project(), &source);
+        let lane = groups[legacy.len() + 6].1.clone();
+        editor
+            .execute(super::group_watch(
+                editor.selected_layer().unwrap(),
+                &lane,
+                30,
+            ))
+            .unwrap();
+        assert!(super::group_visible(
+            editor.selected_layer().unwrap(),
+            &lane,
+            Some(super::PropertyFilter::Animated)
+        ));
+        assert!(
+            editor
+                .selected_layer()
+                .unwrap()
+                .track(lane[0])
+                .unwrap()
+                .keys()
+                .contains_key(&30)
+        );
+        editor
+            .execute(Command::MoveTextRangeSelector {
+                id: 1,
+                selector: 2,
+                index: 0,
+            })
+            .unwrap();
+        let reordered = super::text_groups(editor.selected_layer().unwrap());
+        assert_eq!(
+            &reordered[legacy.len()..legacy.len() + 4],
+            &groups[legacy.len() + 4..]
+        );
+        assert_eq!(
+            &reordered[legacy.len() + 4..],
+            &groups[legacy.len()..legacy.len() + 4]
+        );
+        assert!(super::group_animated(
+            editor.selected_layer().unwrap(),
+            &lane
+        ));
+        editor
+            .execute(Command::RemoveTextRangeSelector { id: 1, selector: 2 })
+            .unwrap();
+        assert_eq!(
+            super::text_groups(editor.selected_layer().unwrap()).len(),
+            legacy.len() + 4
+        );
+        editor.undo();
+        assert_eq!(
+            super::text_groups(editor.selected_layer().unwrap()),
+            reordered
+        );
+        assert!(super::group_animated(
+            editor.selected_layer().unwrap(),
+            &lane
+        ));
+    }
+
+    #[test]
+    fn text_animator_timeline_displays_static_selector_metadata_without_extra_lanes() {
+        use libre_effects_core::{TextSelector, TextSelectorShape, TextSelectorUnits};
+        let mut editor = Editor::default();
+        editor
+            .execute(Command::AddContent {
+                content: Content::Text {
+                    text: "Words\nLines".into(),
+                    font_size: 48.,
+                },
+                width: 400.,
+                height: 180.,
+                name: "Selector metadata".into(),
+            })
+            .unwrap();
+        let initial_groups = super::text_groups(editor.selected_layer().unwrap());
+        assert_eq!(
+            super::animator_section_label(editor.selected_layer().unwrap()),
+            "Text Animator · Characters · Square"
+        );
+        assert_eq!(
+            initial_groups[12],
+            (
+                "Amount".to_string(),
+                vec![PropertyPath::Text(TextParam::AnimatorAmount)]
+            )
+        );
+        for units in TextSelectorUnits::ALL {
+            for shape in TextSelectorShape::ALL {
+                editor
+                    .execute(Command::SetTextSelector {
+                        id: 1,
+                        selector: TextSelector { units, shape },
+                    })
+                    .unwrap();
+                let layer = editor.selected_layer().unwrap();
+                assert_eq!(
+                    super::animator_section_label(layer),
+                    format!("Text Animator · {} · {}", units.label(), shape.label())
+                );
+                assert_eq!(super::text_groups(layer), initial_groups);
+                for (_, paths) in &initial_groups[9..] {
+                    assert!(!super::group_animated(layer, paths));
+                }
+            }
+        }
+    }
+
+    #[test]
     fn text_opacity_timeline_has_independent_percentage_groups_and_watches() {
         let mut e = Editor::default();
         e.execute(Command::AddContent {
@@ -2675,7 +3588,7 @@ mod tests {
         .unwrap();
         let source = e.project().clone();
         let groups = super::text_groups(e.selected_layer().unwrap());
-        assert_eq!(groups.iter().flat_map(|(_, paths)| paths).count(), 13);
+        assert_eq!(groups.iter().flat_map(|(_, paths)| paths).count(), 23);
         for (paint, index) in [(TextPaint::Fill, 7), (TextPaint::Stroke, 8)] {
             let parameter = paint.opacity();
             let paths = &groups[index].1;
@@ -2987,6 +3900,83 @@ mod source_text_tests {
                 .keys()[&90]
                 .interpolation,
             Interpolation::Hold
+        );
+    }
+}
+
+#[cfg(test)]
+mod animator_stack_timeline_tests {
+    use super::*;
+    use libre_effects_core::{Content, Editor};
+    #[test]
+    fn extra_animator_lanes_follow_stack_order_with_stable_ids_and_sparse_filters() {
+        let mut editor = Editor::default();
+        editor
+            .execute(Command::AddContent {
+                content: Content::Text {
+                    text: "Stack".into(),
+                    font_size: 48.,
+                },
+                width: 400.,
+                height: 120.,
+                name: "Text".into(),
+            })
+            .unwrap();
+        let legacy = text_groups(editor.selected_layer().unwrap());
+        for _ in 0..2 {
+            editor.execute(Command::AddTextAnimator { id: 1 }).unwrap();
+        }
+        let groups = text_groups(editor.selected_layer().unwrap());
+        assert_eq!(&groups[..legacy.len()], legacy.as_slice());
+        assert_eq!(groups.len(), legacy.len() + 20);
+        let mut lanes = vec![];
+        for (index, (label, paths)) in groups[legacy.len()..].iter().enumerate() {
+            let parameter = super::super::text_animator::ANIMATOR_PARAMETERS[index % 10];
+            let path = PropertyPath::TextAnimator {
+                animator: 1 + (index / 10) as u64,
+                parameter,
+            };
+            assert_eq!(paths, &[path]);
+            assert_eq!(label, parameter.label().trim_start_matches("Animator · "));
+            let layer = editor.selected_layer().unwrap();
+            assert!(layer.track(path).is_none());
+            assert_eq!(
+                layer.track_value(path, 10),
+                layer.text_value_at(parameter, 10)
+            );
+            assert!(!group_visible(layer, paths, Some(PropertyFilter::Animated)));
+            lanes.push(path);
+        }
+        editor
+            .execute(group_watch(
+                editor.selected_layer().unwrap(),
+                &[lanes[19]],
+                10,
+            ))
+            .unwrap();
+        assert!(group_visible(
+            editor.selected_layer().unwrap(),
+            &[lanes[19]],
+            Some(PropertyFilter::Animated)
+        ));
+        editor
+            .execute(Command::MoveTextAnimator {
+                id: 1,
+                animator: 2,
+                index: 0,
+            })
+            .unwrap();
+        let reordered = text_groups(editor.selected_layer().unwrap());
+        assert_eq!(reordered[legacy.len()].1, vec![lanes[10]]);
+        assert_eq!(reordered[legacy.len() + 10].1, vec![lanes[0]]);
+        assert!(
+            editor
+                .selected_layer()
+                .unwrap()
+                .track(lanes[19])
+                .unwrap()
+                .keys()
+                .contains_key(&10)
         );
     }
 }

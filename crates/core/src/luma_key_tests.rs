@@ -99,7 +99,7 @@ fn audio() -> Content {
 
 #[test]
 fn luma_defaults_specs_mode_and_legacy_wire_shape_are_explicit() {
-    assert_eq!(EffectKind::ALL.len(), 13);
+    assert_eq!(EffectKind::ALL.len(), 14);
     assert_eq!(
         EffectKind::ALL
             .iter()
@@ -862,7 +862,8 @@ fn luma_preset_collisions_and_duration_reject_atomically_and_legacy_versions_sta
     );
     for kind in EffectKind::ALL
         .into_iter()
-        .filter(|k| *k != EffectKind::LumaKey)
+        // Slider Control has its own schema-65 coverage; this loop checks legacy effects.
+        .filter(|k| !matches!(k, EffectKind::LumaKey | EffectKind::SliderControl))
     {
         let mut old = Editor::default();
         old.execute(Command::AddRectangle).unwrap();
@@ -1000,7 +1001,9 @@ fn luma_duplicate_split_shift_clipboard_fps_and_key_copy_preserve_animation() {
             influence: 0.4
         })
     );
-    assert_eq!(editor.project().version, 51);
+    // Five source frames of origin movement resample to ten at 60 fps.
+    assert_eq!(editor.selected_layer().unwrap().start_frame, Some(10));
+    assert_eq!(editor.project().version, 64);
     assert_eq!(
         Project::from_json(&editor.project().to_json().unwrap()).unwrap(),
         *editor.project()

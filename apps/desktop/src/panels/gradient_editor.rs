@@ -1,8 +1,8 @@
 //! A modal, isolated Contents gradient transaction. No draft enters source history or I/O.
 use crate::editor::EditorState;
 use libre_effects_core::{
-    Command, Content, ContentsEdit, ContentsNode, ContentsParam, Editor, Frame, GradientParam,
-    LayerId, Project, TrackEdit,
+    Command, Content, ContentsEdit, ContentsNode, ContentsParam, Editor, Frame, GradientColorsEdit,
+    GradientParam, LayerId, Project, TrackEdit,
 };
 use std::sync::Arc;
 
@@ -21,6 +21,8 @@ pub(crate) struct Session {
     pub item: u64,
     draft: Editor,
     commands: Vec<Command>,
+    compound: bool,
+    selection_generation: u64,
     segment_start: usize,
     pub selected: GradientParam,
     pub error: String,
@@ -39,9 +41,37 @@ impl Session {
             .node(item)
             .and_then(|n| n.kind.gradient())
             .ok_or("Select a Gradient Fill or Gradient Stroke")?;
+        let compound = gradient.colors_animation().is_some();
         let mut draft = Editor::default();
         draft.replace_project(s.editor.project().clone())?;
         draft.select(layer.id());
+        // Compound colors are edited in a temporary static sample. The original
+        // compound track remains untouched, and OK writes one complete snapshot.
+        if compound {
+            draft.execute(Command::Contents {
+                id: layer.id(),
+                edit: ContentsEdit::GradientColors {
+                    item,
+                    edit: GradientColorsEdit::SetAnimation {
+                        frame: s.frame,
+                        enabled: false,
+                    },
+                },
+            })?;
+        }
+        let Content::ShapeContents(draft_contents) = draft.selected_layer().unwrap().content()
+        else {
+            unreachable!()
+        };
+        let selected = GradientParam::ColorPosition(
+            draft_contents
+                .node(item)
+                .unwrap()
+                .kind
+                .gradient()
+                .unwrap()
+                .colors[0],
+        );
         draft.clear_history();
         let session = Self {
             id: crate::color_edit::next_gradient_gesture(),
@@ -54,8 +84,10 @@ impl Session {
             item,
             draft,
             commands: vec![],
+            compound,
+            selection_generation: 0,
             segment_start: 0,
-            selected: GradientParam::ColorPosition(gradient.colors[0]),
+            selected,
             error: String::new(),
             input_error: None,
         };
@@ -179,6 +211,49 @@ impl Session {
         current == *original
     }
     fn finalized(&self) -> Result<(Project, Vec<Command>), String> {
+        if self.compound {
+            let original = self.original_node();
+            let node = self.node();
+            let mut colors = node.kind.gradient().unwrap().colors_at(node, self.frame);
+            let opening = original
+                .kind
+                .gradient()
+                .unwrap()
+                .colors_at(original, self.frame);
+            // RGB/HEX controls display byte colors. Restore untouched/display-
+            // equal channel precision, including a sampled fractional opening
+            // value reached again after a color-picker round trip.
+            for stop in &mut colors.colors {
+                if let Some(before) = opening.colors.iter().find(|before| before.id == stop.id) {
+                    for (after, value) in [
+                        (&mut stop.red, before.red),
+                        (&mut stop.green, before.green),
+                        (&mut stop.blue, before.blue),
+                    ] {
+                        if after.round() == value.round() {
+                            *after = value;
+                        }
+                    }
+                }
+            }
+            if opening == colors {
+                return Ok((self.origin.as_ref().clone(), vec![]));
+            }
+            let command = Command::Contents {
+                id: self.layer,
+                edit: ContentsEdit::GradientColors {
+                    item: self.item,
+                    edit: GradientColorsEdit::Set {
+                        frame: self.frame,
+                        colors,
+                    },
+                },
+            };
+            let mut temporary = Editor::default();
+            temporary.replace_project(self.origin.as_ref().clone())?;
+            temporary.execute(command.clone())?;
+            return Ok((temporary.project().clone(), vec![command]));
+        }
         let corrections = self.corrections();
         let project = if corrections.is_empty() {
             self.draft.project().clone()
@@ -208,6 +283,9 @@ impl Session {
         if project == *self.origin {
             return Ok(None);
         }
+        if self.compound {
+            return Ok(corrections.into_iter().next());
+        }
         let mut commands = self.commands.clone();
         commands.extend(corrections);
         Ok(Some(Command::Batch(commands)))
@@ -216,6 +294,24 @@ impl Session {
         self.draft.execute(command.clone())?;
         self.draft.clear_history();
         self.record(command);
+        self.error.clear();
+        self.input_error = None;
+        Ok(())
+    }
+    fn apply_draft_sequence(&mut self, commands: Vec<Command>) -> Result<(), String> {
+        // A multi-step private bridge is atomic even if its second step exceeds
+        // a validation or metadata bound. Only the finished candidate is adopted.
+        let mut temporary = Editor::default();
+        temporary.replace_project(self.draft.project().clone())?;
+        temporary.select(self.layer);
+        for command in &commands {
+            temporary.execute(command.clone())?;
+        }
+        temporary.clear_history();
+        self.draft = temporary;
+        for command in commands {
+            self.record(command);
+        }
         self.error.clear();
         self.input_error = None;
         Ok(())
@@ -261,10 +357,32 @@ impl Session {
         {
             return Err("This gradient stop no longer exists".into());
         }
-        if (self.value(parameter) - value).abs() < 1e-8 {
+        let previous = self.value(parameter);
+        if if self.compound {
+            previous.to_bits() == value.to_bits()
+        } else {
+            (previous - value).abs() < 1e-8
+        } {
             self.error.clear();
             self.input_error = None;
             return Ok(());
+        }
+        if self.compound && previous == value && previous.to_bits() != value.to_bits() {
+            // Legacy scalar equality treats signed zero alike, while total_cmp
+            // distinguishes coincident-stop order. Neither private bridge state
+            // is previewed; both steps must validate before the draft is adopted.
+            let command = |value| Command::Contents {
+                id: self.layer,
+                edit: ContentsEdit::Track {
+                    item: self.item,
+                    parameter: ContentsParam::Gradient(parameter),
+                    edit: TrackEdit::Value {
+                        frame: self.frame,
+                        value,
+                    },
+                },
+            };
+            return self.apply_draft_sequence(vec![command(1.), command(value)]);
         }
         self.apply(Command::Contents {
             id: self.layer,
@@ -288,6 +406,10 @@ impl Session {
                 frame: self.frame,
             },
         })?;
+        self.selection_generation = self
+            .selection_generation
+            .checked_add(1)
+            .expect("Gradient selection exhausted");
         let gradient = self.node().kind.gradient().unwrap();
         self.selected = if opacity {
             GradientParam::OpacityPosition(*gradient.opacities.last().unwrap())
@@ -312,6 +434,10 @@ impl Session {
                 stop,
             },
         })?;
+        self.selection_generation = self
+            .selection_generation
+            .checked_add(1)
+            .expect("Gradient selection exhausted");
         let gradient = self.node().kind.gradient().unwrap();
         self.selected = if opacity {
             GradientParam::OpacityPosition(gradient.opacities[0])
@@ -328,6 +454,10 @@ impl Session {
         {
             return Err("Select an existing gradient stop".into());
         }
+        self.selection_generation = self
+            .selection_generation
+            .checked_add(1)
+            .expect("Gradient selection exhausted");
         self.selected = parameter;
         self.error.clear();
         self.input_error = None;
@@ -343,27 +473,28 @@ impl Session {
                 .contains(&stop)
         })
     }
+    fn number_text(&self, value: f64) -> String {
+        if self.compound {
+            value.to_string()
+        } else {
+            format!("{value:.2}")
+        }
+    }
     pub fn field_value(&self, index: usize) -> Option<String> {
         let stop = self.selected.stop()?;
         let opacity = self.opacity();
         Some(match index {
-            0 => format!(
-                "{:.2}",
-                self.value(if opacity {
-                    GradientParam::OpacityPosition(stop)
-                } else {
-                    GradientParam::ColorPosition(stop)
-                })
-            ),
-            1 => format!(
-                "{:.2}",
-                self.value(if opacity {
-                    GradientParam::OpacityMidpoint(stop)
-                } else {
-                    GradientParam::ColorMidpoint(stop)
-                })
-            ),
-            2 if opacity => format!("{:.2}", self.value(GradientParam::Opacity(stop))),
+            0 => self.number_text(self.value(if opacity {
+                GradientParam::OpacityPosition(stop)
+            } else {
+                GradientParam::ColorPosition(stop)
+            })),
+            1 => self.number_text(self.value(if opacity {
+                GradientParam::OpacityMidpoint(stop)
+            } else {
+                GradientParam::ColorMidpoint(stop)
+            })),
+            2 if opacity => self.number_text(self.value(GradientParam::Opacity(stop))),
             3..=6 if !opacity => {
                 let color = self
                     .node()
@@ -425,6 +556,30 @@ impl Session {
 }
 
 impl EditorState {
+    /// Compound fields also bind the exact stop-selection generation. A delayed
+    /// callback cannot regain authority after selecting another stop and back.
+    pub(crate) fn gradient_compound_input(
+        &mut self,
+        session_id: u64,
+        generation: u64,
+        stop: u64,
+        index: usize,
+        text: &str,
+    ) -> String {
+        self.invalidate_gradient_editor();
+        if self.gradient_editor.as_ref().is_some_and(|session| {
+            session.id == session_id
+                && session.compound
+                && session.selection_generation == generation
+                && session.selected.stop() == Some(stop)
+        }) {
+            self.gradient_input(session_id, index, text);
+        }
+        self.gradient_editor
+            .as_ref()
+            .and_then(|session| session.field_value(index))
+            .unwrap_or_default()
+    }
     /// The originating dialog generation is captured by each field callback.
     pub(crate) fn gradient_input(&mut self, session_id: u64, index: usize, text: &str) {
         self.invalidate_gradient_editor();
@@ -1245,5 +1400,380 @@ mod tests {
         s.editor.undo();
         assert_eq!(s.editor.project(), &before);
         assert!(!s.editor.can_undo());
+    }
+}
+
+#[cfg(test)]
+mod compound_tests {
+    use super::*;
+    use libre_effects_core::ContentsKind;
+    fn scene() -> EditorState {
+        let mut s = EditorState::default();
+        s.editor
+            .execute(Command::AddContent {
+                content: Content::ShapeContents(Default::default()),
+                width: 200.,
+                height: 120.,
+                name: "Compound".into(),
+            })
+            .unwrap();
+        s.editor
+            .execute(Command::Contents {
+                id: 1,
+                edit: ContentsEdit::Add {
+                    parent: 0,
+                    kind: ContentsKind::GradientFill {
+                        even_odd: false,
+                        gradient: Default::default(),
+                    },
+                },
+            })
+            .unwrap();
+        s.editor
+            .execute(Command::Contents {
+                id: 1,
+                edit: ContentsEdit::GradientColors {
+                    item: 1,
+                    edit: GradientColorsEdit::SetAnimation {
+                        frame: 0,
+                        enabled: true,
+                    },
+                },
+            })
+            .unwrap();
+        s.frame = 30;
+        s.contents_selection = Some((s.editor.project().active_composition_id(), 1, 1));
+        s.editor.clear_history();
+        s
+    }
+    fn node(project: &Project) -> &ContentsNode {
+        let Content::ShapeContents(contents) = project.composition().layer(1).unwrap().content()
+        else {
+            panic!()
+        };
+        contents.node(1).unwrap()
+    }
+    #[test]
+    fn compound_modal_samples_to_private_static_draft_and_commits_one_complete_key() {
+        let mut s = scene();
+        let before = s.editor.project().clone();
+        let mut draft = Session::new(&s, 1).unwrap();
+        assert!(draft.compound);
+        assert!(
+            draft
+                .node()
+                .kind
+                .gradient()
+                .unwrap()
+                .colors_animation()
+                .is_none()
+        );
+        draft.input(3, "12EF34").unwrap();
+        draft.add(false, 25.).unwrap();
+        draft.input(3, "FEDCBA").unwrap();
+        draft.add(true, 65.).unwrap();
+        draft.input(2, "40").unwrap();
+        assert_eq!(s.editor.project(), &before);
+        assert!(!s.editor.can_undo());
+        let preview = draft.preview(&s).unwrap();
+        assert!(matches!(
+            draft.command().unwrap(),
+            Some(Command::Contents {
+                edit: ContentsEdit::GradientColors {
+                    edit: GradientColorsEdit::Set { frame: 30, .. },
+                    ..
+                },
+                ..
+            })
+        ));
+        let original = node(&before);
+        let changed = node(&preview);
+        assert_eq!(
+            original.parameters, changed.parameters,
+            "legacy base stop tracks stay untouched"
+        );
+        let keys = changed
+            .kind
+            .gradient()
+            .unwrap()
+            .colors_animation()
+            .unwrap()
+            .keys();
+        assert_eq!(keys.keys().copied().collect::<Vec<_>>(), vec![0, 30]);
+        assert_eq!(keys[&30].colors.len(), 3);
+        assert_eq!(keys[&30].opacities.len(), 3);
+        assert_eq!(keys[&30].colors[0].red, 18.);
+        assert_eq!(
+            original.kind.gradient().unwrap().colors_at(original, 29),
+            changed.kind.gradient().unwrap().colors_at(changed, 29)
+        );
+        s.gradient_editor = Some(draft);
+        s.accept_gradient_editor();
+        assert_eq!(s.editor.project(), &preview);
+        s.editor.undo();
+        assert_eq!(s.editor.project(), &before);
+        assert!(!s.editor.can_undo());
+        s.editor.redo();
+        assert_eq!(s.editor.project(), &preview);
+    }
+    #[test]
+    fn compound_modal_noop_away_back_and_added_removed_stop_preserve_redo() {
+        for mode in 0..3 {
+            let mut s = scene();
+            s.editor
+                .execute(Command::Contents {
+                    id: 1,
+                    edit: ContentsEdit::Rename {
+                        item: 1,
+                        name: "Temporary".into(),
+                    },
+                })
+                .unwrap();
+            s.editor.undo();
+            let before = s.editor.project().clone();
+            let mut draft = Session::new(&s, 1).unwrap();
+            if mode == 1 {
+                draft
+                    .set_value(GradientParam::ColorPosition(1), 25.)
+                    .unwrap();
+                draft
+                    .set_value(GradientParam::ColorPosition(1), 0.)
+                    .unwrap();
+            } else if mode == 2 {
+                draft.add(false, 25.).unwrap();
+                draft.remove().unwrap();
+                draft.add(true, 65.).unwrap();
+                draft.remove().unwrap();
+            }
+            assert!(draft.command().unwrap().is_none());
+            assert_eq!(draft.preview(&s).unwrap(), before);
+            s.gradient_editor = Some(draft);
+            s.accept_gradient_editor();
+            assert_eq!(s.editor.project(), &before);
+            assert!(s.editor.can_redo());
+            assert!(!s.editor.can_undo());
+        }
+    }
+    #[test]
+    fn compound_modal_tiny_value_and_existing_key_replacement_are_exact() {
+        let mut s = scene();
+        let mut draft = Session::new(&s, 1).unwrap();
+        draft
+            .set_value(GradientParam::ColorPosition(1), 1e-10)
+            .unwrap();
+        assert!(draft.command().unwrap().is_some());
+        s.gradient_editor = Some(draft);
+        s.accept_gradient_editor();
+        let mut draft = Session::new(&s, 1).unwrap();
+        draft.input(3, "123456").unwrap();
+        let before = s.editor.project().clone();
+        let preview = draft.preview(&s).unwrap();
+        let before_keys = node(&before)
+            .kind
+            .gradient()
+            .unwrap()
+            .colors_animation()
+            .unwrap()
+            .keys();
+        let after_keys = node(&preview)
+            .kind
+            .gradient()
+            .unwrap()
+            .colors_animation()
+            .unwrap()
+            .keys();
+        assert_eq!(
+            before_keys.keys().collect::<Vec<_>>(),
+            after_keys.keys().collect::<Vec<_>>()
+        );
+        assert_eq!(before_keys[&0], after_keys[&0]);
+        assert_eq!(after_keys[&30].colors[0].position, 1e-10);
+    }
+    #[test]
+    fn compound_modal_invalid_and_stale_input_never_retargets_the_snapshot() {
+        let mut s = scene();
+        let mut draft = Session::new(&s, 1).unwrap();
+        let original = s.editor.project().clone();
+        for value in [f64::NAN, f64::INFINITY, -1., 101.] {
+            assert!(
+                draft
+                    .set_value(GradientParam::ColorPosition(1), value)
+                    .is_err()
+            );
+        }
+        assert!(draft.command().unwrap().is_none());
+        draft.input(3, "123456").unwrap();
+        s.gradient_editor = Some(draft);
+        s.frame = 31;
+        s.accept_gradient_editor();
+        assert!(s.gradient_editor.is_none());
+        assert_eq!(s.editor.project(), &original);
+        assert!(!s.editor.can_undo());
+    }
+    #[test]
+    fn compound_modal_field_callbacks_bind_stop_selection_generation_and_restore_invalid_text() {
+        let mut s = scene();
+        let draft = Session::new(&s, 1).unwrap();
+        let (id, generation) = (draft.id, draft.selection_generation);
+        s.gradient_editor = Some(draft);
+        assert_eq!(
+            s.gradient_compound_input(id, generation, 1, 0, "0.0000000001"),
+            "0.0000000001"
+        );
+        let preview = s.gradient_editor.as_ref().unwrap().preview(&s).unwrap();
+        assert_eq!(
+            s.gradient_compound_input(id, generation, 1, 0, "NaN"),
+            "0.0000000001"
+        );
+        assert_eq!(s.gradient_editor.as_ref().unwrap().input_error, Some(0));
+        s.accept_gradient_editor();
+        assert!(s.gradient_editor.is_some());
+        s.gradient_editor
+            .as_mut()
+            .unwrap()
+            .select(GradientParam::ColorPosition(2))
+            .unwrap();
+        s.gradient_editor
+            .as_mut()
+            .unwrap()
+            .select(GradientParam::ColorPosition(1))
+            .unwrap();
+        assert_eq!(
+            s.gradient_compound_input(id, generation, 1, 0, "20"),
+            "0.0000000001"
+        );
+        assert_eq!(
+            s.gradient_editor.as_ref().unwrap().preview(&s).unwrap(),
+            preview
+        );
+        let fresh = s.gradient_editor.as_ref().unwrap().selection_generation;
+        assert_eq!(s.gradient_compound_input(id, fresh, 1, 0, "20"), "20");
+        s.accept_gradient_editor();
+        assert!(s.gradient_editor.is_none());
+        let node = node(s.editor.project());
+        assert_eq!(
+            node.kind.gradient().unwrap().colors_at(node, 30).colors[0].position,
+            20.
+        );
+    }
+    #[test]
+    fn compound_modal_fractional_rgb_display_roundtrip_retains_raw_values_and_redo() {
+        let mut s = scene();
+        s.editor
+            .execute(Command::Contents {
+                id: 1,
+                edit: ContentsEdit::GradientColors {
+                    item: 1,
+                    edit: GradientColorsEdit::Value {
+                        frame: 30,
+                        parameter: GradientParam::Red(1),
+                        value: 127.5,
+                    },
+                },
+            })
+            .unwrap();
+        s.editor
+            .execute(Command::Contents {
+                id: 1,
+                edit: ContentsEdit::Rename {
+                    item: 1,
+                    name: "Temporary".into(),
+                },
+            })
+            .unwrap();
+        s.editor.undo();
+        let before = s.editor.project().clone();
+        let mut draft = Session::new(&s, 1).unwrap();
+        assert_eq!(draft.field_value(4).as_deref(), Some("128"));
+        draft.input(4, "12").unwrap();
+        draft.input(4, "128").unwrap();
+        assert!(draft.command().unwrap().is_none());
+        assert_eq!(draft.preview(&s).unwrap(), before);
+        s.gradient_editor = Some(draft);
+        s.accept_gradient_editor();
+        assert_eq!(s.editor.project(), &before);
+        assert!(s.editor.can_redo());
+    }
+    #[test]
+    fn compound_modal_signed_zero_location_preserves_bits_without_intermediate_source_edit() {
+        let mut s = scene();
+        s.editor
+            .execute(Command::Contents {
+                id: 1,
+                edit: ContentsEdit::GradientColors {
+                    item: 1,
+                    edit: GradientColorsEdit::Value {
+                        frame: 30,
+                        parameter: GradientParam::ColorPosition(2),
+                        value: 0.,
+                    },
+                },
+            })
+            .unwrap();
+        s.editor.clear_history();
+        let before = s.editor.project().clone();
+        let mut draft = Session::new(&s, 1).unwrap();
+        draft.select(GradientParam::ColorPosition(2)).unwrap();
+        draft
+            .set_value(GradientParam::ColorPosition(2), -0.)
+            .unwrap();
+        assert_eq!(
+            draft.value(GradientParam::ColorPosition(2)).to_bits(),
+            (-0.0f64).to_bits()
+        );
+        assert_eq!(s.editor.project(), &before);
+        assert!(!s.editor.can_undo());
+        assert!(matches!(
+            draft.command().unwrap(),
+            Some(Command::Contents {
+                edit: ContentsEdit::GradientColors {
+                    edit: GradientColorsEdit::Set { .. },
+                    ..
+                },
+                ..
+            })
+        ));
+        let preview = draft.preview(&s).unwrap();
+        let current = node(&preview);
+        assert_eq!(
+            current
+                .kind
+                .gradient()
+                .unwrap()
+                .colors_at(current, 30)
+                .colors[1]
+                .position
+                .to_bits(),
+            (-0.0f64).to_bits()
+        );
+        s.gradient_editor = Some(draft);
+        s.accept_gradient_editor();
+        assert_eq!(s.editor.project(), &preview);
+        s.editor.undo();
+        assert_eq!(s.editor.project(), &before);
+        assert!(!s.editor.can_undo());
+    }
+    #[test]
+    fn compound_modal_failed_private_bridge_never_exposes_intermediate_draft() {
+        let s = scene();
+        let mut draft = Session::new(&s, 1).unwrap();
+        let before = draft.draft.project().clone();
+        let command = |value| Command::Contents {
+            id: 1,
+            edit: ContentsEdit::Track {
+                item: 1,
+                parameter: ContentsParam::Gradient(GradientParam::ColorPosition(1)),
+                edit: TrackEdit::Value { frame: 30, value },
+            },
+        };
+        assert!(
+            draft
+                .apply_draft_sequence(vec![command(1.), command(101.)])
+                .is_err()
+        );
+        assert_eq!(draft.draft.project(), &before);
+        assert!(draft.commands.is_empty());
+        assert!(draft.command().unwrap().is_none());
+        assert_eq!(draft.preview(&s).unwrap(), *s.editor.project());
     }
 }

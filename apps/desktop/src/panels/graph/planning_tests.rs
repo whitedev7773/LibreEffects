@@ -68,6 +68,165 @@ fn geometry() -> (View, Bounds<Pixels>, Point<Pixels>) {
 }
 
 #[test]
+fn native_opacity_is_rejected_before_graph_narrows_a_mixed_selection() {
+    let mut state = EditorState::default();
+    state.editor = crate::opacity_test_support::overshoot_editor(false);
+    state.editor.execute(Command::AddRectangle).unwrap();
+    let scalar = [
+        key(2, Property::PositionX, 10),
+        key(2, Property::PositionX, 30),
+    ];
+    for (key, value) in scalar.into_iter().zip([20.0, 80.0]) {
+        put(&mut state, key, value);
+    }
+    state.graph_activate_channel(channel(scalar[0]), true);
+    state.graph_open = true;
+    state.graph_key = Some(scalar[0]);
+    state.selected_keys = [scalar[0], scalar[1], key(1, Property::Opacity, 0)].into();
+    state.editor.clear_history();
+    let before = state.editor.project().clone();
+    let keys = state.selected_keys.iter().copied().collect::<Vec<_>>();
+    assert_eq!(selection::included(&state), scalar);
+    assert!(
+        selection::validate_scalar_selection(&state)
+            .unwrap_err()
+            .contains("Native Opacity")
+    );
+    assert!(selection::scale(&state, true, 2.0).is_err());
+    assert!(EditPlan::paste(&state).is_err());
+    let (view, bounds, start) = geometry();
+    assert!(TimeGesture::new(&state, view, bounds, start, None).is_err());
+    assert!(super::super::transform::Transform::new(&state, view, bounds, start).is_none());
+    assert!(EditPlan::translate(&before, &keys, 5, state.graph_key).is_err());
+    assert!(EditPlan::scale_time(&before, &keys, 10.0, 2.0, state.graph_key).is_err());
+    assert!(EditPlan::scale_value(&before, &keys, 2.0, state.graph_key).is_err());
+    assert!(EditPlan::delete(&before, &keys).is_err());
+    assert!(EditPlan::interpolation(&before, &keys, Interpolation::Hold).is_err());
+    assert!(EditPlan::temporal_mode(&before, &keys, TemporalMode::Auto).is_err());
+    assert!(EditPlan::ease(&before, &keys, true, true).is_err());
+    assert_eq!(state.editor.project(), &before);
+    assert_eq!(
+        state.selected_keys.iter().copied().collect::<Vec<_>>(),
+        keys
+    );
+    assert!(!state.editor.can_undo());
+}
+
+#[test]
+fn joined_position_is_rejected_before_graph_can_narrow_a_mixed_selection() {
+    let mut state = EditorState::default();
+    state.editor.execute(Command::AddRectangle).unwrap();
+    state
+        .editor
+        .execute(Command::SetThreeD {
+            id: 1,
+            enabled: true,
+        })
+        .unwrap();
+    state.editor.execute(Command::AddRectangle).unwrap();
+    let scalar = [key(2, Property::Opacity, 10), key(2, Property::Opacity, 30)];
+    for (key, value) in scalar.into_iter().zip([20.0, 80.0]) {
+        put(&mut state, key, value);
+    }
+    state.graph_activate_channel(channel(scalar[0]), true);
+    state.graph_open = true;
+    state.graph_key = Some(scalar[0]);
+    let stale_joined = key(1, Property::PositionX, 10);
+    state.selected_keys = [scalar[0], scalar[1], stale_joined].into();
+    state.editor.clear_history();
+    state
+        .editor
+        .execute(Command::RenameLayer {
+            id: 2,
+            name: "Redo branch".into(),
+        })
+        .unwrap();
+    state.editor.undo();
+    let before = state.editor.project().clone();
+    let selection = state.selected_keys.clone();
+    // The display may omit unavailable lanes, but action preflight must inspect
+    // the raw selection before that filtering can erase the rejected member.
+    assert_eq!(selection::included(&state), scalar);
+    assert!(selection::validate_scalar_selection(&state).is_err());
+    assert!(selection::scale(&state, true, 2.0).is_err());
+    assert!(EditPlan::paste(&state).is_err());
+    let (view, bounds, start) = geometry();
+    assert!(TimeGesture::new(&state, view, bounds, start, None).is_err());
+    assert!(super::super::transform::Transform::new(&state, view, bounds, start).is_none());
+    let keys = state.selected_keys.iter().copied().collect::<Vec<_>>();
+    assert!(EditPlan::translate(&before, &keys, 5, state.graph_key).is_err());
+    assert!(EditPlan::scale_time(&before, &keys, 10.0, 2.0, state.graph_key).is_err());
+    assert!(EditPlan::scale_value(&before, &keys, 2.0, state.graph_key).is_err());
+    assert!(EditPlan::delete(&before, &keys).is_err());
+    assert!(EditPlan::interpolation(&before, &keys, Interpolation::Hold).is_err());
+    assert!(EditPlan::temporal_mode(&before, &keys, TemporalMode::Auto).is_err());
+    assert!(EditPlan::ease(&before, &keys, true, true).is_err());
+    assert_eq!(state.editor.project(), &before);
+    assert_eq!(state.selected_keys, selection);
+    assert!(!state.editor.can_undo());
+    assert!(state.editor.can_redo());
+    state.selected_keys = scalar.into();
+    assert!(selection::validate_scalar_selection(&state).is_ok());
+    assert!(EditPlan::translate(&before, &scalar, 5, state.graph_key).is_ok());
+}
+
+#[test]
+fn mixed_scalar_paste_into_joined_position_rejects_every_destination() {
+    let mut state = EditorState::default();
+    state.editor.execute(Command::AddRectangle).unwrap();
+    state
+        .editor
+        .execute(Command::SetThreeD {
+            id: 1,
+            enabled: true,
+        })
+        .unwrap();
+    state.editor.execute(Command::AddRectangle).unwrap();
+    for (property, value) in [(Property::Opacity, 25.0), (Property::PositionX, 100.0)] {
+        put(&mut state, key(2, property, 10), value);
+    }
+    let project = state.editor.project();
+    let copies = [Property::Opacity, Property::PositionX].map(|property| {
+        project
+            .composition()
+            .layer(2)
+            .unwrap()
+            .copy_key(property.into(), 10)
+            .unwrap()
+    });
+    let destinations = [Property::Opacity, Property::PositionX].map(|property| GraphChannel {
+        id: 1,
+        property: property.into(),
+    });
+    let before = project.clone();
+    assert!(
+        EditPlan::paste_copies(
+            project,
+            &copies,
+            &destinations,
+            Some(destinations[0]),
+            50,
+            None,
+            &[]
+        )
+        .is_err()
+    );
+    assert_eq!(state.editor.project(), &before);
+    assert!(
+        state
+            .editor
+            .project()
+            .composition()
+            .layer(1)
+            .unwrap()
+            .property(Property::Opacity)
+            .unwrap()
+            .keys()
+            .is_empty()
+    );
+}
+
+#[test]
 fn same_frame_different_lanes_are_distinct_and_vacated_destinations_are_legal() {
     let (mut state, keys) = scene();
     assert_eq!(selection::included(&state).len(), 4);

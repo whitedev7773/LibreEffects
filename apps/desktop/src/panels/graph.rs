@@ -30,9 +30,25 @@ use std::{
 #[cfg(test)]
 fn graph_units(property: PropertyPath, speed: bool) -> &'static str {
     match (property, speed) {
-        (PropertyPath::Text(parameter), speed) => channels::text_unit(parameter).label(speed),
+        (PropertyPath::Text(parameter) | PropertyPath::TextAnimator { parameter, .. }, speed) => {
+            channels::text_unit(parameter).label(speed)
+        }
+        (PropertyPath::TextSelector { .. }, speed) => channels::Unit::Percent.label(speed),
         (_, true) => "units/s",
         _ => "",
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn secondary_selector_graph_units_are_percentage_in_value_and_speed_modes() {
+    for parameter in libre_effects_core::TextSelectorParam::ALL {
+        let path = PropertyPath::TextSelector {
+            selector: 7,
+            parameter,
+        };
+        assert_eq!(graph_units(path, false), "%");
+        assert_eq!(graph_units(path, true), "%/s");
     }
 }
 
@@ -469,6 +485,7 @@ fn graph_editable(state: &EditorState) -> bool {
         && state.colors.session.is_none()
         && state.gradient_editor.is_none()
         && state.vertex_editor.is_none()
+        && state.expression_editor.is_none()
         && state.text_session.is_none()
         && !state.new_composition_requested
 }
@@ -526,13 +543,23 @@ fn mixed_selection(keys: &[KeyRef]) -> bool {
             .any(|key| key.id != first.id || key.property != first.property)
     })
 }
+fn reject_native_timing_selection(state: &mut EditorState, cx: &mut Context<EditorState>) -> bool {
+    if let Err(error) = selection::validate_scalar_selection(state) {
+        state.status = error;
+        cx.notify();
+        true
+    } else {
+        false
+    }
+}
+
 fn apply_plan(
     state: &mut EditorState,
     result: Result<planning::EditPlan, String>,
     window: &mut Window,
     cx: &mut Context<EditorState>,
 ) {
-    if !graph_editable(state) {
+    if reject_native_timing_selection(state, cx) || !graph_editable(state) {
         return;
     }
     match result {
@@ -596,6 +623,9 @@ fn dispatch_key(
     window: &mut Window,
     cx: &mut Context<EditorState>,
 ) {
+    if reject_native_timing_selection(state, cx) {
+        return;
+    }
     let selected = selected(state);
     let property = selected.map_or(state.graph_property, |(_, _, p)| p);
     let from = selected.map(|(_, frame, _)| frame);
@@ -628,6 +658,9 @@ fn dispatch_key(
 impl Graph {
     pub(super) fn focus(&self, window: &mut Window) {
         window.focus(&self.focus);
+    }
+    pub(super) fn contains_focus(&self, window: &Window, cx: &gpui::App) -> bool {
+        self.focus.contains_focused(window, cx)
     }
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
         cx.observe(&state, |this, _, cx| {
@@ -667,6 +700,9 @@ impl Graph {
                 cx.new(|cx| {
                     TextField::new(cx, move |text, window, cx| {
                         edit.update(cx, |state, cx| {
+                            if reject_native_timing_selection(state, cx) {
+                                return;
+                            }
                             if !target.borrow().as_ref().is_some_and(|t| t.current(state)) {
                                 return;
                             }
@@ -1017,6 +1053,15 @@ impl Graph {
         };
         let bounds = lane.bounds;
         if !graph_editable(self.state.read(cx)) {
+            return;
+        }
+        if event.button == MouseButton::Left
+            && !matches!(self.state.read(cx).tool, Tool::Hand | Tool::Zoom)
+            && !self.hand.held
+            && self
+                .state
+                .update(cx, |state, cx| reject_native_timing_selection(state, cx))
+        {
             return;
         }
         self.state.update(cx, |s, cx| {
@@ -1604,6 +1649,16 @@ impl Graph {
             cx,
         );
         if let Some(drag) = self.drag.take() {
+            if !matches!(
+                &drag,
+                Drag::Marquee { .. } | Drag::Zoom { .. } | Drag::Pan { .. }
+            ) && self
+                .state
+                .update(cx, |state, cx| reject_native_timing_selection(state, cx))
+            {
+                cx.notify();
+                return;
+            }
             if let Drag::Key {
                 id,
                 property,
@@ -2595,6 +2650,9 @@ impl Render for Graph {
                         && matches!(key, "left" | "right")
                     {
                         this.state.update(cx, |s, cx| {
+                            if reject_native_timing_selection(s, cx) {
+                                return;
+                            }
                             let delta =
                                 if key == "left" { -1 } else { 1 } * if m.shift { 10 } else { 1 };
                             let keys = selection::included(s);
@@ -2619,6 +2677,9 @@ impl Render for Graph {
                         return;
                     }
                     this.state.update(cx, |s, cx| {
+                        if reject_native_timing_selection(s, cx) {
+                            return;
+                        }
                         let keys = selection::included(s);
                         if key == "v" {
                             let result = planning::EditPlan::paste(s);
@@ -2807,7 +2868,8 @@ impl Render for Graph {
                     this.drag = None;
                     window.focus(&this.focus);
                     this.state.update(cx, |s, cx| {
-                        if graph_editable(s)
+                        if !reject_native_timing_selection(s, cx)
+                            && graph_editable(s)
                             && s.editor
                                 .project()
                                 .composition()
@@ -2958,7 +3020,7 @@ impl Render for Graph {
                 .child(toolbar);
         };
         let Some(track) = layer.track(property).cloned() else {
-            return root.child(div().p_4().child(if matches!(property, PropertyPath::Text(_)) {
+            return root.child(div().p_4().child(if matches!(property, PropertyPath::Text(_) | PropertyPath::TextSelector { .. } | PropertyPath::TextAnimator { .. }) {
                 "Enable this text property's stopwatch or add a key in the timeline to edit its graph."
             } else { "Select a property in the timeline." }));
         };
@@ -3071,7 +3133,12 @@ impl Render for Graph {
                 ("Active frame", frame.to_string()),
                 (
                     "Active value",
-                    if matches!(property, PropertyPath::Text(_)) {
+                    if matches!(
+                        property,
+                        PropertyPath::Text(_)
+                            | PropertyPath::TextSelector { .. }
+                            | PropertyPath::TextAnimator { .. }
+                    ) {
                         key.value.to_string()
                     } else if property == PropertyPath::TimeRemap {
                         format!("{:.12}", key.value)
@@ -3442,11 +3509,28 @@ mod tests {
         for p in libre_effects_core::TextParam::ALL {
             let path = libre_effects_core::PropertyPath::Text(p);
             let expected = match p {
-                TextParam::FontSize | TextParam::StrokeWidth => ("px", "px/s"),
+                TextParam::FontSize
+                | TextParam::StrokeWidth
+                | TextParam::AnimatorPositionX
+                | TextParam::AnimatorPositionY => ("px", "px/s"),
+                TextParam::AnimatorRotation => ("deg", "deg/s"),
                 TextParam::Tracking => ("1/1000 em", "(1/1000 em)/s"),
                 TextParam::Leading => ("ratio", "ratio/s"),
-                TextParam::FillOpacity | TextParam::StrokeOpacity => ("%", "%/s"),
-                _ => ("RGB 0–255", "RGB units/s"),
+                TextParam::FillOpacity
+                | TextParam::StrokeOpacity
+                | TextParam::AnimatorStart
+                | TextParam::AnimatorEnd
+                | TextParam::AnimatorOffset
+                | TextParam::AnimatorAmount
+                | TextParam::AnimatorScaleX
+                | TextParam::AnimatorScaleY
+                | TextParam::AnimatorOpacity => ("%", "%/s"),
+                TextParam::FillRed
+                | TextParam::FillGreen
+                | TextParam::FillBlue
+                | TextParam::StrokeRed
+                | TextParam::StrokeGreen
+                | TextParam::StrokeBlue => ("RGB 0–255", "RGB units/s"),
             };
             assert_eq!(super::graph_units(path, false), expected.0);
             assert_eq!(super::graph_units(path, true), expected.1);

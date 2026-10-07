@@ -36,9 +36,9 @@ fn scene(path: &str, fps: FrameRate) -> Editor {
 }
 fn cached(e: &Editor, preview: bool) -> Mixer {
     let mut m = Mixer::new(e.project(), preview).unwrap();
-    for source in 0..m.sources.len() {
+    for source in 0..m.cache.sources.len() {
         for second in 0..3 {
-            m.chunks.push_back(Chunk {
+            m.cache.chunks.push_back(Chunk {
                 source,
                 second,
                 pcm: (0..SAMPLE_RATE)
@@ -231,7 +231,7 @@ fn mixing_sums_channels_preserves_phase_and_reports_master_clipping() {
             .unwrap();
     }
     let mut m = cached(&e, false);
-    assert_eq!(m.sources.len(), 1);
+    assert_eq!(m.cache.sources.len(), 1);
     let output = m.render(1.0, 0, 1, 6.0, &AtomicBool::new(false)).unwrap();
     assert_eq!(output[0], [1.0, -1.0]);
     assert_eq!(m.levels.peak, [1.25; 2]);
@@ -770,4 +770,117 @@ fn cancel_audio_mix_preserves_destination_and_removes_temporary_mix() {
     assert!(result.unwrap_err().contains("canceled"));
     assert_eq!(std::fs::read(&output).unwrap(), b"original");
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
+}
+
+#[test]
+fn pcm_cache_bounds_chunks_keys_and_bytes_without_caching_invalid_data() {
+    let mut cache = PcmCache::default();
+    let mut audio = AudioMetadata {
+        stream_index: 0,
+        sample_rate: SAMPLE_RATE,
+        channels: 2,
+        channel_layout: "stereo".into(),
+        duration: 3.0,
+        start_time: 0.0,
+        file_offset: 0.0,
+    };
+    let source = cache.register("synthetic.wav", &audio).unwrap();
+    for second in 0..140 {
+        cache
+            .insert_chunk(
+                Chunk {
+                    source,
+                    second,
+                    pcm: vec![[2.0; 2]; 16],
+                },
+                &AtomicBool::new(false),
+            )
+            .unwrap();
+    }
+    assert_eq!(cache.chunks.len(), CACHE_CHUNKS);
+    assert_eq!(cache.chunks.front().unwrap().second, 12);
+    assert!(cache.memory_bytes() <= CACHE_BYTES);
+    assert!(
+        cache
+            .insert_chunk(
+                Chunk {
+                    source,
+                    second: 500,
+                    pcm: vec![[f32::INFINITY; 2]]
+                },
+                &AtomicBool::new(false)
+            )
+            .is_err()
+    );
+    assert!(
+        cache
+            .insert_chunk(
+                Chunk {
+                    source,
+                    second: 500,
+                    pcm: vec![[0.0; 2]; 48_001]
+                },
+                &AtomicBool::new(false)
+            )
+            .is_err()
+    );
+    assert_eq!(cache.chunks.back().unwrap().second, 139);
+    assert!(cache.make_room(usize::MAX).is_err());
+    assert!(cache.chunks.is_empty());
+    assert!(
+        cache
+            .register(&"x".repeat(MAX_SOURCE_PATH_BYTES + 1), &audio)
+            .is_err()
+    );
+    for index in 1..CACHE_SOURCES {
+        audio.duration = index as f64 / 100.0;
+        cache.register("synthetic.wav", &audio).unwrap();
+    }
+    // One generated duration matches the first source's metadata, so add one
+    // more distinct key before checking the exact bound.
+    audio.duration = 100.0;
+    cache.register("synthetic.wav", &audio).unwrap();
+    assert_eq!(cache.sources.len(), CACHE_SOURCES);
+    audio.duration = 101.0;
+    assert!(
+        cache
+            .register("synthetic.wav", &audio)
+            .unwrap_err()
+            .contains("4096")
+    );
+}
+
+#[test]
+fn shared_cache_pins_file_across_distinct_metadata_keys() {
+    let file = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(file.path(), b"first").unwrap();
+    let path = file.path().to_str().unwrap();
+    let e = scene(path, 30.into());
+    let (_, audio) = e.project().composition().layers()[0]
+        .content()
+        .audio()
+        .unwrap();
+    let mut cache = PcmCache::default();
+    let first = cache.register(path, audio).unwrap();
+    cache
+        .validate_source(first, &AtomicBool::new(false))
+        .unwrap();
+    let mut alternate = audio.clone();
+    alternate.stream_index = 1;
+    let second = cache.register(path, &alternate).unwrap();
+    std::fs::write(file.path(), b"changed file").unwrap();
+    assert!(
+        cache
+            .validate_source(second, &AtomicBool::new(false))
+            .unwrap_err()
+            .contains("source changed")
+    );
+}
+
+#[test]
+fn shared_audio_clock_rejects_nonfinite_positions() {
+    let e = scene("synthetic.wav", 30.into());
+    let layer = &e.project().composition().layers()[0];
+    assert!(voice_position(std::iter::once((layer, 30.into(), 180)), f64::NAN).is_err());
+    assert!(voice_position(std::iter::once((layer, 30.into(), 180)), f64::INFINITY).is_err());
 }

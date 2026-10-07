@@ -334,6 +334,7 @@ fn anchor_tool_preserves_parented_pose_and_keys_in_one_undo() {
                 .layer(2)
                 .unwrap()
                 .property(property)
+                .unwrap()
                 .keys()
                 .contains_key(&30)
         );
@@ -485,6 +486,7 @@ fn batch_key_move_handles_overlapping_sources_and_rolls_back_collisions() {
         e.selected_layer()
             .unwrap()
             .property(Property::PositionX)
+            .unwrap()
             .keys()
             .keys()
             .copied()
@@ -524,6 +526,7 @@ fn key_clipboard_preserves_timing_interpolation_and_is_atomic() {
         .selected_layer()
         .unwrap()
         .property(Property::PositionX)
+        .unwrap()
         .keys()[&10]
         .clone();
     let key = KeyCopy {
@@ -547,6 +550,7 @@ fn key_clipboard_preserves_timing_interpolation_and_is_atomic() {
         e.selected_layer()
             .unwrap()
             .property(Property::PositionX)
+            .unwrap()
             .keys()[&60],
         data
     );
@@ -581,7 +585,12 @@ fn layer_shift_moves_keys_and_range_once_and_rejects_overflow() {
     let l = e.selected_layer().unwrap();
     assert_eq!(l.in_frame(), 30);
     assert_eq!(l.out_frame(150), 120);
-    assert!(l.property(Property::Rotation).keys().contains_key(&40));
+    assert!(
+        l.property(Property::Rotation)
+            .unwrap()
+            .keys()
+            .contains_key(&40)
+    );
     e.undo();
     assert_eq!(e.project(), &before);
     assert!(e.execute(Command::ShiftLayer { id: 1, delta: 80 }).is_err());
@@ -717,7 +726,12 @@ fn bundled_curve_parent_study_roundtrips_and_inherits_motion() {
     let comp = project.composition();
     assert_eq!(comp.layer(2).unwrap().parent(), Some(1));
     assert!(matches!(
-        comp.layer(1).unwrap().property(Property::PositionX).keys()[&0].interpolation,
+        comp.layer(1)
+            .unwrap()
+            .property(Property::PositionX)
+            .unwrap()
+            .keys()[&0]
+            .interpolation,
         Interpolation::Bezier(_)
     ));
     assert_ne!(comp.corners_at(2, 0), comp.corners_at(2, 60));
@@ -760,7 +774,8 @@ fn temporal_bezier_solves_time_instead_of_using_parameter_as_time() {
     let track = editor
         .selected_layer()
         .unwrap()
-        .property(Property::PositionX);
+        .property(Property::PositionX)
+        .unwrap();
     assert!((track.sample(50.0) - 31.53568125).abs() < 1e-6);
     assert!(track.sample(50.5) > track.value_at(50));
     assert_eq!(editor.project().version, 2);
@@ -841,6 +856,7 @@ fn graph_key_edit_is_one_undo_step_and_failures_are_atomic() {
             .selected_layer()
             .unwrap()
             .property(Property::PositionX)
+            .unwrap()
             .value_at(45),
         525.0
     );
@@ -852,6 +868,7 @@ fn graph_key_edit_is_one_undo_step_and_failures_are_atomic() {
             .selected_layer()
             .unwrap()
             .property(Property::PositionX)
+            .unwrap()
             .value_at(45),
         525.0
     );
@@ -962,6 +979,7 @@ fn parent_animation_affects_children_but_visibility_and_opacity_do_not() {
         comp.layer(2)
             .unwrap()
             .property(Property::Opacity)
+            .unwrap()
             .value_at(15),
         100.0
     );
@@ -1052,7 +1070,11 @@ fn bundled_motion_study_loads_and_animates() {
         Project::from_json(include_str!("../../../examples/motion-study.lfe.json")).unwrap();
     let comp = project.composition();
     assert_eq!(comp.layers().len(), 3);
-    let track = comp.layer(1).unwrap().property(Property::PositionX);
+    let track = comp
+        .layer(1)
+        .unwrap()
+        .property(Property::PositionX)
+        .unwrap();
     assert_eq!(track.value_at(0), 330.0);
     assert_eq!(track.value_at(60), 470.0);
     assert!(comp.layer(3).unwrap().locked());
@@ -1068,8 +1090,8 @@ fn duplicate_layer_preserves_animation_with_unique_identity_and_history() {
     assert_eq!(layers.len(), 2);
     assert_ne!(layers[0].id(), layers[1].id());
     assert_eq!(
-        layers[0].property(Property::PositionX),
-        layers[1].property(Property::PositionX)
+        layers[0].property(Property::PositionX).unwrap(),
+        layers[1].property(Property::PositionX).unwrap()
     );
     assert_eq!(editor.selected(), Some(2));
     editor.undo();
@@ -1137,7 +1159,8 @@ fn keyframe_move_preserves_interpolation_and_rejects_collisions_atomically() {
     let track = editor
         .selected_layer()
         .unwrap()
-        .property(Property::PositionX);
+        .property(Property::PositionX)
+        .unwrap();
     assert!(!track.keys().contains_key(&30));
     assert_eq!(track.keys()[&45].interpolation, Interpolation::Hold);
     let before = editor.project().clone();
@@ -1158,6 +1181,7 @@ fn keyframe_move_preserves_interpolation_and_rejects_collisions_atomically() {
             .selected_layer()
             .unwrap()
             .property(Property::PositionX)
+            .unwrap()
             .keys()
             .contains_key(&30)
     );
@@ -1181,6 +1205,7 @@ fn disabling_animation_bakes_current_value_and_is_undoable() {
             .selected_layer()
             .unwrap()
             .property(Property::PositionX)
+            .unwrap()
             .keys()
             .is_empty()
     );
@@ -1191,6 +1216,7 @@ fn disabling_animation_bakes_current_value_and_is_undoable() {
             .selected_layer()
             .unwrap()
             .property(Property::PositionX)
+            .unwrap()
             .keys()
             .len(),
         2
@@ -1329,6 +1355,7 @@ fn value(editor: &Editor, frame: Frame) -> f64 {
         .layer(1)
         .unwrap()
         .property(Property::PositionX)
+        .unwrap()
         .value_at(frame)
 }
 
@@ -1376,6 +1403,7 @@ fn editing_same_frame_replaces_key_and_removing_last_key_preserves_value() {
             .selected_layer()
             .unwrap()
             .property(Property::PositionX)
+            .unwrap()
             .keys()
             .len(),
         1
@@ -1484,7 +1512,10 @@ fn corrupt_and_future_projects_are_rejected() {
     let editor = editor_with_layer();
     let mut project = editor.project().clone();
     project.version = u32::MAX;
-    assert!(Project::from_json(&project.to_json().unwrap()).is_err());
+    assert!(project.to_json().is_err());
+    // A future-version input must also fail before model/asset interpretation.
+    let future = serde_json::to_string(&project).unwrap();
+    assert!(Project::from_json(&future).is_err());
     project.version = 1;
     project.composition.fps = 0.into();
     assert!(Project::from_json(&project.to_json().unwrap()).is_err());
@@ -1600,7 +1631,7 @@ fn transform_applies_anchor_then_scale_then_rotation_then_position() {
             value: 90.0,
         })
         .unwrap();
-    let corners = editor.selected_layer().unwrap().corners_at(0);
+    let corners = editor.selected_layer().unwrap().corners_at(0).unwrap();
     assert!((corners[0][0] - 1060.0).abs() < 1e-9);
     assert!((corners[0][1] - 380.0).abs() < 1e-9);
 }
@@ -1713,7 +1744,7 @@ fn video_timing_survives_trim_move_split_and_serialization() {
     let id = e.selected().unwrap();
     let l = e.project().composition().layer(id).unwrap();
     assert_eq!((l.in_frame(), l.out_frame(150)), (10, 70));
-    assert_eq!(l.property(Property::ScaleX).value_at(0), 50.0);
+    assert_eq!(l.property(Property::ScaleX).unwrap().value_at(0), 50.0);
     assert_eq!(l.content().video_time(40, 30), Some(1.0));
     e.execute(Command::SetLayerRange {
         id,
@@ -1834,12 +1865,13 @@ fn playback_speed_and_source_slip_keep_ranges_keys_and_support_undo() {
     let layer = e.project().composition().layer(id).unwrap();
     assert_eq!((layer.in_frame(), layer.out_frame(150)), (25, 60));
     assert_eq!(
-        layer.property(Property::PositionX),
+        layer.property(Property::PositionX).unwrap(),
         before
             .composition()
             .layer(id)
             .unwrap()
             .property(Property::PositionX)
+            .unwrap()
     );
     assert_eq!(layer.content().video_time(25, 30), Some(0.5));
     assert_eq!(layer.content().video_time(40, 30), Some(1.5));
@@ -1856,7 +1888,13 @@ fn playback_speed_and_source_slip_keep_ranges_keys_and_support_undo() {
     e.redo();
     e.redo();
     let saved = e.project().to_json().unwrap();
-    assert!(saved.contains("\"version\": 22"));
+    // Playback rebases its source clock to the trim while retaining the authored origin.
+    assert_eq!(e.selected_layer().unwrap().start_frame, Some(10));
+    assert_eq!(
+        layer_timing::content_origin(e.selected_layer().unwrap().content()),
+        25
+    );
+    assert!(saved.contains("\"version\": 64"));
     assert_eq!(&Project::from_json(&saved).unwrap(), e.project());
 }
 

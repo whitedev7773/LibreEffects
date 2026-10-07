@@ -136,8 +136,12 @@ mod tests {
                 [
                     l.width(),
                     l.height(),
-                    l.property(Property::PositionX).value_at(0),
-                    l.property(Property::PositionY).value_at(0)
+                    l.property(Property::PositionX)
+                        .expect("2D fixture property")
+                        .value_at(0),
+                    l.property(Property::PositionY)
+                        .expect("2D fixture property")
+                        .value_at(0)
                 ],
                 expected
             );

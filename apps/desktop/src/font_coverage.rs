@@ -6,7 +6,7 @@
 //! Overflow glyphs are not inspected. A zero glyph-ID-0 count does not guarantee
 //! emoji/variation support or of color/bitmap glyph painting. No source ranges or
 //! caret positions are inferred from usvg's possibly-empty cluster fragments.
-use libre_effects_core::{Content, Frame, Layer};
+use libre_effects_core::{Content, Frame, Layer, text_paragraphs::paragraphs};
 use resvg::usvg::{self, fontdb};
 use std::collections::{BTreeMap, HashMap};
 
@@ -119,13 +119,20 @@ fn analyze_with_options(
 ) -> Report {
     let primary_id = primary.map(|face| face.id);
     let mut report = Report::new(primary.map(Face::from_info), frame);
+    if layer.rich_text().is_some() {
+        report.status =
+            Status::Incomplete("Rich-run font coverage analysis is not yet supported".into());
+        return report;
+    }
     let Some(text) = layer.source_text_at(frame) else {
         report.status = Status::Unsupported;
         return report;
     };
     // Refuse the whole layer rather than chopping through a cluster/run, which
     // could change both fallback choice and paragraph composition.
-    if text.len() > MAX_SOURCE_BYTES || text.split('\n').count() > MAX_SOURCE_LINES {
+    if text.len() > MAX_SOURCE_BYTES
+        || paragraphs(text).take(MAX_SOURCE_LINES + 1).count() > MAX_SOURCE_LINES
+    {
         report.status = Status::Incomplete("Layer exceeds the text analysis limit".into());
         report.truncated = true;
         return report;
@@ -141,8 +148,10 @@ fn analyze_with_options(
     let mut expected = BTreeMap::new();
     let mut expected_nodes = 0;
     let mut add_line = |line: &str| {
-        // Match text_svg's lines() behavior, including CRLF and empty lines.
-        for line in line.lines() {
+        // Match text_svg's hard paragraphs. The SVG parser drops empty text
+        // nodes, though those paragraphs still count toward logical line count.
+        for paragraph in paragraphs(line) {
+            let line = paragraph.text;
             if !line.is_empty() {
                 expected_nodes += 1;
             }
@@ -165,7 +174,7 @@ fn analyze_with_options(
             add_line(&text[line.range.start..line.visible_end]);
         }
     } else {
-        report.composed_lines = text.lines().count();
+        report.composed_lines = paragraphs(text).count();
         add_line(text);
     }
     // An opaque single fill keeps glyph metadata available regardless of source
@@ -550,6 +559,13 @@ mod tests {
         assert_eq!(report.composed_lines, 4);
         assert_eq!(report.glyphs, 3);
         assert_eq!(report.status, Status::Complete);
+        for text in ["A\rB\r\rC\r", "A\r\nB\r\n\r\nC\r\n", "A\rB\r\n\nC\n"] {
+            let e = editor(text, TextStyle::default(), 600.0, 400.0);
+            let report = inspect(e.selected_layer().unwrap(), &options, primary);
+            assert_eq!(report.composed_lines, 5);
+            assert_eq!(report.glyphs, 3);
+            assert_eq!(report.status, Status::Complete);
+        }
         let style = TextStyle {
             paragraph: true,
             ..Default::default()
@@ -742,6 +758,8 @@ mod tests {
         for source in [
             "A".repeat(MAX_SOURCE_BYTES + 1),
             "A\n".repeat(MAX_SOURCE_LINES + 1),
+            "A\r".repeat(MAX_SOURCE_LINES + 1),
+            "A\r\n".repeat(MAX_SOURCE_LINES + 1),
         ] {
             let e = editor(&source, TextStyle::default(), 600.0, 200.0);
             let report = inspect(e.selected_layer().unwrap(), &options, primary);

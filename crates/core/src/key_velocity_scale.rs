@@ -68,6 +68,12 @@ pub(super) fn apply(
     }
     let mut tracks = BTreeMap::<_, Vec<_>>::new();
     for key in keys {
+        state
+            .project
+            .composition
+            .layer(key.id)
+            .ok_or("Layer not found")?
+            .require_scalar_track(key.property)?;
         if matches!(key.property, PropertyPath::Path(_)) {
             return Err("Geometry path keys do not support scalar velocity scaling".into());
         }

@@ -10,6 +10,209 @@ use libre_effects_core::{
 };
 use std::{cell::RefCell, rc::Rc};
 
+/// Joined Position is one spatial track. Its displayed sample and key count
+/// must never be reconstructed from independent scalar X/Y channels.
+pub(super) fn joined_position_summary(
+    layer: &Layer,
+    frame: Frame,
+    seconds_per_frame: f64,
+) -> Option<(String, usize)> {
+    if let Some(planar) = layer.planar_position() {
+        let value = match layer.position2_at(frame, seconds_per_frame) {
+            Ok([x, y]) => format!("X {x:.2}  Y {y:.2}"),
+            Err(error) => format!("Position unavailable: {error}"),
+        };
+        return Some((value, planar.keys.len()));
+    }
+    let spatial = layer.spatial_position()?;
+    let value = match layer.position3_at(frame, seconds_per_frame) {
+        Ok([x, y, z]) => format!("X {x:.2}  Y {y:.2}  Z {z:.2}"),
+        Err(error) => format!("Position unavailable: {error}"),
+    };
+    Some((value, spatial.keys.len()))
+}
+
+/// Native timing owns the scalar sample. Keep its raw authored value visible,
+/// including overshoot, without exposing the neutral legacy graph underneath.
+pub(super) fn native_opacity_summary(
+    layer: &Layer,
+    frame: Frame,
+    seconds_per_frame: f64,
+) -> Option<(String, usize)> {
+    if !layer.has_opacity_timing() {
+        return None;
+    }
+    let value = match layer.opacity_at(frame, seconds_per_frame) {
+        Ok(value) => {
+            let prefix =
+                if layer.has_enabled_expression(libre_effects_core::ExpressionTarget::Opacity) {
+                    "Base raw"
+                } else {
+                    "Raw"
+                };
+            let value = if value != 0.0 && (value.abs() < 0.01 || value.abs() >= 1e7) {
+                format!("{value:e}")
+            } else {
+                value.to_string()
+            };
+            format!("{prefix} {value}%")
+        }
+        Err(error) => format!("Opacity unavailable: {error}"),
+    };
+    Some((value, layer.opacity_key_count()))
+}
+
+#[cfg(test)]
+mod native_opacity_tests {
+    use super::*;
+
+    #[test]
+    fn native_opacity_summary_reads_raw_source_fps_keys_and_explicit_errors() {
+        let mut editor = crate::opacity_test_support::overshoot_editor(false);
+        let before = editor.project().clone();
+        let layer = editor.selected_layer().unwrap();
+        for (seconds_per_frame, expected) in [(1.0 / 30.0, -100.0), (1.0 / 60.0, -25.0)] {
+            let (value, keys) = native_opacity_summary(layer, 15, seconds_per_frame).unwrap();
+            let raw: f64 = value
+                .strip_prefix("Raw ")
+                .unwrap()
+                .strip_suffix('%')
+                .unwrap()
+                .parse()
+                .unwrap();
+            assert!((raw - expected).abs() < 1e-10);
+            assert_eq!(keys, 2);
+        }
+        assert!(
+            native_opacity_summary(layer, 15, 0.0)
+                .unwrap()
+                .0
+                .starts_with("Opacity unavailable:")
+        );
+        assert!(layer.property(Property::Opacity).is_none());
+        assert_eq!(editor.project(), &before);
+        editor
+            .execute(Command::SetExpression {
+                id: 1,
+                target: libre_effects_core::ExpressionTarget::Opacity,
+                source: "value".into(),
+                enabled: true,
+            })
+            .unwrap();
+        assert!(
+            native_opacity_summary(editor.selected_layer().unwrap(), 15, 1.0 / 30.0)
+                .unwrap()
+                .0
+                .starts_with("Base raw -")
+        );
+        editor.execute(Command::AddRectangle).unwrap();
+        assert!(native_opacity_summary(editor.selected_layer().unwrap(), 0, 1.0 / 30.0).is_none());
+    }
+}
+
+#[cfg(test)]
+mod joined_position_tests {
+    use super::*;
+
+    #[test]
+    fn ordinary_2d_position_keeps_its_scalar_fields() {
+        let mut editor = libre_effects_core::Editor::default();
+        editor.execute(Command::AddRectangle).unwrap();
+        let layer = editor.selected_layer().unwrap();
+        assert!(joined_position_summary(layer, 0, 1.0 / 30.0).is_none());
+        assert!(layer.property(Property::PositionX).is_some());
+        assert!(layer.property(Property::PositionY).is_some());
+    }
+
+    #[test]
+    fn joined_position_displays_all_three_source_coordinates_without_scalar_tracks() {
+        let mut editor = libre_effects_core::Editor::default();
+        editor.execute(Command::AddRectangle).unwrap();
+        for (property, value) in [(Property::PositionX, 12.5), (Property::PositionY, -34.25)] {
+            editor
+                .execute(Command::SetValue {
+                    id: 1,
+                    property,
+                    frame: 0,
+                    value,
+                })
+                .unwrap();
+        }
+        editor
+            .execute(Command::SetThreeD {
+                id: 1,
+                enabled: true,
+            })
+            .unwrap();
+        let before = editor.project().clone();
+        let layer = editor.selected_layer().unwrap();
+        assert_eq!(
+            joined_position_summary(layer, 17, 1.0 / 30.0),
+            Some(("X 12.50  Y -34.25  Z 0.00".into(), 0))
+        );
+        assert!(layer.property(Property::PositionX).is_none());
+        assert!(layer.property(Property::PositionY).is_none());
+        assert!(layer.property(Property::Opacity).is_some());
+        assert_eq!(editor.project(), &before);
+    }
+
+    #[test]
+    fn joined_position_summary_uses_spatial_keys_and_the_actual_seconds_per_frame() {
+        use libre_effects_core::{SpatialEase, SpatialEdit, SpatialInterpolation};
+
+        let mut editor = libre_effects_core::Editor::default();
+        editor.execute(Command::AddRectangle).unwrap();
+        editor
+            .execute(Command::SetThreeD {
+                id: 1,
+                enabled: true,
+            })
+            .unwrap();
+        for edit in [
+            SpatialEdit::Key {
+                frame: 0,
+                value: [0.0; 3],
+            },
+            SpatialEdit::Key {
+                frame: 30,
+                value: [0.0, 0.0, 12.0],
+            },
+            SpatialEdit::Interpolation {
+                frame: 0,
+                incoming: SpatialInterpolation::Linear,
+                outgoing: SpatialInterpolation::Bezier,
+            },
+            SpatialEdit::TemporalEase {
+                frame: 0,
+                incoming: SpatialEase::default(),
+                outgoing: SpatialEase {
+                    speed: 4.0,
+                    influence: 100.0 / 3.0,
+                },
+            },
+        ] {
+            editor
+                .execute(Command::SetSpatialPosition { id: 1, edit })
+                .unwrap();
+        }
+        let layer = editor.selected_layer().unwrap();
+        assert_eq!(
+            joined_position_summary(layer, 15, 1.0 / 30.0),
+            Some(("X 0.00  Y 0.00  Z 5.00".into(), 2))
+        );
+        assert_eq!(
+            joined_position_summary(layer, 15, 1.0 / 60.0),
+            Some(("X 0.00  Y 0.00  Z 4.75".into(), 2))
+        );
+        assert!(
+            joined_position_summary(layer, 15, 0.0)
+                .unwrap()
+                .0
+                .starts_with("Position unavailable:")
+        );
+    }
+}
+
 fn text_field_command(
     layer: &Layer,
     frame: Frame,
@@ -70,6 +273,7 @@ pub(crate) struct Inspector {
     extra_targets: Vec<Rc<RefCell<Option<InputTarget>>>>,
     playback: Vec<Entity<TextField>>,
     audio_controls: Entity<super::audio_controls::AudioControls>,
+    text_animator: Entity<super::text_animator::TextAnimator>,
     shape_controls: Entity<super::shape_controls::ShapeControls>,
     contents_controls: Entity<super::contents::ContentsControls>,
     mask_values: Entity<super::mask_values::MaskValues>,
@@ -102,6 +306,21 @@ impl Inspector {
                     TextField::new(cx, move |text, window, cx| {
                         edit.update(cx, |state, cx| {
                             if let Some(id) = state.editor.selected() {
+                                if state
+                                    .editor
+                                    .selected_layer()
+                                    .and_then(|layer| layer.property(property))
+                                    .is_none()
+                                {
+                                    state.status = if property == Property::Opacity {
+                                        "Native Opacity timing is read-only in Properties."
+                                    } else {
+                                        "Joined Position is read-only in Properties."
+                                    }
+                                    .into();
+                                    cx.notify();
+                                    return;
+                                }
                                 match text.trim().parse::<f64>() {
                                     Ok(value) => state.dispatch(
                                         &Action::Edit(Command::SetValue {
@@ -288,6 +507,7 @@ impl Inspector {
             .collect();
         let audio_controls =
             cx.new(|cx| super::audio_controls::AudioControls::new(state.clone(), cx));
+        let text_animator = cx.new(|cx| super::text_animator::TextAnimator::new(state.clone(), cx));
         let mask_values = cx.new(|cx| super::mask_values::MaskValues::new(state.clone(), cx));
         let shape_controls =
             cx.new(|cx| super::shape_controls::ShapeControls::new(state.clone(), cx));
@@ -307,6 +527,7 @@ impl Inspector {
             parent_owner: None,
             playback,
             audio_controls,
+            text_animator,
             shape_controls,
             contents_controls,
             mask_values,
@@ -417,14 +638,91 @@ impl Render for Inspector {
             if is_audio {
                 continue;
             }
+            if label == "Position"
+                && let Some((value, keys)) =
+                    joined_position_summary(&layer, frame, comp.fps().seconds(1))
+            {
+                contents = contents.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .py_1()
+                        .text_size(px(11.0))
+                        .child(format!(
+                            "Position {} · joined · {keys} keys · read-only",
+                            if layer.is_three_d() { "XYZ" } else { "XY" }
+                        ))
+                        .child(div().text_color(rgb(ui::MUTED)).child(value))
+                        .when(!layer.is_three_d(), |row| {
+                            row.child(super::expression_editor::entry_button(
+                                &self.state,
+                                &layer,
+                                libre_effects_core::ExpressionTarget::Position,
+                            ))
+                        })
+                        .child(
+                            div()
+                                .text_color(rgb(ui::MUTED))
+                                .child("Edit spatial geometry through scripting."),
+                        ),
+                );
+                continue;
+            }
+            if label == "Opacity"
+                && let Some((value, keys)) =
+                    native_opacity_summary(&layer, frame, comp.fps().seconds(1))
+            {
+                contents = contents.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .py_1()
+                        .text_size(px(11.0))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_1()
+                                .child(div().flex_1().child(format!(
+                                    "Opacity · native timing · {keys} keys · read-only"
+                                )))
+                                .when(!layer.is_three_d(), |row| {
+                                    row.child(super::expression_editor::entry_button(
+                                        &self.state,
+                                        &layer,
+                                        libre_effects_core::ExpressionTarget::Opacity,
+                                    ))
+                                }),
+                        )
+                        .child(div().text_color(rgb(ui::MUTED)).child(value))
+                        .child(
+                            div()
+                                .text_color(rgb(ui::MUTED))
+                                .child("Paint clamps to 0–100%. Edit timing through scripting."),
+                        ),
+                );
+                continue;
+            }
             let properties: Vec<_> = indices.iter().map(|i| Property::ALL[*i]).collect();
-            let animated = properties
-                .iter()
-                .any(|p| !layer.property(*p).keys().is_empty());
+            let expression_driven = properties.iter().any(|property| {
+                libre_effects_core::ExpressionTarget::from_property(*property)
+                    .is_some_and(|target| layer.has_enabled_expression(target))
+            });
+            let animated = properties.iter().any(|p| {
+                layer
+                    .property(*p)
+                    .is_some_and(|track| !track.keys().is_empty())
+            });
             let command = Command::Batch(
                 properties
                     .iter()
-                    .filter(|p| layer.property(**p).keys().is_empty() == !animated)
+                    .filter(|p| {
+                        layer
+                            .property(**p)
+                            .is_some_and(|track| track.keys().is_empty() == !animated)
+                    })
                     .map(|p| Command::ToggleAnimation {
                         id,
                         property: *p,
@@ -445,10 +743,22 @@ impl Render for Inspector {
                     Action::Edit(command),
                     animated,
                 ))
-                .child(div().flex_1().text_size(px(11.0)).child(label));
+                .child(
+                    div()
+                        .flex_1()
+                        .text_size(px(11.0))
+                        .child(if expression_driven {
+                            format!("{label} · base")
+                        } else {
+                            label.to_string()
+                        }),
+                );
             for index in indices {
                 let property = Property::ALL[index];
-                let value = layer.property(property).value_at(frame);
+                let Some(track) = layer.property(property) else {
+                    continue;
+                };
+                let value = track.value_at(frame);
                 self.fields[index].update(cx, |field, _| {
                     field.set_numeric();
                     field.sync(format!("{id}-{frame}"), format!("{value:.2}"), window);
@@ -460,7 +770,22 @@ impl Render for Inspector {
                         .when(locked, |s| s.child(format!("{value:.2}"))),
                 );
             }
+            if !layer.is_three_d()
+                && let Some(target) = properties
+                    .first()
+                    .copied()
+                    .and_then(libre_effects_core::ExpressionTarget::from_property)
+            {
+                row = row.child(super::expression_editor::entry_button(
+                    &self.state,
+                    &layer,
+                    target,
+                ));
+            }
             contents = contents.child(row);
+        }
+        if layer.expressions().iter().any(|program| program.enabled) {
+            contents=contents.child(div().text_size(px(11.0)).text_color(rgb(ui::MUTED)).child("Expressions enabled · numeric fields edit authored base values; the Composition shows evaluated results."));
         }
         let is_null = matches!(layer.content(), Content::Null);
         if !is_null && !is_audio {
@@ -580,6 +905,20 @@ impl Render for Inspector {
                     "Content"
                 }),
         );
+        if layer.source_text_at(frame).is_some() {
+            contents = contents.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child("Source Text expression")
+                    .child(super::expression_editor::entry_button(
+                        &self.state,
+                        &layer,
+                        libre_effects_core::ExpressionTarget::SourceText,
+                    )),
+            );
+        }
         contents = contents.child(self.contents_controls.clone());
         if matches!(layer.content(), Content::Shape(_)) {
             contents = contents.child(self.shape_controls.clone());
@@ -938,6 +1277,9 @@ impl Render for Inspector {
                             .when(locked, |s| s.child(value)),
                     ),
             );
+        }
+        if matches!(layer.content(), Content::Text { .. }) {
+            contents = contents.child(self.text_animator.clone());
         }
         if matches!(layer.content(), Content::Solid | Content::Adjustment) {
             let state = self.state.clone();
@@ -1345,6 +1687,7 @@ mod typography_tests {
             e.selected_layer()
                 .unwrap()
                 .property(Property::Opacity)
+                .expect("every layer has a scalar Opacity track")
                 .value_at(17),
             100.
         );

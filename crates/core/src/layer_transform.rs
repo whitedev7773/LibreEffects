@@ -40,7 +40,13 @@ fn changed_value(
     // Sampled animation may legitimately overshoot an input field's range.
     // An unchanged finite channel is not a new value and must keep its keys.
     // This also preserves the original bits of +0/-0 for a zero-scale flip.
-    if value.is_finite() && layer.property(property).value_at(frame) == value {
+    if value.is_finite()
+        && layer
+            .property(property)
+            .ok_or("Scalar transform property is unavailable")?
+            .value_at(frame)
+            == value
+    {
         return Ok(());
     }
     if !property.accepts(value) {
@@ -72,8 +78,16 @@ fn noncollapsed(transform: Affine) -> bool {
 }
 
 fn fit_space(comp: &Composition, layer: &Layer, frame: Frame) -> Result<(Affine, Affine), String> {
-    if layer.property(Property::ScaleX).value_at(frame) == 0.0
-        || layer.property(Property::ScaleY).value_at(frame) == 0.0
+    if layer
+        .property(Property::ScaleX)
+        .ok_or("Scalar transform property is unavailable")?
+        .value_at(frame)
+        == 0.0
+        || layer
+            .property(Property::ScaleY)
+            .ok_or("Scalar transform property is unavailable")?
+            .value_at(frame)
+            == 0.0
     {
         return Err("Cannot fit a collapsed layer; restore nonzero X and Y scale first".into());
     }
@@ -146,8 +160,16 @@ fn fit(
             return Ok(());
         }
     }
-    let sx = layer.property(Property::ScaleX).value_at(frame) * factor;
-    let sy = layer.property(Property::ScaleY).value_at(frame) * factor;
+    let sx = layer
+        .property(Property::ScaleX)
+        .ok_or("Scalar transform property is unavailable")?
+        .value_at(frame)
+        * factor;
+    let sy = layer
+        .property(Property::ScaleY)
+        .ok_or("Scalar transform property is unavailable")?
+        .value_at(frame)
+        * factor;
     changed_value(commands, layer, frame, Property::ScaleX, sx)?;
     changed_value(commands, layer, frame, Property::ScaleY, sy)?;
     // The center must land on inverse(position-space) * composition-center.
@@ -160,10 +182,21 @@ fn fit(
     preview
         .properties
         .insert(Property::ScaleY, AnimatedProperty::new(sy));
-    let local_center = preview.local_transform(frame).vector([
-        layer.width * 0.5 - layer.property(Property::AnchorX).value_at(frame),
-        layer.height * 0.5 - layer.property(Property::AnchorY).value_at(frame),
-    ]);
+    let local_center = preview
+        .local_transform(frame)
+        .ok_or("Cannot fit a 3D layer with a 2D transform")?
+        .vector([
+            layer.width * 0.5
+                - layer
+                    .property(Property::AnchorX)
+                    .ok_or("Scalar transform property is unavailable")?
+                    .value_at(frame),
+            layer.height * 0.5
+                - layer
+                    .property(Property::AnchorY)
+                    .ok_or("Scalar transform property is unavailable")?
+                    .value_at(frame),
+        ]);
     let target = inverse.point(goal);
     let position = [target[0] - local_center[0], target[1] - local_center[1]];
     for (property, value) in [
@@ -187,7 +220,10 @@ fn fit(
         };
         result = l
             .transform_offset
-            .compose(l.local_transform(frame))
+            .compose(
+                l.local_transform(frame)
+                    .ok_or("Cannot fit through a 3D parent transform")?,
+            )
             .compose(result);
         current = l.parent;
     }
@@ -223,6 +259,7 @@ pub(super) fn apply(
     // Validate every explicit member, even selected descendants carried by a root.
     for id in ids.iter().copied().collect::<BTreeSet<_>>() {
         let layer = comp.layer(id).ok_or("Selected layer no longer exists")?;
+        comp.require_two_d_transform(id)?;
         if matches!(layer.content, Content::Audio { .. }) {
             return Err(
                 "Audio layers do not support spatial transforms; select visual layers".into(),
@@ -272,7 +309,10 @@ pub(super) fn apply(
                     layer,
                     frame,
                     property,
-                    -layer.property(property).value_at(frame),
+                    -layer
+                        .property(property)
+                        .ok_or("Scalar transform property is unavailable")?
+                        .value_at(frame),
                 )?;
             }
             LayerTransformOp::FitInsideComposition => fit(comp, layer, frame, &mut commands)?,
@@ -280,20 +320,39 @@ pub(super) fn apply(
                 let center = [layer.width * 0.5, layer.height * 0.5];
                 // As in SetAnchor, compensate in local position space. No inverse
                 // parent is needed, even for a zero-scale ancestor.
-                let delta = layer.local_transform(frame).vector([
-                    center[0] - layer.property(Property::AnchorX).value_at(frame),
-                    center[1] - layer.property(Property::AnchorY).value_at(frame),
-                ]);
+                let delta = layer
+                    .local_transform(frame)
+                    .ok_or("Cannot center a 3D layer with a 2D transform")?
+                    .vector([
+                        center[0]
+                            - layer
+                                .property(Property::AnchorX)
+                                .ok_or("Scalar transform property is unavailable")?
+                                .value_at(frame),
+                        center[1]
+                            - layer
+                                .property(Property::AnchorY)
+                                .ok_or("Scalar transform property is unavailable")?
+                                .value_at(frame),
+                    ]);
                 for (property, value) in [
                     (Property::AnchorX, center[0]),
                     (Property::AnchorY, center[1]),
                     (
                         Property::PositionX,
-                        layer.property(Property::PositionX).value_at(frame) + delta[0],
+                        layer
+                            .property(Property::PositionX)
+                            .ok_or("Scalar transform property is unavailable")?
+                            .value_at(frame)
+                            + delta[0],
                     ),
                     (
                         Property::PositionY,
-                        layer.property(Property::PositionY).value_at(frame) + delta[1],
+                        layer
+                            .property(Property::PositionY)
+                            .ok_or("Scalar transform property is unavailable")?
+                            .value_at(frame)
+                            + delta[1],
                     ),
                 ] {
                     changed_value(&mut commands, layer, frame, property, value)?;

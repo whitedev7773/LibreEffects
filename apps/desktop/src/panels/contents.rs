@@ -16,6 +16,9 @@ use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
+mod bulk_fields;
+mod clipboard;
+mod compound_colors;
 #[cfg(test)]
 mod drop_integration_tests;
 pub(super) mod gradient_ramp;
@@ -93,6 +96,10 @@ pub(crate) struct ContentsControls {
     tree_focus: FocusHandle,
     tree_layout: Rc<RefCell<tree::TreeLayout>>,
     fields: Vec<(ContentsParam, Entity<TextField>)>,
+    bulk_session: Rc<RefCell<bulk_fields::Session>>,
+    clipboard_session: Rc<RefCell<clipboard::Session>>,
+    bulk_fields: Vec<(ContentsParam, Entity<TextField>)>,
+    colors_serial: Rc<Cell<u64>>,
     name: Option<Entity<TextField>>,
     add_open: bool,
     collapsed: std::collections::BTreeSet<u64>,
@@ -134,6 +141,10 @@ impl ContentsControls {
             cx.notify();
         })
         .detach();
+        let tree_focus = cx.focus_handle();
+        state.update(cx, |state, _| {
+            state.contents_tree_focus = Some(tree_focus.clone())
+        });
         Self {
             state,
             owner: None,
@@ -144,9 +155,13 @@ impl ContentsControls {
             move_input: None,
             move_serial: 0,
             tree_drag: None,
-            tree_focus: cx.focus_handle(),
+            tree_focus,
             tree_layout: Default::default(),
             fields: vec![],
+            bulk_session: Default::default(),
+            clipboard_session: Default::default(),
+            bulk_fields: vec![],
+            colors_serial: Default::default(),
             name: None,
             add_open: false,
             collapsed: Default::default(),
@@ -162,6 +177,12 @@ impl ContentsControls {
         }
     }
     fn select(&mut self, layer: u64, item: u64, cx: &mut Context<Self>) {
+        self.colors_serial.set(
+            self.colors_serial
+                .get()
+                .checked_add(1)
+                .expect("Colors input serial exhausted"),
+        );
         self.paint_menu = None;
         self.cancel_ramp(cx);
         self.ramp_selected = None;
@@ -188,6 +209,8 @@ impl ContentsControls {
             {
                 s.gradient_controls = None;
             }
+            s.retire_colors_clipboard();
+            s.colors_key_owned.set(false);
             s.contents_selection = identity;
             cx.notify();
         });
@@ -652,6 +675,7 @@ impl Render for ContentsControls {
                     .overflow_hidden()
                     .child(feedback),
             )
+            .child(self.clipboard_actions(cx))
             .child(self.hierarchy_actions(cx))
             .child(
                 canvas(
@@ -715,14 +739,13 @@ impl Render for ContentsControls {
             );
         }
         let Some(item) = self.selected else {
+            if self.selection.items.len() > 1 {
+                return root.child(self.shared_numeric_fields(contents, w, cx));
+            }
             return root.child(
                 div()
                     .text_size(px(11.))
-                    .child(if self.selection.items.len() > 1 {
-                        "Select one item for editing controls"
-                    } else {
-                        "Select a Contents item to edit"
-                    }),
+                    .child("Select a Contents item to edit"),
             );
         };
         let Some(node) = contents.node(item) else {
@@ -737,9 +760,7 @@ impl Render for ContentsControls {
             self.select(id, item, cx);
         }
         if let Some(name) = &self.name {
-            name.update(cx, |f, _| {
-                f.sync(format!("contents-name-{id}-{item}"), node.name.clone(), w)
-            });
+            self.sync_clipboard_field(name, None, node.name.clone(), w, cx);
             root = root.child(
                 div()
                     .mt_2()
@@ -1026,6 +1047,8 @@ impl Render for ContentsControls {
             );
         }
         if let Some(gradient) = node.kind.gradient() {
+            let compound = gradient.colors_animation().is_some();
+            root = root.child(self.compound_color_controls(node, frame, cx));
             let target = crate::color_edit::GradientTarget::Contents(composition, id, item);
             let active = self.state.read(cx).gradient_controls == Some(target);
             root = root.child(
@@ -1050,19 +1073,22 @@ impl Render for ContentsControls {
                         });
                     })),
             );
-            let state = self.state.clone();
-            root = root.child(
-                ui::text_button("open-gradient-editor", "Edit Gradient…")
-                    .when(locked, |b| b.opacity(0.4))
-                    .when(!locked, |b| {
-                        b.on_click(move |_, w, cx| {
-                            TextField::commit_active(w, cx);
-                            state
-                                .update(cx, |s, cx| s.dispatch(&Action::OpenGradient(item), w, cx));
-                        })
-                    }),
-            );
-            root = root.child(self.gradient_ramp(node, frame, locked, cx));
+            if !compound {
+                let state = self.state.clone();
+                root = root.child(
+                    ui::text_button("open-gradient-editor", "Edit Gradient…")
+                        .when(locked, |b| b.opacity(0.4))
+                        .when(!locked, |b| {
+                            b.on_click(move |_, w, cx| {
+                                TextField::commit_active(w, cx);
+                                state.update(cx, |s, cx| {
+                                    s.dispatch(&Action::OpenGradient(item), w, cx)
+                                });
+                            })
+                        }),
+                );
+                root = root.child(self.gradient_ramp(node, frame, locked, cx));
+            }
             let mut types = div().flex().gap_1().child("Type");
             for (index, radial) in [false, true].into_iter().enumerate() {
                 let state = self.state.clone();
@@ -1090,126 +1116,136 @@ impl Render for ContentsControls {
                 );
             }
             root = root.child(types);
-            let ids = gradient
-                .colors
-                .iter()
-                .chain(&gradient.opacities)
-                .copied()
-                .collect::<Vec<_>>();
-            if self.gradient_stop.is_none_or(|id| !ids.contains(&id)) {
-                self.gradient_stop = ids.first().copied();
-            }
-            for (opacity, stops) in [(false, &gradient.colors), (true, &gradient.opacities)] {
-                let mut row = div().flex().flex_wrap().gap_1();
-                for &stop in stops {
+            if !compound {
+                let ids = gradient
+                    .colors
+                    .iter()
+                    .chain(&gradient.opacities)
+                    .copied()
+                    .collect::<Vec<_>>();
+                if self.gradient_stop.is_none_or(|id| !ids.contains(&id)) {
+                    self.gradient_stop = ids.first().copied();
+                }
+                for (opacity, stops) in [(false, &gradient.colors), (true, &gradient.opacities)] {
+                    let mut row = div().flex().flex_wrap().gap_1();
+                    for &stop in stops {
+                        row = row.child(
+                            ui::text_button(
+                                gpui::SharedString::from(format!("gradient-stop-{stop}")),
+                                stop.to_string(),
+                            )
+                            .when(self.gradient_stop == Some(stop), |b| b.bg(rgb(0x164a7b)))
+                            .on_click(cx.listener(
+                                move |this, _, w, cx| {
+                                    TextField::commit_active(w, cx);
+                                    this.gradient_stop = Some(stop);
+                                    this.ramp_selected = None;
+                                    cx.notify();
+                                },
+                            )),
+                        );
+                    }
+                    let state = self.state.clone();
                     row = row.child(
                         ui::text_button(
-                            gpui::SharedString::from(format!("gradient-stop-{stop}")),
-                            stop.to_string(),
+                            if opacity {
+                                "gradient-add-opacity"
+                            } else {
+                                "gradient-add-color"
+                            },
+                            "+",
                         )
-                        .when(self.gradient_stop == Some(stop), |b| b.bg(rgb(0x164a7b)))
-                        .on_click(cx.listener(move |this, _, w, cx| {
-                            TextField::commit_active(w, cx);
-                            this.gradient_stop = Some(stop);
-                            this.ramp_selected = None;
-                            cx.notify();
-                        })),
+                        .when(
+                            !locked && stops.len() < ShapeGradient::MAX_STOPS,
+                            |b| {
+                                b.on_click(cx.listener(move |this, _, w, cx| {
+                                    TextField::commit_active(w, cx);
+                                    state.update(cx, |s, cx| {
+                                        s.dispatch(
+                                            &Action::Edit(Command::Contents {
+                                                id,
+                                                edit: ContentsEdit::AddGradientStop {
+                                                    item,
+                                                    opacity,
+                                                    position: 50.,
+                                                    frame: s.frame,
+                                                },
+                                            }),
+                                            w,
+                                            cx,
+                                        )
+                                    });
+                                    let layer = state.read(cx).editor.selected_layer();
+                                    if let Some(Content::ShapeContents(c)) =
+                                        layer.map(|l| l.content())
+                                    {
+                                        if let Some(g) =
+                                            c.node(item).and_then(|n| n.kind.gradient())
+                                        {
+                                            this.gradient_stop = if opacity {
+                                                g.opacities.last().copied()
+                                            } else {
+                                                g.colors.last().copied()
+                                            };
+                                        }
+                                    }
+                                    cx.notify();
+                                }))
+                            },
+                        ),
+                    );
+                    root = root.child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(if opacity {
+                                "Opacity stops"
+                            } else {
+                                "Color stops"
+                            })
+                            .child(row),
                     );
                 }
-                let state = self.state.clone();
-                row = row.child(
-                    ui::text_button(
-                        if opacity {
-                            "gradient-add-opacity"
-                        } else {
-                            "gradient-add-color"
-                        },
-                        "+",
-                    )
-                    .when(
-                        !locked && stops.len() < ShapeGradient::MAX_STOPS,
-                        |b| {
-                            b.on_click(cx.listener(move |this, _, w, cx| {
-                                TextField::commit_active(w, cx);
-                                state.update(cx, |s, cx| {
-                                    s.dispatch(
-                                        &Action::Edit(Command::Contents {
-                                            id,
-                                            edit: ContentsEdit::AddGradientStop {
-                                                item,
-                                                opacity,
-                                                position: 50.,
-                                                frame: s.frame,
-                                            },
-                                        }),
-                                        w,
-                                        cx,
-                                    )
-                                });
-                                let layer = state.read(cx).editor.selected_layer();
-                                if let Some(Content::ShapeContents(c)) = layer.map(|l| l.content())
-                                {
-                                    if let Some(g) = c.node(item).and_then(|n| n.kind.gradient()) {
-                                        this.gradient_stop = if opacity {
-                                            g.opacities.last().copied()
-                                        } else {
-                                            g.colors.last().copied()
-                                        };
-                                    }
-                                }
-                                cx.notify();
-                            }))
-                        },
-                    ),
-                );
-                root = root.child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap_1()
-                        .child(if opacity {
-                            "Opacity stops"
-                        } else {
-                            "Color stops"
-                        })
-                        .child(row),
-                );
-            }
-            if let Some(stop) = self.gradient_stop {
-                if let Some(color) = gradient.color_at(node, stop, frame) {
-                    root = root.child(super::color_picker::swatch(
-                        "gradient-stop-color",
-                        color,
-                        crate::color_edit::Target::GradientStop(id, item, stop),
-                        locked,
-                        &self.state,
-                    ));
+                if let Some(stop) = self.gradient_stop {
+                    if let Some(color) = gradient.color_at(node, stop, frame) {
+                        root = root.child(super::color_picker::swatch(
+                            "gradient-stop-color",
+                            color,
+                            crate::color_edit::Target::GradientStop(id, item, stop),
+                            locked,
+                            &self.state,
+                        ));
+                    }
+                    let state = self.state.clone();
+                    let can_remove = if gradient.colors.contains(&stop) {
+                        gradient.colors.len() > 2
+                    } else {
+                        gradient.opacities.len() > 2
+                    };
+                    root = root.child(
+                        ui::text_button("gradient-remove-stop", "Remove selected stop")
+                            .when(locked || !can_remove, |b| b.opacity(0.4))
+                            .when(!locked && can_remove, |b| {
+                                b.on_click(move |_, w, cx| {
+                                    TextField::commit_active(w, cx);
+                                    state.update(cx, |s, cx| {
+                                        s.dispatch(
+                                            &Action::Edit(Command::Contents {
+                                                id,
+                                                edit: ContentsEdit::RemoveGradientStop {
+                                                    item,
+                                                    stop,
+                                                },
+                                            }),
+                                            w,
+                                            cx,
+                                        )
+                                    });
+                                })
+                            }),
+                    );
                 }
-                let state = self.state.clone();
-                let can_remove = if gradient.colors.contains(&stop) {
-                    gradient.colors.len() > 2
-                } else {
-                    gradient.opacities.len() > 2
-                };
-                root = root.child(
-                    ui::text_button("gradient-remove-stop", "Remove selected stop")
-                        .when(locked || !can_remove, |b| b.opacity(0.4))
-                        .when(!locked && can_remove, |b| {
-                            b.on_click(move |_, w, cx| {
-                                TextField::commit_active(w, cx);
-                                state.update(cx, |s, cx| {
-                                    s.dispatch(
-                                        &Action::Edit(Command::Contents {
-                                            id,
-                                            edit: ContentsEdit::RemoveGradientStop { item, stop },
-                                        }),
-                                        w,
-                                        cx,
-                                    )
-                                });
-                            })
-                        }),
-                );
             }
         }
         if let Some(style) = node.kind.stroke() {
@@ -1328,13 +1364,7 @@ impl Render for ContentsControls {
                 parameter: *p,
             };
             let value = node.value_at(*p, frame).to_string();
-            field.update(cx, |f, _| {
-                f.sync(
-                    format!("contents-{id}-{item}-{p:?}-{frame}"),
-                    value.clone(),
-                    w,
-                )
-            });
+            self.sync_clipboard_field(field, Some(*p), value.clone(), w, cx);
             root = root.child(
                 div()
                     .flex()

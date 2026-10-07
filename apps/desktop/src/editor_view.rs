@@ -113,20 +113,24 @@ impl EditorState {
             self.graph_key = None;
             return true;
         }
-        // Whole-layer Text paint rows deliberately expose static defaults even
-        // before animation materializes a track. Their labels/components still
+        // Text and secondary selector rows expose static defaults even before
+        // animation materializes a track. Their labels/components still
         // focus the Inspector. An explicit Graph keeps its existing numeric
         // lane identity and ranges until this Text property has a real track.
-        let static_text = matches!(channel.property, PropertyPath::Text(_))
-            && self
-                .editor
-                .project()
-                .composition()
-                .layer(channel.id)
-                .is_some_and(|layer| {
-                    layer.track(channel.property).is_none()
-                        && layer.track_value(channel.property, self.frame).is_some()
-                });
+        let static_text = matches!(
+            channel.property,
+            PropertyPath::Text(_)
+                | PropertyPath::TextSelector { .. }
+                | PropertyPath::TextAnimator { .. }
+        ) && self
+            .editor
+            .project()
+            .composition()
+            .layer(channel.id)
+            .is_some_and(|layer| {
+                layer.track(channel.property).is_none()
+                    && layer.track_value(channel.property, self.frame).is_some()
+            });
         if static_text {
             self.normalize_graph_channels(false);
             self.editor.select(channel.id);
@@ -1165,6 +1169,180 @@ mod tests {
             assert_eq!(state.selected_keys, keys);
             assert_eq!(state.graph_property, property);
             assert_eq!(state.graph_channels, channels);
+        }
+    }
+
+    #[test]
+    fn secondary_selector_sparse_focus_preserves_views_and_cannot_pin_missing_tracks() {
+        use libre_effects_core::{Property, TextSelectorParam, TrackEdit};
+        for explicit in [false, true] {
+            let mut state = sparse_text_scene();
+            state
+                .editor
+                .execute(Command::AddTextRangeSelector { id: 2 })
+                .unwrap();
+            state.editor.select(2);
+            state.selected_layers = [2].into();
+            let existing = GraphChannel {
+                id: 1,
+                property: Property::PositionX.into(),
+            };
+            if explicit {
+                state.graph_pin_channel(existing).unwrap();
+                state.graph_activate_channel(existing, true);
+            }
+            let source = state.editor.project().clone();
+            let view = state.graph_channels.clone();
+            let bytes = state.capture_views().encode_native(&source).unwrap();
+            for parameter in TextSelectorParam::ALL {
+                let channel = GraphChannel {
+                    id: 2,
+                    property: PropertyPath::TextSelector {
+                        selector: 1,
+                        parameter,
+                    },
+                };
+                assert!(state.graph_activate_property(channel, true));
+                assert_eq!(state.editor.selected(), Some(2));
+                assert_eq!(state.graph_channels, view);
+                assert_eq!(
+                    state.graph_property,
+                    if explicit {
+                        existing.property
+                    } else {
+                        channel.property
+                    }
+                );
+                assert!(state.graph_pin_channel(channel).is_err());
+                assert_eq!(state.capture_views().encode_native(&source).unwrap(), bytes);
+                assert_eq!(state.editor.project(), &source);
+            }
+            let channel = GraphChannel {
+                id: 2,
+                property: PropertyPath::TextSelector {
+                    selector: 1,
+                    parameter: TextSelectorParam::Amount,
+                },
+            };
+            state
+                .editor
+                .execute(Command::EditTrack {
+                    id: 2,
+                    property: channel.property,
+                    edit: TrackEdit::ToggleAnimation { frame: 10 },
+                })
+                .unwrap();
+            assert!(state.graph_activate_property(channel, false));
+            assert_eq!(state.graph_active_channel(), Some(channel));
+            state.graph_pin_channel(channel).unwrap();
+            state
+                .editor
+                .execute(Command::RemoveTextRangeSelector { id: 2, selector: 1 })
+                .unwrap();
+            state.normalize_graph_channels(false);
+            assert!(!state.graph_channels.is_available(channel));
+            assert!(!state.graph_activate_property(channel, false));
+            state.editor.undo();
+            state.normalize_graph_channels(true);
+            assert!(state.graph_channels.is_available(channel));
+            assert!(state.graph_activate_property(channel, false));
+            assert_eq!(state.graph_active_channel(), Some(channel));
+            let missing = GraphChannel {
+                id: 2,
+                property: PropertyPath::TextSelector {
+                    selector: 999,
+                    parameter: TextSelectorParam::Start,
+                },
+            };
+            assert!(!state.graph_activate_property(missing, false));
+            assert_eq!(state.graph_active_channel(), Some(channel));
+        }
+    }
+
+    #[test]
+    fn extra_animator_sparse_focus_preserves_views_and_cannot_pin_missing_tracks() {
+        use libre_effects_core::{Property, TextParam, TrackEdit};
+        for explicit in [false, true] {
+            let mut state = sparse_text_scene();
+            state
+                .editor
+                .execute(Command::AddTextAnimator { id: 2 })
+                .unwrap();
+            state.editor.select(2);
+            state.selected_layers = [2].into();
+            let existing = GraphChannel {
+                id: 1,
+                property: Property::PositionX.into(),
+            };
+            if explicit {
+                state.graph_pin_channel(existing).unwrap();
+                state.graph_activate_channel(existing, true);
+            }
+            let source = state.editor.project().clone();
+            let view = state.graph_channels.clone();
+            let bytes = state.capture_views().encode_native(&source).unwrap();
+            for parameter in TextParam::ALL.into_iter().filter(|p| p.is_animator()) {
+                let channel = GraphChannel {
+                    id: 2,
+                    property: PropertyPath::TextAnimator {
+                        animator: 1,
+                        parameter,
+                    },
+                };
+                assert!(state.graph_activate_property(channel, true));
+                assert_eq!(state.editor.selected(), Some(2));
+                assert_eq!(state.graph_channels, view);
+                assert_eq!(
+                    state.graph_property,
+                    if explicit {
+                        existing.property
+                    } else {
+                        channel.property
+                    }
+                );
+                assert!(state.graph_pin_channel(channel).is_err());
+                assert_eq!(state.capture_views().encode_native(&source).unwrap(), bytes);
+                assert_eq!(state.editor.project(), &source);
+            }
+            let channel = GraphChannel {
+                id: 2,
+                property: PropertyPath::TextAnimator {
+                    animator: 1,
+                    parameter: TextParam::AnimatorAmount,
+                },
+            };
+            state
+                .editor
+                .execute(Command::EditTrack {
+                    id: 2,
+                    property: channel.property,
+                    edit: TrackEdit::ToggleAnimation { frame: 10 },
+                })
+                .unwrap();
+            assert!(state.graph_activate_property(channel, false));
+            assert_eq!(state.graph_active_channel(), Some(channel));
+            state.graph_pin_channel(channel).unwrap();
+            state
+                .editor
+                .execute(Command::RemoveTextAnimator { id: 2, animator: 1 })
+                .unwrap();
+            state.normalize_graph_channels(false);
+            assert!(!state.graph_channels.is_available(channel));
+            assert!(!state.graph_activate_property(channel, false));
+            state.editor.undo();
+            state.normalize_graph_channels(true);
+            assert!(state.graph_channels.is_available(channel));
+            assert!(state.graph_activate_property(channel, false));
+            assert_eq!(state.graph_active_channel(), Some(channel));
+            let missing = GraphChannel {
+                id: 2,
+                property: PropertyPath::TextAnimator {
+                    animator: 999,
+                    parameter: TextParam::AnimatorStart,
+                },
+            };
+            assert!(!state.graph_activate_property(missing, false));
+            assert_eq!(state.graph_active_channel(), Some(channel));
         }
     }
 

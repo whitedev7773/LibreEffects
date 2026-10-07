@@ -529,6 +529,7 @@ fn add_layer(state: &mut Snapshot, asset: AssetId, frame: Frame) -> Result<(), S
     layer.asset = Some(asset);
     layer.footage_interpretation = a.interpretation;
     layer.in_frame = frame;
+    layer.preserve_start_frame(i64::from(frame));
     if let Some(seconds) = interpreted_duration {
         let comp = &state.project.composition;
         let end = (u64::from(frame) + (seconds * comp.fps.as_f64() - 1e-7).ceil().max(1.0) as u64)

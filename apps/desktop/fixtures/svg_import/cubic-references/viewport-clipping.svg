@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="100">
+<g transform='matrix(1.25 0 0 1.25 5 0)'>
+  <rect x="-10" y="-10" width="34" height="100" fill="#bc643e" stroke="#492819" stroke-width="10"/>
+  <circle cx="113" cy="40" r="31" fill="#4a98b1" stroke="#214651" stroke-width="13"/>
+  <path d="M42 -12 C57.666666666666664 22.0 73.33333333333333 56.0 89 90" fill="none" stroke="#653b86" stroke-width="18"/>
+</g></svg>

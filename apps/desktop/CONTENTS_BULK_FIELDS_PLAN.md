@@ -1,6 +1,13 @@
-# E04 proposal: shared numeric fields for sibling selections
+# E04 contract: shared numeric fields for sibling selections
 
-Prepared 2026-10-04 from a read-only source review. **Proposal only: not implemented or tested.** The design review changed no application source and ran no tests, native actions or network operations. The cross-parent drag implementation is now committed as `75f5055`; its verification is recorded in [HANDOFF.md](HANDOFF.md) and [STATUS.md](STATUS.md). This proposal itself adds no implementation.
+The original 2026-10-04 proposal is now implemented by the dedicated core
+transaction (`e1004ce`), guarded desktop controls (`56ef417`) and independent
+render/codec integration tests (`8ea6de4`). The contract below remains the design
+and acceptance reference; its original source-review line numbers are historical.
+Read [STATUS.md](STATUS.md) and [HANDOFF.md](HANDOFF.md) for the current verification
+results, native limitations and next work; [BULK_FIELDS_ACCEPTANCE.md](BULK_FIELDS_ACCEPTANCE.md)
+contains the executed/unrun matrix. This file does not imply completion of
+compound Colors, bulk animation controls or all of E04.
 
 ## Recommendation
 
@@ -77,9 +84,9 @@ Store a bulk field context in `ContentsControls`, separate from `ContentsFieldTa
 
 Use a pinned final release and saved fixtures. Check: (1) multi-selection/intersection/Mixed presentation; (2) mouse entry and keyboard Enter for one uniform and one Mixed scalar; (3) blur-to-another-field and blur-to-tree selection commit once to the old target; (4) invalid/empty/Escape and real marked-IME ownership; (5) mixed static/animated current-frame edits including an eased key, no-op and exact Undo/Redo; (6) retained selection after two consecutive edits and hierarchy movement; (7) stale/lock/playback/modal context rejection; (8) actual native Save/Open/resave preserving resulting PROJ/VIEW. Capture screenshots and exact output assertions; headless fixture encoding is not native Save/Open. If native access remains unavailable, ship only as headless-verified/native-pending and leave E04 Partial. Compound Colors still remains.
 
-Run the repository's required Rust checks against the final source after implementation, then build/attribute release and retain previous renderer/codec regression evidence. This design review has not run those checks.
+Run the repository's required Rust checks against the final source after implementation, then build/attribute release and retain previous renderer/codec regression evidence. The original proposal did not run those checks; the current outcomes are recorded in STATUS.md.
 
-## Proposed ownership and integration boundaries
+## Implementation ownership and integration boundaries
 
 - **Core worker:** new `crates/core/src/contents_bulk_fields.rs` (or isolated helpers in `shape_contents.rs`) and dedicated `contents_bulk_fields_tests.rs`: validation/planning/atomic value logic. Small shared edits to `shape_contents.rs` for enum/dispatch, and `lib.rs` for module/pure-command acceptance. Coordinate those shared files explicitly.
 - **Desktop worker:** new `apps/desktop/src/panels/contents/bulk_fields.rs` for intersection, binding/session model and rendering; focused tests alongside it. Minimal integration in `panels/contents.rs` and `panels/contents/tree.rs` for multiselect publish/invalidation. These files overlap the current drag work, so begin after its gate or let one integrator own them.

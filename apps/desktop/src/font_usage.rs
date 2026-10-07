@@ -3,7 +3,7 @@ use libre_effects_core::{
     Command, CompositionId, Content, Frame, Layer, LayerId, Project, TextFont,
 };
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -30,21 +30,31 @@ impl Group {
         self.usages.iter().filter(|u| !u.locked).count()
     }
 }
+/// Authored identities include the retained insertion style as well as visible runs.
+/// Keep exact PostScript faces intact so normal missing-face warnings still apply.
+fn authored_fonts(layer: &Layer) -> impl Iterator<Item = TextFont> + '_ {
+    std::iter::once(TextFont::of(&layer.text_style())).chain(
+        layer.rich_text().into_iter().flat_map(|rich| {
+            std::iter::once(rich.default_style.font())
+                .chain(rich.runs.iter().map(|run| run.style.font()))
+        }),
+    )
+}
 pub(crate) fn inventory(project: &Project) -> Vec<Group> {
     let mut groups = BTreeMap::<TextFont, Vec<Usage>>::new();
     for (composition_id, comp) in project.compositions() {
         for layer in comp.layers() {
             if matches!(layer.content(), Content::Text { .. }) {
-                groups
-                    .entry(TextFont::of(&layer.text_style()))
-                    .or_default()
-                    .push(Usage {
+                // A font may occur in multiple runs, but replacement counts layers.
+                for font in authored_fonts(layer).collect::<BTreeSet<_>>() {
+                    groups.entry(font).or_default().push(Usage {
                         composition_id,
                         layer_id: layer.id(),
                         composition: comp.name().into(),
                         layer: layer.name().into(),
                         locked: layer.locked(),
                     });
+                }
             }
         }
     }
@@ -93,7 +103,7 @@ impl CoverageSnapshot {
         for (composition_id, comp) in project.compositions() {
             for layer in comp.layers() {
                 if matches!(layer.content(), Content::Text { .. })
-                    && TextFont::of(&layer.text_style()) == *font
+                    && authored_fonts(layer).any(|authored| authored == *font)
                 {
                     layers.push(FrozenLayer {
                         usage: Usage {
@@ -143,7 +153,7 @@ impl CoverageSnapshot {
         for (composition_id, comp) in project.compositions() {
             for layer in comp.layers() {
                 if matches!(layer.content(), Content::Text { .. })
-                    && TextFont::of(&layer.text_style()) == self.font
+                    && authored_fonts(layer).any(|authored| authored == self.font)
                 {
                     let Some(frozen) = self.layers.get(index) else {
                         return false;
@@ -503,6 +513,234 @@ mod tests {
         assert_eq!(missing_count(e.project()), 2);
         assert_eq!(groups.iter().filter(|g| g.warning.is_none()).count(), 1);
         assert!(groups.iter().all(|g| g.actual.family == "Wanted Sans"));
+    }
+}
+
+#[cfg(test)]
+mod rich_font_tests {
+    use super::*;
+    use libre_effects_core::{Editor, RichText, TextCharacterStyle, TextStyle, TextStyleRun};
+
+    fn add_rich_text(editor: &mut Editor, default: &TextStyle, styles: &[TextStyle]) -> LayerId {
+        let text = "x".repeat(styles.len());
+        let rich_text = RichText::new(
+            &text,
+            TextCharacterStyle::from_style(default, 32.0, 0xffffff),
+            styles
+                .iter()
+                .enumerate()
+                .map(|(index, style)| TextStyleRun {
+                    start: index,
+                    end: index + 1,
+                    style: TextCharacterStyle::from_style(style, 32.0, 0xffffff),
+                })
+                .collect(),
+        )
+        .unwrap();
+        editor
+            .execute(Command::AddContent {
+                content: Content::Text {
+                    text,
+                    font_size: 32.0,
+                },
+                width: 250.0,
+                height: 100.0,
+                name: "Mixed fonts".into(),
+            })
+            .unwrap();
+        let id = editor.selected().unwrap();
+        editor
+            .execute(Command::SetRichText {
+                id,
+                rich_text: Some(rich_text),
+            })
+            .unwrap();
+        id
+    }
+
+    #[test]
+    fn authored_layer_default_and_run_fonts_are_distinct_once_per_layer() {
+        let root = TextStyle::default();
+        // An explicit face stays distinct from a family-only authored identity,
+        // even when both resolve to the same installed face.
+        let insertion = TextStyle {
+            font_face: "WantedSans-Regular".into(),
+            ..root.clone()
+        };
+        let bold = TextStyle {
+            weight: 700,
+            ..root.clone()
+        };
+        let mut editor = Editor::default();
+        add_rich_text(
+            &mut editor,
+            &insertion,
+            &[bold.clone(), root.clone(), bold.clone()],
+        );
+        editor.execute(Command::DuplicateComposition).unwrap();
+        editor
+            .execute(Command::ToggleLocked(editor.selected().unwrap()))
+            .unwrap();
+        let before = editor.project().clone();
+        let groups = inventory(&before);
+        assert_eq!(groups.len(), 3);
+        assert_eq!(
+            groups
+                .iter()
+                .map(|group| group.font.clone())
+                .collect::<BTreeSet<_>>(),
+            [&root, &insertion, &bold]
+                .into_iter()
+                .map(TextFont::of)
+                .collect()
+        );
+        for group in &groups {
+            assert_eq!(group.usages.len(), 2);
+            assert_eq!(group.editable(), 1);
+            let snapshot = CoverageSnapshot::capture(&before, 7, &group.font, 12);
+            assert_eq!(snapshot.layers.len(), 2);
+            assert_eq!(
+                snapshot
+                    .layers
+                    .iter()
+                    .map(|layer| &layer.usage)
+                    .collect::<Vec<_>>(),
+                group.usages.iter().collect::<Vec<_>>()
+            );
+            assert!(snapshot.matches(&before, 7, Some(&group.font), 12));
+        }
+        assert_eq!(missing_count(&before), 0);
+        assert_eq!(editor.project(), &before);
+    }
+
+    #[test]
+    fn empty_rich_text_retains_its_default_font_in_inventory_and_snapshot() {
+        let insertion = TextStyle {
+            weight: 700,
+            ..Default::default()
+        };
+        let mut editor = Editor::default();
+        let id = add_rich_text(&mut editor, &insertion, &[]);
+        let font = TextFont::of(&insertion);
+        let group = inventory(editor.project())
+            .into_iter()
+            .find(|group| group.font == font)
+            .unwrap();
+        assert_eq!(group.usages.len(), 1);
+        assert_eq!(group.usages[0].layer_id, id);
+        let snapshot = CoverageSnapshot::capture(editor.project(), 7, &font, 0);
+        assert_eq!(snapshot.layers.len(), 1);
+        assert!(snapshot.matches(editor.project(), 7, Some(&font), 0));
+    }
+
+    #[test]
+    fn run_only_missing_postscript_face_is_reported_once_and_can_be_replaced() {
+        let root = TextStyle::default();
+        let missing = TextStyle {
+            font_face: "WantedSans-LibreEffectsRunOnlyMissingQA".into(),
+            ..root.clone()
+        };
+        let mut editor = Editor::default();
+        let id = add_rich_text(
+            &mut editor,
+            &root,
+            &[missing.clone(), root.clone(), missing.clone()],
+        );
+        let before = editor.project().clone();
+        let groups = inventory(&before);
+        assert_eq!(groups.len(), 2);
+        let group = groups
+            .iter()
+            .find(|group| group.font == TextFont::of(&missing))
+            .unwrap();
+        assert_eq!(group.usages.len(), 1);
+        assert_eq!(group.font.face, missing.font_face);
+        assert_eq!(group.warning, crate::fonts::warning(&missing));
+        assert!(
+            group
+                .warning
+                .as_ref()
+                .unwrap()
+                .contains("Style unavailable")
+        );
+        assert_ne!(group.actual.face, missing.font_face);
+        assert_eq!(missing_count(&before), 1);
+        let plan = Replacement::new(&before, 7, group.font.clone(), group.actual.clone()).unwrap();
+        assert_eq!((plan.count, plan.locked), (1, 0));
+        editor.execute(plan.command(&before, 7).unwrap()).unwrap();
+        assert_eq!(missing_count(editor.project()), 0);
+        let layer = editor.project().composition().layer(id).unwrap();
+        assert_eq!(layer.text_style(), root);
+        assert_eq!(
+            layer.content(),
+            before.composition().layer(id).unwrap().content()
+        );
+        let rich = layer.rich_text().unwrap();
+        assert_eq!(rich.default_style.font(), TextFont::of(&root));
+        assert_eq!(rich.runs[0].style.font(), group.actual);
+        assert_eq!(rich.runs[2].style.font(), group.actual);
+        editor.undo();
+        assert_eq!(editor.project(), &before);
+    }
+
+    #[test]
+    fn same_source_run_changes_invalidate_snapshot_without_revision_change() {
+        let root = TextStyle::default();
+        let bold = TextStyle {
+            weight: 700,
+            ..root.clone()
+        };
+        let mut editor = Editor::default();
+        let id = add_rich_text(&mut editor, &root, &[bold.clone(), root.clone()]);
+        let font = TextFont::of(&bold);
+        let mut session = CoverageSession::default();
+        let job = session.start(editor.project(), 7, &font, 0).unwrap();
+        assert_eq!(job.snapshot.layers.len(), 1);
+        let original = job.snapshot.layers[0].layer.clone();
+        let mut rich_text = original.rich_text().unwrap().clone();
+        rich_text.runs[0].style.tracking = 125.0;
+        editor
+            .execute(Command::SetRichText {
+                id,
+                rich_text: Some(rich_text),
+            })
+            .unwrap();
+        let changed = editor.project().composition().layer(id).unwrap();
+        assert_eq!(changed.content(), original.content());
+        assert_eq!(changed.text_style(), original.text_style());
+        assert!(authored_fonts(changed).any(|authored| authored == font));
+        session.validate(editor.project(), 7, Some(&font), true, 0);
+        assert!(job.cancelled());
+        assert!(session.check.is_none());
+        session.finish(job.serial);
+
+        // Changing a run in a previously nonmatching layer must also invalidate
+        // the report, even when every previously frozen layer remains identical.
+        let other = add_rich_text(&mut editor, &TextStyle::default(), &[TextStyle::default()]);
+        let snapshot = CoverageSnapshot::capture(editor.project(), 7, &font, 0);
+        assert_eq!(snapshot.layers.len(), 1);
+        let mut rich_text = editor
+            .project()
+            .composition()
+            .layer(other)
+            .unwrap()
+            .rich_text()
+            .unwrap()
+            .clone();
+        rich_text.runs[0].style.weight = bold.weight;
+        editor
+            .execute(Command::SetRichText {
+                id: other,
+                rich_text: Some(rich_text),
+            })
+            .unwrap();
+        assert!(!snapshot.matches(editor.project(), 7, Some(&font), 0));
+        assert_eq!(
+            CoverageSnapshot::capture(editor.project(), 7, &font, 0)
+                .layers
+                .len(),
+            2
+        );
     }
 }
 

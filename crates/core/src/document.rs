@@ -200,6 +200,7 @@ pub(super) fn prepare_native(project: &Project) -> Result<NativeMetadata, String
 }
 
 pub(super) fn encode(project: &Project) -> Result<String, String> {
+    reject_unsupported_version(u64::from(project.version))?;
     let prepared = Prepared::new(project);
     prepared.validate_budget()?;
     let mut value = prepared.metadata_value()?;
@@ -269,15 +270,28 @@ pub(super) fn decode_native(
     finish(resolve(value, images, true)?)
 }
 
-// Reject newer schemas before asset resolution or model deserialization can
-// mistake their new fields or variants for malformed supported project data.
-// Leave missing, invalid and older version handling to the existing checks.
+// Reject incompatible schemas before asset resolution or model deserialization
+// can discard unfamiliar fields. Versions 66–70 belong to earlier, unrecovered
+// contracts and must not be interpreted as this build's new rich-text schema.
+// Missing, invalid and older version diagnostics retain their existing paths.
 fn reject_future_version(
     object: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<(), String> {
-    if let Some(version) = object.get("version").and_then(serde_json::Value::as_u64)
-        && version > u64::from(PROJECT_VERSION)
-    {
+    if let Some(version) = object.get("version").and_then(serde_json::Value::as_u64) {
+        reject_unsupported_version(version)?;
+    }
+    Ok(())
+}
+
+/// Shared by wire-format preflight and resident project validation. Zero remains
+/// on the existing invalid-model path, preserving legacy asset diagnostics.
+pub(super) fn reject_unsupported_version(version: u64) -> Result<(), String> {
+    if (66..=70).contains(&version) {
+        return Err(format!(
+            "Unsupported project version {version}; versions 66–70 are not supported by this build"
+        ));
+    }
+    if version > u64::from(PROJECT_VERSION) {
         return Err(format!(
             "Unsupported project version {version}; this build supports up to version {PROJECT_VERSION}"
         ));

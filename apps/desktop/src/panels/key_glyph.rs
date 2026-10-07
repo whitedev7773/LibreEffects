@@ -231,7 +231,10 @@ mod tests {
     }
     fn glyph(e: &Editor, frame: u32) -> Glyph {
         Glyph::track(
-            e.selected_layer().unwrap().property(Property::PositionX),
+            e.selected_layer()
+                .unwrap()
+                .property(Property::PositionX)
+                .expect("2D test layer has independent Position tracks"),
             frame,
         )
         .unwrap()
@@ -362,7 +365,8 @@ mod tests {
                     .composition()
                     .layer(1)
                     .unwrap()
-                    .property(Property::PositionX),
+                    .property(Property::PositionX)
+                    .expect("2D test layer has independent Position tracks"),
                 30
             ),
             Some(changed)

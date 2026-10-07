@@ -1,15 +1,131 @@
 //! Layer-space SVG filters. Each stage takes the preceding stage's complete RGBA result.
 use libre_effects_core::{
-    EffectColorSpace, EffectInstance, EffectKind, EffectParam as P, Layer, LumaKeyMode,
+    Affine, EffectColorSpace, EffectInstance, EffectKind, EffectParam as P, GaussianEdgeMode,
+    Layer, LumaKeyMode,
 };
 use std::fmt::Write;
 
+/// Input domain before the first stage. Transform maps it into layer/filter space.
+#[derive(Clone, Copy)]
+pub(crate) struct InputDomain {
+    pub rect: [f64; 4],
+    pub transform: Affine,
+}
+impl InputDomain {
+    pub(crate) fn local(rect: [f64; 4]) -> Self {
+        Self {
+            rect,
+            transform: Affine::default(),
+        }
+    }
+    fn sidecar(self, filter_id: String) -> Result<resvg::RepeatEdgeDomain, String> {
+        let [x, y, width, height] = self.rect;
+        if !self.rect.iter().all(|v| v.is_finite()) || width <= 0.0 || height <= 0.0 {
+            return Err("Repeat Edge Pixels has an invalid source domain".into());
+        }
+        let rect =
+            resvg::tiny_skia::Rect::from_xywh(x as f32, y as f32, width as f32, height as f32)
+                .ok_or("Repeat Edge Pixels source domain exceeds raster precision")?;
+        let [a, b, c, d, e, f] = self.transform.0;
+        if !self.transform.0.iter().all(|v| v.is_finite()) {
+            return Err("Repeat Edge Pixels has an invalid source transform".into());
+        }
+        let transform = resvg::tiny_skia::Transform::from_row(
+            a as f32, b as f32, c as f32, d as f32, e as f32, f as f32,
+        );
+        if !transform.is_finite() || transform.invert().is_none() {
+            return Err("Repeat Edge Pixels source transform exceeds raster precision".into());
+        }
+        Ok(resvg::RepeatEdgeDomain {
+            filter_id,
+            primitive_index: 0,
+            rect,
+            transform,
+        })
+    }
+}
+
+pub(crate) struct FilterStack {
+    pub definitions: String,
+    pub open: String,
+    pub close: String,
+    pub repeat_domains: Vec<resvg::RepeatEdgeDomain>,
+}
+
+#[cfg(test)]
 pub(crate) fn stack(
     layer: &Layer,
     frame: u32,
     prefix: &str,
     bounds: [f64; 4],
 ) -> Result<(String, String, String), String> {
+    let stack = stack_with_domain(layer, frame, prefix, bounds, InputDomain::local(bounds))?;
+    Ok((stack.definitions, stack.open, stack.close))
+}
+
+pub(crate) fn stack_with_domain(
+    layer: &Layer,
+    frame: u32,
+    prefix: &str,
+    bounds: [f64; 4],
+    input_domain: InputDomain,
+) -> Result<FilterStack, String> {
+    stack_after_generator(layer, frame, prefix, bounds, input_domain, None)
+}
+
+pub(crate) fn stack_with_generated_spectrum(
+    layer: &Layer,
+    frame: u32,
+    prefix: &str,
+    bounds: [f64; 4],
+    input_domain: InputDomain,
+    spectrum: libre_effects_core::EffectId,
+) -> Result<FilterStack, String> {
+    stack_after_generator(layer, frame, prefix, bounds, input_domain, Some(spectrum))
+}
+
+fn stack_after_generator(
+    layer: &Layer,
+    frame: u32,
+    prefix: &str,
+    bounds: [f64; 4],
+    mut input_domain: InputDomain,
+    generated_spectrum: Option<libre_effects_core::EffectId>,
+) -> Result<FilterStack, String> {
+    let mut active = layer
+        .effect_stack()
+        .iter()
+        .filter(|e| !e.bypassed() && e.kind() != EffectKind::SliderControl);
+    let first = active.next();
+    let spectra: Vec<_> = layer
+        .effect_stack()
+        .iter()
+        .filter(|e| !e.bypassed() && e.kind() == EffectKind::AudioSpectrum)
+        .collect();
+    match (spectra.as_slice(), generated_spectrum) {
+        ([], None) => {}
+        ([effect], Some(id)) if effect.id() == id && first.is_some_and(|e| e.id() == id) => {}
+        _ => {
+            return Err(
+                "Audio Spectrum requires its first-stage selected-audio generator result".into(),
+            );
+        }
+    }
+    let repeats = layer.effect_stack().iter().any(|effect| {
+        !effect.bypassed() && effect.gaussian_edge_mode() == GaussianEdgeMode::Repeat
+    });
+    if repeats
+        && (layer.effects().blur > 0.0
+            || layer.effect_stack().iter().any(|effect| {
+                !effect.bypassed() && effect.color_space() == EffectColorSpace::LinearRgb
+            }))
+    {
+        return Err(
+            "Repeat Edge Pixels does not yet support legacy linear-color or legacy blur stages"
+                .into(),
+        );
+    }
+    let mut repeat_domains = Vec::new();
     let [left, top, source_width, source_height] = bounds;
     let mut definitions = String::new();
     let mut filters = Vec::new();
@@ -19,7 +135,9 @@ pub(crate) fn stack(
         (0.0, 0.0)
     };
     let mut stages = Vec::new();
-    for effect in layer.effect_stack().iter().filter(|e| !e.bypassed()) {
+    for effect in layer.effect_stack().iter().filter(|e| {
+        !e.bypassed() && e.kind() != EffectKind::SliderControl && Some(e.id()) != generated_spectrum
+    }) {
         if effect.kind() == EffectKind::LumaKey {
             let mode = luma_key_mode(effect)?;
             // Even an identity filter can introduce another 8-bit intermediate.
@@ -53,6 +171,11 @@ pub(crate) fn stack(
             continue;
         }
         let v = |p| effect.value_at(p, frame);
+        let preceding_domain = input_domain;
+        let spreads = matches!(
+            effect.kind(),
+            EffectKind::GaussianBlur | EffectKind::Glow | EffectKind::DropShadow
+        );
         match effect.kind() {
             EffectKind::GaussianBlur | EffectKind::Glow => {
                 px += v(P::Radius) * 4.0;
@@ -72,6 +195,13 @@ pub(crate) fn stack(
             );
         }
         let id = format!("{prefix}-effect-{}", effect.id());
+        if effect.gaussian_edge_mode() == GaussianEdgeMode::Repeat {
+            repeat_domains.push(preceding_domain.sidecar(id.clone())?);
+        }
+        if spreads {
+            // The next stage reads this finite declared output, not its own halo.
+            input_domain = InputDomain::local([left - px, top - py, width, height]);
+        }
         write!(definitions,"<filter id='{id}' filterUnits='userSpaceOnUse' x='{}' y='{}' width='{width}' height='{height}' color-interpolation-filters='sRGB'>{}</filter>",left-px,top-py,primitives(effect,frame,[left-px,top-py,width,height])?).unwrap();
         filters.push(id);
     }
@@ -82,7 +212,12 @@ pub(crate) fn stack(
         .map(|id| format!("<g filter='url(#{id})'>"))
         .collect();
     let close = "</g>".repeat(filters.len());
-    Ok((definitions, open, close))
+    Ok(FilterStack {
+        definitions,
+        open,
+        close,
+        repeat_domains,
+    })
 }
 
 fn primitives(effect: &EffectInstance, frame: u32, bounds: [f64; 4]) -> Result<String, String> {
@@ -96,6 +231,10 @@ fn primitives(effect: &EffectInstance, frame: u32, bounds: [f64; 4]) -> Result<S
         )
     };
     Ok(match effect.kind() {
+        EffectKind::AudioSpectrum => {
+            return Err("Audio Spectrum requires selected-audio generator context".into());
+        }
+        EffectKind::SliderControl => String::new(),
         EffectKind::LumaKey => {
             let mode = luma_key_mode(effect)?;
             luma_key(v(P::LumaThreshold), v(P::LumaSoftness), mode)
@@ -133,7 +272,16 @@ fn primitives(effect: &EffectInstance, frame: u32, bounds: [f64; 4]) -> Result<S
             format!("<feComponentTransfer>{channels}</feComponentTransfer>")
         }
         EffectKind::LinearGradient | EffectKind::RadialGradient => gradient(effect, frame, bounds),
-        EffectKind::GaussianBlur => format!("<feGaussianBlur stdDeviation='{}'/>", v(P::Radius)),
+        EffectKind::GaussianBlur => {
+            if effect.gaussian_edge_mode() == GaussianEdgeMode::Repeat {
+                format!(
+                    "<feGaussianBlur stdDeviation='{}' edgeMode='duplicate'/>",
+                    v(P::Radius)
+                )
+            } else {
+                format!("<feGaussianBlur stdDeviation='{}'/>", v(P::Radius))
+            }
+        }
         EffectKind::Brightness => {
             let b = v(P::Amount);
             format!("<feColorMatrix values='{b} 0 0 0 0 0 {b} 0 0 0 0 0 {b} 0 0 0 0 0 1 0'/>")

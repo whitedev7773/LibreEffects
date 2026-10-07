@@ -7,8 +7,12 @@ editor, not a complete After Effects replacement or an AEP-compatible applicatio
 See [current implementation status](STATUS.md) for all backlog IDs, the latest
 verification results and remaining milestones. Dated test counts later in this
 guide and the backlog are historical checkpoints.
-For the paused recovery checkpoint and next development contract, read
-[engineering handoff](HANDOFF.md) and the [shared Contents field plan](CONTENTS_BULK_FIELDS_PLAN.md).
+For the current continuation checkpoint and Contents editing contracts, read
+[engineering handoff](HANDOFF.md), the [shared field plan](CONTENTS_BULK_FIELDS_PLAN.md),
+the [compound Colors contract](GRADIENT_COLORS_PLAN.md) and
+[animation acceptance](CONTENTS_ANIMATION_ACCEPTANCE.md), and the
+[Contents clipboard contract](CONTENTS_CLIPBOARD_PLAN.md) and
+[compound key editing contract](GRADIENT_MULTIKEY_PLAN.md).
 
 Only one editor runs per user, including builds launched from different folders
 or executable names. Launching again requests that the previous editor stop its
@@ -21,6 +25,27 @@ Command-line renders remain independent of the interactive editor.
 
 ![Libre Effects workspace with the Content and Motion Study sample](screenshots/workspace.png)
 
+## Recent projects
+
+**File → Open recent** lists up to ten native `.lep` projects, newest first.
+Successful Open and Save As (including the first Save chooser) remember a path;
+direct Save does not reorder history. Legacy imports are remembered only after
+saving a native copy. Hover a filename for its full path. The list does not scan
+folders or check files until you explicitly open one. Missing or invalid files
+report an error without replacing the current project.
+
+Recent opens use the ordinary unsaved-changes prompt. Use arrows/Home/End and
+Enter/Space within the menu; Left/Escape returns to File, and F10/Tab dismisses
+it. **Clear recent list** clears local history only, leaving project files intact.
+History is stored beside recent colors in the profile's `recent-projects.json`.
+Reads are capped at 256 KiB; each absolute Unicode path is limited to 4096 bytes.
+No paths are uploaded or included in project/VIEW data. Routine atomic writes
+run in the background; close finishes the newest pending history write, which
+can wait on slow storage. Bounded Linux native open/save ordering, dirty Cancel/
+Save-and-continue, missing paths and restart/Clear persistence have been checked.
+Tenth-entry first-Save eviction, interrupted choosers, marked IME, duplicate-name
+tooltips and read-only/stalled profiles remain unqualified; see [STATUS.md](STATUS.md).
+
 ## Project list names
 
 Long composition, footage and folder names stay on one line and show an ellipsis
@@ -29,6 +54,96 @@ stored name is unchanged, and Project search still uses the complete name.
 Type labels and row action buttons retain their width instead of wrapping into
 the next row. This correction is separate from the broader cross-DPI layout and
 accessibility acceptance work.
+
+## Project filters and navigation
+
+Project search matches full names or type labels, ignoring case and outer
+whitespace. Combine it with **All / Comps / Footage / Folders**; Footage includes
+images, sequences, video and audio. Filtered results include items inside collapsed
+folders, retain the Name/Type sort order, and show their parent path on name hover.
+Clear restores the unfiltered folder tree and its collapse state. The footer shows
+visible/total items and warns if the inspected selection is hidden.
+Type buttons keep their labels on one line and wrap as whole controls in narrow
+panes, retaining the same order, selected highlight and full-label tooltips.
+
+Click within Project, then use Tab/Shift+Tab to traverse its controls, stopping
+at the panel boundaries. Pending source edits and IME keep focus until explicitly
+finished. Search queries retain their text when tabbing. Click the list or return
+to its focus stop with Shift+Tab, then use Up/Down or Home/End to select visible
+rows and scroll them into view. Selection does not open a composition,
+seek, change Timeline selection or affect source/history/Graph VIEW. Enter opens
+a visible selected composition, or toggles a folder in the unfiltered tree;
+it does not insert footage. Ctrl+F selects the search text, and Enter/Escape in
+search returns focus to the list. Text/IME and pending edit domains retain their
+input. Unsupported row modifier chords and layer-edit shortcuts are absorbed
+while Project has focus, so they cannot edit a retained Timeline selection.
+With the list focused and playback paused, F2 selects the visible item's name in
+the existing details field. Enter/blur commits and Escape cancels through that
+field's existing rename behavior. Hidden/stale items, held or modified F2, source
+drafts, gestures and IME cannot start the shortcut.
+
+The filters and folder view are transient and reset on document/composition
+changes. Source names, links, IDs and saved VIEW are unchanged by browsing.
+Bounded Linux native checks cover 147/200 px wrapping, wrapped Tab/Space, F2
+select-all, Enter/Escape and pending-name Tab protection. Short panes, rename
+blur/Undo, held repeats, marked IME and other platforms remain unqualified.
+
+## Fast development checks
+
+Source the development environment when needed, then use the same target directory:
+
+- `bash apps/desktop/scripts/verify.sh models` runs the lightweight shared view-model tests without GPUI.
+- `bash apps/desktop/scripts/verify.sh check` checks all workspace targets.
+- `bash apps/desktop/scripts/verify.sh desktop-tests timeline` filters the desktop/workspace tests to Timeline cases.
+- `bash apps/desktop/scripts/verify.sh desktop-tests` is the full default gate for a frozen batch.
+
+Moon's `desktop:test-models`, `desktop:check` and `desktop:test` use equivalent
+native Cargo argument lists, so they do not require Bash on Windows.
+
+A desktop test filter still compiles the whole desktop test executable before
+selecting tests at runtime. Use `models` for pure filtering/selection changes,
+and reserve desktop code-generation and release builds for changes that need
+them. The desktop imports the same editor-model implementation tested by the
+lightweight target. Do not claim these model tests replace native UI validation.
+The script fixes the existing one-job/default incremental-off setup and desktop
+debug/strip/codegen settings; callers may explicitly override job/incremental
+environment values. It never deletes build caches or changes the release profile.
+
+## Timeline layer filters
+
+The **Layers** bar combines live, case-insensitive name search with **All types**
+and **Selected only**. Type matches the layer's content; Shape includes legacy
+rectangles and Shape Contents, while Sequence is separate from still Image.
+Search uses literal substrings, and all active criteria must match. Hide Shy
+still takes precedence. **Ctrl+F** with Timeline focus enters the name field;
+Enter returns to the Timeline, and the × button clears these three filters.
+The type picker supports arrows, Home/End, Enter and Escape.
+
+Filters affect only the current composition's Timeline rows and their property
+lanes. Stack numbers, IDs, parent labels and nested Contents remain intact.
+They do not change source, rendering, Undo or saved VIEW, and reset when opening
+another document or switching composition. Pinned Graph channels remain explicit
+and independently editable.
+
+With Timeline layer rows focused, Up/Down selects the previous/next visible row;
+Home/End selects the first/last. Shift extends or contracts a range from one
+anchor, and the active header scrolls into view. Held arrow keys repeat without
+wrapping at the ends. Ctrl+A selects visible rows and keeps the active visible
+layer, falling back to the first row in stack order. Selected only updates live,
+so navigation does not restore rows that become hidden by the new selection.
+These shortcuts do not seek, change source/history or alter saved VIEW/Graph
+pins. Search/numeric fields, Contents, Graph and selected keys keep their own
+keyboard ownership; finish pending input or pointer gestures first.
+
+Ctrl+A and Shift-click select only displayed layer rows. Shared selection can
+still contain layers hidden by a filter; a count warns when it does. Timeline
+selection edits, key context menus and bar/key dragging refuse hidden targets
+rather than silently editing them. That protection follows Timeline commands
+through Edit/Find command and neutral workspace focus. Clear filters or select
+visible rows to continue. Filtered paste is conservative because key clipboards
+can address other layers. Layer reordering requires clearing these filters and
+Hide Shy. Parent/matte dependency behavior is unchanged when deleting a visible
+layer.
 
 ## Keyboard menus
 
@@ -58,6 +173,81 @@ draft first. Native F10 opening, menu/item navigation, Enter execution and
 Escape closing have been checked; full Windows keyboard, IME and DPI regression
 remains to be completed.
 
+## Import SVG as editable shapes
+
+Choose **File → Import SVG as editable shapes…** or find that command with
+**Ctrl+Shift+P**. Select one local, uncompressed UTF-8 SVG (up to 1 MiB). A
+successful import creates one Shape Contents layer at composition origin,
+using the SVG viewport size and an editable rectangular viewport mask. Paths,
+solid/linear/radial-gradient Fill/Stroke and nested groups remain editable. One Undo removes the whole
+import. Cancel, unsupported data and stale chooser/parse results leave the
+import transaction's source/history unchanged.
+
+This is a deliberately bounded static importer. It supports paths, rectangles
+(including rounded corners), circles, ellipses, lines, polylines, polygons,
+groups, transforms, group opacity, inherited solid paint, winding, cap/join/
+miter/dashes, and root viewBox/preserveAspectRatio. Viewport width/height must be
+**integer pixels from 1 to 16,384**, written as numbers or px; missing dimensions
+may come from viewBox. Fractional viewport sizes reject rather than round,
+because the current native mask cannot faithfully retain their edge coverage.
+
+Geometry is normalized to editable cubic paths: straight segments use linear
+cubic controls, quadratics use degree elevation, and elliptical arcs use the
+pinned renderer's existing cubic approximation. Antialiased edge pixels may
+differ slightly from the original SVG because the renderer handles native
+lines, quadratics and cubics differently. This is not a byte-identical SVG
+round-trip or a promise of raw-source pixel identity at arbitrary scales.
+
+Supported solid colors are named colors, three/six-digit RGB hex, and
+three-channel RGB numbers/percentages. Use separate fill/stroke-opacity for
+transparency. A bounded `style` attribute supports the same Fill/Stroke, winding,
+stroke-style and opacity fields. Inline declarations override presentation
+attributes; repeated properties use the last value. Property/keyword case is
+insensitive. Paint/stroke values inherit; element opacity remains local. Every
+supplied value must be valid, even if overridden. Empty styles are no-ops.
+
+Inline styles allow literal values only: no comments, escapes, strings,
+`!important`, `inherit`, `currentColor`, CSS-wide values, variables or functions
+other than supported three-channel RGB and local url(#ID) paint. Limits are 16 KiB decoded style bytes and
+128 declarations per element, 2,048 declarations per file. See the
+[inline declaration contract](SVG_INLINE_STYLE_PLAN.md) for the precise subset.
+Local linear gradients in root-level defs are supported with 2–32 ordered stops,
+stop opacity, objectBoundingBox/userSpaceOnUse coordinates and gradientTransform.
+Local href/xlink gradient templates support bounded inheritance and reuse, with
+nearest attribute overrides and whole-list stop replacement. Both reference
+attributes must agree if supplied together. All definitions are validated,
+including unused ones; cycles and external/missing targets reject.
+Paints stay editable, with pad/sRGB behavior. See the
+[linear-gradient contract](SVG_LINEAR_GRADIENT_PLAN.md) for IDs, limits and
+renderer precision rejections. Flattened transformed ramps can differ by small
+channel-rounding amounts from raw SVG, separately from geometry antialiasing.
+
+Circular radial gradients support editable center/radius/focus, same-kind local
+href templates, and circle-preserving combined bbox/gradient transforms. Normal
+outer group transforms remain editable, including nonuniform scaling and shear.
+Gradient-only ellipses/shear, nonzero focal radius and focus beyond 99.9% reject;
+see the [radial-gradient contract](SVG_RADIAL_GRADIENT_PLAN.md).
+
+Stylesheets/class, embedded-alpha/HSL color syntax,
+patterns, external resources/use/images, text, filters, masks/clip paths,
+markers, scripts/events, animation, nested SVG and foreign content reject the
+**whole file with an explicit reason**. No unsupported object is silently
+skipped or replaced with raster pixels. Titles/descriptions are inert. Empty,
+degenerate, singular, over-budget or otherwise unrepresentable geometry also
+rejects. XML declarations must be XML 1.0/UTF-8; DTD/entity declarations and
+processing instructions are disabled. Symlinks and nonregular files are refused.
+
+General File-menu/search opening retains its normal field-commit behavior.
+If a source edit was pending at entry, that same entry cannot start SVG import;
+finish the edit and reopen the menu/search. Import results are canceled if the
+source, history, document, selection, input context, transport or modal context
+changes while the chooser/parser is active. Very old projects that would need
+unrelated asset/schema migration reject instead of rewriting existing content.
+
+See the [bounded SVG contract](SVG_IMPORT_PLAN.md) and the
+[qualification report](SVG_IMPORT_ACCEPTANCE.md) for exact limits, evidence and
+remaining E06 scope.
+
 ## Build identity
 
 Open **Help → About Libre Effects** (also available in Find command) for the
@@ -73,7 +263,7 @@ FNV-1a 64-bit change identifier, **not a cryptographic security signature**. It
 covers desktop/core source trees (including source tests), bundled desktop assets,
 build helpers/integration tests and fixtures, bundled example test inputs,
 workspace/package manifests, Cargo.lock, the
-vendored grid source/manifest and existing relevant toolchain/build configuration.
+vendored grid/usvg sources/manifests and existing relevant toolchain/build configuration.
 Paths and contents are sorted and hashed independently of the checkout location.
 Uncommitted edits, additions, deletions and renames inside watched source/asset
 trees are included. Git revision and relevant-source dirty state are optional;
@@ -106,22 +296,26 @@ With no selection it creates a shape path; use Ctrl when starting a mask on a
 shape layer. Click an existing vertex or handle to drag it, click a curve to
 insert a vertex without changing the curve, and use Delete on a selected vertex.
 Alt-click converts a vertex to a corner; Alt-drag a handle to break its symmetry.
-Shift constrains handles or a vertex drag to a local axis. Shift-click vertices
-on one path to toggle a multi-selection; dragging a selected vertex moves that
-set by the same local delta, preserving tangent offsets and unselected points.
+Shift constrains tangent handles to a local axis. Legacy Shape and mask vertices
+use same-path selection and local-axis moves. Contents anchor selection can span
+paths; cross-path moves and Canvas Transform use composition axes, as described
+below. Ordinary single-path editing retains its existing local-axis behavior.
+Shift-click toggles vertices; dragging a selected vertex moves the selected set,
+preserving tangent offsets during translation and retaining unselected points.
 An ordinary click on a different vertex replaces the selection. Handles remain
 single-target edits. Each completed path or drag is one Undo. Selection-only and
 edit-then-return gestures do not create keys or history entries.
 
-After targeting a path, **Shift-drag blank canvas** to add its anchor centers
-inside a box to the current selection. This is additive, same-path selection;
-points on other paths are not selected. Vertex toggles and tangent hits take
+After targeting a legacy Shape or mask path, **Shift-drag blank canvas** to add
+its anchor centers inside a box to the current same-path selection. Contents
+instead uses the selected layer's enabled editable paths. Vertex toggles and tangent hits take
 precedence, while a blank area over a curve/fill can start the box. Drag at least
 four logical screen pixels along either axis to activate it. Smaller blank clicks
 preserve selection. Box edges are inclusive and either drag direction works.
 
-**Ctrl+A**, with the Pen canvas focused, selects all vertices of that targeted
-path. Neither command guesses a path from the layer or Contents Group selection.
+**Ctrl+A**, with the Pen canvas focused, selects all vertices of the targeted
+legacy Shape/mask path, or all eligible Contents anchors on the selected layer.
+Legacy Shape/mask commands still require an explicit known path target.
 Toggling the last vertex off retains the known target, so a subsequent box or
 Ctrl+A can select it again. Selection alone adds no keys or Undo step. These
 shortcuts do not run in a text field, marked IME composition, color/gradient
@@ -138,7 +332,8 @@ multi-vertex gesture.
 Delete removes the selected static vertices atomically, retaining at least two
 vertices on open paths and three on closed paths. Animated paths reject topology
 changes without falling through to layer deletion. The same selection workflow
-works on legacy shapes, vector masks and nested Contents paths. Escape, focus,
+works on legacy shapes, vector masks and a single Contents path. Cross-path
+Delete is consumed without editing. Escape, focus,
 time, tool, target or document changes cancel a pending gesture. Opening Settings,
 Help or other shell overlays removes canvas focus before editing shortcuts run.
 Actions that open native file choosers request canvas blur; actual focus loss
@@ -197,8 +392,8 @@ and exact source, clearing errors and invalidating old field callbacks. It keeps
 the chosen scope and acts on a completed click; dragging out cancels it. Identity,
 whole-turn identity, pivot-only changes to identity controls and exact effective
 no-ops preserve keys, legacy data and Redo. Ordinary OK/Cancel restores the complete
-validated vertex selection. Linked tangent controls, cross-path selection,
-topology changes and on-canvas affine handles remain future work.
+validated vertex selection. Linked tangent controls and topology changes remain
+future work. Contents-only cross-path canvas editing is described below.
 
 Transform Vertices now has a transient **Scope** selector. **This frame** is the
 default and retains the existing evaluated-pose/key behavior. **Base + all stored
@@ -226,8 +421,58 @@ modal sample must be valid, but easing may overshoot at other frames; this is no
 an unbounded all-frame validation pass. The overlay evaluates the completed draft,
 just like rendering, because floating-point affine/interpolation order is not
 bit-identical at arbitrary angles. No project, LEP, VIEW or address version changes.
-Native scope interaction is pending the cloud screen transport; model/render/CLI
-evidence is recorded separately in STATUS.md.
+Native all-stored-pose scope acceptance remains pending; its prior
+model/render/CLI evidence is recorded separately in STATUS.md. The current-frame
+canvas qualification below does not close that separate native gap.
+
+### Cross-path canvas editing
+
+With Pen (G) and a Shape Contents layer selected, **Shift-click** toggles anchors
+across its enabled Bezier Path items, including nested Groups. **Shift-drag** adds
+anchors inside a composition-space marquee; **Ctrl+A** selects all eligible
+Contents anchors on that layer. Masks and legacy Shape paths keep their separate
+single-path selection behavior. Parametric shapes are not implicitly converted.
+
+With cross-path points selected, or Canvas Transform enabled, drag a selected
+Contents anchor to move the complete set in composition axes. Ordinary
+single-path editing with the transform box off keeps its existing local-axis
+behavior. **Canvas Transform · Shift+T** toggles four corner scale handles and a top
+rotation handle around the selected anchors' fixed center. Corners scale X/Y in
+composition axes; negative scale reflects and zero scale collapses. Shift locks
+the move to the dominant axis, uses the scale factor with the larger change for
+both axes, or snaps rotation to 15°. The opening pointer offset is retained, so
+clicking near a handle does not jump. Flat/single-point selections get a small
+visual box; their actual pivot and source geometry are unchanged by that padding.
+
+This canvas route edits **only the sampled current frame**. Static paths remain
+static. Animated paths update/insert that frame's key while retaining the base,
+every existing stored pose (including unused poses), all other keys and existing
+key interpolation/temporal metadata. Dormant static pose references remain static
+without discarding their authored pool. Unselected vertices, paints and local
+group/layer transform tracks are unchanged. Existing numeric **Base + all stored
+poses** remains an explicitly separate same-path operation.
+Changing/inserting a key can change interpolated frames between neighboring keys.
+
+Nested rotated/reflected/skewed groups use their actual local-to-composition
+matrices. Anchors and tangent offsets receive the world affine mapped back into
+each path's local space. Existing inverse limits apply: singular/near-singular
+determinants below 1e-10, nonfinite mappings and inverse coefficients beyond
+±1e12 are unavailable. Invalid results or geometry/storage/document limits reject
+the complete operation. No approximate inverse or path conversion is substituted.
+
+The isolated draft does not change Save, autosave, output or history. Release
+uses the final pointer/modifiers and commits one Undo across all affected paths.
+Unchanged/return-to-start gestures preserve Redo. Escape, focus loss, playback,
+source/frame/selection/tool/modal changes or changed canvas mapping cancel a
+gesture. Finish a pending text field before starting a canvas action; marked input
+cannot submit one. Cross-path numeric, Delete, Reverse and Set First are safely
+unavailable until the selection is on one path. Alt/Ctrl/extra-modifier affine
+gestures are not supported.
+
+No new project, LEP, VIEW or address version is required. Cross-layer/mask sets,
+custom pivots, canvas skew, all-pose world edits and topology animation remain
+outside this slice. See [the contract](CROSS_PATH_PLAN.md) and
+[acceptance](CROSS_PATH_ACCEPTANCE.md) for tested and unrun boundaries.
 
 ### Path order
 
@@ -362,6 +607,20 @@ uses the current preview's raw 8-bit straight RGBA before background, checker,
 channel display and overlays. It uses the current preview resolution; it is not
 an OS screen eyedropper or a color-managed HDR sampler. At partial alpha,
 premultiplication roundtrips can differ from source RGB by one byte.
+
+## Click-to-create auto-size text
+
+Select the Text tool and click once in the Composition to start point text at
+that position. Type or paste immediately; its blue box grows and shrinks with
+the text, including line breaks. Ctrl+Enter finishes, Escape cancels the draft.
+The selection box and transform handles continue to follow the current text
+and font size after finishing and reopening the project. No Fit action is needed.
+
+Dragging at least four screen pixels instead creates a fixed paragraph box;
+text wraps inside it. Alt-drag creates the box around the starting point. Click
+existing text to edit it, or Shift-click to insert a separate text layer.
+Point-text bounds are evaluated editing geometry: existing stored alignment,
+layer dimensions, typography and rendered content remain unchanged.
 
 ## Text fonts and styles
 
@@ -501,7 +760,7 @@ untouched legacy text stays sparse. LEP v1, VIEW v1/v2 and typed Graph address v
 remain unchanged. Sparse Graph focus does not leak new addresses into old files.
 Readers limited to project schema 48 cannot open projects containing typography
 tracks; old static and paint-only projects remain supported.
-Per-character styles, Text Animator, absolute/Auto leading,
+Per-character styles, absolute/Auto leading,
 kerning modes and animated font identity/weight remain separate work.
 
 ### Independent text paint opacity
@@ -544,8 +803,8 @@ transport recovery; automated/CLI evidence is recorded separately in STATUS.md.
 Source Text is a separate, **Hold-only** channel for the entire UTF-8 string. It
 appears first in the Timeline Text section with a stopwatch, key button, previous/
 next key navigation and a sampled-text button that opens the existing canvas editor.
-Properties shows the current source and a stopwatch. The twelve numeric text
-channels remain independent; Source Text has no numeric value or Value/Speed Graph
+Properties shows the current source and a stopwatch. The twelve whole-layer and
+five Text Animator numeric channels remain independent; Source Text has no numeric value or Value/Speed Graph
 lane. F9, non-Hold interpolation, temporal handles and value/velocity scaling are
 rejected for the whole selected operation, not partially applied to scalar keys.
 Timeline selection, dragging, copy/paste and deletion support its key times. The
@@ -581,9 +840,72 @@ the current source sample into the baseline.
 A materialized source animation requires project schema 53, including inactive
 compositions. Unanimated legacy text stays sparse; LEP 1, VIEW 1/2, numeric Graph
 address 1 and TextStyle storage are unchanged. This is whole-layer source animation,
-not per-character rich text, Text Animator, text-on-path or reusable instance controls.
+not per-character rich text, text-on-path or reusable instance controls. The bounded
+range-selected Text Animator is a separate set of numeric channels below.
 Native acceptance remains pending the supported cloud screen transport; unit/CLI
 checks are separate evidence, as recorded in STATUS.md.
+
+### Range-selected Text Animator
+
+Text Properties provides a pinned **Primary animator** with an animated primary range and up
+to seven ordered **independently animated secondary** ranges. Add a range, select its row, choose
+Add/Subtract/Intersect, and use Up/Down or Remove to edit the secondary list.
+The primary is pinned first. Selecting another row retires pending field bindings;
+secondary IDs survive reordering and are not reused after removal.
+
+Every range has Start, End, Offset, Amount, Units (Characters/Words/Lines) and
+Shape (Square/Ramp Up/Ramp Down/Triangle). Start, End, Offset and Amount can
+animate independently on each range; Units, Shape and combination mode stay static. Shared Position X/Y, Opacity, Scale X/Y and Rotation still animate
+independently. Disable animation deletes all keys for that property and keeps its
+current sample. Unchanged numeric assignments preserve keys and Redo.
+
+Unit centers in logical source order are selected inside the shifted, clipped
+half-open range `[Start + Offset, End + Offset)`, with no wrap. Characters are
+extended Unicode graphemes, including spaces and hard breaks. Words exclude
+separators, punctuation-only runs and emoji; Lines are source LF/CRLF lines,
+including blank/trailing lines, independent of visual wrapping. Shape and Amount
+produce each range's influence. Starting with Primary, Add clamps the sum to 1,
+Subtract clamps the difference to 0, and Intersect multiplies. Order matters.
+An Add range can select text when Primary is empty. Only the final combined
+weights are expanded to protect connected shaping/grapheme clusters.
+
+Shared Position and Opacity use the final protected influence. Scale and Rotation
+group by **Primary Units**, even when secondary ranges use different units, and
+share the first logical rendered baseline pivot across automatic wrapping.
+Scale then Rotation precedes weighted Position. Editing/caret geometry and
+paragraph flow do not change; paragraph ink still clips to the original box.
+
+Primary, secondary and shared materialized channels appear in Timeline and
+Value/Speed Graph. Secondary addresses use their stable selector ID, so reordering
+keeps keys and Graph lanes attached to the same range. Remove deletes that range
+and its tracks together; Undo restores them and any retained Graph pins. Timeline values are read-only; commit pending fields with Enter before
+using its animation/key buttons. Properties controls may commit their own
+pending fields. Both routes reject stale, locked, marked-IME, playback and modal
+contexts. Each accepted source edit is one Undo.
+
+Static secondary storage requires schema61 only when used. A stored secondary
+track requires schema62; untracked numeric edits retain the static baseline and
+remain sparse. Existing primary tracks and legacy files keep their schema minima.
+LEP and VIEW versions stay unchanged; Graph address version 2 is written only
+when a secondary channel is included, and version 1 cannot contain such addresses.
+Single-selector rendering remains pixel-compatible.
+
+Use **Add animator** to append up to three independent animators after Primary.
+Each additional animator has one range with independent Units/Shape and animated
+Start, End, Offset, Amount, Position X/Y, Opacity, Scale X/Y and Rotation. Select
+its row to edit it, or use Move up/down and Remove. Nested secondary ranges are
+available only inside Primary in this bounded version. Primary stays pinned first.
+
+Animators compose top to bottom on the original shaped layout. Each uses its own
+original source-unit baseline pivot, applies Scale, Rotation and then Position;
+later scale/rotation transforms earlier translations. Pivots are not moved by
+previous animators. Independent weighted opacity factors multiply. Reordering
+therefore changes noncommuting transforms without changing flow or caret geometry.
+The stable animator ID keeps keys and Graph pins attached across reorder; Undo
+restores removed animators and retained pins. Additional animator storage uses
+schema63 and its included Graph channels use address version3. Legacy primary
+storage and Source Text remain unchanged. Per-character styling remains future work.
+See the [format contract](../../docs/lep-format-v1.md) and [current qualification](HANDOFF.md).
 
 ### Canvas text editing
 
@@ -607,6 +929,26 @@ Only composed lines that fit the box are rendered; an overflow marker and panel
 message identify hidden text. Width and height are limited to 1–16384 pixels.
 The box type and dimensions roundtrip in project version 33. Older documents
 remain point text.
+
+Paragraph also provides layer-wide static **Left indent**, **Right indent**,
+**First-line indent**, **Space before** and **Space after** in source pixels.
+First-line is relative to the left indent; a negative value creates a hanging
+indent, clipped at the original box edge. Alignment and wrapping use each
+line's remaining interval. An interval with no positive width is overflow;
+Fit height cannot repair exhausted width. Only hard LF newlines start new
+paragraphs; wrapped/soft lines retain their ordinary leading. Empty paragraphs
+also receive spacing. Space before applies to the first paragraph, and final
+space after contributes to Fit height without hiding otherwise fitting ink.
+
+These values remain stored but inactive in point mode. The new fields are omitted
+at zero, preserving legacy layout/storage; nonzero values require project schema
+55, while LEP/VIEW stay unchanged. Each field edit is one Undo, and an unchanged
+numeric value preserves source/history/Redo. Source Text and typography animation
+remain independent. Finish canvas text editing before using paragraph controls.
+All seven Paragraph numbers use precise typed entry rather than drag scrubbing.
+The new controls reject locked, stale, marked-input, playback and modal contexts;
+a valid pending paragraph field commits before a subsequent paragraph action as
+its own history step. See [paragraph contract](PARAGRAPH_STYLE_PLAN.md).
 
 Point/Paragraph buttons convert the selected layer. Paragraph-to-Point fixes
 the visible line breaks in the source and removes overflow, following the
@@ -637,8 +979,8 @@ including script-sensitive tracking and the absence of trailing letter spacing.
 The most recent layout is cached for pointer movement and selection painting.
 Graphemes stay together; internal ligature caret positions are distributed evenly
 rather than reading OpenType GDEF caret tables, and bidi boundary affinity remains
-limited. Per-character styles, paragraph indentation/justification, vertical
-text, Text Animator and caret blinking are not implemented. Existing AE-style panel
+limited. Per-character styles, per-paragraph styles/justification, vertical
+text and caret blinking are not implemented. Existing AE-style panel
 geometry is unchanged.
 
 ## Effect presets
@@ -744,9 +1086,14 @@ future work.
 - Drag numeric values horizontally to scrub; Shift changes values faster and Alt
   provides fine adjustment. A gesture commits one undo step, including outside
   the input's bounds; Escape cancels.
-- Ctrl-click toggles layer selection; Shift-click selects a layer range. Drag empty
-  timeline space to box-select keys or layer bars. Ctrl+A selects all layers, or
+- Ctrl-click toggles layer selection; Shift-click selects a layer range. Timeline
+  Up/Down and Home/End select visible rows; Shift extends/contracts the range.
+  Drag empty timeline space to box-select keys or layer bars. Ctrl+A selects visible layers, or
   visible keys when keys are selected. Delete/duplicate act on the layer selection.
+- Double-click a Timeline layer name, or press F2 with one visible, unlocked
+  layer selected, to rename in place. Enter or leaving the field commits one
+  undoable edit; Escape cancels. Source/selection/context changes discard stale
+  drafts. Renaming a search match may hide its row until the search is cleared.
 - Drag selected layers in the composition to move them together in one undo step.
   Selected parent/child groups move once through their selected root ancestors.
   Drag any of the eight handles to scale, or use W/Y for rotation/anchor editing.
@@ -868,8 +1215,9 @@ export excludes the line while keeping the animated panel.
   durations are rejected without changing the document. Copy the complete parent
   hierarchy when pasting into another composition; local copies can retain an
   existing external parent. Circular or missing composition references are rejected.
-- The editor clipboard is in memory and is cleared by New/Open/Recovery. Copying keys
-  replaces copied layers and vice versa. Cross-project/OS layer clipboard and
+- The editor clipboard is in memory and is cleared by New/Open/Recovery. Contents,
+  key and layer payloads replace one another. A focused Contents tree owns its
+  Ctrl+C/X/V; text fields keep their OS text clipboard. Cross-project/OS layer clipboard and
   paste-at-playhead layer timing are not implemented.
 
 These switch semantics follow Adobe's [layer switches](https://helpx.adobe.com/after-effects/desktop/work-with-layers/manage-layers/layers.html)
@@ -1870,7 +2218,7 @@ otherwise moving the layers into a nested composition would change their visibil
 
 Save and Save As write **Libre Effects Project (`.lep`)** files. This is a binary
 container, not a renamed JSON file or a ZIP archive. Container version **1** is
-independent of the project model's schema version (supported through **48**):
+independent of the project model's schema version (supported through **61**):
 choosing `.lep` does not change the project schema or its editing behavior.
 
 - `PROJ` stores compact JSON metadata for all compositions, layers, animation and
@@ -2613,8 +2961,8 @@ Release resolves its actual final position and commits one atomic command; a
 no-op or canceled drag preserves Undo/Redo. The explicit Move Into/Out controls
 remain useful when a destination is outside the current viewport.
 
-Rename, numeric/paint controls and duplicate/delete require one
-selected item. Add uses the selected Group or the existing singleton parent;
+Rename, paint options, animation toggles, gradient stops and duplicate/delete require one
+selected item. Shared numeric controls are available for multiple siblings as described below. Add uses the selected Group or the existing singleton parent;
 with no selection it adds at root, and with multiple selections it is disabled.
 Only a singleton selection is shared with Pen group creation and gradient
 endpoint controls. Multi-selection never chooses one of its Groups implicitly.
@@ -2639,15 +2987,17 @@ while Undo/Redo retain their existing key-selection clearing policy.
 
 Cross-parent button/keyboard and drag verification is recorded in
 [STATUS.md](STATUS.md). Eight button/keyboard and six drag native interaction
-cases remain pending because the supported desktop transport is unavailable.
+cases remain unrun from the earlier checkpoint. Current desktop access does
+not by itself qualify those scenarios.
 
 With the tree focused, Ctrl+A selects its active sibling list; Up/Down navigates
 visible rows, Shift+Up/Down extends a sibling range, and Left/Right collapses or
 expands one Group. Ctrl+Right moves the selected block into the preceding Group;
 Ctrl+Left moves it out. Extra modifiers and repeats do not trigger these moves.
 Delete/Backspace and Ctrl+D affect one Contents item only;
-they do nothing for multi-selection. Unsupported Contents clipboard,
-pre-compose, layer trim and time-remap shortcuts are consumed here, rather than
+they do nothing for multi-selection. Ctrl+C/X/V use the session-local Contents
+clipboard described below. Unsupported pre-compose, layer trim and time-remap
+shortcuts are consumed here, rather than
 editing whole layers or old Timeline keys. Select the layer/Timeline to use
 those layer commands. Name/numeric fields retain their own text-input shortcuts,
 and global Save/Open, Undo/Redo, tool, view/time and Space playback shortcuts remain
@@ -2661,8 +3011,100 @@ another blocked editing/dialog flow; its owned keys do not fall through to layer
 Reordering preserves item IDs, local transforms, keys, poses, paint settings and
 references. It can intentionally change **which paths receive a paint and the
 overlap order**, following the rules below. It does not compensate coordinates or
-promise unchanged pixels. Bulk field edits and a Contents clipboard remain
-future work; the hierarchy and drag commands require no new project/LEP schema.
+promise unchanged pixels. The hierarchy, drag, shared-value and shared numeric
+animation commands require no new project/LEP schema.
+
+### Contents sibling clipboard
+
+Use the Contents **Copy**, **Cut** and **Paste** buttons or tree-focused
+**Ctrl+C/X/V** for one or more immediate siblings. Entire nested Groups are
+included, and roots follow source order even when selected in another order.
+This is a session-local snapshot. Later edits or deletion of the original do not
+change copied data; copying layers or keys replaces it, and New/Open/Recovery
+clears it. Name/numeric fields keep ordinary text clipboard shortcuts.
+
+Paste targets an existing Contents layer in the same composition and at the same
+FPS. A selected singleton Group receives the new children at its end. A selected
+leaf or sibling block inserts after its last selected sibling. No selection means
+append at root. The label under the buttons states the current destination.
+After a paste, the inserted roots are selected and their ancestors are revealed.
+Select the intended parent again before repeated Paste when the pasted item is
+itself a Group.
+
+Names, enabled states, local geometry/transforms, all scalar keys/handles,
+unreferenced path poses and complete Hold Colors snapshots survive unchanged.
+Original key frames stay fixed. Every new subtree gets fresh layer-local node
+IDs; gradient-local stop IDs and pose references retain their own identity.
+Destination transforms and paint/Trim/isolation scope apply, so placement or
+appearance may change. No world-space compensation or paste-at-playhead is used.
+
+Copy makes no history entry. Cut removes the exact sibling set in one Undo while
+retaining its parent, and replaces the clipboard only after success. Paste is
+one Undo. Source/destination validity, locks, composition/FPS, current duration,
+ID exhaustion and depth/node/key/metadata budgets are checked atomically. Failed
+operations retain document/history/clipboard/selection. Paste may advance only
+an existing schema minimum needed by the payload, such as schema54 Colors copied
+before Undo. There is no new project, LEP or VIEW format.
+
+Pending field edits, stale context, marked input and playback are guarded.
+A valid field edit committed before a clipboard button keeps its own Undo step;
+the subsequent clipboard transaction is separate. Generic shell clipboard commands are unavailable when entered from the Contents
+tree or a text field; use the owning tree/field shortcuts or Contents buttons.
+Cross-composition/FPS conversion, cross-project/OS Contents transfer, implicit
+legacy Shape conversion and cross-parent source selection remain separate work.
+See [the contract](CONTENTS_CLIPBOARD_PLAN.md) and the current
+[acceptance record](CONTENTS_CLIPBOARD_ACCEPTANCE.md) for exact verification limits.
+
+### Shared numeric properties
+
+Select two or more sibling item labels to show their **Shared numeric properties**.
+The controls contain only typed scalar channels present on every selected item:
+for example Rectangle + Ellipse share Width, Height and Position; Fill + Gradient
+Fill share Fill Opacity. Fill and Stroke opacity remain different channels.
+An exact common sampled value is shown with round-trip precision; differing
+values show **Mixed**, even if rounded values would look equal.
+
+Enter a finite, in-range absolute value and press Enter or move focus normally.
+One submission changes all selected members in one Undo. Static tracks remain
+static; animated changed members insert or update only the key at the displayed
+playhead, preserving existing interpolation and temporal handles. An already-equal
+member retains its entire track, including dormant values and unused data. A
+whole-command no-op preserves Redo. Values are local scalars, not deltas,
+world-space alignment, recursive Group edits or transform compensation.
+
+Untouched Mixed, Escape and typing back to the original uniform text make no edit.
+Invalid/empty/nonfinite/out-of-range input reports an error and restores the
+source display. There is no numeric scrubbing, live document preview or bulk
+Graph action in this slice. Gradient Start/End are
+shared across gradient paints; radial highlights require every selected gradient
+to be radial. Gradient stop-ID channels are excluded because IDs on separate
+paints do not establish correspondence. Existing matching Dash/Gap indices may
+be edited, but no dash is added.
+
+Each shared row also displays Static/Animated/Mixed animation and current-key
+state. Explicit **Enable animation**, **Disable animation**, **Add key** and
+**Remove key** apply one intent to all selected members:
+
+- Enable only keys previously static members, retaining each member's own sample.
+- Disable removes **all keys**, retaining each member's own clamped playhead value.
+- Add key inserts only missing playhead keys, preserving existing key metadata.
+- Remove key deletes only present playhead keys; a final key becomes that member's
+  static sampled value. Absent keys and unrelated tracks remain exact.
+
+Whole no-ops preserve Redo. A current pending scalar field may commit before its
+animation action through a one-use successful-flush receipt. Rejected, stale or
+marked input never authorizes that action; the selection stays sibling-owned.
+
+Selection, parent, source, composition, layer, playhead, transport and editor-action
+context bind each field. A stale callback cannot retarget a later selection/frame;
+other editor actions conservatively cancel an unfinished bulk draft. Pending
+valid text commits to its original selection before an ordinary tree press. Marked
+IME blocks submission and outside-down; rebinding marked text cancels focus.
+The owning sibling selection, anchor/cursor and disclosure survive accepted
+edits, and a second field can be edited normally. Only singleton selection is
+published to Pen/gradient overlays. The existing history key-selection policy
+and Graph pins/ranges are retained. See STATUS.md for exact automated/native
+coverage and remaining real IME, platform and DPI limitations.
 
 Paints consume paths above them in the same group, including transformed paths
 from child groups. Earlier paints/groups composite in front of later ones.
@@ -2794,11 +3236,97 @@ field first restores that field; Escape from the dialog cancels the transaction.
 Invalid input stays visible and blocks acceptance until corrected or reverted.
 An unchanged or edit-then-restore transaction does not create keys or history.
 
-This uses the existing independently animated stop channels, not AE's compound
-Colors property. Topology changes remain static. Embedded HSV/eyedropper controls,
-drag-away stop deletion, compound Colors/topology animation, and AE color-space,
-UI or pixel equivalence remain separate work. See STATUS.md for current automated
-and native validation.
+Without Colors animation, this modal retains the existing independently animated
+stop channels and topology changes apply to every frame.
+
+**Animate Colors (Hold)** enables complete color/opacity snapshots, including stop
+counts, ordering and midpoint values. New and existing legacy keys default to
+Hold. At an exact key, select **Hold**, **Linear** or **Smoothstep** for its outgoing
+segment. Smoothstep eases all stop numbers with one bounded progress value;
+before the first key and after the last key the endpoint sample holds.
+**Edit Colors…** edits only the sampled key/frame in
+an isolated modal and OK submits one complete snapshot. Adding/removing stops at
+that frame preserves other keys. Exact unchanged/add-then-remove drafts retain
+history and allocator; returning to the displayed RGB byte color restores opening
+fractional channels. Location/midpoint/opacity show round-trip precision, and
+signed-zero location ordering is preserved. Compound text fields reject invalid input, block acceptance until corrected
+or reverted with Escape, and bind the stop-selection generation. Marked input cannot cause pointer/Enter/Tab submission.
+
+Enable is unavailable while any legacy stop channel is animated, with an explicit
+explanation; no lossy implicit conversion occurs. Existing endpoints/highlights,
+paint opacity and stroke animation remain independent. While compound animation
+is active, legacy stop fields/Graph lanes are hidden and core scalar writes reject.
+Use Previous/Next and Add/Remove key in Contents. Disable clears all Colors keys
+and keeps the current sample. Removing the final key has the same static result.
+Accept a pending text field with Enter before using the guarded Colors actions.
+
+Linear/Smoothstep requires the same ordered color-stop IDs and the same ordered
+opacity-stop IDs in both adjacent snapshots. Stops may move or cross. Adding,
+removing or reordering stop IDs creates an explicit **Hold boundary**; the chosen
+mode stays stored but the left snapshot holds until the next key. Status explains
+the boundary. No correspondence is inferred by position, color or another paint.
+
+Expanded Timeline layers have dedicated whole-Colors lanes, also available under
+the Animated filter. Click selects one key; Shift-click toggles keys on that same
+paint. Selecting a different paint starts a new selection. The exact Move frame
+sets the earliest selected key's destination and preserves the others' relative
+timing. A group may move through its own old frames; an unselected key at a
+destination rejects the whole move. Delete and outgoing mode controls apply to
+the selected set in one Undo. Deleting every key bakes the playhead sample.
+The Edit Colors shortcut requires that paint to be selected in Contents first;
+key timing and interpolation controls do not require a Contents selection.
+These lanes are separate from scalar Graph channels. Mode and complete snapshot
+move together; Undo/Redo restores the complete source. Pending field/IME or stale
+source/selection callbacks cannot reinterpret their original key action.
+
+The bounded pointer workflow and its native limitations are recorded in the
+[pointer acceptance report](GRADIENT_POINTER_ACCEPTANCE.md).
+Drag an already selected Colors key to move the whole same-paint selection.
+Pressing an unselected key selects it; an ordinary click on a selected key
+collapses the selection when released. Shift-click toggles membership without
+dragging. Four horizontal pixels start a drag; vertical-only movement does not
+retime. The translucent Timeline preview leaves the document, playhead, saved
+view and Undo history unchanged until release. Relative key spacing and complete
+snapshots/modes stay together, with one Undo for an accepted move. Returning to
+the original position preserves Redo.
+
+The common delta is clamped to composition bounds. With Snapping enabled, keys
+snap within eight screen pixels to the playhead or unselected keys on that paint;
+hold Alt to bypass snapping. Snapping onto an occupied unselected key displays
+an invalid destination and rejects the entire drop. The pointer's offset inside
+a key is retained. Zoom, scroll, layout, source/history, modal, transport or
+editing-context changes cancel a pending drag rather than changing its meaning.
+Escape and focus/window loss also cancel. Finish text input with Enter before
+starting a drag. No automatic timeline scrolling is performed.
+
+**Copy selected** and **Paste at playhead** copy complete Colors keys within the
+same paint. The earliest copied key lands at the playhead; offsets, stop identities
+and outgoing modes are unchanged. Keep a key selection on that paint to paste;
+clearing selection clears the copy. This internal clipboard survives playhead
+navigation, but other edits, history or editing-context changes require a fresh
+Copy. A successful paste allows another paste of the same copied keys. Occupied
+destinations reject unless the entire pasted set is already exactly identical,
+which is a no-op and preserves Redo. Partial overlap never overwrites keys.
+Use the dedicated controls: generic Copy/Cut/Paste/Duplicate commands remain
+consumed while Colors keys own selection. Escape leaves that selection.
+After deletion or an interrupted edit, those shortcuts stay in the Colors
+domain until Escape or explicit layer selection, preventing repeated Delete
+from removing the layer. History, modal or other context changes require
+selecting the desired keys again.
+
+Hold-only compound animation requires project schema54. Non-Hold outgoing modes,
+including a dormant final-key mode, require schema57. Legacy files keep omitted
+fields, and existing Hold snapshots serialize unchanged; LEP1, VIEW1/2 and
+numeric-address1 remain unchanged. Older readers reject unsupported new files.
+Pointer marquee, compound time scaling/Graph editing, cross-paint
+or project key clipboard, topology
+reconciliation, bulk compound Colors, Bezier/velocity easing, embedded HSV/
+eyedropper and drag-away stop deletion remain future work. No AE interpolation,
+color-space, UI or pixel-equivalence claim is made. See the
+[interpolation contract](GRADIENT_INTERPOLATION_PLAN.md),
+[multi-key contract](GRADIENT_MULTIKEY_PLAN.md),
+[pointer-drag contract](GRADIENT_POINTER_PLAN.md) and earlier
+[Hold acceptance](CONTENTS_ANIMATION_ACCEPTANCE.md) for distinct boundaries.
 
 Group Skew ranges from −89° to 89° to avoid singular transforms. Skew Axis
 rotates the shear direction. The group applies Anchor, Scale, oriented Skew,
@@ -2833,8 +3361,9 @@ retiming and serialization. Turning animation off bakes the evaluated shape.
 Corresponding vertices and tangents interpolate; animated topology must retain
 the same vertex count and closed state. Turn off Path animation before inserting
 or deleting vertices. Path geometry is edited on the canvas, not as numeric values
-in the graph. Grouped Contents is implemented; shape operators, variable feather,
-roto tools, marquee/cross-path selection and animated topology remain future work.
+in the graph. Grouped Contents and bounded same-layer Contents selection are
+implemented; further shape operators, variable feather, roto tools, cross-layer
+point sets and animated topology remain future work.
 
 Version 29 masks migrate to stable IDs; scalar mask tracks use version 30 and
 path animation uses version 31. Compact image and sequence decoding now accepts
@@ -2855,3 +3384,10 @@ keys and both Feather keys remained. Timeline groups keep each mask's Path and
 scalar properties together. Validation passed 133 core and 130 desktop tests
 with 30 external media/device tests excluded, Cargo check, rustfmt and release
 build. Moon/proto were not on PATH, so Cargo equivalents were used.
+
+## Automation and ScriptUI preview
+
+Use **File → Run script (.jsx / .js)…** for bounded JavaScript automation and
+native ScriptUI dialogs. Successful changes form one Undo; unsupported APIs or
+cancellation discard the candidate. See [SCRIPTING.md](SCRIPTING.md) for the
+2D host subset, examples, limits and the remaining AEP/3D/expression gaps.

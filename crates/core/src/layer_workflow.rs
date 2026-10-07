@@ -101,8 +101,43 @@ fn paste(state: &mut Snapshot, clipboard: &LayerClipboard) -> Result<(), String>
         return Err("Layer clipboard is empty".into());
     }
     let comp = &state.project.composition;
+    if clipboard.fps != comp.fps && clipboard.layers.iter().any(Layer::has_opacity_timing) {
+        return Err(
+            "Pasting native Opacity timing requires matching composition frame rates".into(),
+        );
+    }
+    if clipboard.fps != comp.fps && clipboard.layers.iter().any(Layer::is_three_d) {
+        return Err("Pasting 3D layers requires matching composition frame rates".into());
+    }
+    if clipboard.fps != comp.fps
+        && clipboard
+            .layers
+            .iter()
+            .any(|l| l.planar_position().is_some())
+    {
+        return Err("Pasting joined XY Position requires matching composition frame rates".into());
+    }
     let copied: BTreeSet<_> = clipboard.layers.iter().map(|l| l.id).collect();
     for layer in &clipboard.layers {
+        if layer.spectrum_sources().any(|source| {
+            !copied.contains(&source)
+                && (state.project.composition_id != clipboard.composition
+                    || comp.layer(source).is_none())
+        }) {
+            return Err("Copy the Audio Spectrum source as well before pasting into another composition or after source removal".into());
+        }
+        if layer
+            .spatial_position()
+            .is_some_and(|position| position.keys.keys().any(|frame| *frame >= comp.duration))
+        {
+            return Err("Destination duration would lose copied spatial Position keyframes; extend the composition".into());
+        }
+        if layer
+            .planar_position()
+            .is_some_and(|p| p.keys.keys().any(|f| *f >= comp.duration))
+        {
+            return Err("Destination duration would lose copied planar Position keys; extend the composition".into());
+        }
         if let Some(matte) = layer.track_matte
             && !copied.contains(&matte.source)
             && (state.project.composition_id != clipboard.composition
@@ -160,6 +195,7 @@ fn paste(state: &mut Snapshot, clipboard: &LayerClipboard) -> Result<(), String>
         layer.id = mapping[&layer.id];
         layer.parent = layer.parent.map(|p| mapping.get(&p).copied().unwrap_or(p));
         layer.remap_matte(&mapping);
+        layer.remap_spectrum_sources(&mapping);
         let end = convert(layer.out_frame(clipboard.duration))?;
         if end > comp.duration {
             return Err(
@@ -173,9 +209,26 @@ fn paste(state: &mut Snapshot, clipboard: &LayerClipboard) -> Result<(), String>
             );
         }
         layer.out_frame = Some(end);
+        if let Some(origin) = layer.start_frame {
+            layer.start_frame = Some(
+                clipboard
+                    .fps
+                    .convert_origin(origin, comp.fps)
+                    .ok_or("Copied layer origin overflow")?,
+            );
+        }
         layer
             .markers
             .resample(clipboard.fps, comp.fps, comp.duration)?;
+        if let Content::ShapeContents(contents) = &mut layer.content {
+            contents.map_gradient_frames(|frame| {
+                let frame = convert(frame)?;
+                if frame >= comp.duration {
+                    return Err("Destination duration would lose Gradient Colors keys".into());
+                }
+                Ok(frame)
+            })?;
+        }
         for track in layer.all_tracks_mut() {
             let mut keys = BTreeMap::new();
             for (frame, key) in &track.keys {
@@ -257,6 +310,7 @@ mod tests {
             e.selected_layer()
                 .unwrap()
                 .property(Property::AnchorX)
+                .unwrap()
                 .value_at(0),
             0.0
         );
@@ -514,7 +568,12 @@ mod tests {
         e.execute(Command::PasteLayers(clipboard)).unwrap();
         let l = e.selected_layer().unwrap();
         assert_eq!(l.out_frame(300), 270);
-        assert!(l.property(Property::Rotation).keys().contains_key(&60));
+        assert!(
+            l.property(Property::Rotation)
+                .unwrap()
+                .keys()
+                .contains_key(&60)
+        );
         assert_eq!(l.content().video_source_time(60, 60), source_time);
     }
     #[test]

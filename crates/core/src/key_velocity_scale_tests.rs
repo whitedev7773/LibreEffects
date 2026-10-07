@@ -47,6 +47,7 @@ fn current_track(e: &Editor) -> &AnimatedProperty {
         .layer(1)
         .unwrap()
         .property(Property::PositionX)
+        .unwrap()
 }
 fn keys(frames: &[Frame]) -> Vec<KeyRef> {
     frames

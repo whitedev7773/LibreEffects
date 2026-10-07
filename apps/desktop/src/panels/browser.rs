@@ -1,10 +1,15 @@
+mod browsing;
+mod usage;
+
 use crate::{
     components::TextField,
     editor::{Action, EditorState},
-    project_browser::{self, Row},
+    project_browser::{self, ItemType, Row},
     ui,
 };
-use gpui::{Context, Entity, SharedString, Window, div, img, prelude::*, px, rgb};
+use gpui::{
+    Context, Entity, FocusHandle, MouseButton, SharedString, Window, div, img, prelude::*, px, rgb,
+};
 use libre_effects_core::{Command, Content, FolderId, Project, ProjectItem};
 use std::{collections::BTreeSet, sync::Arc};
 
@@ -32,6 +37,10 @@ fn item_name(item: ProjectItem, name: String) -> gpui::Stateful<gpui::Div> {
 pub(crate) struct Browser {
     state: Entity<EditorState>,
     search: Entity<TextField>,
+    focus: FocusHandle,
+    item_type: ItemType,
+    filter_context: Option<u64>,
+    row_scroll: gpui::ScrollHandle,
     name: Entity<TextField>,
     effects: Entity<super::effects::EffectControls>,
     collapsed: BTreeSet<FolderId>,
@@ -39,6 +48,8 @@ pub(crate) struct Browser {
     descending: bool,
     move_open: bool,
     interpretation_open: bool,
+    usage_open: Option<ProjectItem>,
+    usage_cache: Option<usage::Cache>,
     interpretation: Option<(u64, Entity<super::footage_interpretation::Interpretation>)>,
     thumbnail: Option<Arc<gpui::RenderImage>>,
     retired_images: super::image_retirement::ImageRetirement,
@@ -49,7 +60,12 @@ pub(crate) struct Browser {
 impl Browser {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
-        let search = cx.new(|cx| TextField::new(cx, |_, _, _| {}));
+        let focus = cx.focus_handle().tab_index(0).tab_stop(true);
+        let search = cx.new(|cx| {
+            TextField::new(cx, |_, _, _| {})
+                .tab_stop()
+                .return_focus(focus.clone())
+        });
         cx.observe(&search, |_, _, cx| cx.notify()).detach();
         let edit = state.clone();
         let name = cx.new(|cx| {
@@ -67,11 +83,16 @@ impl Browser {
                     }
                 });
             })
+            .tab_stop()
         });
         let effects = cx.new(|cx| super::effects::EffectControls::new(state.clone(), cx));
         Self {
             state,
             search,
+            focus,
+            item_type: ItemType::All,
+            filter_context: None,
+            row_scroll: gpui::ScrollHandle::new(),
             name,
             effects,
             collapsed: BTreeSet::new(),
@@ -79,6 +100,8 @@ impl Browser {
             descending: false,
             move_open: false,
             interpretation_open: false,
+            usage_open: None,
+            usage_cache: None,
             interpretation: None,
             thumbnail: None,
             retired_images: Default::default(),
@@ -137,6 +160,7 @@ impl Browser {
         selected: ProjectItem,
         active: u64,
         frame: u32,
+        parent_path: Option<String>,
         cx: &mut Context<Self>,
     ) -> gpui::Stateful<gpui::Div> {
         let Row {
@@ -151,7 +175,13 @@ impl Browser {
             _ if kind == "Image" => "square",
             _ => "filmstrip",
         };
-        let state = self.state.clone();
+        let mut label = item_name(item, name.clone());
+        if let Some(path) = parent_path {
+            label = label.tooltip(move |_, cx| {
+                cx.new(|_| ui::Tip(format!("{name} · {path}").into()))
+                    .into()
+            });
+        }
         let mut element = ui::text_button(SharedString::from(format!("project-{item:?}")), "")
             .w_full()
             .min_w_0()
@@ -163,7 +193,7 @@ impl Browser {
             .pr_2()
             .when(item == selected, |s| s.bg(rgb(0x343434)))
             .child(ui::icon(icon))
-            .child(item_name(item, name))
+            .child(label)
             .child(
                 div()
                     .flex_none()
@@ -172,17 +202,25 @@ impl Browser {
                     .text_color(rgb(ui::MUTED))
                     .child(kind),
             )
-            .on_click(move |event, window, cx| {
-                state.update(cx, |s, cx| {
-                    s.project_item = Some(item);
-                    if event.click_count() == 2 {
-                        if let ProjectItem::Composition(id) = item {
-                            s.dispatch(&Action::ActivateComposition(id), window, cx);
+            .on_key_down(|event: &gpui::KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    cx.stop_propagation();
+                }
+            })
+            .on_click(
+                cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
+                    window.focus(&this.focus);
+                    this.state.update(cx, |s, cx| {
+                        s.project_item = Some(item);
+                        if event.click_count() == 2 {
+                            if let ProjectItem::Composition(id) = item {
+                                s.dispatch(&Action::ActivateComposition(id), window, cx);
+                            }
                         }
-                    }
-                    cx.notify();
-                });
-            });
+                        cx.notify();
+                    });
+                }),
+            );
         match item {
             ProjectItem::Folder(id) => {
                 element = element.child(
@@ -198,9 +236,7 @@ impl Browser {
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
                         cx.stop_propagation();
-                        if !this.collapsed.remove(&id) {
-                            this.collapsed.insert(id);
-                        }
+                        this.toggle_folder(id, cx);
                         cx.notify();
                     })),
                 );
@@ -267,6 +303,7 @@ mod row_label_tests {
 }
 impl Render for Browser {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.prepare_browsing(window, cx);
         let effects_open = self.state.read(cx).effect_controls_open;
         let tabs = div()
             .flex()
@@ -350,7 +387,8 @@ impl Render for Browser {
         let project = state.editor.project().clone();
         let active = project.active_composition_id();
         let frame = state.frame;
-        let all = project_browser::rows(&project, "", false, false, &BTreeSet::new());
+        let all =
+            project_browser::rows(&project, "", ItemType::All, false, false, &BTreeSet::new());
         let selected = state
             .project_item
             .filter(|item| all.iter().any(|r| r.item == *item))
@@ -397,7 +435,6 @@ impl Render for Browser {
                         })
                         .unwrap_or_else(|| format!("{} × {}", a.width(), a.height())),
                     source,
-                    format!("{} layer reference(s)", project.asset_references(id)),
                 ]
             }
             ProjectItem::Folder(id) => vec![
@@ -449,11 +486,29 @@ impl Render for Browser {
         let rows = project_browser::rows(
             &project,
             &query,
+            self.item_type,
             self.by_type,
             self.descending,
             &self.collapsed,
         );
+        let filtering = self.filters_active(cx);
+        let no_results = rows.is_empty();
+        let count = format!(
+            "{} / {} items{}",
+            rows.len(),
+            all.len(),
+            if rows.iter().any(|row| row.item == selected) {
+                ""
+            } else {
+                " · selected hidden"
+            }
+        );
         let mut panel = div()
+            .id("project-browser")
+            .track_focus(&self.focus)
+            .tab_index(0)
+            .capture_key_down(cx.listener(Self::tab_key))
+            .on_key_down(cx.listener(Self::browsing_key))
             .flex()
             .flex_col()
             .size_full()
@@ -486,6 +541,7 @@ impl Render for Browser {
                             })),
                     ),
             )
+            .child(self.usage_details(&project, selected, cx))
             .child(
                 div()
                     .flex()
@@ -493,9 +549,37 @@ impl Render for Browser {
                     .h(px(26.0))
                     .mx_2()
                     .gap_1()
-                    .child(ui::icon("magnifier"))
-                    .child(div().flex_1().child(self.search.clone())),
+                    .child(
+                        ui::tool(
+                            "project-search-focus",
+                            "magnifier",
+                            "Search Project names and types (Ctrl+F)",
+                            false,
+                        )
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.search.read(cx).focus_input(window)
+                        })),
+                    )
+                    .child(div().flex_1().min_w_0().child(self.search.clone()))
+                    .child(
+                        ui::tool(
+                            "project-clear-filters",
+                            "xmark",
+                            "Clear Project search and type filter",
+                            false,
+                        )
+                        .when(!filtering, |d| d.opacity(0.35))
+                        .on_key_down(|event: &gpui::KeyDownEvent, _, cx| {
+                            if matches!(event.keystroke.key.as_str(), "space" | "enter") {
+                                cx.stop_propagation();
+                            }
+                        })
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.clear_filters(window, cx)),
+                        ),
+                    ),
             )
+            .child(self.type_filters(cx))
             .child(
                 div()
                     .flex()
@@ -716,13 +800,22 @@ impl Render for Browser {
             .child(
                 div()
                     .id("project-items")
+                    .track_scroll(&self.row_scroll)
+                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, _| {
+                        if !window.default_prevented() {
+                            window.focus(&this.focus);
+                        }
+                    }))
+                    .flex()
+                    .flex_col()
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
-                    .children(
-                        rows.into_iter()
-                            .map(|row| self.item_row(row, selected, active, frame, cx)),
-                    ),
+                    .when(no_results, |d| d.child(div().px_3().py_2().text_size(px(11.0)).text_color(rgb(ui::MUTED)).child("No matching Project items. Clear the filters to see all items.")))
+                    .children(rows.into_iter().map(|row| {
+                        let path = filtering.then(|| project_browser::folder_path(&project, row.folder));
+                        self.item_row(row, selected, active, frame, path, cx)
+                    })),
             )
             .child(
                 div()
@@ -761,12 +854,18 @@ impl Render for Browser {
                         Action::Edit(Command::NewComposition),
                         false,
                     ))
-                    .child(div().flex_1())
                     .child(
                         div()
+                            .id("project-match-count")
                             .text_size(px(10.0))
                             .text_color(rgb(ui::MUTED))
-                            .child(format!("{} assets", project.asset_library().assets().len())),
+                            .flex_1()
+                            .min_w_0()
+                            .whitespace_normal()
+                            .text_ellipsis()
+                            .line_clamp(1)
+                            .tooltip({ let count = count.clone(); move |_, cx| cx.new(|_| ui::Tip(count.clone().into())).into() })
+                            .child(count),
                     ),
             )
             .into_any_element()

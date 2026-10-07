@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160" style=" ; ; ">
+  <g id="empty-group" style="">
+    <path id="spaced" d="M24 24 C48 24 72 24 96 24 C96 48 96 72 96 96 C72 96 48 96 24 96 C24 72 24 48 24 24 Z" style=" &#9; fill &#10;:&#13; #3d965c ; ; stroke : #192c4b ; stroke-width : 6px ; opacity : 0.75 ; ;"/>
+    <path id="empty-child" fill="#aa4779" d="M138 48 C162 48 186 48 210 48 C210 72 210 96 210 120 C186 120 162 120 138 120 C138 96 138 72 138 48 Z" style=";&#9;;&#10; ;"/>
+  </g>
+</svg>

@@ -521,6 +521,7 @@ fn clone_editor(editor: &Editor) -> Editor {
         current: editor.current.clone(),
         undo: editor.undo.clone(),
         redo: editor.redo.clone(),
+        context_generation: editor.context_generation,
     }
 }
 

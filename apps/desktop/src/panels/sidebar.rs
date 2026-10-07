@@ -28,6 +28,10 @@ impl Sidebar {
 impl Render for Sidebar {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.state.read(cx);
+        let text_session = state
+            .text_session
+            .as_ref()
+            .map(|session| session.identity());
         let comp = state.editor.project().composition();
         let mut info = format!(
             "{}\n{} × {} · {} fps\nTime: {}\n{} layers",
@@ -83,6 +87,21 @@ impl Render for Sidebar {
                     .border_b_1()
                     .border_color(rgb(ui::BORDER))
                     .when(active, |s| s.text_color(rgb(ui::BLUE)))
+                    .when(index == 5 && text_session.is_some(), |button| {
+                        crate::color_edit::input_pointer_text_selection_guarded(
+                            button,
+                            move |state, _| {
+                                state.text_session.as_ref().is_some_and(|session| {
+                                    Some(session.identity()) == text_session
+                                        && session.valid(
+                                            state.editor.project(),
+                                            state.document_revision,
+                                            state.frame,
+                                        )
+                                })
+                            },
+                        )
+                    })
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if index >= 4 {
                             this.state.update(cx, |s, cx| {

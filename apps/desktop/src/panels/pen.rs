@@ -1,4 +1,8 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+
+#[path = "pen_affine.rs"]
+mod affine;
+pub(super) use affine::paint as paint_transform;
 
 use crate::{
     editor::{EditorState, Tool},
@@ -25,6 +29,8 @@ enum Target {
 struct Context {
     project: Project,
     revision: u64,
+    transport: u64,
+    action: u64,
     frame: u32,
     selection: Option<LayerId>,
     selected_layers: BTreeSet<LayerId>,
@@ -35,6 +41,8 @@ impl Context {
         Self {
             project: s.editor.project().clone(),
             revision: s.document_revision,
+            transport: s.transport_generation(),
+            action: s.input_context_generation(),
             frame: s.frame,
             selection: s.editor.selected(),
             selected_layers: s.selected_layers.clone(),
@@ -42,9 +50,16 @@ impl Context {
         }
     }
     fn valid(&self, s: &EditorState) -> bool {
-        s.tool == Tool::Pen
+        // Idle selection/creation survives harmless viewer actions. Held
+        // Contents gestures additionally bind the full action epoch in Binding.
+        self.source_valid(s) && self.transport == s.transport_generation()
+    }
+    fn source_valid(&self, s: &EditorState) -> bool {
+        affine::ready(s)
+            && s.tool == Tool::Pen
             && s.gradient_editor.is_none()
             && s.vertex_editor.is_none()
+            && s.expression_editor.is_none()
             && s.document_revision == self.revision
             && s.frame == self.frame
             && s.editor.selected() == self.selection
@@ -157,9 +172,50 @@ impl Drag {
             .flatten()
     }
 }
+#[derive(Clone, PartialEq, Eq)]
 struct Selection {
     target: Target,
     vertices: BTreeSet<usize>,
+    /// Other enabled Contents paths on this same layer; never masks/shapes.
+    other_contents: BTreeMap<u64, BTreeSet<usize>>,
+}
+impl Selection {
+    fn contents(&self) -> Option<(LayerId, BTreeMap<u64, BTreeSet<usize>>)> {
+        let Target::Contents(layer, item) = self.target else {
+            return None;
+        };
+        let mut selections = self.other_contents.clone();
+        selections.insert(item, self.vertices.clone());
+        selections.retain(|_, indices| !indices.is_empty());
+        Some((layer, selections))
+    }
+    fn normalize(&mut self) {
+        self.other_contents.retain(|_, indices| !indices.is_empty());
+        if self.vertices.is_empty()
+            && let Target::Contents(layer, _) = self.target
+            && let Some((&item, indices)) = self.other_contents.first_key_value()
+        {
+            self.target = Target::Contents(layer, item);
+            self.vertices = indices.clone();
+            self.other_contents.remove(&item);
+        }
+    }
+    fn cross_path(&self) -> bool {
+        self.contents()
+            .is_some_and(|(_, selections)| selections.len() > 1)
+    }
+    fn indices(&self, target: Target) -> BTreeSet<usize> {
+        if target == self.target {
+            return self.vertices.clone();
+        }
+        if let (Target::Contents(layer, _), Target::Contents(other_layer, item)) =
+            (self.target, target)
+            && layer == other_layer
+        {
+            return self.other_contents.get(&item).cloned().unwrap_or_default();
+        }
+        BTreeSet::new()
+    }
 }
 /// Freeze every input to screen/composition mapping for a held pointer. This is
 /// deliberately separate from selection validity: idle zoom/pan keeps the target.
@@ -183,6 +239,9 @@ impl View {
             rulers: s.viewer.rulers,
         }
     }
+    pub fn zoom(self) -> f64 {
+        self.zoom as f64
+    }
     fn pointer(self, position: Point<Pixels>) -> Option<[f64; 2]> {
         let p = [
             f32::from(position.x - self.origin.x) as f64 / self.zoom as f64,
@@ -198,6 +257,11 @@ struct Marquee {
     zoom: f64,
     moved: bool,
     vertices: BTreeSet<usize>,
+    contents: Option<(
+        affine::Binding,
+        Vec<(Target, VectorPath, Affine)>,
+        Selection,
+    )>,
 }
 impl Marquee {
     fn bounds(&self) -> [[f64; 2]; 2] {
@@ -211,6 +275,35 @@ impl Marquee {
                 self.start[1].max(self.end[1]),
             ],
         ]
+    }
+    fn contents_candidates(&self) -> Option<Selection> {
+        let (_, paths, selected) = self.contents.as_ref()?;
+        let mut selected = selected.clone();
+        if self.moved {
+            let [min, max] = self.bounds();
+            for (target, path, world) in paths {
+                let Target::Contents(_, item) = target else {
+                    continue;
+                };
+                let indices = if *target == selected.target {
+                    &mut selected.vertices
+                } else {
+                    selected.other_contents.entry(*item).or_default()
+                };
+                indices.extend(
+                    path.vertices
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(index, vertex)| {
+                            let p = world.point(vertex.position);
+                            (p[0] >= min[0] && p[0] <= max[0] && p[1] >= min[1] && p[1] <= max[1])
+                                .then_some(index)
+                        }),
+                );
+            }
+        }
+        selected.normalize();
+        Some(selected)
     }
     fn candidates(&self) -> BTreeSet<usize> {
         let mut selected = self.vertices.clone();
@@ -235,9 +328,21 @@ pub(super) struct Pen {
     drag: Option<Drag>,
     marquee: Option<Marquee>,
     pointer_view: Option<View>,
+    affine: Option<affine::Gesture>,
+    transform_box: bool,
     selected: Option<Selection>,
     selected_context: Option<Context>,
+    commit_receipt: Option<Context>,
     held: bool,
+}
+pub(super) fn pointer_input_allowed(
+    s: &EditorState,
+    left: bool,
+    active: bool,
+    composing: bool,
+    pending: bool,
+) -> bool {
+    affine::ready(s) && left && active && !composing && !pending
 }
 fn add(a: [f64; 2], b: [f64; 2]) -> [f64; 2] {
     [a[0] + b[0], a[1] + b[1]]
@@ -301,6 +406,9 @@ fn paths(s: &EditorState) -> Vec<(Target, VectorPath, Affine)> {
         l.path_masks()
             .iter()
             .enumerate()
+            .filter(|(_, mask)| {
+                !l.has_enabled_expression(libre_effects_core::ExpressionTarget::MaskPath(mask.id))
+            })
             .map(|(i, m)| (Target::Mask(l.id(), i), m.path_at(s.frame), world)),
     );
     paths
@@ -329,6 +437,145 @@ impl Target {
     }
 }
 impl Pen {
+    /// Rebind only the exact project predicted for the command just dispatched.
+    /// Actual EditorState dispatch advances action/transport epochs and normalizes.
+    pub fn did_commit(&mut self, s: &EditorState) {
+        let Some(context) = self.commit_receipt.take() else {
+            return;
+        };
+        if context.source_valid(s)
+            && s.input_context_generation()
+                == context.action.checked_add(1).expect("input generation")
+            && s.transport_generation() == context.transport.wrapping_add(1)
+        {
+            self.selected_context = Some(Context::capture(s));
+        } else {
+            self.cancel();
+        }
+    }
+    fn ensure_contents_selection(&mut self, s: &EditorState) {
+        if self.selected.is_none()
+            && affine::ready(s)
+            && let Some((target, _, _)) = paths(s)
+                .into_iter()
+                .find(|(target, _, _)| matches!(target, Target::Contents(..)))
+        {
+            self.selected = Some(Selection {
+                target,
+                vertices: BTreeSet::new(),
+                other_contents: BTreeMap::new(),
+            });
+            self.selected_context = Some(Context::capture(s));
+        }
+    }
+    pub fn transform_available(&self, s: &EditorState) -> bool {
+        affine::ready(s)
+            && !self.held
+            && self.draft.is_none()
+            && self.drag.is_none()
+            && self.marquee.is_none()
+            && self.affine.is_none()
+            && self.pointer_view.is_none()
+            && self
+                .selected_context
+                .as_ref()
+                .is_some_and(|context| context.valid(s))
+            && self
+                .selected
+                .as_ref()
+                .and_then(Selection::contents)
+                .is_some_and(|(_, members)| !members.is_empty())
+    }
+    pub fn transform_enabled(&self) -> bool {
+        self.transform_box
+    }
+    pub fn render_generation(&self, s: &EditorState) -> Option<u64> {
+        self.affine
+            .as_ref()
+            .filter(|gesture| gesture.binding.valid(s, self.selected.as_ref()))
+            .map(|gesture| gesture.id)
+    }
+    pub fn toggle_transform(&mut self, s: &EditorState) {
+        if self.transform_available(s) {
+            self.transform_box = !self.transform_box;
+        }
+    }
+    pub fn transform_key(
+        &mut self,
+        event: &KeyDownEvent,
+        focused: bool,
+        composing: bool,
+        s: &EditorState,
+    ) -> bool {
+        let m = event.keystroke.modifiers;
+        if !focused
+            || composing
+            || s.tool != Tool::Pen
+            || s.text_session.is_some()
+            || s.colors.session.is_some()
+            || s.gradient_editor.is_some()
+            || s.vertex_editor.is_some()
+            || s.expression_editor.is_some()
+            || !m.shift
+            || !affine::modifiers_allowed(m)
+            || !matches!(event.keystroke.key.as_str(), "t" | "T")
+        {
+            return false;
+        }
+        self.reset_if_stale(s);
+        if !event.is_held {
+            self.toggle_transform(s);
+        }
+        true
+    }
+    pub fn transform_overlay(&self, s: &EditorState, zoom: f64) -> Option<affine::BoxOverlay> {
+        if !self.transform_box || !affine::ready(s) {
+            return None;
+        }
+        if let Some(gesture) = self
+            .affine
+            .as_ref()
+            .filter(|g| g.binding.valid(s, self.selected.as_ref()))
+        {
+            return gesture.overlay();
+        }
+        self.selected_context
+            .as_ref()
+            .filter(|context| context.valid(s))?;
+        let selection = self.selected.as_ref()?;
+        let (_, members) = selection.contents()?;
+        let paths = paths(s);
+        affine::BoxOverlay::new(
+            paths.iter().flat_map(|(target, path, world)| {
+                let indices = match target {
+                    Target::Contents(_, item) => members.get(item),
+                    _ => None,
+                };
+                indices.into_iter().flatten().filter_map(|&index| {
+                    path.vertices
+                        .get(index)
+                        .map(|vertex| world.point(vertex.position))
+                })
+            }),
+            zoom,
+        )
+    }
+    fn start_affine(
+        &mut self,
+        s: &EditorState,
+        p: [f64; 2],
+        zoom: f64,
+        handle: affine::Handle,
+    ) -> bool {
+        let Some(selection) = self.selected.as_ref() else {
+            return false;
+        };
+        self.affine = affine::Gesture::new(s, selection, p, handle, zoom);
+        self.affine.is_some()
+    }
+    fn strict_pointer(&self) -> bool {
+        self.affine.is_some() || self.marquee.as_ref().is_some_and(|m| m.contents.is_some())
+    }
     /// Retain a singleton-only entry point for legacy single-vertex callers.
     #[cfg(test)]
     pub fn single_vertex_request(&self, s: &EditorState) -> Option<super::vertex_editor::Request> {
@@ -353,6 +600,12 @@ impl Pen {
             })
     }
     pub fn numeric_vertex_control_text(&self, s: &EditorState) -> (&'static str, &'static str) {
+        if self.selected.as_ref().is_some_and(Selection::cross_path) {
+            return (
+                "Numeric: select one path",
+                "Cross-path points use Canvas Transform at the current frame. Numeric editing, Delete, Reverse and Set First require a single path.",
+            );
+        }
         if self
             .selected
             .as_ref()
@@ -379,7 +632,10 @@ impl Pen {
             || self.drag.is_some()
             || self.draft.is_some()
             || self.marquee.is_some()
+            || self.affine.is_some()
+            || self.selected.as_ref().is_some_and(Selection::cross_path)
             || s.vertex_editor.is_some()
+            || s.expression_editor.is_some()
             || s.playing
         {
             return None;
@@ -421,6 +677,7 @@ impl Pen {
         self.selected = Some(Selection {
             target,
             vertices: request.indices.clone(),
+            other_contents: BTreeMap::new(),
         });
         self.selected_context = Some(Context::capture(s));
         true
@@ -442,6 +699,7 @@ impl Pen {
             || s.colors.session.is_some()
             || s.gradient_editor.is_some()
             || s.vertex_editor.is_some()
+            || s.expression_editor.is_some()
             || !m.shift
             || m.control
             || m.alt
@@ -462,6 +720,8 @@ impl Pen {
         *self = Self::default();
     }
     pub fn abandon_pointer(&mut self) {
+        self.affine = None;
+        self.commit_receipt = None;
         if let Some(drag) = self.drag.take() {
             self.clear_transient_selection(&drag);
         }
@@ -496,11 +756,19 @@ impl Pen {
         self.abandon_pointer();
         let view = view?;
         let p = view.pointer(position)?;
+        if modifiers.platform || modifiers.function {
+            return None;
+        }
         let exact_shift = modifiers.shift
             && !modifiers.alt
             && !modifiers.control
             && !modifiers.platform
             && !modifiers.function;
+        if (self.transform_box || self.selected.as_ref().is_some_and(Selection::cross_path))
+            && !affine::modifiers_allowed(modifiers)
+        {
+            return None;
+        }
         let command = self.down_impl(
             s,
             p,
@@ -523,6 +791,10 @@ impl Pen {
         modifiers: Modifiers,
     ) {
         self.reset_if_stale(s);
+        if self.strict_pointer() && !affine::modifiers_allowed(modifiers) {
+            self.abandon_pointer();
+            return;
+        }
         // Validate before mapping, including fit resize and missing bounds.
         if self.validate_view(view)
             && self.pointer_view.is_some()
@@ -539,6 +811,10 @@ impl Pen {
         modifiers: Modifiers,
     ) -> Option<Command> {
         self.reset_if_stale(s);
+        if self.strict_pointer() && !affine::modifiers_allowed(modifiers) {
+            self.abandon_pointer();
+            return None;
+        }
         if !self.validate_view(view) || self.pointer_view.is_none() {
             return None;
         }
@@ -563,21 +839,59 @@ impl Pen {
             || self.draft.as_ref().is_some_and(|d| !d.valid(s))
             || self.drag.as_ref().is_some_and(|d| !d.session.valid(s))
             || self.marquee.as_ref().is_some_and(|d| !d.session.valid(s))
+            || self
+                .affine
+                .as_ref()
+                .is_some_and(|g| !g.binding.valid(s, self.selected.as_ref()))
+            || self
+                .marquee
+                .as_ref()
+                .and_then(|m| m.contents.as_ref())
+                .is_some_and(|(binding, _, _)| !binding.valid(s, self.selected.as_ref()))
+            || !affine::ready(s)
             || s.tool != Tool::Pen
             || s.gradient_editor.is_some()
             || s.vertex_editor.is_some()
+            || s.expression_editor.is_some()
         {
             self.cancel();
         }
     }
     pub fn pending(&self, s: &EditorState) -> Option<Command> {
-        if let Some(d) = self.drag.as_ref().filter(|d| d.session.valid(s)) {
+        if let Some(gesture) = self
+            .affine
+            .as_ref()
+            .filter(|g| g.binding.valid(s, self.selected.as_ref()))
+        {
+            gesture.command()
+        } else if let Some(d) = self.drag.as_ref().filter(|d| d.session.valid(s)) {
             d.command()
         } else {
             self.draft.as_ref().filter(|d| d.valid(s))?.command()
         }
     }
     fn select_vertex(&mut self, target: Target, index: usize, toggle: bool, s: &EditorState) {
+        if !matches!(target, Target::Contents(..)) {
+            self.transform_box = false;
+        }
+        if let Some(selection) = &mut self.selected
+            && let (Target::Contents(layer, primary), Target::Contents(other_layer, item)) =
+                (selection.target, target)
+            && layer == other_layer
+            && (toggle || selection.indices(target).contains(&index))
+        {
+            let indices = if primary == item {
+                &mut selection.vertices
+            } else {
+                selection.other_contents.entry(item).or_default()
+            };
+            if toggle && !indices.insert(index) {
+                indices.remove(&index);
+            }
+            selection.normalize();
+            self.selected_context = Some(Context::capture(s));
+            return;
+        }
         if let Some(selection) = &mut self.selected
             && selection.target == target
         {
@@ -587,11 +901,13 @@ impl Pen {
                 }
             } else if !selection.vertices.contains(&index) {
                 selection.vertices = [index].into();
+                selection.other_contents.clear();
             }
         } else {
             self.selected = Some(Selection {
                 target,
                 vertices: [index].into(),
+                other_contents: BTreeMap::new(),
             });
         }
         self.selected_context = Some(Context::capture(s));
@@ -605,6 +921,7 @@ impl Pen {
         {
             let mut context = Context::capture(s);
             context.project = next.project().clone();
+            self.commit_receipt = Some(context.clone());
             self.selected_context = Some(context);
             true
         } else {
@@ -642,7 +959,7 @@ impl Pen {
         exact_shift: bool,
     ) -> Option<Command> {
         self.reset_if_stale(s);
-        if s.tool != Tool::Pen || s.gradient_editor.is_some() || s.vertex_editor.is_some() {
+        if !affine::ready(s) {
             return None;
         }
         // A second pointer-down supersedes any gesture whose release was lost.
@@ -670,6 +987,16 @@ impl Pen {
             context: Context::capture(s),
         };
         let existing = paths(s);
+        if self.transform_box
+            && !alt
+            && !force_mask
+            && let Some(handle) = self
+                .transform_overlay(s, zoom)
+                .and_then(|overlay| overlay.hit(p, zoom))
+        {
+            self.start_affine(s, p, zoom, handle);
+            return None;
+        }
         // Handles precede curve insertion, vertices precede overlapping handles.
         for part in [Part::Vertex, Part::Incoming, Part::Outgoing] {
             for (target, path, world) in &existing {
@@ -680,6 +1007,14 @@ impl Pen {
                         Part::Outgoing => add(v.position, v.outgoing),
                     };
                     if distance(world.point(at), p) <= radius {
+                        if matches!(target, Target::Contents(..))
+                            && shift
+                            && !exact_shift
+                            && matches!(part, Part::Vertex)
+                        {
+                            self.held = false;
+                            return None;
+                        }
                         self.select_vertex(
                             *target,
                             index,
@@ -690,6 +1025,22 @@ impl Pen {
                             // Shift-click toggles selection only, even if the pointer moves.
                             self.held = false;
                             self.drag = None;
+                            return None;
+                        }
+                        if self.selected.as_ref().is_some_and(Selection::cross_path) {
+                            // Cross-path tangents/conversion are intentionally unavailable.
+                            if !alt && !force_mask && matches!(part, Part::Vertex) {
+                                self.start_affine(s, p, zoom, affine::Handle::Move);
+                            } else {
+                                self.held = false;
+                            }
+                            return None;
+                        }
+                        if self.transform_box
+                            && matches!(target, Target::Contents(..))
+                            && matches!(part, Part::Vertex)
+                        {
+                            self.start_affine(s, p, zoom, affine::Handle::Move);
                             return None;
                         }
                         let mut session = make(*target, path.clone(), *world);
@@ -716,6 +1067,9 @@ impl Pen {
             }
         }
         if shift {
+            if exact_shift {
+                self.ensure_contents_selection(s);
+            }
             if exact_shift
                 && let Some(selection) = &self.selected
                 && self.selected_context.as_ref().is_some_and(|c| c.valid(s))
@@ -730,9 +1084,24 @@ impl Pen {
                     zoom,
                     moved: false,
                     vertices: selection.vertices.clone(),
+                    contents: matches!(selection.target, Target::Contents(..)).then(|| {
+                        (
+                            affine::Binding::new(s, selection),
+                            existing
+                                .iter()
+                                .filter(|(target, _, _)| matches!(target, Target::Contents(..)))
+                                .cloned()
+                                .collect(),
+                            selection.clone(),
+                        )
+                    }),
                 });
                 return None;
             }
+            self.held = false;
+            return None;
+        }
+        if self.transform_box || self.selected.as_ref().is_some_and(Selection::cross_path) {
             self.held = false;
             return None;
         }
@@ -760,6 +1129,7 @@ impl Pen {
                     self.selected = Some(Selection {
                         target: *target,
                         vertices: [best.1 + 1].into(),
+                        other_contents: BTreeMap::new(),
                     });
                     self.selected_context = Some(Context::capture(s));
                     self.drag = Some(Drag {
@@ -831,7 +1201,13 @@ impl Pen {
         if !self.held {
             return;
         }
-        if let Some(marquee) = &mut self.marquee {
+        if let Some(gesture) = &mut self.affine {
+            if alt {
+                self.abandon_pointer();
+                return;
+            }
+            gesture.update(p, shift);
+        } else if let Some(marquee) = &mut self.marquee {
             marquee.end = p;
             let delta = sub(p, marquee.start);
             marquee.moved |= delta[0].abs().max(delta[1].abs()) * marquee.zoom >= 4.0;
@@ -908,10 +1284,24 @@ impl Pen {
         self.reset_if_stale(s);
         self.held = false;
         self.pointer_view = None;
+        if let Some(gesture) = self.affine.take() {
+            let command = gesture.command();
+            if let Some(command) = &command {
+                if !self.remember_command(command, s) {
+                    return None;
+                }
+            }
+            return command;
+        }
         if let Some(marquee) = self.marquee.take() {
+            if let Some(selection) = marquee.contents_candidates() {
+                self.selected = Some(selection);
+                return None;
+            }
             self.selected = Some(Selection {
                 target: marquee.session.target,
                 vertices: marquee.candidates(),
+                other_contents: BTreeMap::new(),
             });
             return None;
         }
@@ -950,6 +1340,7 @@ impl Pen {
             || s.colors.session.is_some()
             || s.gradient_editor.is_some()
             || s.vertex_editor.is_some()
+            || s.expression_editor.is_some()
             || !m.control
             || m.shift
             || m.alt
@@ -960,7 +1351,30 @@ impl Pen {
             return false;
         }
         self.reset_if_stale(s);
-        if event.is_held || self.held || self.drag.is_some() || self.draft.is_some() {
+        if event.is_held
+            || self.held
+            || self.drag.is_some()
+            || self.draft.is_some()
+            || !affine::ready(s)
+        {
+            return true;
+        }
+        self.ensure_contents_selection(s);
+        if let Some(selection) = &mut self.selected
+            && matches!(selection.target, Target::Contents(..))
+            && self.selected_context.as_ref().is_some_and(|c| c.valid(s))
+        {
+            for (target, path, _) in paths(s) {
+                if let Target::Contents(_, item) = target {
+                    let indices = (0..path.vertices.len()).collect();
+                    if target == selection.target {
+                        selection.vertices = indices;
+                    } else {
+                        selection.other_contents.insert(item, indices);
+                    }
+                }
+            }
+            selection.normalize();
             return true;
         }
         if let Some(selection) = &mut self.selected
@@ -990,6 +1404,7 @@ impl Pen {
             || s.colors.session.is_some()
             || s.gradient_editor.is_some()
             || s.vertex_editor.is_some()
+            || s.expression_editor.is_some()
             || !m.shift
             || m.control
             || m.alt
@@ -1012,7 +1427,10 @@ impl Pen {
     }
     fn reorder(&mut self, first: bool, s: &EditorState) -> Option<Command> {
         let context = self.selected_context.as_ref().filter(|c| c.valid(s))?;
-        let selection = self.selected.as_ref()?;
+        let selection = self
+            .selected
+            .as_ref()
+            .filter(|selection| !selection.cross_path())?;
         let (_, path, _) = paths(s)
             .into_iter()
             .find(|(target, _, _)| *target == selection.target)?;
@@ -1062,6 +1480,12 @@ impl Pen {
         Some(command)
     }
     pub fn order_help(&self, s: &EditorState) -> &'static str {
+        if self.transform_box {
+            return "Current frame: corners scale · top handle rotates";
+        }
+        if self.selected.as_ref().is_some_and(Selection::cross_path) {
+            return "Cross-path: drag moves all · Shift+T transforms";
+        }
         if self.held || self.drag.is_some() || self.draft.is_some() {
             "Path order: finish or cancel the Pen gesture first"
         } else if self
@@ -1081,7 +1505,21 @@ impl Pen {
         }
     }
     pub fn key(&mut self, key: &str, s: &EditorState) -> (bool, Option<Command>) {
+        let contents_owned = s
+            .editor
+            .selected_layer()
+            .is_some_and(|layer| matches!(layer.content(), Content::ShapeContents(_)));
         self.reset_if_stale(s);
+        if self.affine.is_some() {
+            match key {
+                "backspace" | "delete" => {
+                    self.abandon_pointer();
+                    return (true, None);
+                }
+                "enter" => return (true, None),
+                _ => {}
+            }
+        }
         if self.marquee.is_some() {
             match key {
                 "backspace" | "delete" => {
@@ -1093,7 +1531,12 @@ impl Pen {
             }
         }
         match key {
-            "escape" if self.draft.is_some() || self.drag.is_some() || self.selected.is_some() => {
+            "escape"
+                if self.draft.is_some()
+                    || self.drag.is_some()
+                    || self.affine.is_some()
+                    || self.selected.is_some() =>
+            {
                 *self = Self::default();
                 (true, None)
             }
@@ -1115,6 +1558,9 @@ impl Pen {
                     return (true, None);
                 }
                 if let Some(selection) = &self.selected {
+                    if selection.cross_path() {
+                        return (true, None);
+                    }
                     let target = selection.target;
                     if let Some((_, mut path, world)) =
                         paths(s).into_iter().find(|(t, _, _)| *t == target)
@@ -1153,13 +1599,17 @@ impl Pen {
                     }
                     return (true, None);
                 }
-                (false, None)
+                (contents_owned, None)
             }
             _ => (false, None),
         }
     }
     pub fn overlay(&self, s: &EditorState) -> Vec<(VectorPath, Affine, bool, BTreeSet<usize>)> {
-        if s.tool != Tool::Pen || s.gradient_editor.is_some() || s.vertex_editor.is_some() {
+        if s.tool != Tool::Pen
+            || s.gradient_editor.is_some()
+            || s.vertex_editor.is_some()
+            || s.expression_editor.is_some()
+        {
             return Vec::new();
         }
         let mut all = paths(s);
@@ -1174,19 +1624,37 @@ impl Pen {
             all.push((d.target, d.path.clone(), d.world));
         }
         all.into_iter()
-            .map(|(t, p, w)| {
+            .map(|(t, mut p, w)| {
+                if let Target::Contents(_, item) = t
+                    && let Some(gesture) = self
+                        .affine
+                        .as_ref()
+                        .filter(|g| g.binding.valid(s, self.selected.as_ref()))
+                    && let Some(path) = gesture.path(item)
+                {
+                    p = path.clone();
+                }
                 let selected = self
                     .selected
                     .as_ref()
-                    .filter(|selection| selection.target == t)
                     .filter(|_| self.selected_context.as_ref().is_some_and(|c| c.valid(s)))
-                    .map(|selection| selection.vertices.clone())
+                    .map(|selection| selection.indices(t))
                     .unwrap_or_default();
                 let selected = self
                     .marquee
                     .as_ref()
-                    .filter(|m| m.session.target == t && m.session.valid(s))
-                    .map(Marquee::candidates)
+                    .filter(|m| m.session.valid(s))
+                    .map(|m| {
+                        m.contents_candidates()
+                            .map(|selection| selection.indices(t))
+                            .unwrap_or_else(|| {
+                                if m.session.target == t {
+                                    m.candidates()
+                                } else {
+                                    selected.clone()
+                                }
+                            })
+                    })
                     .unwrap_or(selected);
                 (p, w, matches!(t, Target::Mask(..)), selected)
             })
@@ -1538,3 +2006,11 @@ mod view_tests;
 #[cfg(test)]
 #[path = "pen_vertex_tests.rs"]
 mod numeric_vertex_tests;
+
+#[cfg(test)]
+#[path = "pen_affine_tests.rs"]
+mod affine_tests;
+
+#[cfg(test)]
+#[path = "pen_cross_path_guard_tests.rs"]
+mod pen_cross_path_guard_tests;

@@ -29,6 +29,7 @@ fn value(e: &Editor, id: LayerId, property: Property, frame: Frame) -> f64 {
         .layer(id)
         .unwrap()
         .property(property)
+        .unwrap()
         .value_at(frame)
 }
 fn set(e: &mut Editor, id: LayerId, values: &[(Property, f64)]) {
@@ -181,7 +182,7 @@ fn layer_essentials_static_all_operations_are_one_undo_and_roundtrip() {
                         Property::AnchorY,
                         Property::Opacity,
                     ] {
-                        assert_eq!(current.property(p), old.property(p));
+                        assert_eq!(current.property(p).unwrap(), old.property(p).unwrap());
                     }
                 }
                 LayerTransformOp::FlipHorizontal | LayerTransformOp::FlipVertical => {
@@ -190,16 +191,24 @@ fn layer_essentials_static_all_operations_are_one_undo_and_roundtrip() {
                     } else {
                         Property::ScaleY
                     };
-                    assert_eq!(current.property(p).value, -old.property(p).value);
+                    assert_eq!(
+                        current.property(p).unwrap().value,
+                        -old.property(p).unwrap().value
+                    );
                     for other in Property::ALL.into_iter().filter(|o| *o != p) {
-                        assert_eq!(current.property(other), old.property(other));
+                        assert_eq!(
+                            current.property(other).unwrap(),
+                            old.property(other).unwrap()
+                        );
                     }
                 }
                 LayerTransformOp::FitInsideComposition => {
                     assert_fitted(&e, id, 17);
                     near(
-                        value(&e, id, Property::ScaleX, 17) / old.property(Property::ScaleX).value,
-                        value(&e, id, Property::ScaleY, 17) / old.property(Property::ScaleY).value,
+                        value(&e, id, Property::ScaleX, 17)
+                            / old.property(Property::ScaleX).unwrap().value,
+                        value(&e, id, Property::ScaleY, 17)
+                            / old.property(Property::ScaleY).unwrap().value,
                     );
                     for p in [
                         Property::Rotation,
@@ -207,7 +216,7 @@ fn layer_essentials_static_all_operations_are_one_undo_and_roundtrip() {
                         Property::AnchorY,
                         Property::Opacity,
                     ] {
-                        assert_eq!(current.property(p), old.property(p));
+                        assert_eq!(current.property(p).unwrap(), old.property(p).unwrap());
                     }
                 }
                 LayerTransformOp::CenterAnchorInSourceBounds => {
@@ -280,8 +289,8 @@ fn layer_essentials_animated_current_and_middle_frames_preserve_metadata_and_unt
                 let old = before.project.composition.layer(1).unwrap();
                 let after = e.project().composition.layer(1).unwrap();
                 for p in Property::ALL {
-                    let a = old.property(p);
-                    let b = after.property(p);
+                    let a = old.property(p).unwrap();
+                    let b = after.property(p).unwrap();
                     if a == b {
                         continue;
                     }
@@ -337,8 +346,20 @@ fn layer_essentials_only_changed_channels_add_keys() {
     e.execute(command(&[1], 10, LayerTransformOp::ResetScaleRotation))
         .unwrap();
     for p in Property::ALL {
-        let a = before.project.composition.layer(1).unwrap().property(p);
-        let b = e.project().composition.layer(1).unwrap().property(p);
+        let a = before
+            .project
+            .composition
+            .layer(1)
+            .unwrap()
+            .property(p)
+            .unwrap();
+        let b = e
+            .project()
+            .composition
+            .layer(1)
+            .unwrap()
+            .property(p)
+            .unwrap();
         if p == Property::ScaleY {
             assert!(b.keys.contains_key(&10));
         } else {
@@ -376,8 +397,19 @@ fn layer_essentials_only_changed_channels_add_keys() {
         Property::Opacity,
     ] {
         assert_eq!(
-            e.project().composition.layer(1).unwrap().property(p),
-            before.project.composition.layer(1).unwrap().property(p)
+            e.project()
+                .composition
+                .layer(1)
+                .unwrap()
+                .property(p)
+                .unwrap(),
+            before
+                .project
+                .composition
+                .layer(1)
+                .unwrap()
+                .property(p)
+                .unwrap()
         );
     }
 }
@@ -713,6 +745,7 @@ fn layer_essentials_fit_roundoff_is_idempotent_but_does_not_hide_real_offsets() 
             .layer(1)
             .unwrap()
             .property(Property::ScaleX)
+            .unwrap()
             .clone();
         let scale_y = e
             .project()
@@ -720,6 +753,7 @@ fn layer_essentials_fit_roundoff_is_idempotent_but_does_not_hide_real_offsets() 
             .layer(1)
             .unwrap()
             .property(Property::ScaleY)
+            .unwrap()
             .clone();
         e.execute(command(&[1], 10, LayerTransformOp::FitInsideComposition))
             .unwrap();
@@ -729,7 +763,8 @@ fn layer_essentials_fit_roundoff_is_idempotent_but_does_not_hide_real_offsets() 
                 .composition
                 .layer(1)
                 .unwrap()
-                .property(Property::ScaleX),
+                .property(Property::ScaleX)
+                .unwrap(),
             &scale_x
         );
         assert_eq!(
@@ -737,7 +772,8 @@ fn layer_essentials_fit_roundoff_is_idempotent_but_does_not_hide_real_offsets() 
                 .composition
                 .layer(1)
                 .unwrap()
-                .property(Property::ScaleY),
+                .property(Property::ScaleY)
+                .unwrap(),
             &scale_y
         );
         assert_eq!(e.current, fitted);
@@ -769,8 +805,19 @@ fn layer_essentials_fit_recenter_only_avoids_new_animated_scale_keys() {
         .unwrap();
     for p in [Property::ScaleX, Property::ScaleY] {
         assert_eq!(
-            e.project().composition.layer(1).unwrap().property(p),
-            before.project.composition.layer(1).unwrap().property(p)
+            e.project()
+                .composition
+                .layer(1)
+                .unwrap()
+                .property(p)
+                .unwrap(),
+            before
+                .project
+                .composition
+                .layer(1)
+                .unwrap()
+                .property(p)
+                .unwrap()
         );
     }
     assert_fitted(&e, 1, 10);
@@ -916,7 +963,8 @@ fn layer_essentials_ignore_unrelated_opacity_overshoot_and_reset_repairs_scale_o
                 .composition
                 .layer(1)
                 .unwrap()
-                .property(Property::Opacity),
+                .property(Property::Opacity)
+                .unwrap(),
             &track
         );
     }
@@ -1038,7 +1086,8 @@ fn layer_essentials_center_preserves_unchanged_overshooting_position_channels() 
                 .composition
                 .layer(1)
                 .unwrap()
-                .property(Property::PositionX),
+                .property(Property::PositionX)
+                .unwrap(),
             &track
         );
     }

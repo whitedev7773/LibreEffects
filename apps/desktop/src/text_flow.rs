@@ -6,9 +6,18 @@ use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Clone, Debug)]
 pub(crate) struct Line {
+    /// Original content bytes, excluding the hard paragraph terminator.
     pub range: Range<usize>,
+    /// Complete original hard break on the final visual line; empty otherwise.
+    pub terminator: Range<usize>,
     pub visible_end: usize,
+    /// Line origin and available width in layer-local pixels.
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
     pub bottom: f64,
+    /// Space after this hard-newline paragraph, used by Fit, not ink clipping.
+    pub after: f64,
     pub fits_width: bool,
 }
 pub(crate) fn composed_count(lines: &[Line], height: f64) -> usize {
@@ -57,6 +66,26 @@ pub(crate) fn layer_lines(
     let typography = layer.text_typography_at(frame)?;
     let mut style = layer.text_style();
     typography.apply_to_style(&mut style);
+    if let Some(rich) = layer.rich_text() {
+        let composed = crate::rich_text_render::compose(text, rich, layer.width(), &style).ok()?;
+        return Some(Arc::new(
+            composed
+                .lines
+                .iter()
+                .map(|line| Line {
+                    range: line.range.clone(),
+                    terminator: line.terminator.clone(),
+                    visible_end: line.range.end,
+                    x: 0.0,
+                    y: line.y,
+                    width: layer.width(),
+                    bottom: line.y + line.size * 1.2,
+                    after: 0.0,
+                    fits_width: true,
+                })
+                .collect(),
+        ));
+    }
     Some(lines(text, typography.font_size, layer.width(), &style))
 }
 pub(crate) fn fit_height(
@@ -67,7 +96,7 @@ pub(crate) fn fit_height(
     Some(
         layer_lines(layer, frame)?
             .iter()
-            .map(|line| line.bottom)
+            .map(|line| line.bottom + line.after)
             .fold(1.0, f64::max),
     )
 }
@@ -80,7 +109,7 @@ struct Cache {
 }
 thread_local! {static CACHE:RefCell<Option<Cache>>=const {RefCell::new(None)};}
 fn visible(text: &str) -> usize {
-    text.trim_end_matches([' ', '\t', '\r', '\u{2028}', '\u{2029}'])
+    text.trim_end_matches([' ', '\t', '\u{2028}', '\u{2029}'])
         .len()
 }
 fn measured(text: &str, size: f64, width: f64, style: &TextStyle) -> f64 {
@@ -100,17 +129,48 @@ pub(crate) fn lines(text: &str, size: f64, width: f64, style: &TextStyle) -> Arc
             }
         }
         let mut result = vec![];
-        let mut base = 0;
-        for raw in text.split('\n') {
-            let paragraph = raw.strip_suffix('\r').unwrap_or(raw);
-            if !style.paragraph || paragraph.is_empty() {
+        let mut paragraph_spacing = 0.0;
+        for source in libre_effects_core::text_paragraphs::paragraphs(text) {
+            let base = source.range.start;
+            let paragraph = source.text;
+            let line_geometry = |first: bool| {
+                if style.paragraph {
+                    let x = style.paragraph_left_indent
+                        + if first {
+                            style.paragraph_first_line_indent
+                        } else {
+                            0.0
+                        };
+                    (x, width - style.paragraph_right_indent - x)
+                } else {
+                    (0.0, width)
+                }
+            };
+            if style.paragraph {
+                paragraph_spacing += style.paragraph_space_before;
+            }
+            let (x, available) = line_geometry(true);
+            // An exhausted first-line interval is overflow, not a tiny forced
+            // line. Keep its full source range for editing and conversion.
+            if !style.paragraph || paragraph.is_empty() || available <= 0.0 {
                 result.push(Line {
-                    range: base..base + raw.len(),
+                    range: source.range.clone(),
+                    terminator: source.terminator.clone(),
                     visible_end: base + paragraph.len(),
+                    x,
+                    y: result.len() as f64 * size * style.leading + paragraph_spacing,
+                    width: available,
                     bottom: 0.0,
-                    fits_width: true,
+                    after: if style.paragraph {
+                        style.paragraph_space_after
+                    } else {
+                        0.0
+                    },
+                    fits_width: !style.paragraph || available > 0.0,
                 });
-                base += raw.len() + 1;
+                if style.paragraph {
+                    paragraph_spacing += style.paragraph_space_after;
+                }
                 continue;
             }
             let glyphs = metrics::clusters(paragraph, size, width, style).unwrap_or_default();
@@ -138,6 +198,7 @@ pub(crate) fn lines(text: &str, size: f64, width: f64, style: &TextStyle) -> Arc
                 .collect();
             let mut start = 0;
             while start < paragraph.len() {
+                let (x, available) = line_geometry(start == 0);
                 let si = ends.binary_search(&start).unwrap();
                 let limit = breaks
                     .iter()
@@ -158,14 +219,14 @@ pub(crate) fn lines(text: &str, size: f64, width: f64, style: &TextStyle) -> Arc
                 let mut end = opportunities
                     .iter()
                     .copied()
-                    .take_while(|end| estimate(*end) <= width)
+                    .take_while(|end| estimate(*end) <= available)
                     .last();
                 if end.is_none() {
                     end = ends
                         .iter()
                         .copied()
                         .skip(si + 1)
-                        .take_while(|end| *end <= limit && estimate(*end) <= width)
+                        .take_while(|end| *end <= limit && estimate(*end) <= available)
                         .last();
                 }
                 let mut end = end.unwrap_or(ends[si + 1]);
@@ -175,9 +236,9 @@ pub(crate) fn lines(text: &str, size: f64, width: f64, style: &TextStyle) -> Arc
                     && measured(
                         &paragraph[start..start + visible(&paragraph[start..end])],
                         size,
-                        width,
+                        available,
                         style,
-                    ) > width + 0.001
+                    ) > available + 0.001
                 {
                     end = opportunities
                         .iter()
@@ -197,9 +258,9 @@ pub(crate) fn lines(text: &str, size: f64, width: f64, style: &TextStyle) -> Arc
                     if measured(
                         &paragraph[start..start + visible(&paragraph[start..next])],
                         size,
-                        width,
+                        available,
                         style,
-                    ) > width + 0.001
+                    ) > available + 0.001
                     {
                         break;
                     }
@@ -207,23 +268,28 @@ pub(crate) fn lines(text: &str, size: f64, width: f64, style: &TextStyle) -> Arc
                 }
                 result.push(Line {
                     range: base + start..base + end,
+                    terminator: base + end..base + end,
                     visible_end: base + start + visible(&paragraph[start..end]),
+                    x,
+                    y: result.len() as f64 * size * style.leading + paragraph_spacing,
+                    width: available,
                     bottom: 0.0,
-                    fits_width: true,
+                    after: 0.0,
+                    fits_width: available > 0.0,
                 });
                 start = end;
             }
             if let Some(last) = result.last_mut() {
-                last.range.end = base + raw.len();
+                last.terminator = source.terminator;
+                last.after = style.paragraph_space_after;
             }
-            base += raw.len() + 1;
+            paragraph_spacing += style.paragraph_space_after;
         }
-        for (i, line) in result.iter_mut().enumerate() {
+        for line in &mut result {
             if style.paragraph {
                 let content = &text[line.range.start..line.visible_end];
-                line.bottom = i as f64 * size * style.leading
-                    + metrics::line_bottom(content, size, width, style);
-                line.fits_width = measured(content, size, width, style) <= width + 0.001;
+                line.bottom = line.y + metrics::line_bottom(content, size, line.width, style);
+                line.fits_width &= measured(content, size, line.width, style) <= line.width + 0.001;
             }
         }
         let lines = Arc::new(result);
@@ -241,6 +307,123 @@ pub(crate) fn lines(text: &str, size: f64, width: f64, style: &TextStyle) -> Arc
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn mixed_hard_paragraphs_share_original_ranges_and_svg_nodes() {
+        use libre_effects_core::text_paragraphs::paragraphs;
+        for text in ["English\r日本語\r\n한국어\n\r끝\r\n", "\r\r\n\n", ""] {
+            for paragraph in [false, true] {
+                let style = TextStyle {
+                    paragraph,
+                    ..Default::default()
+                };
+                let flow = lines(text, 24.0, 1000.0, &style);
+                let source: Vec<_> = paragraphs(text).collect();
+                assert_eq!(flow.len(), source.len());
+                for (index, (line, source)) in flow.iter().zip(&source).enumerate() {
+                    assert_eq!(line.range, source.range);
+                    assert_eq!(line.terminator, source.terminator);
+                    assert_eq!(line.visible_end, source.range.end);
+                    assert_eq!(line.y, index as f64 * 24.0 * style.leading);
+                }
+                let svg = crate::rendering::text_geometry_svg(
+                    text, 24.0, "white", 1000.0, 10000.0, &style,
+                );
+                assert_eq!(svg.matches("<text ").count(), flow.len());
+                let tagged = crate::text_animator_render::source_geometry_svg(
+                    text, 24.0, "white", 1000.0, 10000.0, &style,
+                )
+                .unwrap();
+                assert_eq!(tagged.matches("<text ").count(), flow.len());
+                for source in &source {
+                    assert!(tagged.contains(&format!("id='le-animator-{}'", source.range.start)));
+                }
+                let canonical = source.iter().map(|p| p.text).collect::<Vec<_>>().join("\n");
+                assert_eq!(
+                    svg,
+                    crate::rendering::text_geometry_svg(
+                        &canonical, 24.0, "white", 1000.0, 10000.0, &style,
+                    )
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn wrapped_mixed_paragraphs_partition_source_without_normalizing_breaks() {
+        let text = "English words wrap\r日本語の段落\r\n한국어 문단\n\r끝\r\n";
+        let style = TextStyle {
+            paragraph: true,
+            ..Default::default()
+        };
+        let flow = lines(text, 24.0, 65.0, &style);
+        let mut source = String::new();
+        let boundaries: Vec<_> = text
+            .grapheme_indices(true)
+            .map(|(i, _)| i)
+            .chain([text.len()])
+            .collect();
+        for line in flow.iter() {
+            assert!(boundaries.contains(&line.range.start));
+            assert!(boundaries.contains(&line.range.end));
+            assert!(boundaries.contains(&line.terminator.end));
+            assert_eq!(line.range.end, line.terminator.start);
+            assert!(line.visible_end <= line.range.end);
+            source.push_str(&text[line.range.clone()]);
+            source.push_str(&text[line.terminator.clone()]);
+        }
+        assert_eq!(source, text);
+        assert_eq!(
+            flow.iter()
+                .filter(|line| !line.terminator.is_empty())
+                .count(),
+            5
+        );
+        assert_eq!(flow.last().unwrap().range, text.len()..text.len());
+        let svg = crate::rendering::text_geometry_svg(text, 24.0, "white", 65.0, 10000.0, &style);
+        assert_eq!(svg.matches("<text ").count(), flow.len());
+    }
+
+    #[test]
+    fn paragraph_offsets_blank_lines_and_trailing_space_share_one_geometry() {
+        let style = TextStyle {
+            paragraph: true,
+            leading: 1.5,
+            paragraph_left_indent: 20.0,
+            paragraph_right_indent: 20.0,
+            paragraph_first_line_indent: 9.0,
+            paragraph_space_before: 7.0,
+            paragraph_space_after: 11.0,
+            ..Default::default()
+        };
+        let flow = lines("A\n\nB\n", 36.0, 220.0, &style);
+        assert_eq!(flow.len(), 4);
+        for (line, y) in flow.iter().zip([7.0, 79.0, 151.0, 223.0]) {
+            assert_eq!(
+                (line.x, line.width, line.y, line.after),
+                (29.0, 171.0, y, 11.0)
+            );
+            assert!(line.fits_width);
+        }
+        let impossible = lines("source remains\nnext", 36.0, 20.0, &style);
+        assert_eq!(impossible[0].range, 0..14);
+        assert!(!impossible[0].fits_width);
+        assert_eq!(composed_count(&impossible, 10000.0), 0);
+        let point = TextStyle {
+            paragraph: false,
+            ..style
+        };
+        let dormant = lines("A\nB", 36.0, 220.0, &point);
+        assert_eq!(
+            (
+                dormant[0].x,
+                dormant[0].y,
+                dormant[0].width,
+                dormant[0].after
+            ),
+            (0.0, 0.0, 220.0, 0.0)
+        );
+        assert_eq!(dormant[1].y, 54.0);
+    }
     #[test]
     fn point_conversion_keeps_composed_lines_and_undo_restores_overflow() {
         use libre_effects_core::{Content, Editor};

@@ -497,7 +497,7 @@ fn second_down_discards_provisional_selection_and_begins_from_committed_set() {
 }
 
 #[test]
-fn marquee_and_select_all_stay_on_known_path_when_other_paths_are_inside_box() {
+fn marquee_and_select_all_span_contents_domain_but_keep_masks_on_known_path() {
     for kind in [1, 2] {
         let (mut s, target, _) = scene(kind, true, false, false);
         if kind == 1 {
@@ -527,7 +527,7 @@ fn marquee_and_select_all_stay_on_known_path_when_other_paths_are_inside_box() {
                 .iter()
                 .filter(|(_, _, _, indices)| !indices.is_empty())
                 .count(),
-            1
+            if kind == 1 { 2 } else { 1 }
         );
         assert!(pen.up(&s).is_none());
         assert!(pen.selected.as_ref().unwrap().target == target);
@@ -540,7 +540,7 @@ fn marquee_and_select_all_stay_on_known_path_when_other_paths_are_inside_box() {
                 .iter()
                 .filter(|(_, _, _, indices)| !indices.is_empty())
                 .count(),
-            1
+            if kind == 1 { 2 } else { 1 }
         );
         before.check(&s);
     }

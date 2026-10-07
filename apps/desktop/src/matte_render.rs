@@ -59,7 +59,13 @@ impl Renderer {
             budget,
         )?;
         Ok(Some((
-            self.raster_canvas(&source, comp.width(), comp.height(), max_dimension)?,
+            self.raster_canvas_with_domains(
+                &source,
+                comp.width(),
+                comp.height(),
+                max_dimension,
+                &budget.repeat_domains,
+            )?,
             matte.mode,
         )))
     }

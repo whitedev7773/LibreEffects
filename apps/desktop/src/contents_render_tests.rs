@@ -1,4 +1,6 @@
 use libre_effects_core::*;
+#[path = "contents_bulk_fields_render_tests.rs"]
+mod bulk_fields;
 #[path = "contents_cross_parent_render_tests.rs"]
 mod cross_parent;
 #[path = "contents_reorder_render_tests.rs"]

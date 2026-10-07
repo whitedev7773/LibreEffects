@@ -58,6 +58,10 @@ impl EffectPreset {
             .unwrap_or(0);
         for (i, e) in effects.iter_mut().enumerate() {
             e.id = i as u64 + 1;
+            if let Some(settings) = &mut e.audio_spectrum {
+                // A portable preset cannot retain another project's layer ID.
+                settings.source = None;
+            }
             for track in e.parameters.values_mut() {
                 track.keys = std::mem::take(&mut track.keys)
                     .into_iter()
@@ -66,7 +70,14 @@ impl EffectPreset {
             }
         }
         let result = Self {
-            version: if effects.iter().any(|e| e.kind == EffectKind::LumaKey) {
+            version: if effects.iter().any(|e| e.audio_spectrum.is_some()) {
+                6
+            } else if effects
+                .iter()
+                .any(|e| e.gaussian_edge_mode == GaussianEdgeMode::Repeat)
+            {
+                5
+            } else if effects.iter().any(|e| e.kind == EffectKind::LumaKey) {
                 4
             } else if effects
                 .iter()
@@ -113,7 +124,7 @@ impl EffectPreset {
         Ok(preset)
     }
     fn validate(&self) -> Result<(), String> {
-        if !(1..=4).contains(&self.version) {
+        if !(1..=6).contains(&self.version) {
             return Err("Unsupported effect preset version".into());
         }
         if self.name.trim().is_empty()
@@ -132,6 +143,24 @@ impl EffectPreset {
             .any(|(i, e)| e.id != i as u64 + 1)
         {
             return Err("Invalid preset effect identities".into());
+        }
+        if self.effects.iter().any(|e| {
+            e.audio_spectrum
+                .as_ref()
+                .is_some_and(|s| s.source.is_some())
+        }) {
+            return Err("Portable Audio Spectrum presets require an unassigned source".into());
+        }
+        if self.version < 6 && self.effects.iter().any(|e| e.audio_spectrum.is_some()) {
+            return Err("Audio Spectrum requires effect preset version 6".into());
+        }
+        if self.version < 5
+            && self
+                .effects
+                .iter()
+                .any(|e| e.gaussian_edge_mode == GaussianEdgeMode::Repeat)
+        {
+            return Err("Repeat Edge Pixels requires effect preset version 5".into());
         }
         if self.version < 4 && self.effects.iter().any(|e| e.kind == EffectKind::LumaKey) {
             return Err("Luma Key requires effect preset version 4".into());

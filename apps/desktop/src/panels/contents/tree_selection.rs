@@ -414,6 +414,9 @@ pub(super) fn plan_move(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum TreeKey {
     SelectAll,
+    Copy,
+    Cut,
+    Paste,
     Duplicate,
     Delete,
     Previous,
@@ -457,10 +460,18 @@ pub(super) fn tree_key(
     }
     // Reserve the finite selection-sensitive shell domains that the Contents
     // tree does not implement. In particular, a tree Cut must never cut a layer.
-    if (control && matches!(key, "c" | "x" | "v"))
-        || (control && alt && key == "t")
-        || (!control && alt && matches!(key, "[" | "]"))
-    {
+    if control && matches!(key, "c" | "x" | "v") {
+        return Some(if !shift && !alt && !other_modifier {
+            match key {
+                "c" => TreeKey::Copy,
+                "x" => TreeKey::Cut,
+                _ => TreeKey::Paste,
+            }
+        } else {
+            TreeKey::Consume
+        });
+    }
+    if (control && alt && key == "t") || (!control && alt && matches!(key, "[" | "]")) {
         return Some(TreeKey::Consume);
     }
     let alternate = alt || other_modifier;

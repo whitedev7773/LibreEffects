@@ -21,6 +21,7 @@ impl EditorState {
         // Numeric geometry drafts never enter replacement/recovery source or a
         // late field callback. Replacement is not an ordinary modal Cancel.
         self.vertex_editor = None;
+        self.expression_editor = None;
         self.vertex_return = None;
         self.finish_text(true, cx);
         self.stop();
@@ -81,6 +82,7 @@ impl EditorState {
         self.recovery.take();
         if let Some(editor) = replacement {
             self.vertex_editor = None;
+            self.expression_editor = None;
             self.vertex_return = None;
             self.stop();
             self.document_revision = self.document_revision.wrapping_add(1);
@@ -201,22 +203,38 @@ impl EditorState {
         .detach();
     }
     pub(super) fn open(&mut self, cx: &mut Context<Self>) {
+        self.open_project(None, cx);
+    }
+    pub(super) fn open_recent(&mut self, path: &Path, cx: &mut Context<Self>) {
+        // Shell validated the exact path before its unsaved-changes prompt.
+        // Save and continue can legitimately evict the tenth history entry;
+        // retain that already-authorized path instead of revalidating its rank.
+        self.open_project(Some(path.to_path_buf()), cx);
+    }
+    fn open_project(&mut self, selected: Option<PathBuf>, cx: &mut Context<Self>) {
         self.stop();
         let operation = self.begin_file_operation();
         let revision = self.document_revision;
         let previous = self.editor.project().clone();
-        let prompt = cx.prompt_for_paths(PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: false,
-            prompt: Some("Open Libre Effects project".into()),
+        let prompt = selected.is_none().then(|| {
+            cx.prompt_for_paths(PathPromptOptions {
+                files: true,
+                directories: false,
+                multiple: false,
+                prompt: Some("Open Libre Effects project".into()),
+            })
         });
         cx.spawn(async move |entity, cx| {
-            let Ok(Ok(Some(paths))) = prompt.await else {
-                return;
-            };
-            let Some(path) = paths.into_iter().next() else {
-                return;
+            let path = if let Some(path) = selected {
+                path
+            } else {
+                let Ok(Ok(Some(paths))) = prompt.unwrap().await else {
+                    return;
+                };
+                let Some(path) = paths.into_iter().next() else {
+                    return;
+                };
+                path
             };
             let source = path.clone();
             let result = cx
@@ -227,12 +245,14 @@ impl EditorState {
                 if let Err(error) = s.finish_open(operation, revision, &previous, result, path) {
                     s.status = format!("Open failed: {error}");
                 }
+                s.persist_recent_projects(cx);
                 cx.notify();
             });
         })
         .detach();
     }
-    fn begin_file_operation(&mut self) -> u64 {
+    pub(super) fn begin_file_operation(&mut self) -> u64 {
+        self.pending_svg_import = None;
         self.file_operation = self.file_operation.wrapping_add(1);
         self.file_operation
     }
@@ -256,6 +276,7 @@ impl EditorState {
                 .as_ref()
                 .is_some_and(|session| session.changed())
             || self.vertex_editor.is_some()
+            || self.expression_editor.is_some()
         {
             return Err("Document changed while opening; open the project again".into());
         }
@@ -271,6 +292,7 @@ impl EditorState {
         let editor = replacement_editor(opened.project)?;
         let path = crate::media_io::clean_absolute(&path)?;
         self.vertex_editor = None;
+        self.expression_editor = None;
         self.vertex_return = None;
         self.begin_file_operation();
         self.cancel_save(self.file_operation);
@@ -284,6 +306,9 @@ impl EditorState {
             || crate::project_io::native_destination(&path) != path)
             .then(|| path.clone());
         self.source_format = Some(opened.format);
+        if opened.format == ProjectFormat::Lep && self.imported_original.is_none() {
+            self.recent_projects.remember(&path);
+        }
         self.path = Some(path);
         self.frame = 0;
         self.work_start = 0;
@@ -313,9 +338,32 @@ impl EditorState {
         self.source_format = None;
         self.imported_original = None;
     }
+    pub(super) fn install_ae_imported_project(
+        &mut self,
+        project: Project,
+        path: PathBuf,
+    ) -> Result<(), String> {
+        // Reuse the fully validated document-boundary installer and imported
+        // source protection. AE data is never a native .lep save destination.
+        self.install_opened_project(
+            OpenedProject {
+                project,
+                views: Default::default(),
+                format: ProjectFormat::LegacyJson,
+            },
+            path,
+        )?;
+        self.source_format = None;
+        self.composition_started = true;
+        self.status = self
+            .status
+            .replacen("Project imported", "AE project data imported", 1);
+        Ok(())
+    }
     pub(super) fn install_new_project(&mut self) -> Result<(), String> {
         let editor = replacement_editor(Project::default())?;
         self.vertex_editor = None;
+        self.expression_editor = None;
         self.vertex_return = None;
         self.begin_file_operation();
         self.cancel_save(self.file_operation);
@@ -361,6 +409,8 @@ impl EditorState {
             | Action::ImportImageSequence
             | Action::RelinkSequence(_)
             | Action::ImportImage
+            | Action::ImportSvg
+            | Action::ImportAeProject
             | Action::ImportVideo
             | Action::RelinkVideo
             | Action::ExportFrame
@@ -423,6 +473,104 @@ impl EditorState {
             }
         }
     }
+    fn finish_chosen_save(
+        &mut self,
+        operation: u64,
+        snapshot: Project,
+        path: PathBuf,
+        result: Result<(), String>,
+        chose_destination: bool,
+    ) {
+        let remember = chose_destination && operation == self.file_operation && result.is_ok();
+        let recent_path = remember
+            .then(|| crate::media_io::clean_absolute(&path).ok())
+            .flatten();
+        self.finish_save(operation, snapshot, path, result);
+        if let Some(path) = recent_path {
+            self.recent_projects.remember(&path);
+        }
+    }
+    pub(super) fn clear_recent_projects(&mut self, revision: u64, cx: &mut Context<Self>) {
+        if self.recent_projects.clear(revision)
+            || (revision == self.recent_projects.revision()
+                && self.recent_projects.paths().is_empty()
+                && self.recent_history_needs_save())
+        {
+            self.status = "Recent project list cleared; project files are unchanged".into();
+            self.persist_recent_projects(cx);
+        }
+    }
+    pub(crate) fn recent_history_needs_save(&self) -> bool {
+        self.recent_projects.revision() != self.recent_projects_persisted_revision
+    }
+    fn finish_recent_projects_write(&mut self, revision: u64, result: Result<(), String>) -> bool {
+        self.recent_projects_writing = false;
+        match result {
+            Ok(()) => self.recent_projects_persisted_revision = revision,
+            Err(error) if revision == self.recent_projects.revision() => {
+                self.status
+                    .push_str(&format!(" · Recent projects could not be saved: {error}"));
+            }
+            Err(_) => {}
+        }
+        // Retry a newer queued snapshot now, but a failed current revision only
+        // on the next explicit Open/Save/Clear. Never spin on a broken profile.
+        revision != self.recent_projects.revision()
+    }
+    pub(crate) fn flush_recent_projects_on_close(&self) {
+        if !self.recent_history_needs_save() && !self.recent_projects_writing {
+            return;
+        }
+        // Close/replacement is the only synchronous drain. Do not drop a queued
+        // Clear while an older write is pending. The revision-aware writer also
+        // rejects older background tasks that acquire the lock after this drain.
+        let result = (|| {
+            let path = crate::recent_projects::path().ok_or("Profile location unavailable")?;
+            self.recent_projects_writer
+                .lock()
+                .map_err(|e| e.to_string())?
+                .write(&path, &self.recent_projects)
+        })();
+        if let Err(error) = result {
+            // A settings failure must not prevent quitting or change project
+            // data. Routine persistence errors also appear in the status bar.
+            eprintln!("Recent projects could not be saved before closing: {error}");
+        }
+    }
+    fn persist_recent_projects(&mut self, cx: &mut Context<Self>) {
+        let revision = self.recent_projects.revision();
+        if self.recent_projects_writing || revision == self.recent_projects_persisted_revision {
+            return;
+        }
+        let Some(path) = crate::recent_projects::path() else {
+            self.status
+                .push_str(" · Recent projects could not be saved: profile location unavailable");
+            return;
+        };
+        let history = self.recent_projects.clone();
+        let writer = self.recent_projects_writer.clone();
+        self.recent_projects_writing = true;
+        // A single serial writer keeps a delayed Open/Save write from restoring
+        // an older list after Clear. Routine disk sync stays off the UI thread.
+        cx.spawn(async move |entity, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    writer
+                        .lock()
+                        .map_err(|e| e.to_string())?
+                        .write(&path, &history)
+                })
+                .await;
+            let _ = entity.update(cx, |s, cx| {
+                if s.finish_recent_projects_write(revision, result) {
+                    s.persist_recent_projects(cx);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
     pub(super) fn save(&mut self, cx: &mut Context<Self>) {
         self.save_project(false, cx);
     }
@@ -434,10 +582,13 @@ impl EditorState {
             return;
         }
         self.stop();
+        let previous_operation = self.file_operation;
         let operation = self.begin_file_operation();
+        self.advance_ae_import_save(previous_operation, operation);
         let views = self.capture_views();
         let snapshot = self.editor.project().clone();
         let path = self.save_path(choose);
+        let chose_destination = path.is_none();
         let suggested_name = self.suggested_save_name();
         let imported_original = self.imported_original.clone();
         let directory = self.save_directory();
@@ -484,7 +635,8 @@ impl EditorState {
                 })
                 .await;
             let _ = entity.update(cx, |s, cx| {
-                s.finish_save(operation, snapshot, path, result);
+                s.finish_chosen_save(operation, snapshot, path, result, chose_destination);
+                s.persist_recent_projects(cx);
                 cx.notify();
             });
         })

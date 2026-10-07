@@ -1,0 +1,718 @@
+{
+  "schema_version": 1,
+  "provenance": {
+    "source_name": "Independently authored rich import acceptance",
+    "producer": "Libre Effects synthetic fixture",
+    "producer_version": "reconstruction-1",
+    "source_sha256": null
+  },
+  "root_composition_ids": [
+    101,
+    202,
+    303
+  ],
+  "items": [
+    {
+      "kind": "composition",
+      "id": 101,
+      "name": "Rich text and linked solid",
+      "width": 640,
+      "height": 360,
+      "pixel_aspect": {
+        "numerator": 1,
+        "denominator": 1
+      },
+      "frame_rate": {
+        "numerator": 30,
+        "denominator": 1
+      },
+      "duration": {
+        "numerator": 10,
+        "denominator": 1
+      },
+      "layers": [
+        {
+          "id": 1001,
+          "name": "Synthetic Unicode",
+          "parent_id": 1002,
+          "source": {
+            "kind": "text",
+            "width": 480,
+            "height": 180,
+            "document": {
+              "text": "AB\r\nready",
+              "origin": "native_top_left",
+              "default_style": {
+                "font": {
+                  "postscript_name": "WantedSans-Regular",
+                  "family": "Wanted Sans",
+                  "style": "Regular",
+                  "weight": 400,
+                  "italic": false
+                },
+                "font_size": 36,
+                "fill_rgb": [
+                  1,
+                  0,
+                  0
+                ],
+                "stroke_rgb": null,
+                "stroke_width": 1.0,
+                "stroke_over_fill": false,
+                "stroke_join": "miter",
+                "tracking": 0.0,
+                "baseline_shift": 0.0,
+                "horizontal_scale": 100.0,
+                "vertical_scale": 100.0
+              },
+              "runs": [
+                {
+                  "start_utf16": 0,
+                  "end_utf16": 1,
+                  "style": {
+                    "font": {
+                      "postscript_name": "WantedSans-Regular",
+                      "family": "Wanted Sans",
+                      "style": "Regular",
+                      "weight": 400,
+                      "italic": false
+                    },
+                    "font_size": 36,
+                    "fill_rgb": [
+                      1,
+                      0,
+                      0
+                    ],
+                    "stroke_rgb": null,
+                    "stroke_width": 1.0,
+                    "stroke_over_fill": false,
+                    "stroke_join": "miter",
+                    "tracking": 0.0,
+                    "baseline_shift": 0.0,
+                    "horizontal_scale": 100.0,
+                    "vertical_scale": 100.0
+                  }
+                },
+                {
+                  "start_utf16": 1,
+                  "end_utf16": 9,
+                  "style": {
+                    "font": {
+                      "postscript_name": "WantedSans-Bold",
+                      "family": "Wanted Sans",
+                      "style": "Bold",
+                      "weight": 700,
+                      "italic": false
+                    },
+                    "font_size": 48,
+                    "fill_rgb": [
+                      0,
+                      1,
+                      1
+                    ],
+                    "stroke_rgb": null,
+                    "stroke_width": 1.0,
+                    "stroke_over_fill": false,
+                    "stroke_join": "miter",
+                    "tracking": 0.0,
+                    "baseline_shift": 0.0,
+                    "horizontal_scale": 100.0,
+                    "vertical_scale": 100.0
+                  }
+                }
+              ],
+              "paragraph": {
+                "alignment": "left",
+                "leading": 1.2,
+                "box_size": null,
+                "left_indent": 0.0,
+                "right_indent": 0.0,
+                "first_line_indent": 0.0,
+                "space_before": 0.0,
+                "space_after": 0.0
+              },
+              "unsupported": []
+            },
+            "keys": []
+          },
+          "start_time": {
+            "numerator": 1,
+            "denominator": 30
+          },
+          "in_point": {
+            "numerator": 1,
+            "denominator": 30
+          },
+          "out_point": {
+            "numerator": 10,
+            "denominator": 1
+          },
+          "enabled": true,
+          "label": 4,
+          "three_d": false,
+          "properties": [
+            {
+              "match_names": [
+                "ADBE Transform Group",
+                "ADBE Anchor Point"
+              ],
+              "value": [
+                0.0,
+                0.0
+              ],
+              "dimensions": 2,
+              "keys": [],
+              "expression": null,
+              "unsupported": []
+            },
+            {
+              "match_names": [
+                "ADBE Transform Group",
+                "ADBE Position"
+              ],
+              "value": [
+                100,
+                80
+              ],
+              "dimensions": 2,
+              "keys": [],
+              "expression": null,
+              "unsupported": []
+            },
+            {
+              "match_names": [
+                "ADBE Transform Group",
+                "ADBE Scale"
+              ],
+              "value": [
+                100.0,
+                100.0
+              ],
+              "dimensions": 2,
+              "keys": [],
+              "expression": null,
+              "unsupported": []
+            },
+            {
+              "match_names": [
+                "ADBE Transform Group",
+                "ADBE Rotate Z"
+              ],
+              "value": [
+                0.0
+              ],
+              "dimensions": 1,
+              "keys": [],
+              "expression": null,
+              "unsupported": []
+            },
+            {
+              "match_names": [
+                "ADBE Transform Group",
+                "ADBE Opacity"
+              ],
+              "value": [
+                100
+              ],
+              "dimensions": 1,
+              "keys": [],
+              "expression": null,
+              "unsupported": []
+            }
+          ],
+          "sliders": [
+            {
+              "id": 1,
+              "name": "Synthetic amount",
+              "property": {
+                "match_names": [
+                  "ADBE Slider Control",
+                  "ADBE Slider Control-0001"
+                ],
+                "value": [
+                  40.0
+                ],
+                "dimensions": 1,
+                "keys": [],
+                "expression": null,
+                "unsupported": []
+              }
+            }
+          ],
+          "markers": [
+            {
+              "time": {
+                "numerator": 1,
+                "denominator": 1
+              },
+              "duration": {
+                "numerator": 0,
+                "denominator": 1
+              },
+              "comment": "Synthetic cue",
+              "chapter": "",
+              "url": "",
+              "frame_target": "",
+              "cue_point_name": "",
+              "event_cue_point": false,
+              "protected_region": false,
+              "label": 0,
+              "parameters": []
+            }
+          ],
+          "unsupported": []
+        },
+        {
+          "id": 1002,
+          "name": "Synthetic parent",
+          "parent_id": null,
+          "source": {
+            "kind": "null",
+            "width": 100,
+            "height": 100
+          },
+          "start_time": {
+            "numerator": 1,
+            "denominator": 30
+          },
+          "in_point": {
+            "numerator": 1,
+            "denominator": 30
+          },
+          "out_point": {
+            "numerator": 10,
+            "denominator": 1
+          },
+          "enabled": false,
+          "label": 0,
+          "three_d": false,
+          "properties": [
+            {
+              "match_names": [
+                "ADBE Transform Group",
+                "ADBE Anchor Point"
+              ],
+              "value": [
+                0.0,
+                0.0
+              ],
+              "dimensions": 2,
+              "keys": [],
+              "expression": null,
+              "unsupported": []
+            },
+            {
+              "match_names": [
+                "ADBE Transform Group",
+                "ADBE Position"
+              ],
+              "value": [
+                0.0,
+                0.0
+              ],
+              "dimensions": 2,
+              "keys": [],
+              "expression": null,
+              "unsupported": []
+            },
+            {
+              "match_names": [
+                "ADBE Transform Group",
+                "ADBE Scale"
+              ],
+              "value": [
+                100.0,
+                100.0
+              ],
+              "dimensions": 2,
+              "keys": [],
+              "expression": null,
+              "unsupported": []
+            },
+            {
+              "match_names": [
+                "ADBE Transform Group",
+                "ADBE Rotate Z"
+              ],
+              "value": [
+                0.0
+              ],
+              "dimensions": 1,
+              "keys": [],
+              "expression": null,
+              "unsupported": []
+            },
+            {
+              "match_names": [
+                "ADBE Transform Group",
+                "ADBE Opacity"
+              ],
+              "value": [
+                100.0
+              ],
+              "dimensions": 1,
+              "keys": [],
+              "expression": null,
+              "unsupported": []
+            }
+          ],
+          "sliders": [],
+          "markers": [],
+          "unsupported": []
+        },
+        {
+          "id": 1003,
+          "name": "Nested board",
+          "parent_id": null,
+          "source": {
+            "kind": "composition",
+            "item_id": 202
+          },
+          "start_time": {
+            "numerator": 1,
+            "denominator": 30
+          },
+          "in_point": {
+            "numerator": 1,
+            "denominator": 30
+          },
+          "out_point": {
+            "numerator": 10,
+            "denominator": 1
+          },
+          "enabled": true,
+          "label": 0,
+          "three_d": false,
+          "properties": [
+            {
+              "match_names": [
+                "ADBE Transform Group",
+                "ADBE Anchor Point"
+              ],
+              "value": [
+                0.0,
+                0.0
+              ],
+              "dimensions": 2,
+              "keys": [],
+              "expression": null,
+              "unsupported": []
+            },
+            {
+              "match_names": [
+                "ADBE Transform Group",
+                "ADBE Position"
+              ],
+              "value": [
+                0.0,
+                0.0
+              ],
+              "dimensions": 2,
+              "keys": [],
+              "expression": null,
+              "unsupported": []
+            },
+            {
+              "match_names": [
+                "ADBE Transform Group",
+                "ADBE Scale"
+              ],
+              "value": [
+                100.0,
+                100.0
+              ],
+              "dimensions": 2,
+              "keys": [],
+              "expression": null,
+              "unsupported": []
+            },
+            {
+              "match_names": [
+                "ADBE Transform Group",
+                "ADBE Rotate Z"
+              ],
+              "value": [
+                0.0
+              ],
+              "dimensions": 1,
+              "keys": [],
+              "expression": null,
+              "unsupported": []
+            },
+            {
+              "match_names": [
+                "ADBE Transform Group",
+                "ADBE Opacity"
+              ],
+              "value": [
+                100.0
+              ],
+              "dimensions": 1,
+              "keys": [],
+              "expression": null,
+              "unsupported": []
+            }
+          ],
+          "sliders": [],
+          "markers": [],
+          "unsupported": []
+        }
+      ],
+      "markers": [],
+      "unsupported": []
+    },
+    {
+      "kind": "composition",
+      "id": 202,
+      "name": "Isolated blue solid",
+      "width": 640,
+      "height": 360,
+      "pixel_aspect": {
+        "numerator": 1,
+        "denominator": 1
+      },
+      "frame_rate": {
+        "numerator": 30,
+        "denominator": 1
+      },
+      "duration": {
+        "numerator": 10,
+        "denominator": 1
+      },
+      "layers": [
+        {
+          "id": 2001,
+          "name": "Synthetic blue",
+          "parent_id": null,
+          "source": {
+            "kind": "solid",
+            "width": 320,
+            "height": 180,
+            "color": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "start_time": {
+            "numerator": 1,
+            "denominator": 30
+          },
+          "in_point": {
+            "numerator": 1,
+            "denominator": 30
+          },
+          "out_point": {
+            "numerator": 10,
+            "denominator": 1
+          },
+          "enabled": true,
+          "label": 0,
+          "three_d": false,
+          "properties": [
+            {
+              "match_names": [
+                "ADBE Transform Group",
+                "ADBE Anchor Point"
+              ],
+              "value": [
+                0.0,
+                0.0
+              ],
+              "dimensions": 2,
+              "keys": [],
+              "expression": null,
+              "unsupported": []
+            },
+            {
+              "match_names": [
+                "ADBE Transform Group",
+                "ADBE Position"
+              ],
+              "value": [
+                0.0,
+                0.0
+              ],
+              "dimensions": 2,
+              "keys": [],
+              "expression": null,
+              "unsupported": []
+            },
+            {
+              "match_names": [
+                "ADBE Transform Group",
+                "ADBE Scale"
+              ],
+              "value": [
+                100.0,
+                100.0
+              ],
+              "dimensions": 2,
+              "keys": [],
+              "expression": null,
+              "unsupported": []
+            },
+            {
+              "match_names": [
+                "ADBE Transform Group",
+                "ADBE Rotate Z"
+              ],
+              "value": [
+                0.0
+              ],
+              "dimensions": 1,
+              "keys": [],
+              "expression": null,
+              "unsupported": []
+            },
+            {
+              "match_names": [
+                "ADBE Transform Group",
+                "ADBE Opacity"
+              ],
+              "value": [
+                100.0
+              ],
+              "dimensions": 1,
+              "keys": [],
+              "expression": null,
+              "unsupported": []
+            }
+          ],
+          "sliders": [],
+          "markers": [],
+          "unsupported": []
+        }
+      ],
+      "markers": [],
+      "unsupported": []
+    },
+    {
+      "kind": "composition",
+      "id": 303,
+      "name": "Blocked spatial root",
+      "width": 640,
+      "height": 360,
+      "pixel_aspect": {
+        "numerator": 1,
+        "denominator": 1
+      },
+      "frame_rate": {
+        "numerator": 30,
+        "denominator": 1
+      },
+      "duration": {
+        "numerator": 10,
+        "denominator": 1
+      },
+      "layers": [
+        {
+          "id": 3001,
+          "name": "Synthetic blue",
+          "parent_id": null,
+          "source": {
+            "kind": "solid",
+            "width": 320,
+            "height": 180,
+            "color": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "start_time": {
+            "numerator": 1,
+            "denominator": 30
+          },
+          "in_point": {
+            "numerator": 1,
+            "denominator": 30
+          },
+          "out_point": {
+            "numerator": 10,
+            "denominator": 1
+          },
+          "enabled": true,
+          "label": 0,
+          "three_d": true,
+          "properties": [
+            {
+              "match_names": [
+                "ADBE Transform Group",
+                "ADBE Anchor Point"
+              ],
+              "value": [
+                0.0,
+                0.0
+              ],
+              "dimensions": 2,
+              "keys": [],
+              "expression": null,
+              "unsupported": []
+            },
+            {
+              "match_names": [
+                "ADBE Transform Group",
+                "ADBE Position"
+              ],
+              "value": [
+                0.0,
+                0.0
+              ],
+              "dimensions": 2,
+              "keys": [],
+              "expression": null,
+              "unsupported": []
+            },
+            {
+              "match_names": [
+                "ADBE Transform Group",
+                "ADBE Scale"
+              ],
+              "value": [
+                100.0,
+                100.0
+              ],
+              "dimensions": 2,
+              "keys": [],
+              "expression": null,
+              "unsupported": []
+            },
+            {
+              "match_names": [
+                "ADBE Transform Group",
+                "ADBE Rotate Z"
+              ],
+              "value": [
+                0.0
+              ],
+              "dimensions": 1,
+              "keys": [],
+              "expression": null,
+              "unsupported": []
+            },
+            {
+              "match_names": [
+                "ADBE Transform Group",
+                "ADBE Opacity"
+              ],
+              "value": [
+                100.0
+              ],
+              "dimensions": 1,
+              "keys": [],
+              "expression": null,
+              "unsupported": []
+            }
+          ],
+          "sliders": [],
+          "markers": [],
+          "unsupported": []
+        }
+      ],
+      "markers": [],
+      "unsupported": []
+    }
+  ],
+  "unsupported": []
+}

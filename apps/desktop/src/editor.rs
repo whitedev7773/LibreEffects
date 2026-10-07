@@ -11,8 +11,12 @@ use libre_effects_core::{
 };
 
 use crate::components::{Button, ButtonSize, ButtonVariant};
+#[path = "editor_ae_import.rs"]
+pub(crate) mod ae_import;
 #[path = "editor_assets.rs"]
 pub(crate) mod assets;
+#[path = "editor_automation.rs"]
+pub(crate) mod automation;
 #[path = "editor_footage.rs"]
 mod footage;
 #[path = "editor_io.rs"]
@@ -25,8 +29,12 @@ mod media;
 mod playback;
 #[path = "editor_presets.rs"]
 pub(crate) mod presets;
+#[path = "editor_project_usage.rs"]
+pub(crate) mod project_usage;
 #[path = "editor_queue.rs"]
 pub(crate) mod queue;
+#[path = "editor_svg_import.rs"]
+mod svg_import;
 #[path = "editor_video.rs"]
 mod video;
 #[path = "editor_view.rs"]
@@ -52,6 +60,10 @@ pub(crate) enum Action {
     OpenVertex(crate::panels::vertex_editor::Request),
     ApplyVertex,
     CancelVertex,
+    OpenExpression(LayerId, libre_effects_core::ExpressionTarget),
+    ApplyExpression,
+    CancelExpression,
+    RemoveExpression,
     OpenColor(crate::color_edit::Target),
     ApplyColor,
     CancelColor,
@@ -82,6 +94,8 @@ pub(crate) enum Action {
     Redo,
     New,
     Open,
+    OpenRecent(PathBuf),
+    ClearRecentProjects(u64),
     SaveAs,
     Save,
     CollectFiles,
@@ -92,6 +106,10 @@ pub(crate) enum Action {
     RelinkSource(String),
     RelinkMissing,
     ImportImage,
+    ImportSvg,
+    ImportAeProject,
+    ApplyAeProject(u64),
+    RunScript,
     ImportImageSequence,
     RelinkSequence(u64),
     ImportVideo,
@@ -160,7 +178,10 @@ impl Action {
         )
     }
     fn commits_text_before_dispatch(&self) -> bool {
-        !matches!(self, Self::CancelText | Self::CommitText)
+        !matches!(
+            self,
+            Self::CancelText | Self::CommitText | Self::ClearRecentProjects(_)
+        )
     }
 }
 
@@ -199,6 +220,8 @@ impl PropertyFilter {
 }
 
 pub(crate) struct EditorState {
+    pub(crate) ae_import: Option<ae_import::Session>,
+    pub(crate) automation: Option<automation::Session>,
     pub fonts_open: bool,
     pub text_session: Option<crate::text_edit::Session>,
     pub presets: crate::effect_presets::Library,
@@ -209,6 +232,8 @@ pub(crate) struct EditorState {
     pub queue_message: String,
     pub queue_formats: Vec<crate::output_settings::Spec>,
     pub project_item: Option<libre_effects_core::ProjectItem>,
+    /// One-shot explicit navigation request, never persisted in source or VIEW.
+    pub(crate) project_usage_reveal: Option<(u64, CompositionId, LayerId, u64)>,
     composition_views:
         std::collections::BTreeMap<CompositionId, crate::view_state::CompositionView>,
     pub workspace: crate::view_state::WorkspaceView,
@@ -223,11 +248,19 @@ pub(crate) struct EditorState {
     pub selected_keys: BTreeSet<KeyRef>,
     clipboard: Vec<KeyCopy>,
     layer_clipboard: Option<libre_effects_core::LayerClipboard>,
+    contents_clipboard: Option<libre_effects_core::ContentsClipboard>,
+    pub(crate) contents_tree_focus: Option<gpui::FocusHandle>,
+    pub(crate) shell_clipboard_blocked: bool,
     pub path: Option<PathBuf>,
+    pub recent_projects: libre_effects_editor_model::recent_projects::RecentProjects,
+    recent_projects_writing: bool,
+    recent_projects_writer: std::sync::Arc<std::sync::Mutex<crate::recent_projects::Writer>>,
+    recent_projects_persisted_revision: u64,
     source_format: Option<crate::project_io::ProjectFormat>,
     // Retain imported-file protection after saving a native copy.
     imported_original: Option<PathBuf>,
     file_operation: u64,
+    pending_svg_import: Option<u64>,
     pub composition_started: bool,
     pub new_composition_requested: bool,
     saved: Project,
@@ -278,15 +311,22 @@ pub(crate) struct EditorState {
     pub effect_controls_open: bool,
     pub gradient_controls: Option<crate::color_edit::GradientTarget>,
     pub contents_selection: Option<(CompositionId, LayerId, u64)>,
+    /// Transient selection-domain ownership, never a source/VIEW key address.
+    /// The Timeline owns its exact-key receipts; this shared latch only prevents
+    /// generic selection commands from falling through to the selected layer.
+    pub colors_key_owned: std::rc::Rc<std::cell::Cell<bool>>,
     pub gradient_preview: Option<crate::color_edit::GradientDraft>,
     pub gradient_editor: Option<crate::panels::gradient_editor::Session>,
     pub vertex_editor: Option<crate::panels::vertex_editor::Session>,
+    pub expression_editor: Option<crate::panels::expression_editor::Session>,
     pub vertex_return: Option<crate::panels::vertex_editor::Request>,
     pub graph_property: PropertyPath,
     pub graph_key: Option<KeyRef>,
     pub graph_channels: crate::view_state::GraphChannels,
     playback_origin: Option<(Instant, Frame)>,
     playback_generation: u64,
+    input_context_generation: u64,
+    colors_clipboard_generation: u64,
 }
 
 impl Default for EditorState {
@@ -296,16 +336,25 @@ impl Default for EditorState {
             colors.load(&path);
         }
         Self {
+            ae_import: None,
+            automation: None,
             text_session: None,
             presets: Default::default(),
             fonts_open: false,
             colors,
+            recent_projects: crate::recent_projects::path()
+                .and_then(|path| crate::recent_projects::load(&path).ok())
+                .unwrap_or_default(),
+            recent_projects_writing: false,
+            recent_projects_writer: Default::default(),
+            recent_projects_persisted_revision: 0,
             queue: None,
             queue_open: false,
             queue_busy: false,
             queue_message: "Loading render queue…".into(),
             queue_formats: vec![crate::render_queue::Format::Mp4.into()],
             project_item: None,
+            project_usage_reveal: None,
             composition_views: Default::default(),
             workspace: Default::default(),
             preview_pan: [0.0; 2],
@@ -315,10 +364,14 @@ impl Default for EditorState {
             selected_keys: BTreeSet::new(),
             clipboard: Vec::new(),
             layer_clipboard: None,
+            contents_clipboard: None,
+            contents_tree_focus: None,
+            shell_clipboard_blocked: false,
             path: None,
             source_format: None,
             imported_original: None,
             file_operation: 0,
+            pending_svg_import: None,
             composition_started: false,
             new_composition_requested: false,
             saved: Project::default(),
@@ -372,15 +425,19 @@ impl Default for EditorState {
             effect_controls_open: false,
             gradient_controls: None,
             contents_selection: None,
+            colors_key_owned: Default::default(),
             gradient_preview: None,
             gradient_editor: None,
             vertex_editor: None,
+            expression_editor: None,
             vertex_return: None,
             graph_property: Property::PositionX.into(),
             graph_key: None,
             graph_channels: Default::default(),
             playback_origin: None,
             playback_generation: 0,
+            input_context_generation: 0,
+            colors_clipboard_generation: 0,
         }
     }
 }
@@ -399,7 +456,12 @@ impl EditorState {
                         self.editor.select(session.id);
                         self.selected_layers = [session.id].into();
                         self.composition_started = true;
-                        "Text edited".into()
+                        format!(
+                            "Text edited{}",
+                            crate::authored_spacing_notice::suffix(usize::from(
+                                session.authored_spacing_reset()
+                            ))
+                        )
                     }
                     Err(e) => e,
                 };
@@ -430,6 +492,101 @@ impl EditorState {
     pub(crate) fn transport_generation(&self) -> u64 {
         self.playback_generation
     }
+    pub(crate) fn input_context_generation(&self) -> u64 {
+        self.input_context_generation
+    }
+    pub(crate) fn colors_clipboard_generation(&self) -> u64 {
+        self.colors_clipboard_generation
+    }
+    /// Source/domain continuity for the paint-local compound clipboard. Unlike
+    /// field receipts, a playhead-only seek does not retire copied snapshots.
+    pub(crate) fn retire_colors_clipboard(&mut self) {
+        self.colors_clipboard_generation = self
+            .colors_clipboard_generation
+            .checked_add(1)
+            .expect("Colors clipboard generation exhausted");
+    }
+    /// Shell-owned modal entry retires compound receipts before focus/blur.
+    /// Other field domains keep their established blur/commit behavior.
+    /// Keep the opaque domain latch until explicit domain navigation, preventing
+    /// a retired compound Delete from falling through to the selected layer.
+    pub(crate) fn retire_colors_context(&mut self) {
+        self.retire_colors_clipboard();
+    }
+    fn begin_colors_action(&mut self, action: &Action) {
+        if !matches!(action, Action::Seek(_) | Action::Step(_)) {
+            self.retire_colors_clipboard();
+        }
+    }
+    /// Retire pending source-bound input on an editor action, even when two
+    /// actions restore equal source/selection before an observer can run.
+    fn begin_input_action(&mut self) {
+        self.input_context_generation = self
+            .input_context_generation
+            .checked_add(1)
+            .expect("Editor input generation exhausted");
+    }
+    /// Keyboard row selection is transient: it cannot commit text, seek, edit
+    /// source or activate a different explicit Graph address in saved VIEW.
+    /// The Timeline checks focus, drafts, modal and key-domain ownership first.
+    pub(crate) fn select_timeline_rows(
+        &mut self,
+        selection: libre_effects_editor_model::timeline_navigation::Selection,
+    ) {
+        if self.selected_layers == selection.layers && self.editor.selected() == selection.active {
+            return;
+        }
+        self.begin_input_action();
+        self.retire_colors_clipboard();
+        self.selected_layers = selection.layers;
+        if let Some(id) = selection.active {
+            self.editor.select(id);
+        } else {
+            self.editor.clear_selection();
+        }
+        self.selected_keys.clear();
+        self.graph_key = None;
+    }
+    #[cfg(test)]
+    pub(crate) fn bulk_test_action(&mut self, action: &Action) {
+        if self.prepare_colors_selection_action(action) {
+            return;
+        }
+        self.begin_input_action();
+        self.begin_colors_action(action);
+        match action {
+            Action::Edit(command) => self.apply_edit(command),
+            Action::Undo => self.step_history(false),
+            Action::Redo => self.step_history(true),
+            Action::Seek(frame) => {
+                self.stop();
+                self.frame = *frame;
+            }
+            Action::Play => {
+                let was_playing = self.playing;
+                self.stop();
+                self.playing = !was_playing;
+            }
+            Action::Select(id) => {
+                self.editor.select(*id);
+                self.selected_layers = [*id].into();
+            }
+            Action::SetTool(tool) => self.tool = *tool,
+            Action::ZoomPreview(factor) => {
+                self.preview_zoom =
+                    Some((self.preview_zoom.unwrap_or(0.5) * factor).clamp(0.0625, 8.0));
+            }
+            Action::FitPreview => {
+                self.preview_zoom = None;
+                self.preview_pan = [0.0; 2];
+            }
+            Action::Checkerboard => self.checkerboard = !self.checkerboard,
+            Action::ViewerOption(option) => self.viewer.toggle(*option),
+            Action::PreviewChannel(channel) => self.viewer.channel = *channel,
+            _ => panic!("Unsupported headless bulk test action"),
+        }
+        self.normalize();
+    }
     pub fn selected_marker(
         &self,
     ) -> Option<(
@@ -455,6 +612,20 @@ impl EditorState {
         &self.clipboard
     }
 
+    pub(crate) fn contents_clipboard(&self) -> Option<&libre_effects_core::ContentsClipboard> {
+        self.contents_clipboard.as_ref()
+    }
+    pub(crate) fn set_contents_clipboard(
+        &mut self,
+        clipboard: libre_effects_core::ContentsClipboard,
+    ) {
+        self.begin_input_action();
+        self.retire_colors_clipboard();
+        self.clipboard.clear();
+        self.layer_clipboard = None;
+        self.contents_clipboard = Some(clipboard);
+    }
+
     fn clear_clipboard(&mut self) {
         self.media_open = false;
         self.media_entries.clear();
@@ -462,6 +633,8 @@ impl EditorState {
         self.marker_selection = None;
         self.clipboard.clear();
         self.layer_clipboard = None;
+        self.contents_clipboard = None;
+        self.shell_clipboard_blocked = false;
     }
     fn copy_layers(&mut self) {
         match self
@@ -472,6 +645,33 @@ impl EditorState {
                 self.status = format!("Copied {} layers", clipboard.len());
                 self.clipboard.clear();
                 self.layer_clipboard = Some(clipboard);
+                self.contents_clipboard = None;
+            }
+            Err(error) => self.status = error,
+        }
+    }
+    fn copy_keys(&mut self) {
+        // A mixed selection is one operation. Preserve every clipboard domain
+        // when any key is absent or belongs to native Position/Opacity timing.
+        let copied: Result<Vec<_>, String> = self.selected_keys.iter().map(|key| {
+            let layer = self.editor.project().composition().layer(key.id)
+                .ok_or_else(|| "Cannot copy keys from a missing layer".to_string())?;
+            if layer.is_three_d() && matches!(key.property,
+                PropertyPath::Transform(Property::PositionX | Property::PositionY)) {
+                return Err("Joined spatial Position keys cannot be copied as scalar keys; use scripting".into());
+            }
+            if layer.has_opacity_timing() && key.property == Property::Opacity.into() {
+                return Err("Native Opacity timing keys cannot be copied as scalar keys; use scripting".into());
+            }
+            layer.copy_key(key.property, key.frame)
+                .ok_or_else(|| "Cannot copy the complete key selection: a scalar key is unavailable".to_string())
+        }).collect();
+        match copied {
+            Ok(clipboard) => {
+                self.layer_clipboard = None;
+                self.contents_clipboard = None;
+                self.clipboard = clipboard;
+                self.status = format!("Copied {} keyframes", self.clipboard.len());
             }
             Err(error) => self.status = error,
         }
@@ -542,6 +742,7 @@ impl EditorState {
     }
 
     fn step_history(&mut self, redo: bool) {
+        self.retire_colors_clipboard();
         self.stop();
         self.remember_view();
         let previous = self.editor.project().active_composition_id();
@@ -573,6 +774,8 @@ impl EditorState {
     }
 
     fn composition_changed(&mut self) {
+        self.expression_editor = None;
+        self.colors_key_owned.set(false);
         self.discard_vertex_editor();
         self.gradient_controls = None;
         self.contents_selection = None;
@@ -588,15 +791,24 @@ impl EditorState {
     }
 
     fn apply_edit(&mut self, command: &Command) {
+        self.retire_colors_clipboard();
         self.stop();
         self.remember_view();
         let before = self.editor.selected();
         let composition = self.editor.project().active_composition_id();
-        self.status = match self.editor.execute(command.clone()) {
-            Ok(()) => "Edited".into(),
+        let spacing = crate::authored_spacing_notice::authored_layers(self.editor.project());
+        let result = self.editor.execute(command.clone());
+        let applied = result.is_ok();
+        self.status = match result {
+            Ok(()) => format!(
+                "Edited{}",
+                crate::authored_spacing_notice::suffix(
+                    crate::authored_spacing_notice::reset_count(&spacing, self.editor.project())
+                )
+            ),
             Err(error) => error,
         };
-        if self.status == "Edited"
+        if applied
             && matches!(
                 command,
                 Command::Effect {
@@ -615,7 +827,164 @@ impl EditorState {
         }
     }
 
+    /// Dedicated compound key controls have their own strict, source-bound edits.
+    /// Shell/menu selection actions must never interpret that opaque selection
+    /// as an empty scalar-key selection and act on an entire layer instead.
+    fn prepare_colors_selection_action(&mut self, action: &Action) -> bool {
+        if self.colors_key_owned.get()
+            && matches!(
+                action,
+                Action::CopySelection
+                    | Action::CutSelection
+                    | Action::PasteSelection
+                    | Action::CopyKeys
+                    | Action::PasteKeys
+                    | Action::CopyLayers
+                    | Action::PasteLayers
+                    | Action::DeleteSelection
+                    | Action::DuplicateSelection
+                    | Action::SplitSelection
+                    | Action::TrimSelection(_)
+                    | Action::NudgeSelection(..)
+                    | Action::TransformLayers(_)
+                    | Action::PrecomposeSelection
+                    | Action::ToggleSelectedSwitch(_)
+                    | Action::PreviousKey
+                    | Action::NextKey
+                    | Action::ToggleTimeRemap
+                    | Action::FreezeTimeRemap
+            )
+        {
+            self.status = "Use the selected Colors key's Timeline controls; press Escape or select a layer to leave Colors key selection".into();
+            return true;
+        }
+        if matches!(
+            action,
+            Action::Select(_)
+                | Action::SelectMany(..)
+                | Action::Play
+                | Action::SetTool(_)
+                | Action::GraphProperty(..)
+                | Action::ToggleGraph
+                | Action::Filter(_)
+                | Action::ToggleExpanded
+                | Action::ActivateComposition(_)
+                | Action::New
+                | Action::Open
+                | Action::OpenRecent(_)
+                | Action::BeginText(..)
+                | Action::BeginParagraph(_)
+        ) {
+            self.colors_key_owned.set(false);
+        }
+        false
+    }
+
+    pub(crate) fn expression_scene_active(&self) -> bool {
+        let project = self.editor.project();
+        let comp = project.composition();
+        project
+            .expression_roots(project.active_composition_id(), self.frame, true)
+            .map_or(true, |roots| !roots.is_empty())
+            || self
+                .selected_layers
+                .iter()
+                .copied()
+                .chain(self.editor.selected())
+                .any(|id| comp.has_expression_transform(id))
+    }
+
     pub fn dispatch(&mut self, action: &Action, window: &mut Window, cx: &mut Context<Self>) {
+        // The local expression draft owns editor input, including Undo/Redo.
+        // Route its own actions before changing any receipt generations.
+        if self.expression_editor.is_some() {
+            match action {
+                Action::ApplyExpression => self.apply_expression_editor(cx),
+                Action::CancelExpression => self.cancel_expression_editor(),
+                Action::RemoveExpression => self.remove_expression_editor(),
+                _ => {}
+            }
+            cx.notify();
+            return;
+        }
+        if !self.ae_import_allows_action(action) {
+            return;
+        }
+        if self.automation.is_some() {
+            return;
+        }
+        if matches!(action, Action::OpenExpression(..))
+            && (!self.svg_import_available()
+                || crate::components::TextField::active_has_pending_source_input(cx)
+                || crate::components::TextField::is_composing(window, cx))
+        {
+            self.status =
+                "Finish the current edit or file operation before editing an expression".into();
+            cx.notify();
+            return;
+        }
+        if self
+            .editor
+            .project()
+            .composition()
+            .layers()
+            .iter()
+            .any(|layer| layer.is_three_d())
+            && expression_geometry_action(action)
+        {
+            self.status = "Spatial composition geometry is selection-only in the canvas; use scripting to edit geometry".into();
+            cx.notify();
+            return;
+        }
+        if self.expression_scene_active() && expression_geometry_action(action) {
+            self.status = "Expression-driven composition: canvas geometry is selection-only. Edit the labeled authored/base properties or disable expressions first.".into();
+            cx.notify();
+            return;
+        }
+        if matches!(action, Action::RunScript)
+            && (!self.automation_available()
+                || crate::components::TextField::active_has_pending_source_input(cx))
+        {
+            self.status =
+                "Finish the current edit or file operation before running a script".into();
+            cx.notify();
+            return;
+        }
+        if matches!(action, Action::ImportAeProject)
+            && (!self.ae_import_available()
+                || crate::components::TextField::active_has_pending_source_input(cx))
+        {
+            self.status =
+                "Finish the current edit or file operation before importing AE project data".into();
+            cx.notify();
+            return;
+        }
+        // A file chooser must never blur an uncommitted field into the source.
+        // Refuse before any generation, transport or focus change.
+        if matches!(action, Action::ImportSvg)
+            && (!self.svg_import_available()
+                || crate::components::TextField::active_has_pending_source_input(cx))
+        {
+            self.status = "Finish the current edit or file operation before importing SVG".into();
+            cx.notify();
+            return;
+        }
+        if self.prepare_colors_selection_action(action) {
+            cx.notify();
+            return;
+        }
+        if self.shell_clipboard_blocked
+            && matches!(
+                action,
+                Action::CopySelection | Action::CutSelection | Action::PasteSelection
+            )
+        {
+            self.status = "Use Contents Copy, Cut and Paste controls".into();
+            cx.notify();
+            return;
+        }
+        self.begin_input_action();
+        self.begin_colors_action(action);
         let vertex_was_open = self.vertex_editor.is_some();
         let vertex_invalidated = self.invalidate_vertex_editor();
         if vertex_was_open && !action.allowed_in_vertex_editor() {
@@ -694,7 +1063,16 @@ impl EditorState {
                             session.buffer.all();
                         }
                         self.text_session = Some(session);
-                        self.status = "Edit text · Ctrl+Enter finishes · Esc cancels".into();
+                        self.status = if self
+                            .text_session
+                            .as_ref()
+                            .is_some_and(|s| s.style.paragraph)
+                        {
+                            "Edit paragraph text · Ctrl+Enter finishes · Esc cancels"
+                        } else {
+                            "Edit auto-size text · Ctrl+Enter finishes · Esc cancels"
+                        }
+                        .into();
                     }
                     Err(e) => self.status = e,
                 }
@@ -719,6 +1097,24 @@ impl EditorState {
             }
             Action::ApplyVertex => self.accept_vertex_editor(),
             Action::CancelVertex => self.cancel_vertex_editor(),
+            Action::OpenExpression(id, target) => {
+                if !self.svg_import_available() {
+                    self.status =
+                        "Finish the current edit or file operation before editing an expression"
+                            .into();
+                } else {
+                    self.stop();
+                    match crate::panels::expression_editor::Session::new(self, *id, *target) {
+                        Ok(session) => {
+                            self.expression_editor = Some(session);
+                            self.status =
+                                "Expression draft · Ctrl+Enter applies · Escape cancels".into();
+                        }
+                        Err(error) => self.status = error,
+                    }
+                }
+            }
+            Action::ApplyExpression | Action::CancelExpression | Action::RemoveExpression => {}
             Action::OpenGradient(item) => {
                 self.stop();
                 self.gradient_preview = None;
@@ -1045,16 +1441,27 @@ impl EditorState {
             }
             Action::CopyLayers => self.copy_layers(),
             Action::CutSelection => {
-                let previous = (self.clipboard.clone(), self.layer_clipboard.clone());
+                let previous = (
+                    self.clipboard.clone(),
+                    self.layer_clipboard.clone(),
+                    self.contents_clipboard.clone(),
+                );
                 self.dispatch(&Action::CopySelection, window, cx);
                 if self.status.starts_with("Copied") {
                     self.dispatch(&Action::DeleteSelection, window, cx);
                     if !self.status.starts_with("Edited") {
-                        (self.clipboard, self.layer_clipboard) = previous;
+                        (
+                            self.clipboard,
+                            self.layer_clipboard,
+                            self.contents_clipboard,
+                        ) = previous;
                     } else {
                         self.status = "Cut selection".into();
                     }
                 }
+            }
+            Action::PasteSelection if self.contents_clipboard.is_some() => {
+                self.status = "Paste the Contents snapshot with its tree controls".into();
             }
             Action::PasteSelection => {
                 let action = if self.layer_clipboard.is_some() {
@@ -1093,21 +1500,7 @@ impl EditorState {
                     self.status = "Copy layers first".into();
                 }
             }
-            Action::CopyKeys => {
-                self.layer_clipboard = None;
-                self.clipboard = self
-                    .selected_keys
-                    .iter()
-                    .filter_map(|k| {
-                        self.editor
-                            .project()
-                            .composition()
-                            .layer(k.id)?
-                            .copy_key(k.property, k.frame)
-                    })
-                    .collect();
-                self.status = format!("Copied {} keyframes", self.clipboard.len());
-            }
+            Action::CopyKeys => self.copy_keys(),
             Action::PasteKeys => {
                 let single = self
                     .clipboard
@@ -1279,6 +1672,10 @@ impl EditorState {
                 );
             }
             Action::ImportImage => self.import_assets(false, false, cx),
+            Action::RunScript => self.run_script_file(cx),
+            Action::ImportSvg => self.import_svg(cx),
+            Action::ImportAeProject => self.import_ae_project(cx),
+            Action::ApplyAeProject(operation) => self.apply_ae_project(*operation, cx),
             Action::CompositionFromFootage => self.import_assets(false, true, cx),
             Action::ImportImageSequence => self.import_assets(true, false, cx),
             Action::RelinkSequence(id) => self.relink_sequence(*id, cx),
@@ -1514,6 +1911,8 @@ impl EditorState {
                 }
             }
             Action::Open => self.open(cx),
+            Action::OpenRecent(path) => self.open_recent(path, cx),
+            Action::ClearRecentProjects(revision) => self.clear_recent_projects(*revision, cx),
             Action::SaveAs => self.save_as(cx),
             Action::Save => self.save(cx),
             Action::CollectFiles => self.collect_files(cx),
@@ -1526,7 +1925,11 @@ impl EditorState {
         // context just captured for opening or the one-shot return on closing.
         if !matches!(
             action,
-            Action::OpenVertex(_) | Action::ApplyVertex | Action::CancelVertex
+            Action::OpenVertex(_)
+                | Action::ApplyVertex
+                | Action::CancelVertex
+                | Action::OpenExpression(..)
+                | Action::RunScript
         ) {
             self.normalize();
         }
@@ -1595,6 +1998,226 @@ pub(crate) fn action_button(
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn assert_key_copies_equal(actual: &[KeyCopy], expected: &[KeyCopy]) {
+        assert_eq!(actual.len(), expected.len());
+        for (actual, expected) in actual.iter().zip(expected) {
+            assert_eq!(actual.key, expected.key);
+            assert_eq!(actual.data, expected.data);
+            assert_eq!(actual.source_text, expected.source_text);
+            assert_eq!(actual.path_pose, expected.path_pose);
+            assert_eq!(actual.effect_kind, expected.effect_kind);
+        }
+    }
+    #[test]
+    fn key_copy_rejects_missing_member_and_preserves_existing_clipboards() {
+        use libre_effects_core::TrackEdit;
+        let mut state = EditorState::default();
+        state.editor.execute(Command::AddRectangle).unwrap();
+        state
+            .editor
+            .execute(Command::EditTrack {
+                id: 1,
+                property: Property::Opacity.into(),
+                edit: TrackEdit::ToggleKey { frame: 0 },
+            })
+            .unwrap();
+        let valid = KeyRef {
+            id: 1,
+            property: Property::Opacity.into(),
+            frame: 0,
+        };
+        let missing = KeyRef {
+            id: 1,
+            property: Property::PositionX.into(),
+            frame: 17,
+        };
+        state.selected_layers = [1].into();
+        state.selected_keys = [valid].into();
+        state.copy_keys();
+        let before = state.clipboard.clone();
+        state.selected_keys = [valid, missing].into();
+        state.copy_keys();
+        assert_key_copies_equal(&state.clipboard, &before);
+        assert!(!state.status.starts_with("Copied"));
+        state.copy_layers();
+        let before = format!("{:?}", state.layer_clipboard);
+        state.copy_keys();
+        assert_eq!(format!("{:?}", state.layer_clipboard), before);
+        assert!(state.clipboard.is_empty());
+        assert!(!state.status.starts_with("Copied"));
+    }
+
+    #[test]
+    fn mixed_spatial_key_copy_preserves_clipboard_source_and_redo() {
+        use libre_effects_core::TrackEdit;
+        let mut state = EditorState::default();
+        state.editor.execute(Command::AddRectangle).unwrap();
+        state
+            .editor
+            .execute(Command::EditTrack {
+                id: 1,
+                property: Property::Opacity.into(),
+                edit: TrackEdit::ToggleKey { frame: 0 },
+            })
+            .unwrap();
+        let opacity = KeyRef {
+            id: 1,
+            property: Property::Opacity.into(),
+            frame: 0,
+        };
+        state.selected_keys = [opacity].into();
+        state.copy_keys();
+        let clipboard = state.clipboard.clone();
+        state
+            .editor
+            .execute(Command::SetThreeD {
+                id: 1,
+                enabled: true,
+            })
+            .unwrap();
+        state
+            .editor
+            .execute(Command::RenameLayer {
+                id: 1,
+                name: "Retained redo".into(),
+            })
+            .unwrap();
+        state.editor.undo();
+        let project = state.editor.project().clone();
+        state.selected_keys.insert(KeyRef {
+            id: 1,
+            property: Property::PositionX.into(),
+            frame: 0,
+        });
+        state.copy_keys();
+        assert!(state.status.contains("Joined spatial Position"));
+        assert_key_copies_equal(&state.clipboard, &clipboard);
+        assert_eq!(state.editor.project(), &project);
+        state.editor.redo();
+        assert_eq!(
+            state
+                .editor
+                .project()
+                .composition()
+                .layer(1)
+                .unwrap()
+                .name(),
+            "Retained redo"
+        );
+    }
+
+    #[test]
+    fn mixed_native_opacity_copy_preserves_key_and_layer_clipboards_and_redo() {
+        let mut state = EditorState::default();
+        state.editor = crate::opacity_test_support::overshoot_editor(false);
+        state.editor.execute(Command::AddRectangle).unwrap();
+        state
+            .editor
+            .execute(Command::EditTrack {
+                id: 2,
+                property: Property::PositionX.into(),
+                edit: libre_effects_core::TrackEdit::ToggleKey { frame: 0 },
+            })
+            .unwrap();
+        let scalar = KeyRef {
+            id: 2,
+            property: Property::PositionX.into(),
+            frame: 0,
+        };
+        state.selected_keys = [scalar].into();
+        state.copy_keys();
+        let clipboard = state.clipboard.clone();
+        state.editor.clear_history();
+        state
+            .editor
+            .execute(Command::RenameLayer {
+                id: 2,
+                name: "Retained redo".into(),
+            })
+            .unwrap();
+        state.editor.undo();
+        let before = state.editor.project().clone();
+        state.selected_keys.insert(KeyRef {
+            id: 1,
+            property: Property::Opacity.into(),
+            frame: 0,
+        });
+        state.copy_keys();
+        assert!(state.status.contains("Native Opacity timing"));
+        assert_key_copies_equal(&state.clipboard, &clipboard);
+        assert_eq!(state.editor.project(), &before);
+        assert!(!state.editor.can_undo());
+        assert!(state.editor.can_redo());
+        state.selected_layers = [2].into();
+        state.copy_layers();
+        let layers = format!("{:?}", state.layer_clipboard);
+        state.copy_keys();
+        assert_eq!(format!("{:?}", state.layer_clipboard), layers);
+        assert!(state.clipboard.is_empty());
+        assert_eq!(state.editor.project(), &before);
+        assert!(state.editor.can_redo());
+    }
+
+    #[test]
+    fn contents_clipboard_is_mutually_exclusive_with_layers_and_keys() {
+        use libre_effects_core::{ContentsEdit, ContentsKind, TrackEdit};
+        let mut state = EditorState::default();
+        state
+            .editor
+            .execute(Command::AddContent {
+                content: Content::ShapeContents(Default::default()),
+                width: 100.,
+                height: 100.,
+                name: "Clipboard domains".into(),
+            })
+            .unwrap();
+        state
+            .editor
+            .execute(Command::Contents {
+                id: 1,
+                edit: ContentsEdit::Add {
+                    parent: 0,
+                    kind: ContentsKind::Group(vec![]),
+                },
+            })
+            .unwrap();
+        state
+            .editor
+            .execute(Command::EditTrack {
+                id: 1,
+                property: Property::PositionX.into(),
+                edit: TrackEdit::ToggleKey { frame: 0 },
+            })
+            .unwrap();
+        let clipboard = state.editor.copy_contents(1, 0, &[1]).unwrap();
+        state.selected_layers = [1].into();
+        state.selected_keys = [KeyRef {
+            id: 1,
+            property: Property::PositionX.into(),
+            frame: 0,
+        }]
+        .into();
+        state.copy_layers();
+        assert!(state.layer_clipboard.is_some());
+        state.set_contents_clipboard(clipboard.clone());
+        assert!(state.layer_clipboard.is_none());
+        assert!(state.clipboard.is_empty());
+        state.copy_keys();
+        assert_eq!(state.clipboard.len(), 1);
+        assert!(state.contents_clipboard().is_none());
+        state.set_contents_clipboard(clipboard.clone());
+        assert!(state.layer_clipboard.is_none());
+        assert!(state.clipboard.is_empty());
+        state.copy_layers();
+        assert!(state.contents_clipboard().is_none());
+        assert!(state.clipboard.is_empty());
+        state.set_contents_clipboard(clipboard);
+        state.clear_clipboard();
+        assert!(state.contents_clipboard().is_none());
+        assert!(state.layer_clipboard.is_none());
+        assert!(state.clipboard.is_empty());
+    }
+
     #[test]
     fn contents_drag_transport_epoch_cannot_revive_after_edit_and_history_roundtrip() {
         let mut state = EditorState::default();
@@ -1747,6 +2370,7 @@ mod tests {
             Action::SaveAs,
             Action::CollectFiles,
             Action::ImportImage,
+            Action::ImportSvg,
             Action::ExportFrame,
             Action::ManageFonts,
             Action::ManageMedia,
@@ -1823,6 +2447,68 @@ mod tests {
         assert_eq!(state.graph_property, Property::PositionX.into());
     }
     #[test]
+    fn timeline_keyboard_selection_preserves_source_view_playhead_and_history() {
+        use libre_effects_editor_model::timeline_navigation::Selection;
+        let mut state = EditorState::default();
+        for _ in 0..3 {
+            state.editor.execute(Command::AddRectangle).unwrap();
+        }
+        let ids: Vec<_> = state
+            .editor
+            .project()
+            .composition()
+            .layers()
+            .iter()
+            .map(|l| l.id())
+            .collect();
+        let channel = crate::view_state::GraphChannel {
+            id: ids[0],
+            property: Property::PositionX.into(),
+        };
+        state.graph_channels.activate(channel);
+        state.graph_channels.pinned.push(channel);
+        state.graph_open = true;
+        state.frame = 37;
+        state.playing = true;
+        state.editor.clear_history();
+        state.saved = state.editor.project().clone();
+        let source = state.editor.project().clone();
+        let view = state.capture_views().encode_native(&source).unwrap();
+        let channels = state.graph_channels.clone();
+        let transport = state.transport_generation();
+        let inputs = state.input_context_generation();
+        let colors = state.colors_clipboard_generation();
+        for selection in [
+            Selection {
+                active: Some(ids[1]),
+                layers: [ids[1]].into(),
+            },
+            Selection {
+                active: Some(ids[2]),
+                layers: ids.iter().copied().collect(),
+            },
+            Selection::default(),
+        ] {
+            state.select_timeline_rows(selection.clone());
+            assert_eq!(state.selected_layers, selection.layers);
+            assert_eq!(state.editor.selected(), selection.active);
+            assert_eq!(state.editor.project(), &source);
+            assert_eq!(state.capture_views().encode_native(&source).unwrap(), view);
+            assert_eq!(state.graph_channels, channels);
+            assert_eq!(state.frame, 37);
+            assert!(state.playing);
+            assert_eq!(state.transport_generation(), transport);
+            assert!(!state.dirty());
+            assert!(!state.editor.can_undo());
+            assert!(!state.editor.can_redo());
+        }
+        assert_eq!(state.input_context_generation(), inputs + 3);
+        assert_eq!(state.colors_clipboard_generation(), colors + 3);
+        state.select_timeline_rows(Selection::default());
+        assert_eq!(state.input_context_generation(), inputs + 3);
+    }
+
+    #[test]
     fn composition_navigation_is_not_dirty_and_history_resets_timeline() {
         let mut state = EditorState::default();
         state.editor.execute(Command::AddRectangle).unwrap();
@@ -1874,5 +2560,86 @@ mod tests {
                 .unwrap()
                 .active_at(state.frame, 150)
         );
+    }
+}
+
+#[cfg(test)]
+#[path = "contents_animation_render_tests.rs"]
+mod contents_animation_render_tests;
+
+#[cfg(test)]
+#[path = "contents_clipboard_render_tests.rs"]
+mod contents_clipboard_render_tests;
+
+#[cfg(test)]
+#[path = "cross_path_render_tests.rs"]
+mod cross_path_render_tests;
+
+#[cfg(test)]
+#[path = "gradient_interpolation_acceptance_tests.rs"]
+mod gradient_interpolation_acceptance_tests;
+#[cfg(test)]
+#[path = "paragraph_style_acceptance_tests.rs"]
+mod paragraph_style_acceptance_tests;
+#[cfg(test)]
+#[path = "text_animator_acceptance_tests.rs"]
+mod text_animator_acceptance_tests;
+#[cfg(test)]
+#[path = "text_animator_guard_review_tests.rs"]
+mod text_animator_guard_review_tests;
+
+#[cfg(test)]
+#[path = "gradient_interpolation_selection_tests.rs"]
+mod gradient_interpolation_selection_tests;
+
+#[cfg(test)]
+#[path = "gradient_multikey_acceptance_tests.rs"]
+mod gradient_multikey_acceptance_tests;
+
+#[cfg(test)]
+#[path = "gradient_pointer_acceptance_tests.rs"]
+mod gradient_pointer_acceptance_tests;
+
+#[cfg(test)]
+#[path = "text_selector_acceptance_tests.rs"]
+mod text_selector_acceptance_tests;
+
+#[cfg(test)]
+#[path = "text_unit_transform_tests.rs"]
+mod text_unit_transform_tests;
+
+#[cfg(test)]
+#[path = "text_selector_stack_acceptance_tests.rs"]
+mod text_selector_stack_acceptance_tests;
+
+fn expression_geometry_action(action: &Action) -> bool {
+    match action {
+        Action::BeginText(..)
+        | Action::BeginParagraph(..)
+        | Action::AddText
+        | Action::OpenVertex(_)
+        | Action::OpenGradient(_)
+        | Action::NudgeSelection(..)
+        | Action::TransformLayers(_) => true,
+        Action::SetTool(Tool::Text | Tool::Pen | Tool::Shape(_) | Tool::Rotate | Tool::Anchor) => {
+            true
+        }
+        Action::Edit(command) => expression_geometry_command(command),
+        _ => false,
+    }
+}
+fn expression_geometry_command(command: &Command) -> bool {
+    match command {
+        Command::SetParent { .. }
+        | Command::AlignLayer { .. }
+        | Command::AlignLayers { .. }
+        | Command::DistributeLayers { .. }
+        | Command::TransformLayers { .. }
+        | Command::SetAnchor { .. }
+        | Command::NudgeLayers { .. }
+        | Command::TransformContentsPoints { .. }
+        | Command::TransformPathPoses { .. } => true,
+        Command::Batch(commands) => commands.iter().any(expression_geometry_command),
+        _ => false,
     }
 }

@@ -207,7 +207,7 @@ fn point(m: Matrix, p: [f64; 2]) -> [f64; 2] {
 }
 fn local(p: &Project, id: LayerId, frame: Frame, scale_factor: f64) -> Matrix {
     let l = layer(p, id);
-    let v = |p| l.property(p).value_at(frame);
+    let v = |p| l.property(p).expect("2D fixture property").value_at(frame);
     let angle = v(Property::Rotation) * std::f64::consts::PI / 180.;
     let sx = v(Property::ScaleX) * scale_factor / 100.;
     let sy = v(Property::ScaleY) * scale_factor / 100.;
@@ -282,7 +282,7 @@ fn reference_changes(
     let mut changes = Vec::new();
     for &id in ids {
         let l = layer(p, id);
-        let v = |p| l.property(p).value_at(frame);
+        let v = |p| l.property(p).expect("2D fixture property").value_at(frame);
         let edits = match op {
             LayerTransformOp::ResetScaleRotation => vec![
                 (Property::ScaleX, 100.),
@@ -471,14 +471,16 @@ fn fit_uses_each_root_source_rectangle_under_parent_offset_and_ignores_painted_b
             assert!(fills_width || fills_height);
             let old = layer(&before, id);
             let new = layer(e.project(), id);
-            let v = |l: &Layer, p| l.property(p).value_at(0);
+            let v = |l: &Layer, p| l.property(p).expect("2D fixture property").value_at(0);
             close(
                 v(old, Property::ScaleX) / v(old, Property::ScaleY),
                 v(new, Property::ScaleX) / v(new, Property::ScaleY),
             );
             assert_eq!(
-                old.property(Property::Rotation),
+                old.property(Property::Rotation)
+                    .expect("2D fixture property"),
                 new.property(Property::Rotation)
+                    .expect("2D fixture property")
             );
             assert_eq!(
                 v(old, Property::ScaleX).is_sign_negative(),
@@ -519,8 +521,18 @@ fn anchor_centering_preserves_pixels_and_world_pose_for_selected_parent_and_chil
         }
         for id in ids {
             let l = layer(e.project(), id);
-            assert_eq!(l.property(Property::AnchorX).value_at(0), l.width() / 2.);
-            assert_eq!(l.property(Property::AnchorY).value_at(0), l.height() / 2.);
+            assert_eq!(
+                l.property(Property::AnchorX)
+                    .expect("2D fixture property")
+                    .value_at(0),
+                l.width() / 2.
+            );
+            assert_eq!(
+                l.property(Property::AnchorY)
+                    .expect("2D fixture property")
+                    .value_at(0),
+                l.height() / 2.
+            );
         }
     }
 }
@@ -538,7 +550,10 @@ fn animate(e: &mut Editor) {
         (2, Property::Rotation, 12.),
         (2, Property::ScaleX, -12.),
     ] {
-        let base = layer(e.project(), id).property(property).value_at(0);
+        let base = layer(e.project(), id)
+            .property(property)
+            .expect("2D fixture property")
+            .value_at(0);
         e.execute(Command::ToggleAnimation {
             id,
             property,
@@ -595,8 +610,12 @@ fn animated_current_frame_edits_preserve_other_keys_handles_geometry_and_referen
                 &[0, 15, 30, 45, 60, 75, 90],
             );
             for property in Property::ALL {
-                let old = layer(&before, 1).property(property);
-                let new = layer(e.project(), 1).property(property);
+                let old = layer(&before, 1)
+                    .property(property)
+                    .expect("2D fixture property");
+                let new = layer(e.project(), 1)
+                    .property(property)
+                    .expect("2D fixture property");
                 for (&at, key) in old.keys() {
                     let changed = new.keys().get(&at).unwrap();
                     assert_eq!(key.interpolation, changed.interpolation);

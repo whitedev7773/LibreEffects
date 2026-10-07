@@ -8,6 +8,8 @@ pub type EffectId = u64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EffectKind {
+    SliderControl,
+    AudioSpectrum,
     GaussianBlur,
     Brightness,
     Grayscale,
@@ -83,7 +85,9 @@ impl ParameterSpec {
     }
 }
 impl EffectKind {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 15] = [
+        Self::SliderControl,
+        Self::AudioSpectrum,
         Self::GaussianBlur,
         Self::Brightness,
         Self::Grayscale,
@@ -100,6 +104,8 @@ impl EffectKind {
     ];
     pub fn label(self) -> &'static str {
         match self {
+            Self::SliderControl => "Slider Control",
+            Self::AudioSpectrum => "Audio Spectrum (Native V1)",
             Self::GaussianBlur => "Gaussian Blur",
             Self::Brightness => "Brightness",
             Self::Grayscale => "Grayscale",
@@ -134,6 +140,8 @@ impl EffectKind {
         let radius = || spec(Radius, "Radius (px)", 0.0, 100.0, 10.0);
         let opacity = || spec(Opacity, "Opacity (%)", 0.0, 100.0, 100.0);
         match self {
+            Self::AudioSpectrum => vec![], // Explicit static, typed settings.
+            Self::SliderControl => vec![spec(Amount, "Slider", -1_000_000.0, 1_000_000.0, 0.0)],
             Self::Curves => CurveChannel::ALL
                 .into_iter()
                 .flat_map(|channel| {
@@ -231,6 +239,19 @@ impl LumaKeyMode {
     }
 }
 
+/// Static Gaussian boundary sampling. Legacy effects omit the transparent mode.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GaussianEdgeMode {
+    #[default]
+    Transparent,
+    Repeat,
+}
+impl GaussianEdgeMode {
+    fn is_transparent(&self) -> bool {
+        *self == Self::Transparent
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EffectInstance {
     id: EffectId,
@@ -242,6 +263,10 @@ pub struct EffectInstance {
     color_space: EffectColorSpace,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     luma_key_mode: Option<LumaKeyMode>,
+    #[serde(default, skip_serializing_if = "GaussianEdgeMode::is_transparent")]
+    gaussian_edge_mode: GaussianEdgeMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    audio_spectrum: Option<AudioSpectrumSettings>,
     parameters: BTreeMap<EffectParam, AnimatedProperty>,
 }
 impl EffectInstance {
@@ -262,6 +287,15 @@ impl EffectInstance {
     }
     pub fn luma_key_mode(&self) -> Option<LumaKeyMode> {
         self.luma_key_mode
+    }
+    pub fn gaussian_edge_mode(&self) -> GaussianEdgeMode {
+        self.gaussian_edge_mode
+    }
+    pub fn audio_spectrum(&self) -> Option<&AudioSpectrumSettings> {
+        self.audio_spectrum.as_ref()
+    }
+    pub(super) fn audio_spectrum_mut(&mut self) -> Option<&mut AudioSpectrumSettings> {
+        self.audio_spectrum.as_mut()
     }
     pub fn parameter(&self, param: EffectParam) -> Option<&AnimatedProperty> {
         self.parameters.get(&param)
@@ -286,6 +320,9 @@ impl EffectInstance {
             .map(|p| self.value_at(p, frame) / 255.0)
     }
     fn gradient_defaults(&mut self, width: f64, height: f64) {
+        if let Some(spectrum) = &mut self.audio_spectrum {
+            spectrum.fit_layer(width, height);
+        }
         if matches!(
             self.kind,
             EffectKind::LinearGradient | EffectKind::RadialGradient
@@ -306,6 +343,9 @@ impl EffectInstance {
             bypassed: false,
             color_space: EffectColorSpace::Srgb,
             luma_key_mode: (kind == EffectKind::LumaKey).then_some(LumaKeyMode::KeepBrighter),
+            gaussian_edge_mode: GaussianEdgeMode::Transparent,
+            audio_spectrum: (kind == EffectKind::AudioSpectrum)
+                .then(AudioSpectrumSettings::default),
             parameters: kind
                 .parameters()
                 .iter()
@@ -345,6 +385,14 @@ pub enum EffectEdit {
         name: String,
     },
     Reset(EffectId),
+    SetGaussianEdgeMode {
+        effect: EffectId,
+        mode: GaussianEdgeMode,
+    },
+    SetAudioSpectrum {
+        effect: EffectId,
+        settings: AudioSpectrumSettings,
+    },
     SetLumaKeyMode {
         effect: EffectId,
         mode: LumaKeyMode,
@@ -376,6 +424,11 @@ impl Layer {
     pub fn effect_stack(&self) -> &[EffectInstance] {
         &self.effect_stack
     }
+    /// Whether this layer's content supports adding this effect kind. Lock state
+    /// and stack limits are checked separately when the command is applied.
+    pub fn supports_effect_kind(&self, kind: EffectKind) -> bool {
+        validate_add_target(self, kind).is_ok()
+    }
     pub(super) fn all_tracks_mut(&mut self) -> impl Iterator<Item = &mut AnimatedProperty> {
         self.properties
             .values_mut()
@@ -391,6 +444,16 @@ impl Layer {
             )
             .chain(std::iter::once(&mut self.source_text_animation.timing))
             .chain(self.text_parameters.values_mut())
+            .chain(
+                self.text_range_selectors
+                    .iter_mut()
+                    .flat_map(|selector| selector.parameters.values_mut()),
+            )
+            .chain(
+                self.text_animators
+                    .iter_mut()
+                    .flat_map(|animator| animator.parameters.values_mut()),
+            )
             .chain(self.time_remap.iter_mut())
             .chain(self.audio_controls.parameters.values_mut())
             .chain(self.path_masks.iter_mut().flat_map(|m| {
@@ -413,6 +476,7 @@ pub(super) fn validate(layer: &Layer, duration: Frame) -> Result<(), String> {
     validate_stack(&layer.effect_stack, layer.next_effect_id, duration)
 }
 fn validate_target(layer: &Layer, stack: &[EffectInstance]) -> Result<(), String> {
+    audio_spectrum::validate_target(layer, stack)?;
     if matches!(layer.content, Content::Null | Content::Audio { .. })
         && stack.iter().any(|e| e.kind == EffectKind::LumaKey)
     {
@@ -437,8 +501,23 @@ fn validate_stack(stack: &[EffectInstance], next: EffectId, duration: Frame) -> 
         if (effect.kind == EffectKind::LumaKey) != effect.luma_key_mode.is_some() {
             return Err("Luma Key mode must belong to a Luma Key effect".into());
         }
+        if (effect.kind == EffectKind::AudioSpectrum) != effect.audio_spectrum.is_some() {
+            return Err("Audio Spectrum settings must belong to an Audio Spectrum effect".into());
+        }
+        if let Some(settings) = &effect.audio_spectrum {
+            settings.validate()?;
+            if effect.color_space != EffectColorSpace::Srgb {
+                return Err("Native Audio Spectrum supports only sRGB".into());
+            }
+        }
         if effect.kind == EffectKind::LumaKey && effect.color_space != EffectColorSpace::Srgb {
             return Err("Luma Key supports only sRGB".into());
+        }
+        if effect.gaussian_edge_mode == GaussianEdgeMode::Repeat
+            && (effect.kind != EffectKind::GaussianBlur
+                || effect.color_space != EffectColorSpace::Srgb)
+        {
+            return Err("Repeat Edge Pixels requires an sRGB Gaussian Blur effect".into());
         }
         let specs = effect.kind.parameters();
         if effect.parameters.len() != specs.len() {
@@ -461,11 +540,21 @@ fn validate_stack(stack: &[EffectInstance], next: EffectId, duration: Frame) -> 
     }
     Ok(())
 }
-fn add(layer: &mut Layer, kind: EffectKind) -> Result<EffectId, String> {
+fn validate_add_target(layer: &Layer, kind: EffectKind) -> Result<(), String> {
+    if kind == EffectKind::AudioSpectrum {
+        audio_spectrum::validate_owner(layer)?;
+    }
+    if matches!(layer.content, Content::Null) && kind != EffectKind::SliderControl {
+        return Err("Null objects support only Slider Control effects".into());
+    }
     if kind == EffectKind::LumaKey && matches!(layer.content, Content::Null | Content::Audio { .. })
     {
         return Err("Luma Key requires a layer with rendered pixels".into());
     }
+    Ok(())
+}
+fn add(layer: &mut Layer, kind: EffectKind) -> Result<EffectId, String> {
+    validate_add_target(layer, kind)?;
     if layer.effect_stack.len() >= 64 || layer.next_effect_id == u64::MAX {
         return Err("Effect limit reached".into());
     }
@@ -511,6 +600,26 @@ pub(super) fn luma_value_edits_only(command: &Command) -> bool {
         _ => false,
     }
 }
+pub(super) fn has_repeat_edges(project: &Project) -> bool {
+    project.compositions().iter().any(|(_, comp)| {
+        comp.layers
+            .iter()
+            .flat_map(|layer| &layer.effect_stack)
+            .any(|effect| effect.gaussian_edge_mode == GaussianEdgeMode::Repeat)
+    })
+}
+pub(super) fn gaussian_mode_edits_only(command: &Command) -> bool {
+    match command {
+        Command::Effect {
+            edit: EffectEdit::SetGaussianEdgeMode { .. },
+            ..
+        } => true,
+        Command::Batch(commands) => {
+            !commands.is_empty() && commands.iter().all(gaussian_mode_edits_only)
+        }
+        _ => false,
+    }
+}
 pub(super) fn apply(state: &mut Snapshot, id: LayerId, edit: EffectEdit) -> Result<(), String> {
     let duration = state.project.composition.duration;
     let fps = state.project.composition.fps;
@@ -524,8 +633,8 @@ pub(super) fn apply(state: &mut Snapshot, id: LayerId, edit: EffectEdit) -> Resu
     if layer.locked {
         return Err("Unlock the layer before editing effects".into());
     }
-    if matches!(layer.content, Content::Null) {
-        return Err("Null objects have no rendered pixels to affect".into());
+    if matches!(layer.content, Content::Null) && !expressions::slider_edit(layer, &edit) {
+        return Err("Null objects support only Slider Control effects".into());
     }
     validate_target(layer, &layer.effect_stack)?;
     match edit {
@@ -610,6 +719,9 @@ pub(super) fn apply(state: &mut Snapshot, id: LayerId, edit: EffectEdit) -> Resu
                 .position(|e| e.id == effect)
                 .ok_or("Effect not found")?;
             layer.effect_stack.remove(at);
+            layer
+                .expressions
+                .retain(|program| program.target != ExpressionTarget::Slider(effect));
         }
         EffectEdit::Duplicate(effect) => {
             let at = layer
@@ -620,7 +732,12 @@ pub(super) fn apply(state: &mut Snapshot, id: LayerId, edit: EffectEdit) -> Resu
             let mut copy = layer.effect_stack[at].clone();
             copy.id = add(layer, copy.kind)?;
             layer.effect_stack.pop();
+            let copied_id = copy.id;
             layer.effect_stack.insert(at + 1, copy);
+            if let Some(mut program) = layer.expression(ExpressionTarget::Slider(effect)).cloned() {
+                program.target = ExpressionTarget::Slider(copied_id);
+                layer.expressions.push(program);
+            }
         }
         EffectEdit::Move { effect, index } => {
             if index >= layer.effect_stack.len() {
@@ -661,6 +778,32 @@ pub(super) fn apply(state: &mut Snapshot, id: LayerId, edit: EffectEdit) -> Resu
             fresh.name = e.name.clone();
             fresh.color_space = e.color_space;
             *e = fresh;
+        }
+        EffectEdit::SetGaussianEdgeMode { effect, mode } => {
+            let effect = layer
+                .effect_stack
+                .iter_mut()
+                .find(|e| e.id == effect)
+                .ok_or("Effect not found")?;
+            if effect.kind != EffectKind::GaussianBlur {
+                return Err("Select a Gaussian Blur effect".into());
+            }
+            if mode == GaussianEdgeMode::Repeat && effect.color_space != EffectColorSpace::Srgb {
+                return Err("Repeat Edge Pixels requires a new sRGB Gaussian Blur effect".into());
+            }
+            effect.gaussian_edge_mode = mode;
+        }
+        EffectEdit::SetAudioSpectrum { effect, settings } => {
+            settings.validate()?;
+            let effect = layer
+                .effect_stack
+                .iter_mut()
+                .find(|e| e.id == effect)
+                .ok_or("Effect not found")?;
+            if effect.kind != EffectKind::AudioSpectrum {
+                return Err("Select an Audio Spectrum effect".into());
+            }
+            effect.audio_spectrum = Some(settings);
         }
         EffectEdit::SetLumaKeyMode { effect, mode } => {
             let effect = layer
@@ -723,7 +866,7 @@ pub(super) fn apply(state: &mut Snapshot, id: LayerId, edit: EffectEdit) -> Resu
                     }
                     // A scalar commit at the displayed value is not an implicit key action.
                     // Validate the target, frame and value above before recognizing this no-op.
-                    if effect.kind == EffectKind::LumaKey
+                    if matches!(effect.kind, EffectKind::LumaKey | EffectKind::SliderControl)
                         && track.value_at(frame).clamp(spec.min, spec.max) == value
                     {
                         return Ok(());

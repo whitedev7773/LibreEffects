@@ -96,7 +96,7 @@ fn animated_scene() -> Editor {
 fn text_opacity_appends_stable_addresses_without_expanding_rgb_helpers() {
     use TextParam::*;
     assert_eq!(
-        TextParam::ALL,
+        TextParam::ALL[..12],
         [
             FillRed,
             FillGreen,
@@ -112,7 +112,7 @@ fn text_opacity_appends_stable_addresses_without_expanding_rgb_helpers() {
             StrokeOpacity
         ]
     );
-    for (index, parameter) in TextParam::ALL.into_iter().enumerate() {
+    for (index, parameter) in TextParam::ALL[..12].iter().enumerate() {
         assert_eq!(
             parameter.required_version(),
             if index < 7 {
@@ -955,7 +955,17 @@ fn text_opacity_duplicate_split_shift_clipboard_fps_and_precompose_preserve_trac
             .text_parameters,
         pasted_tracks
     );
-    assert_eq!(e.project().version, 52);
+    // Independent origin survives split, shift, FPS conversion and precompose.
+    assert_eq!(
+        e.project()
+            .composition_by_id(*composition)
+            .unwrap()
+            .layer(pasted)
+            .unwrap()
+            .start_frame,
+        Some(10)
+    );
+    assert_eq!(e.project().version, 64);
     let bytes = project_file::encode(e.project(), None).unwrap();
     assert_eq!(project_file::decode(&bytes).unwrap().project, *e.project());
 }

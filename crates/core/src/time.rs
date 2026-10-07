@@ -417,7 +417,13 @@ mod tests {
         configure(&mut e, "29.97", 600, 0).unwrap();
         e.execute(Command::PasteLayers(clip)).unwrap();
         let copied = e.selected_layer().unwrap();
-        assert!(copied.property(Property::Rotation).keys().contains_key(&30));
+        assert!(
+            copied
+                .property(Property::Rotation)
+                .unwrap()
+                .keys()
+                .contains_key(&30)
+        );
         assert_eq!(copied.markers()[0].frame(), 30);
         assert_eq!(copied.out_frame(600), 300);
         assert!(

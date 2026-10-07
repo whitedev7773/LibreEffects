@@ -54,10 +54,22 @@ pub(super) struct Descriptor {
 }
 pub(super) fn text_unit(parameter: TextParam) -> Unit {
     match parameter {
-        TextParam::FontSize | TextParam::StrokeWidth => Unit::Pixels,
+        TextParam::FontSize
+        | TextParam::StrokeWidth
+        | TextParam::AnimatorPositionX
+        | TextParam::AnimatorPositionY => Unit::Pixels,
+        TextParam::AnimatorRotation => Unit::Degrees,
         TextParam::Tracking => Unit::ThousandthsEm,
         TextParam::Leading => Unit::Ratio,
-        TextParam::FillOpacity | TextParam::StrokeOpacity => Unit::Percent,
+        TextParam::FillOpacity
+        | TextParam::StrokeOpacity
+        | TextParam::AnimatorStart
+        | TextParam::AnimatorEnd
+        | TextParam::AnimatorOffset
+        | TextParam::AnimatorAmount
+        | TextParam::AnimatorScaleX
+        | TextParam::AnimatorScaleY
+        | TextParam::AnimatorOpacity => Unit::Percent,
         TextParam::FillRed
         | TextParam::FillGreen
         | TextParam::FillBlue
@@ -126,6 +138,17 @@ pub(super) fn describe(project: &Project, channel: GraphChannel) -> Option<Descr
         PropertyPath::Transform(p) => transform_unit(p),
         PropertyPath::Shape(p) => shape_unit(p),
         PropertyPath::Text(parameter) => text_unit(parameter),
+        PropertyPath::TextAnimator {
+            animator,
+            parameter,
+        } => {
+            label = format!("{label} [animator #{animator}]");
+            text_unit(parameter)
+        }
+        PropertyPath::TextSelector { selector, .. } => {
+            label = format!("{label} [selector #{selector}]");
+            Unit::Percent
+        }
         PropertyPath::Mask { mask, parameter } => {
             label = format!("{label} [mask #{mask}]");
             match parameter {
@@ -255,6 +278,99 @@ mod typography_units_tests {
     use libre_effects_core::{Command, Editor, TrackEdit};
 
     #[test]
+    fn animator_transform_graph_lanes_keep_independent_keys_units_and_identity_colors() {
+        let mut state = EditorState::default();
+        state.editor = Editor::default();
+        state
+            .editor
+            .execute(Command::AddContent {
+                content: Content::Text {
+                    text: "Transform lanes".into(),
+                    font_size: 48.,
+                },
+                width: 400.,
+                height: 120.,
+                name: "Title".into(),
+            })
+            .unwrap();
+        let parameters = [
+            TextParam::AnimatorScaleX,
+            TextParam::AnimatorScaleY,
+            TextParam::AnimatorRotation,
+        ];
+        let lanes = parameters.map(|parameter| GraphChannel {
+            id: 1,
+            property: PropertyPath::Text(parameter),
+        });
+        let colors = lanes.map(super::super::channel_color);
+        let original = state.editor.project().clone();
+        for lane in lanes {
+            assert!(describe(state.editor.project(), lane).is_none());
+            assert!(state.graph_pin_channel(lane).is_err());
+        }
+        assert_eq!(state.editor.project(), &original);
+        for (index, parameter) in parameters.into_iter().enumerate() {
+            state
+                .editor
+                .execute(Command::EditText {
+                    id: 1,
+                    parameter,
+                    edit: TrackEdit::ToggleAnimation {
+                        frame: 7 + index as u32,
+                    },
+                })
+                .unwrap();
+            let descriptor = describe(state.editor.project(), lanes[index]).unwrap();
+            assert_eq!(
+                descriptor.units,
+                if index == 2 {
+                    Unit::Degrees
+                } else {
+                    Unit::Percent
+                }
+            );
+            assert!(descriptor.label.ends_with(parameter.label()));
+            state.graph_pin_channel(lanes[index]).unwrap();
+        }
+        assert!(state.graph_activate_channel(lanes[0], false));
+        assert_eq!(
+            included(&state).into_iter().collect::<BTreeSet<_>>(),
+            lanes.into()
+        );
+        assert_eq!(
+            all_keys(state.editor.project(), &lanes),
+            lanes
+                .into_iter()
+                .enumerate()
+                .map(|(index, lane)| KeyRef {
+                    id: lane.id,
+                    property: lane.property,
+                    frame: 7 + index as u32,
+                })
+                .collect()
+        );
+        let source = state.editor.project().clone();
+        // Renaming a visible label or activating/reordering lanes cannot alter
+        // the colors, which belong to the stable layer/property identity.
+        state
+            .editor
+            .execute(Command::RenameLayer {
+                id: 1,
+                name: "Renamed".into(),
+            })
+            .unwrap();
+        for lane in lanes.into_iter().rev() {
+            assert!(state.graph_activate_channel(lane, false));
+        }
+        assert_eq!(lanes.map(super::super::channel_color), colors);
+        assert!(colors.into_iter().all(|color| {
+            [0xffc66d, 0x7bd8a5, 0xd3a3ff, 0x72c8ff, 0xff92b0, 0x9de3de].contains(&color)
+        }));
+        state.editor.undo();
+        assert_eq!(state.editor.project(), &source);
+    }
+
+    #[test]
     fn actual_text_lane_descriptors_use_distinct_scalar_units_in_value_and_speed_modes() {
         let mut editor = Editor::default();
         editor
@@ -285,10 +401,22 @@ mod typography_units_tests {
                 .unwrap();
             let descriptor = describe(editor.project(), channel).unwrap();
             let (value_unit, speed_unit) = match parameter {
-                TextParam::FontSize | TextParam::StrokeWidth => ("px", "px/s"),
+                TextParam::FontSize
+                | TextParam::StrokeWidth
+                | TextParam::AnimatorPositionX
+                | TextParam::AnimatorPositionY => ("px", "px/s"),
+                TextParam::AnimatorRotation => ("deg", "deg/s"),
                 TextParam::Tracking => ("1/1000 em", "(1/1000 em)/s"),
                 TextParam::Leading => ("ratio", "ratio/s"),
-                TextParam::FillOpacity | TextParam::StrokeOpacity => ("%", "%/s"),
+                TextParam::FillOpacity
+                | TextParam::StrokeOpacity
+                | TextParam::AnimatorStart
+                | TextParam::AnimatorEnd
+                | TextParam::AnimatorOffset
+                | TextParam::AnimatorAmount
+                | TextParam::AnimatorScaleX
+                | TextParam::AnimatorScaleY
+                | TextParam::AnimatorOpacity => ("%", "%/s"),
                 _ => ("RGB 0–255", "RGB units/s"),
             };
             assert_eq!(descriptor.channel, channel);
@@ -584,6 +712,254 @@ mod source_text_channel_tests {
                 .into()
             );
             assert_eq!(editor.project(), &before);
+        }
+    }
+}
+
+#[cfg(test)]
+mod secondary_selector_graph_tests {
+    use super::*;
+    use libre_effects_core::{Command, Editor, TextSelectorParam, TrackEdit};
+
+    #[test]
+    fn secondary_selector_graphs_use_percent_and_bounded_stable_channel_plans() {
+        let mut editor = Editor::default();
+        editor
+            .execute(Command::AddContent {
+                content: Content::Text {
+                    text: "Selectors".into(),
+                    font_size: 48.,
+                },
+                width: 400.,
+                height: 120.,
+                name: "Text".into(),
+            })
+            .unwrap();
+        for _ in 0..2 {
+            editor
+                .execute(Command::AddTextRangeSelector { id: 1 })
+                .unwrap();
+        }
+        let mut state = EditorState::default();
+        state.editor = editor;
+        let mut lanes = Vec::new();
+        for parameter in TextSelectorParam::ALL {
+            let lane = GraphChannel {
+                id: 1,
+                property: PropertyPath::TextSelector {
+                    selector: 2,
+                    parameter,
+                },
+            };
+            assert!(describe(state.editor.project(), lane).is_none());
+            assert!(state.graph_pin_channel(lane).is_err());
+            let start = if parameter == TextSelectorParam::Offset {
+                -25.
+            } else {
+                25.
+            };
+            state
+                .editor
+                .execute(
+                    state
+                        .editor
+                        .selected_layer()
+                        .unwrap()
+                        .text_selector_value_command(2, parameter, start, 10)
+                        .unwrap()
+                        .unwrap(),
+                )
+                .unwrap();
+            state
+                .editor
+                .execute(Command::EditTrack {
+                    id: 1,
+                    property: lane.property,
+                    edit: TrackEdit::ToggleAnimation { frame: 10 },
+                })
+                .unwrap();
+            state
+                .editor
+                .execute(Command::EditTrack {
+                    id: 1,
+                    property: lane.property,
+                    edit: TrackEdit::Value {
+                        frame: 20,
+                        value: 75.,
+                    },
+                })
+                .unwrap();
+            let descriptor = describe(state.editor.project(), lane).unwrap();
+            assert_eq!(descriptor.units, Unit::Percent);
+            assert_eq!(descriptor.units.label(false), "%");
+            assert_eq!(descriptor.units.label(true), "%/s");
+            assert!(descriptor.label.contains("[selector #2]"));
+            assert!(descriptor.label.contains(parameter.label()));
+            state.graph_pin_channel(lane).unwrap();
+            let keys = [10, 20].map(|frame| KeyRef {
+                id: lane.id,
+                property: lane.property,
+                frame,
+            });
+            let source = state.editor.project().clone();
+            assert!(
+                super::super::planning::EditPlan::scale_value(&source, &keys, 2., Some(keys[0]))
+                    .is_err()
+            );
+            let plan =
+                super::super::planning::EditPlan::scale_value(&source, &keys, 0.5, Some(keys[0]))
+                    .unwrap();
+            assert!(plan.command.is_some());
+            assert_eq!(plan.keys, keys);
+            assert_eq!(
+                plan.tracks[&lane].keys()[&20].value,
+                start + (75. - start) * 0.5
+            );
+            assert_eq!(state.editor.project(), &source);
+            assert_eq!(
+                state
+                    .editor
+                    .selected_layer()
+                    .unwrap()
+                    .track(PropertyPath::TextSelector {
+                        selector: 1,
+                        parameter
+                    }),
+                None
+            );
+            lanes.push(lane);
+        }
+        // Pinning preserves the previously active legacy transform. Select a
+        // selector lane explicitly before testing removal of all included lanes.
+        assert!(state.graph_activate_channel(lanes[0], false));
+        let source = state.editor.project().clone();
+        let keys = all_keys(&source, &lanes);
+        assert_eq!(keys.len(), 8);
+        let labels: Vec<_> = lanes
+            .iter()
+            .map(|lane| describe(&source, *lane).unwrap().label)
+            .collect();
+        let colors: Vec<_> = lanes
+            .iter()
+            .copied()
+            .map(super::super::channel_color)
+            .collect();
+        state
+            .editor
+            .execute(Command::MoveTextRangeSelector {
+                id: 1,
+                selector: 2,
+                index: 0,
+            })
+            .unwrap();
+        state
+            .graph_channels
+            .reconcile(Some(state.editor.project().composition()), false);
+        assert_eq!(all_keys(state.editor.project(), &lanes), keys);
+        assert_eq!(
+            lanes
+                .iter()
+                .map(|lane| describe(state.editor.project(), *lane).unwrap().label)
+                .collect::<Vec<_>>(),
+            labels
+        );
+        assert_eq!(
+            lanes
+                .iter()
+                .copied()
+                .map(super::super::channel_color)
+                .collect::<Vec<_>>(),
+            colors
+        );
+        state
+            .editor
+            .execute(Command::RemoveTextRangeSelector { id: 1, selector: 2 })
+            .unwrap();
+        state
+            .graph_channels
+            .reconcile(Some(state.editor.project().composition()), false);
+        assert!(included(&state).is_empty());
+        assert!(all_keys(state.editor.project(), &lanes).is_empty());
+        state.editor.undo();
+        state
+            .graph_channels
+            .reconcile(Some(state.editor.project().composition()), true);
+        assert_eq!(all_keys(state.editor.project(), &lanes), keys);
+        assert_eq!(included(&state), lanes);
+    }
+}
+
+#[cfg(test)]
+mod animator_stack_units_tests {
+    use super::*;
+    use libre_effects_core::{Command, Content, Editor, TextParam, TrackEdit};
+    #[test]
+    fn extra_animator_graph_descriptors_and_plans_keep_parameter_units_and_ids() {
+        let mut editor = Editor::default();
+        editor
+            .execute(Command::AddContent {
+                content: Content::Text {
+                    text: "Stack".into(),
+                    font_size: 48.,
+                },
+                width: 400.,
+                height: 120.,
+                name: "Text".into(),
+            })
+            .unwrap();
+        editor.execute(Command::AddTextAnimator { id: 1 }).unwrap();
+        for parameter in TextParam::ALL.into_iter().filter(|p| p.is_animator()) {
+            let lane = GraphChannel {
+                id: 1,
+                property: PropertyPath::TextAnimator {
+                    animator: 1,
+                    parameter,
+                },
+            };
+            assert!(describe(editor.project(), lane).is_none());
+            editor
+                .execute(Command::EditTrack {
+                    id: 1,
+                    property: lane.property,
+                    edit: TrackEdit::ToggleAnimation { frame: 10 },
+                })
+                .unwrap();
+            editor
+                .execute(Command::EditTrack {
+                    id: 1,
+                    property: lane.property,
+                    edit: TrackEdit::Value {
+                        frame: 20,
+                        value: 25.,
+                    },
+                })
+                .unwrap();
+            let descriptor = describe(editor.project(), lane).unwrap();
+            assert_eq!(descriptor.units, text_unit(parameter));
+            assert!(descriptor.label.contains("[animator #1]"));
+            let keys = [10, 20].map(|frame| KeyRef {
+                id: 1,
+                property: lane.property,
+                frame,
+            });
+            let original = editor.project().clone();
+            let plan =
+                super::super::planning::EditPlan::scale_value(&original, &keys, 0.5, Some(keys[0]))
+                    .unwrap();
+            assert_eq!(plan.keys, keys);
+            let base = editor
+                .selected_layer()
+                .unwrap()
+                .track_value(lane.property, 10)
+                .unwrap();
+            // Value-scale UI pivots around the minimum selected value, not
+            // the active key (which only determines post-edit focus).
+            let origin = base.min(25.);
+            assert_eq!(
+                plan.tracks[&lane].keys()[&20].value,
+                origin + (25. - origin) * 0.5
+            );
+            assert_eq!(editor.project(), &original);
         }
     }
 }

@@ -119,7 +119,7 @@ impl ContentsParam {
             Self::Transform(_) => (-1000000., 1000000.),
         }
     }
-    fn accepts(self, v: f64) -> bool {
+    pub(super) fn accepts(self, v: f64) -> bool {
         v.is_finite() && (self.bounds().0..=self.bounds().1).contains(&v)
     }
 }
@@ -308,6 +308,29 @@ pub struct ContentsNode {
     pub parameters: BTreeMap<ContentsParam, AnimatedProperty>,
 }
 impl ContentsNode {
+    /// Construct an unallocated node with the complete defaults for its kind.
+    /// Assemble the tree with `ShapeContents::from_nodes` to assign fresh IDs.
+    pub fn with_defaults(kind: ContentsKind) -> Self {
+        Self::new(0, kind)
+    }
+
+    /// Set a bounded, existing static parameter without creating animation or
+    /// allowing a caller to omit the other required defaults.
+    pub fn set_static_value(&mut self, parameter: ContentsParam, value: f64) -> Result<(), String> {
+        if !parameter.accepts(value) {
+            return Err("Invalid static Contents parameter".into());
+        }
+        let track = self
+            .parameters
+            .get_mut(&parameter)
+            .ok_or("Contents parameter does not belong to this item")?;
+        if !track.keys.is_empty() {
+            return Err("Static Contents assignment cannot replace animation".into());
+        }
+        track.value = value;
+        Ok(())
+    }
+
     /// Display order follows the shape-group Transform controls.
     pub fn parameter_order(&self) -> Vec<ContentsParam> {
         use ContentsParam::{Skew, SkewAxis, Transform as T};
@@ -334,7 +357,11 @@ impl ContentsNode {
                 .map(ContentsParam::Trim)
                 .collect()
         } else {
-            self.parameters.keys().copied().collect()
+            self.parameters
+                .keys()
+                .copied()
+                .filter(|p| self.scalar_parameter_available(*p))
+                .collect()
         }
     }
     pub fn paint(&self) -> Option<ShapePaint> {
@@ -441,7 +468,7 @@ impl ContentsNode {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ShapeContents {
     pub items: Vec<ContentsNode>,
-    next_id: u64,
+    pub(super) next_id: u64,
 }
 impl Default for ShapeContents {
     fn default() -> Self {
@@ -452,6 +479,33 @@ impl Default for ShapeContents {
     }
 }
 impl ShapeContents {
+    /// Build a validated tree with fresh layer-local, depth-first IDs. Input IDs
+    /// are ignored. Geometry, names, parameters and sibling order are preserved.
+    /// Construction applies the same 256-node/eight-group limits as editing.
+    pub fn from_nodes(mut items: Vec<ContentsNode>) -> Result<Self, String> {
+        fn assign(nodes: &mut [ContentsNode], depth: usize, next: &mut u64) -> Result<(), String> {
+            if depth > 8 {
+                return Err("Contents nesting exceeds 8 groups".into());
+            }
+            for node in nodes {
+                if *next > 256 {
+                    return Err("Contents item count exceeds 256".into());
+                }
+                node.id = *next;
+                *next += 1;
+                if let ContentsKind::Group(children) = &mut node.kind {
+                    assign(children, depth + 1, next)?;
+                }
+            }
+            Ok(())
+        }
+        let mut next_id = 1;
+        assign(&mut items, 0, &mut next_id)?;
+        let contents = Self { items, next_id };
+        contents.validate(u32::MAX)?;
+        Ok(contents)
+    }
+
     pub fn node(&self, id: u64) -> Option<&ContentsNode> {
         find(&self.items, id)
     }
@@ -476,7 +530,7 @@ impl ShapeContents {
         walk(&self.items, 0, 0, &mut out);
         out
     }
-    fn group_mut(&mut self, id: u64) -> Result<&mut Vec<ContentsNode>, String> {
+    pub(super) fn group_mut(&mut self, id: u64) -> Result<&mut Vec<ContentsNode>, String> {
         if id == 0 {
             return Ok(&mut self.items);
         }
@@ -489,7 +543,7 @@ impl ShapeContents {
             _ => Err("Choose a Contents group".into()),
         }
     }
-    fn allocate(&mut self) -> Result<u64, String> {
+    pub(super) fn allocate(&mut self) -> Result<u64, String> {
         let id = self.next_id;
         self.next_id = id.checked_add(1).ok_or("Contents ID exhausted")?;
         Ok(id)
@@ -524,6 +578,7 @@ impl ShapeContents {
                     if version < 45 || !g.valid() {
                         return Err("Invalid gradient or project version (requires v45)".into());
                     }
+                    g.validate_colors_animation(n, duration, version)?;
                 }
                 if n.id == 0
                     || !ids.insert(n.id)
@@ -1018,6 +1073,10 @@ pub enum ContentsEdit {
         item: u64,
         mode: PaintComposite,
     },
+    GradientColors {
+        item: u64,
+        edit: GradientColorsEdit,
+    },
     GradientType {
         item: u64,
         radial: bool,
@@ -1038,6 +1097,19 @@ pub enum ContentsEdit {
         kind: ContentsKind,
     },
     Remove(u64),
+    /// Remove exactly one nonempty set of immediate siblings, including entire
+    /// selected groups. Root is zero; every ID must exist exactly once.
+    RemoveSiblings {
+        parent: u64,
+        items: Vec<u64>,
+    },
+    /// Insert an immutable session-local snapshot at an exact root/group index.
+    /// Captured frames and payloads stay unchanged; all node IDs are newly allocated.
+    Paste {
+        parent: u64,
+        index: usize,
+        clipboard: ContentsClipboard,
+    },
     Duplicate(u64),
     Move {
         item: u64,
@@ -1067,6 +1139,24 @@ pub enum ContentsEdit {
     Enabled {
         item: u64,
         enabled: bool,
+    },
+    /// Assign one absolute scalar to an exact sibling set at the displayed frame.
+    /// Unchanged sampled values retain their complete tracks.
+    SetSharedValue {
+        parent: u64,
+        items: Vec<u64>,
+        parameter: ContentsParam,
+        frame: Frame,
+        value: f64,
+    },
+    /// Apply explicit animation intent atomically to an exact sibling set.
+    /// Every inserted key or collapsed base uses its member's own clamped sample.
+    SharedAnimation {
+        parent: u64,
+        items: Vec<u64>,
+        parameter: ContentsParam,
+        frame: Frame,
+        action: ContentsAnimationAction,
     },
     Track {
         item: u64,
@@ -1193,6 +1283,12 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
     let Command::Contents { id, edit } = command else {
         return None;
     };
+    if matches!(
+        edit,
+        ContentsEdit::RemoveSiblings { .. } | ContentsEdit::Paste { .. }
+    ) {
+        return Some(contents_clipboard::apply(state, *id, edit));
+    }
     Some((|| {
         let duration = state.project.composition.duration;
         let layer = editing::editable(state, *id)?;
@@ -1340,6 +1436,35 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                     .ok_or("Contents item no longer exists")?
                     .enabled = *enabled
             }
+            ContentsEdit::SetSharedValue {
+                parent,
+                items,
+                parameter,
+                frame,
+                value,
+            } => {
+                contents.set_shared_value(*parent, items, *parameter, *frame, *value, duration)?;
+                // The dedicated editor route validates in the declared schema,
+                // allowing legacy groups without materializing newer properties.
+                return Ok(());
+            }
+            ContentsEdit::SharedAnimation {
+                parent,
+                items,
+                parameter,
+                frame,
+                action,
+            } => {
+                contents
+                    .edit_shared_animation(*parent, items, *parameter, *frame, *action, duration)?;
+                return Ok(());
+            }
+            ContentsEdit::GradientColors { item, edit } => {
+                let node = contents
+                    .node_mut(*item)
+                    .ok_or("Contents paint no longer exists")?;
+                gradient_colors::edit(node, edit, duration)?;
+            }
             ContentsEdit::Track {
                 item,
                 parameter,
@@ -1348,6 +1473,9 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                 let node = contents
                     .node_mut(*item)
                     .ok_or("Contents item no longer exists")?;
+                if !node.scalar_parameter_available(*parameter) {
+                    return Err("Edit active Gradient Colors through its compound controls".into());
+                }
                 if matches!(parameter, ContentsParam::Trim(_)) {
                     if !matches!(node.kind, ContentsKind::TrimPaths)
                         || !node.parameters.contains_key(parameter)
@@ -1492,7 +1620,9 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                     _ => return Err("Stroke supports up to 16 dash/gap lengths".into()),
                 }
             }
-            ContentsEdit::Promote => unreachable!(),
+            ContentsEdit::Promote
+            | ContentsEdit::RemoveSiblings { .. }
+            | ContentsEdit::Paste { .. } => unreachable!(),
         }
         contents.validate(duration)
     })())

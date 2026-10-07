@@ -1,5 +1,11 @@
+#[path = "gaussian_controls.rs"]
+mod gaussian_controls;
+
 #[path = "luma_controls.rs"]
 mod luma_controls;
+
+#[path = "spectrum_controls.rs"]
+mod spectrum_controls;
 
 use crate::editor::presets::PresetAction;
 use crate::{
@@ -15,6 +21,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) struct EffectControls {
     luma: luma_controls::Controls,
+    gaussian: gaussian_controls::Controls,
+    spectrum: spectrum_controls::Controls,
     curves: BTreeMap<(LayerId, EffectId), Entity<super::color_curve::ColorCurve>>,
     state: Entity<EditorState>,
     fields: BTreeMap<(LayerId, EffectId, EffectParam), Entity<TextField>>,
@@ -25,6 +33,8 @@ impl EffectControls {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
         Self {
             luma: Default::default(),
+            gaussian: Default::default(),
+            spectrum: Default::default(),
             state,
             fields: BTreeMap::new(),
             curves: BTreeMap::new(),
@@ -36,6 +46,8 @@ impl Render for EffectControls {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.state.read(cx);
         self.luma.refresh(state);
+        self.gaussian.refresh(state);
+        self.spectrum.refresh(state);
         let layer = state.editor.selected_layer().cloned();
         let frame = state.frame;
         let composition = state.editor.project().active_composition_id();
@@ -55,9 +67,7 @@ impl Render for EffectControls {
             self.names.clear();
             return body.child("Select a layer to edit effects");
         };
-        if matches!(layer.content(), Content::Null) {
-            return body.child("Null objects have no rendered pixels.");
-        }
+        let is_null = matches!(layer.content(), Content::Null);
         self.curves.retain(|(owner, effect), _| {
             *owner == layer.id()
                 && layer
@@ -98,7 +108,7 @@ impl Render for EffectControls {
         if locked {
             body = body.child("Unlock this layer to edit its effects.");
         }
-        if layer.effects() != Effects::default() {
+        if !is_null && layer.effects() != Effects::default() {
             let state = self.state.clone();
             body = body.child(
                 div()
@@ -124,6 +134,9 @@ impl Render for EffectControls {
         let mut keep_fields = BTreeSet::new();
         let mut keep_names = BTreeSet::new();
         for (index, effect) in layer.effect_stack().iter().enumerate() {
+            if !layer.supports_effect_kind(effect.kind()) {
+                continue;
+            }
             let effect_id = effect.id();
             if effect.kind() == EffectKind::LumaKey {
                 body = body.child(self.luma.render(&self.state, &layer, effect, window, cx));
@@ -252,6 +265,23 @@ impl Render for EffectControls {
                 &self.state,
                 PresetAction::Save(Some(effect_id)),
             ));
+            if effect.kind() == EffectKind::GaussianBlur {
+                section = section.child(self.gaussian.render(&self.state, &layer, effect));
+                if effect.color_space() != libre_effects_core::EffectColorSpace::Srgb {
+                    section = section.child(
+                        div()
+                            .text_color(rgb(ui::MUTED))
+                            .child("Add a new Gaussian Blur to use edge repetition."),
+                    );
+                }
+            }
+            if effect.kind() == EffectKind::AudioSpectrum {
+                section =
+                    section.child(
+                        self.spectrum
+                            .render(&self.state, &layer, effect, window, cx),
+                    );
+            }
             if matches!(
                 effect.kind(),
                 EffectKind::LinearGradient | EffectKind::RadialGradient
@@ -372,7 +402,15 @@ impl Render for EffectControls {
                         .child(
                             ui::text_button(
                                 SharedString::from(format!("{param_prefix}-graph")),
-                                spec.label,
+                                if effect.kind() == EffectKind::SliderControl
+                                    && layer.has_enabled_expression(
+                                        libre_effects_core::ExpressionTarget::Slider(effect_id),
+                                    )
+                                {
+                                    format!("{} · base", spec.label)
+                                } else {
+                                    spec.label.to_string()
+                                },
                             )
                             .flex_1()
                             .min_w_0()
@@ -401,6 +439,16 @@ impl Render for EffectControls {
                                 .w(px(63.0))
                                 .when(!locked, |s| s.child(field))
                                 .when(locked, |s| s.child(format!("{value:.2}"))),
+                        )
+                        .when(
+                            effect.kind() == EffectKind::SliderControl && !layer.is_three_d(),
+                            |row| {
+                                row.child(super::expression_editor::entry_button(
+                                    &self.state,
+                                    &layer,
+                                    libre_effects_core::ExpressionTarget::Slider(effect_id),
+                                ))
+                            },
                         )
                         .child(tool(
                             format!("{param_prefix}-key"),
@@ -486,8 +534,16 @@ impl Render for EffectControls {
         }
         self.fields.retain(|k, _| keep_fields.contains(k));
         self.names.retain(|k, _| keep_names.contains(k));
-        if layer.effect_stack().is_empty() {
-            body = body.child("Add an effect from Effects & Presets.");
+        if !layer
+            .effect_stack()
+            .iter()
+            .any(|effect| layer.supports_effect_kind(effect.kind()))
+        {
+            body = body.child(if is_null {
+                "Add a Slider Control from Effects & Presets."
+            } else {
+                "Add an effect from Effects & Presets."
+            });
         }
         body
     }
@@ -524,13 +580,11 @@ impl EffectCatalog {
 impl Render for EffectCatalog {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         crate::color_edit::InputTarget::refresh(&mut self.input_source, self.state.read(cx));
-        let selected = self
-            .state
-            .read(cx)
-            .editor
-            .selected_layer()
-            .filter(|l| !l.locked() && !matches!(l.content(), Content::Null))
-            .map(|l| l.id());
+        let layer = self.state.read(cx).editor.selected_layer().cloned();
+        let selected = layer.as_ref().filter(|l| !l.locked()).map(|l| l.id());
+        let is_null = layer
+            .as_ref()
+            .is_some_and(|l| matches!(l.content(), Content::Null));
         let query = self.search.read(cx).value().to_lowercase();
         let mut list = div()
             .id("effects-catalog")
@@ -547,7 +601,7 @@ impl Render for EffectCatalog {
                 div()
                     .text_size(px(10.0))
                     .text_color(rgb(ui::MUTED))
-                    .child("Select an unlocked image, text, shape or composition layer."),
+                    .child("Select an unlocked layer to add effects or controls."),
             );
         }
         list = list.child(
@@ -582,6 +636,8 @@ impl Render for EffectCatalog {
         let entries: Vec<_> = library
             .entries
             .iter()
+            // Applying presets to Null layers is not a supported core edit.
+            .filter(|_| !is_null)
             .filter(|e| {
                 query.is_empty()
                     || e.preset.name().to_lowercase().contains(&query)
@@ -621,6 +677,7 @@ impl Render for EffectCatalog {
         }
 
         for (category, kinds) in [
+            ("Expression Controls", vec![EffectKind::SliderControl]),
             ("Blur & Sharpen", vec![EffectKind::GaussianBlur]),
             (
                 "Color Correction",
@@ -647,6 +704,7 @@ impl Render for EffectCatalog {
         ] {
             let kinds: Vec<_> = kinds
                 .into_iter()
+                .filter(|kind| layer.as_ref().is_none_or(|l| l.supports_effect_kind(*kind)))
                 .filter(|k| {
                     query.is_empty()
                         || category.to_lowercase().contains(&query)
@@ -715,6 +773,11 @@ impl Render for EffectCatalog {
                     .on_click(move |_, window, cx| {
                         if let Some(id) = selected {
                             state.update(cx, |s, cx| {
+                                if !s.editor.selected_layer().is_some_and(|l| {
+                                    l.id() == id && !l.locked() && l.supports_effect_kind(kind)
+                                }) {
+                                    return;
+                                }
                                 s.dispatch(
                                     &Action::Edit(Command::Effect {
                                         id,

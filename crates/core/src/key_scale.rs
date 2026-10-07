@@ -45,6 +45,12 @@ pub(super) fn apply(state: &mut Snapshot, keys: &[KeyRef], scale: KeyScale) -> R
     let duration = state.project.composition.duration;
     let mut tracks = BTreeMap::<_, Vec<_>>::new();
     for key in keys {
+        state
+            .project
+            .composition
+            .layer(key.id)
+            .ok_or("Layer not found")?
+            .require_scalar_track(key.property)?;
         if matches!(key.property, PropertyPath::Path(_)) {
             return Err("Geometry path keys do not support scalar key scaling".into());
         }
@@ -255,6 +261,7 @@ mod tests {
             e.selected_layer()
                 .unwrap()
                 .property(Property::PositionX)
+                .unwrap()
                 .keys
                 .keys()
                 .copied()
@@ -336,7 +343,11 @@ mod tests {
             },
         })
         .unwrap();
-        let t = e.selected_layer().unwrap().property(Property::PositionX);
+        let t = e
+            .selected_layer()
+            .unwrap()
+            .property(Property::PositionX)
+            .unwrap();
         assert_eq!(
             t.keys.values().map(|k| k.value).collect::<Vec<_>>(),
             vec![20.0, -20.0, 10.0]

@@ -43,6 +43,20 @@ fn validate(project: &Project, keys: &[KeyRef]) -> Result<Vec<KeyRef>, String> {
             .composition()
             .layer(key.id)
             .ok_or("Selected layer no longer exists")?;
+        if layer.has_opacity_timing()
+            && key.property == libre_effects_core::Property::Opacity.into()
+        {
+            return Err("Native Opacity timing is not a scalar Graph channel".into());
+        }
+        if matches!(
+            key.property,
+            PropertyPath::Transform(
+                libre_effects_core::Property::PositionX | libre_effects_core::Property::PositionY
+            )
+        ) && layer.spatial_position().is_some()
+        {
+            return Err("Joined XYZ Position is not a scalar Graph channel".into());
+        }
         if layer.locked() {
             return Err("Unlock every selected graph layer before editing keys".into());
         }
@@ -232,6 +246,7 @@ impl EditPlan {
     /// Paste uses the core clipboard addressing rules, narrowed to channels
     /// already included in Graph. Copied source keys may have been cut/deleted.
     pub fn paste(state: &EditorState) -> Result<Self, String> {
+        selection::validate_scalar_selection(state)?;
         Self::paste_copies(
             state.editor.project(),
             state.graph_clipboard(),
@@ -491,6 +506,7 @@ impl FrozenContext {
             && state.colors.session.is_none()
             && state.gradient_editor.is_none()
             && state.vertex_editor.is_none()
+            && state.expression_editor.is_none()
             && state.text_session.is_none()
             && !state.new_composition_requested
     }
@@ -537,6 +553,7 @@ impl TimeGesture {
         start: Point<Pixels>,
         edge: Option<i8>,
     ) -> Result<Self, String> {
+        selection::validate_scalar_selection(state)?;
         let keys = selection::included(state);
         let project = state.editor.project();
         validate(project, &keys)?;

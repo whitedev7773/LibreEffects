@@ -78,6 +78,30 @@ fn editor_near_budget(spare: usize) -> Editor {
     editor
 }
 
+#[test]
+fn svg_import_obeys_final_metadata_budget_without_touching_source_or_redo() {
+    let mut editor = editor_near_budget(64);
+    let path = ContentsNode::with_defaults(ContentsKind::Path {
+        path: VectorPath {
+            vertices: [[0., 0.], [100., 0.], [100., 100.]]
+                .map(PathVertex::corner)
+                .to_vec(),
+            closed: true,
+        },
+        animation: PathAnimation::default(),
+    });
+    let fill = ContentsNode::with_defaults(ContentsKind::Fill { even_odd: false });
+    assert_rejected(
+        &mut editor,
+        Command::ImportSvg {
+            contents: ShapeContents::from_nodes(vec![path, fill]).unwrap(),
+            width: 100.,
+            height: 100.,
+            name: "Imported.svg".into(),
+        },
+    );
+}
+
 fn assert_rejected(editor: &mut Editor, command: Command) {
     let current = editor.current.clone();
     let undo = editor.undo.clone();
@@ -576,5 +600,175 @@ fn contents_move_siblings_rejects_oversized_source_even_when_move_would_repair_i
             contents_budget_move(1, &[2], 5, 0),
             contents_budget_move(5, &[2], 1, 0),
         ]),
+    );
+}
+
+fn contents_budget_paste(clipboard: &ContentsClipboard) -> Command {
+    Command::Contents {
+        id: 181,
+        edit: ContentsEdit::Paste {
+            parent: 5,
+            index: 0,
+            clipboard: clipboard.clone(),
+        },
+    }
+}
+
+#[test]
+fn contents_clipboard_exact_metadata_boundary_and_growth_preserve_atomic_history() {
+    let probe = contents_move_budget_editor(1024);
+    let clipboard = probe.copy_contents(181, 1, &[2]).unwrap();
+    let mut candidate = probe.current.clone();
+    apply(&mut candidate, contents_budget_paste(&clipboard)).unwrap();
+    let cost = metadata_size(&candidate.project) - metadata_size(probe.project());
+    assert!((1..1024).contains(&cost));
+    let mut editor = contents_move_budget_editor(cost);
+    let (before, undo, redo) = (
+        editor.current.clone(),
+        editor.undo.clone(),
+        editor.redo.clone(),
+    );
+    let clipboard = editor.copy_contents(181, 1, &[2]).unwrap();
+    assert_eq!(editor.current, before);
+    assert_eq!(editor.undo, undo);
+    assert_eq!(editor.redo, redo);
+    editor.execute(contents_budget_paste(&clipboard)).unwrap();
+    assert_eq!(metadata_size(editor.project()), MAX_METADATA_BYTES);
+    assert_eq!(editor.undo.len(), undo.len() + 1);
+    assert!(editor.redo.is_empty());
+    let after = editor.current.clone();
+    editor.undo();
+    assert_eq!(editor.current, before);
+    assert_eq!(editor.undo, undo);
+    editor.redo();
+    assert_eq!(editor.current, after);
+    let bytes = project_file::encode(editor.project(), None).unwrap();
+    assert_eq!(
+        project_file::decode(&bytes).unwrap().project,
+        *editor.project()
+    );
+
+    let mut full = contents_move_budget_editor(cost - 1);
+    assert_rejected(&mut full, contents_budget_paste(&clipboard));
+    assert_rejected(
+        &mut full,
+        Command::Batch(vec![Command::Batch(vec![contents_budget_paste(
+            &clipboard,
+        )])]),
+    );
+}
+
+#[test]
+fn contents_clipboard_rejects_oversized_original_even_when_cut_would_repair_budget() {
+    let mut editor = contents_move_budget_editor(0);
+    let clipboard = editor.copy_contents(181, 1, &[2]).unwrap();
+    editor.current.project.composition.name.push('x');
+    assert_eq!(metadata_size(editor.project()), MAX_METADATA_BYTES + 1);
+    let (before, undo, redo) = (
+        editor.current.clone(),
+        editor.undo.clone(),
+        editor.redo.clone(),
+    );
+    let error = editor.copy_contents(181, 1, &[2]).unwrap_err();
+    assert!(error.contains(METADATA_LIMIT_ERROR), "{error}");
+    assert_eq!(editor.current, before);
+    assert_eq!(editor.undo, undo);
+    assert_eq!(editor.redo, redo);
+    let cut = Command::Contents {
+        id: 181,
+        edit: ContentsEdit::RemoveSiblings {
+            parent: 1,
+            items: vec![2],
+        },
+    };
+    assert_rejected(&mut editor, cut.clone());
+    assert_rejected(&mut editor, Command::Batch(vec![Command::Batch(vec![cut])]));
+    assert_rejected(&mut editor, contents_budget_paste(&clipboard));
+}
+
+fn contents_points_budget_editor() -> Editor {
+    let mut editor = contents_move_budget_editor(4096);
+    let layer = editor
+        .current
+        .project
+        .composition
+        .layers
+        .iter_mut()
+        .find(|layer| layer.id == 181)
+        .unwrap();
+    let Content::ShapeContents(contents) = &mut layer.content else {
+        unreachable!()
+    };
+    let node = contents.node_mut(2).unwrap();
+    node.kind = ContentsKind::Path {
+        path: VectorPath {
+            closed: true,
+            vertices: [[0., 0.], [10., 0.], [0., 10.]]
+                .map(PathVertex::corner)
+                .to_vec(),
+        },
+        animation: PathAnimation::default(),
+    };
+    node.parameters.clear();
+    let padding = MAX_METADATA_BYTES - metadata_size(editor.project());
+    let Content::Text { text, .. } = &mut editor.current.project.composition.layers[0].content
+    else {
+        unreachable!()
+    };
+    text.push_str(&"x".repeat(padding));
+    assert!(text.len() <= 16384);
+    editor.project().validate().unwrap();
+    assert_eq!(metadata_size(editor.project()), MAX_METADATA_BYTES);
+    editor
+}
+
+fn contents_points_shift(dx: f64) -> Command {
+    Command::TransformContentsPoints {
+        id: 181,
+        frame: 0,
+        selections: [(2, [0].into())].into(),
+        transform: PathTransformSpec {
+            translation: [dx, 0.],
+            ..Default::default()
+        },
+    }
+}
+
+#[test]
+fn contents_points_metadata_growth_and_oversized_source_reject_atomically() {
+    let mut editor = contents_points_budget_editor();
+    let current = editor.current.clone();
+    let undo = editor.undo.clone();
+    let redo = editor.redo.clone();
+    editor.execute(contents_points_shift(0.)).unwrap();
+    assert_eq!(editor.current, current);
+    assert_eq!(editor.undo, undo);
+    assert_eq!(editor.redo, redo);
+    assert_rejected(&mut editor, contents_points_shift(0.123456789012345));
+    assert_rejected(
+        &mut editor,
+        Command::Batch(vec![Command::Batch(vec![contents_points_shift(
+            0.123456789012345,
+        )])]),
+    );
+    editor
+        .execute(Command::Batch(vec![
+            contents_points_shift(0.125),
+            contents_points_shift(-0.125),
+        ]))
+        .unwrap();
+    assert_eq!(editor.current, current);
+    assert_eq!(editor.undo, undo);
+    assert_eq!(editor.redo, redo);
+    let bytes = project_file::encode(editor.project(), None).unwrap();
+    assert_eq!(
+        project_file::decode(&bytes).unwrap().project,
+        *editor.project()
+    );
+    editor.current.project.composition.layers[0].name.push('x');
+    assert_rejected(&mut editor, contents_points_shift(0.));
+    assert_rejected(
+        &mut editor,
+        Command::Batch(vec![Command::Batch(vec![contents_points_shift(0.)])]),
     );
 }

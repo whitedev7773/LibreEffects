@@ -1,7 +1,14 @@
 //! Shared font discovery and matching for the Character panel and every renderer.
 use libre_effects_core::TextStyle;
 use resvg::usvg::fontdb::{Database, Family, Query, Stretch, Style, Weight};
-use std::sync::{Arc, OnceLock};
+use sha2::{Digest, Sha256};
+use std::sync::{
+    Arc, OnceLock,
+    atomic::{AtomicUsize, Ordering},
+};
+
+const AUTHORED_FONT_FILE_LIMIT: usize = 64 * 1024 * 1024;
+const AUTHORED_FONT_CACHE_LIMIT: usize = 256 * 1024 * 1024;
 
 pub(crate) fn render_options() -> resvg::usvg::Options<'static> {
     resvg::usvg::Options {
@@ -15,6 +22,9 @@ struct Catalog {
     db: Arc<Database>,
     families: Vec<String>,
     aliases: std::collections::HashMap<resvg::usvg::fontdb::ID, String>,
+    authored:
+        std::collections::HashMap<resvg::usvg::fontdb::ID, OnceLock<Result<AuthoredFont, String>>>,
+    authored_bytes: AtomicUsize,
 }
 fn catalog() -> &'static Catalog {
     static FONTS: OnceLock<Catalog> = OnceLock::new();
@@ -49,22 +59,121 @@ fn catalog() -> &'static Catalog {
         families.sort_by_cached_key(|s| s.to_lowercase());
         let faces: Vec<_> = db.faces().cloned().collect();
         let mut aliases = std::collections::HashMap::new();
+        let mut authored = std::collections::HashMap::new();
         for (i, mut face) in faces.into_iter().enumerate() {
             db.remove_face(face.id);
             let alias = format!("LibreEffectsFont{i}");
             let language = face.families[0].1;
             face.families.push((alias.clone(), language));
-            aliases.insert(db.push_face_info(face), alias);
+            let id = db.push_face_info(face);
+            aliases.insert(id, alias);
+            authored.insert(id, OnceLock::new());
         }
         Catalog {
             db: Arc::new(db),
             families,
             aliases,
+            authored,
+            authored_bytes: AtomicUsize::new(0),
         }
     })
 }
 pub(crate) fn database() -> Arc<Database> {
     catalog().db.clone()
+}
+/// An immutable, lazily loaded single-face database for authored positioning.
+/// Ordinary documents never retain extra system-font bytes. Positioned paint
+/// is flattened from this database, so final rendering cannot reopen a file
+/// that changed after identity verification.
+pub(crate) struct AuthoredFont {
+    pub id: resvg::usvg::fontdb::ID,
+    pub sha256: String,
+    pub index: u32,
+    pub post_script_name: String,
+    db: Arc<Database>,
+    _reservation: FontReservation,
+}
+struct FontReservation(usize);
+impl FontReservation {
+    fn reserve(bytes: usize) -> Result<Self, String> {
+        if bytes > AUTHORED_FONT_FILE_LIMIT {
+            return Err("The required font exceeds the 64 MiB authored-font file limit".into());
+        }
+        catalog().authored_bytes.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |used| {
+            used.checked_add(bytes).filter(|total| *total <= AUTHORED_FONT_CACHE_LIMIT)
+        }).map_err(|_| "Pinned authored fonts exceed the 256 MiB process limit; restart to release earlier font snapshots".to_string())?;
+        Ok(Self(bytes))
+    }
+}
+impl Drop for FontReservation {
+    fn drop(&mut self) {
+        catalog()
+            .authored_bytes
+            .fetch_sub(self.0, Ordering::Relaxed);
+    }
+}
+impl AuthoredFont {
+    pub fn options(&self) -> resvg::usvg::Options<'static> {
+        resvg::usvg::Options {
+            fontdb: self.db.clone(),
+            ..Default::default()
+        }
+    }
+}
+pub(crate) fn authored_font(style: &TextStyle) -> Result<&'static AuthoredFont, String> {
+    if let Some(warning) = warning(style) {
+        return Err(warning);
+    }
+    let face = matched(style);
+    catalog().authored[&face.id]
+        .get_or_init(|| {
+            let (data, reservation) = catalog()
+                .db
+                .with_face_data(face.id, |bytes, _| {
+                    let reservation = FontReservation::reserve(bytes.len())?;
+                    let mut data = Vec::new();
+                    data.try_reserve_exact(bytes.len())
+                        .map_err(|_| "Could not allocate the bounded font snapshot".to_string())?;
+                    data.extend_from_slice(bytes);
+                    Ok::<_, String>((data, reservation))
+                })
+                .ok_or("Could not read the required font bytes")??;
+            let sha256 = format!("{:x}", Sha256::digest(&data));
+            let mut db = Database::new();
+            db.load_font_data(data);
+            let mut pinned = db
+                .faces()
+                .find(|candidate| candidate.index == face.index)
+                .cloned()
+                .ok_or("Could not read the required font face index")?;
+            if pinned.post_script_name != face.post_script_name {
+                return Err("Font PostScript identity changed since font discovery".into());
+            }
+            // Keep just this face. Fallback to another face is never admitted.
+            let ids: Vec<_> = db.faces().map(|candidate| candidate.id).collect();
+            for id in ids {
+                db.remove_face(id);
+            }
+            let language = pinned.families[0].1;
+            pinned
+                .families
+                .push((catalog().aliases[&face.id].clone(), language));
+            let post_script_name = pinned.post_script_name.clone();
+            let index = pinned.index;
+            let id = db.push_face_info(pinned);
+            // This immutable catalog retains successful snapshots for its
+            // lifetime. Failed reads/parses release their reservation via Drop.
+            Ok(AuthoredFont {
+                id,
+                sha256,
+                index,
+                post_script_name,
+                db: Arc::new(db),
+                _reservation: reservation,
+            })
+        })
+        .as_ref()
+        .map_err(Clone::clone)
 }
 pub(crate) fn families() -> &'static [String] {
     &catalog().families

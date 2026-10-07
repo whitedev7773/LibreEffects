@@ -730,7 +730,7 @@ mod tests {
             value["version"] = version.into();
             invalid.push(value);
         }
-        for version in [0, 2, 999] {
+        for version in [0, 4, 999] {
             let mut value = base.clone();
             value["compositions"]["1"]["graph_channels"]["version"] = version.into();
             invalid.push(value);
@@ -1598,5 +1598,246 @@ mod source_text_view_tests {
             );
             assert_eq!(editor.project(), &project);
         }
+    }
+}
+
+#[cfg(test)]
+mod secondary_selector_view_tests {
+    use super::*;
+    use libre_effects_core::{
+        Command, Content, Editor, Property, PropertyPath, TextSelectorParam, TrackEdit,
+    };
+
+    #[test]
+    fn secondary_selector_view_addresses_roundtrip_with_minimal_versions_and_stable_ids() {
+        let mut editor = Editor::default();
+        editor
+            .execute(Command::AddContent {
+                content: Content::Text {
+                    text: "Selectors".into(),
+                    font_size: 48.,
+                },
+                width: 400.,
+                height: 120.,
+                name: "Text".into(),
+            })
+            .unwrap();
+        for _ in 0..2 {
+            editor
+                .execute(Command::AddTextRangeSelector { id: 1 })
+                .unwrap();
+        }
+        let mut views = ProjectViews::default();
+        let mut view = CompositionView::default();
+        let old = GraphChannel {
+            id: 1,
+            property: Property::PositionX.into(),
+        };
+        view.graph_channels.pin(old).unwrap();
+        view.graph_channels.activate(old);
+        views.compositions.insert(1, view);
+        let legacy = views.encode_native(editor.project()).unwrap();
+        for parameter in TextSelectorParam::ALL {
+            let channel = GraphChannel {
+                id: 1,
+                property: PropertyPath::TextSelector {
+                    selector: 2,
+                    parameter,
+                },
+            };
+            // A selector with no materialized tracks changes no existing VIEW bytes.
+            assert!(!channel.available(editor.project().composition()));
+            editor
+                .execute(Command::EditTrack {
+                    id: 1,
+                    property: channel.property,
+                    edit: TrackEdit::ToggleAnimation { frame: 10 },
+                })
+                .unwrap();
+            let channels = &mut views.compositions.get_mut(&1).unwrap().graph_channels;
+            channels.pin(channel).unwrap();
+            channels.activate(channel);
+            channels.ranges.insert(
+                channel,
+                GraphRanges {
+                    value: Some([-100., 100.]),
+                    speed: Some([-50., 50.]),
+                },
+            );
+        }
+        let source = editor.project().clone();
+        let encoded = views.encode_native(&source).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(value["version"], 2);
+        assert_eq!(value["compositions"]["1"]["graph_channels"]["version"], 2);
+        assert_eq!(
+            ProjectViews::read_native(&encoded, &source)
+                .unwrap()
+                .encode_native(&source)
+                .unwrap(),
+            encoded
+        );
+        let native = crate::project_io::encode_native_project(&source, Some(&views)).unwrap();
+        assert_eq!(&native[8..10], &[1, 0]);
+        let loaded = crate::project_io::decode_project(&native).unwrap();
+        assert_eq!(loaded.project, source);
+        assert_eq!(
+            loaded.views.encode_native(&loaded.project).unwrap(),
+            encoded
+        );
+        assert_eq!(
+            crate::project_io::encode_native_project(&loaded.project, Some(&loaded.views)).unwrap(),
+            native
+        );
+        let mut smuggled = value.clone();
+        smuggled["compositions"]["1"]["graph_channels"]["version"] = 1.into();
+        assert!(
+            ProjectViews::read_native(&serde_json::to_vec(&smuggled).unwrap(), &source).is_err()
+        );
+        editor
+            .execute(Command::MoveTextRangeSelector {
+                id: 1,
+                selector: 2,
+                index: 0,
+            })
+            .unwrap();
+        assert_eq!(views.encode_native(editor.project()).unwrap(), encoded);
+        editor
+            .execute(Command::RemoveTextRangeSelector { id: 1, selector: 2 })
+            .unwrap();
+        assert_eq!(views.encode_native(editor.project()).unwrap(), legacy);
+        // Saving prunes a copy; the in-session pins still restore on Undo.
+        assert_eq!(views.compositions[&1].graph_channels.pinned.len(), 5);
+        editor.undo();
+        assert_eq!(views.encode_native(editor.project()).unwrap(), encoded);
+        assert_eq!(
+            editor
+                .project()
+                .composition()
+                .layer(1)
+                .unwrap()
+                .text_range_selectors()[0]
+                .id,
+            2
+        );
+    }
+}
+#[cfg(test)]
+mod animator_stack_view_tests {
+    use super::*;
+    use libre_effects_core::{
+        Command, Content, Editor, Property, PropertyPath, TextParam, TrackEdit,
+    };
+
+    #[test]
+    fn extra_animator_view_addresses_roundtrip_with_minimal_versions_and_stable_ids() {
+        let mut editor = Editor::default();
+        editor
+            .execute(Command::AddContent {
+                content: Content::Text {
+                    text: "Selectors".into(),
+                    font_size: 48.,
+                },
+                width: 400.,
+                height: 120.,
+                name: "Text".into(),
+            })
+            .unwrap();
+        for _ in 0..2 {
+            editor.execute(Command::AddTextAnimator { id: 1 }).unwrap();
+        }
+        let mut views = ProjectViews::default();
+        let mut view = CompositionView::default();
+        let old = GraphChannel {
+            id: 1,
+            property: Property::PositionX.into(),
+        };
+        view.graph_channels.pin(old).unwrap();
+        view.graph_channels.activate(old);
+        views.compositions.insert(1, view);
+        let legacy = views.encode_native(editor.project()).unwrap();
+        for parameter in TextParam::ALL.into_iter().filter(|p| p.is_animator()) {
+            let channel = GraphChannel {
+                id: 1,
+                property: PropertyPath::TextAnimator {
+                    animator: 2,
+                    parameter,
+                },
+            };
+            // A selector with no materialized tracks changes no existing VIEW bytes.
+            assert!(!channel.available(editor.project().composition()));
+            editor
+                .execute(Command::EditTrack {
+                    id: 1,
+                    property: channel.property,
+                    edit: TrackEdit::ToggleAnimation { frame: 10 },
+                })
+                .unwrap();
+            let channels = &mut views.compositions.get_mut(&1).unwrap().graph_channels;
+            channels.pin(channel).unwrap();
+            channels.activate(channel);
+            channels.ranges.insert(
+                channel,
+                GraphRanges {
+                    value: Some([-100., 100.]),
+                    speed: Some([-50., 50.]),
+                },
+            );
+        }
+        let source = editor.project().clone();
+        let encoded = views.encode_native(&source).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(value["version"], 2);
+        assert_eq!(value["compositions"]["1"]["graph_channels"]["version"], 3);
+        assert_eq!(
+            ProjectViews::read_native(&encoded, &source)
+                .unwrap()
+                .encode_native(&source)
+                .unwrap(),
+            encoded
+        );
+        let native = crate::project_io::encode_native_project(&source, Some(&views)).unwrap();
+        assert_eq!(&native[8..10], &[1, 0]);
+        let loaded = crate::project_io::decode_project(&native).unwrap();
+        assert_eq!(loaded.project, source);
+        assert_eq!(
+            loaded.views.encode_native(&loaded.project).unwrap(),
+            encoded
+        );
+        assert_eq!(
+            crate::project_io::encode_native_project(&loaded.project, Some(&loaded.views)).unwrap(),
+            native
+        );
+        let mut smuggled = value.clone();
+        smuggled["compositions"]["1"]["graph_channels"]["version"] = 1.into();
+        assert!(
+            ProjectViews::read_native(&serde_json::to_vec(&smuggled).unwrap(), &source).is_err()
+        );
+        editor
+            .execute(Command::MoveTextAnimator {
+                id: 1,
+                animator: 2,
+                index: 0,
+            })
+            .unwrap();
+        assert_eq!(views.encode_native(editor.project()).unwrap(), encoded);
+        editor
+            .execute(Command::RemoveTextAnimator { id: 1, animator: 2 })
+            .unwrap();
+        assert_eq!(views.encode_native(editor.project()).unwrap(), legacy);
+        // Saving prunes a copy; the in-session pins still restore on Undo.
+        assert_eq!(views.compositions[&1].graph_channels.pinned.len(), 11);
+        editor.undo();
+        assert_eq!(views.encode_native(editor.project()).unwrap(), encoded);
+        assert_eq!(
+            editor
+                .project()
+                .composition()
+                .layer(1)
+                .unwrap()
+                .text_animators()[0]
+                .id,
+            2
+        );
     }
 }

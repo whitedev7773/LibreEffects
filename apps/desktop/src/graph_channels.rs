@@ -1,7 +1,7 @@
 //! Bounded, view-only graph lane identities and their versioned wire addresses.
 use libre_effects_core::{
     AudioParam, Composition, ContentsParam, EffectParam, KeyRef, LayerId, MaskParam, Property,
-    PropertyPath, ShapeParam, TextParam,
+    PropertyPath, ShapeParam, TextParam, TextSelectorParam,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -165,20 +165,46 @@ impl GraphChannels {
     }
 }
 
-// This DTO belongs to desktop VIEW schema v2, not the render project schema.
+// These address versions live inside desktop VIEW schema v2. Address v1
+// remains canonical unless a secondary selector needs v2 or an animator needs v3.
 // PropertyPath intentionally has no core serde dependency; every scalar variant
 // gets a typed, unambiguous address here. Opaque timing is never a numeric lane.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum PropertyAddress {
-    Transform { parameter: Property },
-    Shape { parameter: ShapeParam },
-    Text { parameter: TextParam },
-    Contents { item: u64, parameter: ContentsParam },
-    Mask { mask: u64, parameter: MaskParam },
-    Audio { parameter: AudioParam },
+    Transform {
+        parameter: Property,
+    },
+    Shape {
+        parameter: ShapeParam,
+    },
+    Text {
+        parameter: TextParam,
+    },
+    TextSelector {
+        selector: u64,
+        parameter: TextSelectorParam,
+    },
+    TextAnimator {
+        animator: u64,
+        parameter: TextParam,
+    },
+    Contents {
+        item: u64,
+        parameter: ContentsParam,
+    },
+    Mask {
+        mask: u64,
+        parameter: MaskParam,
+    },
+    Audio {
+        parameter: AudioParam,
+    },
     TimeRemap {},
-    Effect { effect: u64, parameter: EffectParam },
+    Effect {
+        effect: u64,
+        parameter: EffectParam,
+    },
 }
 impl TryFrom<PropertyPath> for PropertyAddress {
     type Error = String;
@@ -187,6 +213,30 @@ impl TryFrom<PropertyPath> for PropertyAddress {
             PropertyPath::Transform(parameter) => Self::Transform { parameter },
             PropertyPath::Shape(parameter) => Self::Shape { parameter },
             PropertyPath::Text(parameter) => Self::Text { parameter },
+            PropertyPath::TextSelector {
+                selector,
+                parameter,
+            } => {
+                if selector == 0 || selector == u64::MAX {
+                    return Err("Invalid Graph selector ID".into());
+                }
+                Self::TextSelector {
+                    selector,
+                    parameter,
+                }
+            }
+            PropertyPath::TextAnimator {
+                animator,
+                parameter,
+            } => {
+                if animator == 0 || animator == u64::MAX || !parameter.is_animator() {
+                    return Err("Invalid Graph animator address".into());
+                }
+                Self::TextAnimator {
+                    animator,
+                    parameter,
+                }
+            }
             PropertyPath::Contents { item, parameter } => Self::Contents { item, parameter },
             PropertyPath::Mask { mask, parameter } => Self::Mask { mask, parameter },
             PropertyPath::Audio(parameter) => Self::Audio { parameter },
@@ -206,6 +256,22 @@ impl TryFrom<PropertyAddress> for PropertyPath {
             PropertyAddress::Transform { parameter } => Self::Transform(parameter),
             PropertyAddress::Shape { parameter } => Self::Shape(parameter),
             PropertyAddress::Text { parameter } => Self::Text(parameter),
+            PropertyAddress::TextSelector {
+                selector,
+                parameter,
+            } if selector > 0 && selector < u64::MAX => Self::TextSelector {
+                selector,
+                parameter,
+            },
+            PropertyAddress::TextAnimator {
+                animator,
+                parameter,
+            } if animator > 0 && animator < u64::MAX && parameter.is_animator() => {
+                Self::TextAnimator {
+                    animator,
+                    parameter,
+                }
+            }
             PropertyAddress::Contents { item, parameter } if item > 0 => {
                 Self::Contents { item, parameter }
             }
@@ -267,7 +333,18 @@ struct ChannelsDto {
 impl Serialize for GraphChannels {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let dto = ChannelsDto {
-            version: 1,
+            version: self
+                .pinned
+                .iter()
+                .chain(self.active.iter())
+                .chain(self.ranges.keys())
+                .map(|channel| match channel.property {
+                    PropertyPath::TextAnimator { .. } => 3,
+                    PropertyPath::TextSelector { .. } => 2,
+                    _ => 1,
+                })
+                .max()
+                .unwrap_or(1),
             pinned: self
                 .pinned
                 .iter()
@@ -299,9 +376,33 @@ impl Serialize for GraphChannels {
 impl<'de> Deserialize<'de> for GraphChannels {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let dto = ChannelsDto::deserialize(deserializer)?;
-        if dto.version != 1 {
+        if !matches!(dto.version, 1 | 2 | 3) {
             return Err(serde::de::Error::custom(
                 "Unsupported Graph channel address version",
+            ));
+        }
+        if dto.version == 1
+            && dto
+                .pinned
+                .iter()
+                .chain(dto.active.iter())
+                .chain(dto.ranges.iter().map(|range| &range.channel))
+                .any(|channel| matches!(channel.property, PropertyAddress::TextSelector { .. }))
+        {
+            return Err(serde::de::Error::custom(
+                "Text selector Graph addresses require version 2",
+            ));
+        }
+        if dto.version < 3
+            && dto
+                .pinned
+                .iter()
+                .chain(dto.active.iter())
+                .chain(dto.ranges.iter().map(|range| &range.channel))
+                .any(|channel| matches!(channel.property, PropertyAddress::TextAnimator { .. }))
+        {
+            return Err(serde::de::Error::custom(
+                "Text animator Graph addresses require version 3",
             ));
         }
         if dto.pinned.len() > MAX_PINNED_CHANNELS || dto.ranges.len() > MAX_PINNED_CHANNELS + 1 {
@@ -936,5 +1037,346 @@ mod text_opacity_channel_tests {
         editor.undo();
         state.reconcile(Some(editor.project().composition()), true);
         assert_eq!(state.included(), channels);
+    }
+}
+
+#[cfg(test)]
+mod secondary_selector_channels_tests {
+    use super::*;
+    use libre_effects_core::{Command, Content, Editor, TrackEdit};
+
+    fn scene() -> Editor {
+        let mut editor = Editor::default();
+        editor
+            .execute(Command::AddContent {
+                content: Content::Text {
+                    text: "Selectors".into(),
+                    font_size: 48.,
+                },
+                width: 400.,
+                height: 120.,
+                name: "Text".into(),
+            })
+            .unwrap();
+        editor
+            .execute(Command::AddTextRangeSelector { id: 1 })
+            .unwrap();
+        editor
+            .execute(Command::AddTextRangeSelector { id: 1 })
+            .unwrap();
+        editor
+    }
+    fn channel(selector: u64, parameter: TextSelectorParam) -> GraphChannel {
+        GraphChannel {
+            id: 1,
+            property: PropertyPath::TextSelector {
+                selector,
+                parameter,
+            },
+        }
+    }
+
+    #[test]
+    fn secondary_selector_addresses_use_v2_only_when_present_and_reject_v1_smuggling() {
+        let old = GraphChannel {
+            id: 1,
+            property: Property::PositionX.into(),
+        };
+        let mut legacy = GraphChannels::default();
+        legacy.pin(old).unwrap();
+        legacy.activate(old);
+        let original = serde_json::to_value(&legacy).unwrap();
+        assert_eq!(original["version"], 1);
+        for parameter in TextSelectorParam::ALL {
+            let selector = channel(7, parameter);
+            let mut state = legacy.clone();
+            state.pin(selector).unwrap();
+            state.activate(selector);
+            state.ranges.insert(
+                selector,
+                GraphRanges {
+                    value: Some([-100., 100.]),
+                    speed: Some([-50., 50.]),
+                },
+            );
+            let value = serde_json::to_value(&state).unwrap();
+            assert_eq!(value["version"], 2);
+            assert_eq!(value["active"]["property"]["kind"], "text_selector");
+            assert_eq!(value["active"]["property"]["selector"], 7);
+            assert_eq!(
+                serde_json::from_value::<GraphChannels>(value.clone()).unwrap(),
+                state
+            );
+            let mut bad = value.clone();
+            bad["version"] = 1.into();
+            assert!(serde_json::from_value::<GraphChannels>(bad).is_err());
+            for field in ["selector", "parameter", "future"] {
+                let mut bad = value.clone();
+                bad["active"]["property"][field] = if field == "selector" {
+                    0.into()
+                } else {
+                    "invalid".into()
+                };
+                assert!(
+                    serde_json::from_value::<GraphChannels>(bad).is_err(),
+                    "{field}"
+                );
+            }
+            for invalid in [0, u64::MAX] {
+                let mut bad = value.clone();
+                bad["active"]["property"]["selector"] = invalid.into();
+                assert!(serde_json::from_value::<GraphChannels>(bad).is_err());
+                let mut state = GraphChannels::default();
+                state.activate(channel(invalid, parameter));
+                assert!(serde_json::to_vec(&state).is_err());
+            }
+            state.unpin(selector);
+            state.activate(old);
+            assert_eq!(serde_json::to_value(&state).unwrap(), original);
+        }
+        // Check every address slot, including a selector hidden in ranges.
+        for slot in ["pinned", "active", "ranges"] {
+            let address = serde_json::to_value(
+                ChannelAddress::try_from(channel(7, TextSelectorParam::Start)).unwrap(),
+            )
+            .unwrap();
+            let mut value = original.clone();
+            match slot {
+                "pinned" => value[slot] = serde_json::json!([address]),
+                "active" => value[slot] = address,
+                _ => {
+                    value[slot] =
+                        serde_json::json!([{"channel":address,"value":[0,100],"speed":null}])
+                }
+            }
+            assert!(serde_json::from_value::<GraphChannels>(value).is_err());
+        }
+    }
+
+    #[test]
+    fn secondary_selector_reorder_remove_undo_and_save_preserve_stable_pin_intent() {
+        let mut editor = scene();
+        let selected = channel(2, TextSelectorParam::Offset);
+        assert!(!selected.available(editor.project().composition()));
+        editor
+            .execute(Command::EditTrack {
+                id: 1,
+                property: selected.property,
+                edit: TrackEdit::ToggleAnimation { frame: 10 },
+            })
+            .unwrap();
+        let mut state = GraphChannels::default();
+        state.pin(selected).unwrap();
+        state.activate(selected);
+        state.ranges.insert(
+            selected,
+            GraphRanges {
+                value: Some([-100., 100.]),
+                speed: None,
+            },
+        );
+        let pinned = state.clone();
+        editor
+            .execute(Command::MoveTextRangeSelector {
+                id: 1,
+                selector: 2,
+                index: 0,
+            })
+            .unwrap();
+        state.reconcile(Some(editor.project().composition()), false);
+        assert_eq!(state, pinned);
+        editor
+            .execute(Command::RemoveTextRangeSelector { id: 1, selector: 2 })
+            .unwrap();
+        state.reconcile(Some(editor.project().composition()), false);
+        assert!(state.is_pinned(selected));
+        assert!(!state.is_available(selected));
+        assert!(state.included().is_empty());
+        assert_eq!(state.active, None);
+        let mut saved = state.clone();
+        saved.prune(editor.project().composition());
+        assert!(saved.is_legacy());
+        assert!(state.is_pinned(selected));
+        editor.undo();
+        state.reconcile(Some(editor.project().composition()), true);
+        assert!(state.is_available(selected));
+        assert_eq!(state.included(), vec![selected]);
+        assert_eq!(state.ranges, pinned.ranges);
+        editor.redo();
+        state.reconcile(Some(editor.project().composition()), true);
+        editor
+            .execute(Command::AddTextRangeSelector { id: 1 })
+            .unwrap();
+        let replacement = editor
+            .selected_layer()
+            .unwrap()
+            .text_range_selectors()
+            .last()
+            .unwrap()
+            .id;
+        assert_ne!(replacement, 2);
+        editor
+            .execute(Command::EditTrack {
+                id: 1,
+                property: channel(replacement, TextSelectorParam::Offset).property,
+                edit: TrackEdit::ToggleAnimation { frame: 10 },
+            })
+            .unwrap();
+        state.reconcile(Some(editor.project().composition()), false);
+        assert!(!state.is_available(selected));
+        assert!(state.included().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod animator_channels_tests {
+    use super::*;
+    use libre_effects_core::{Command, Content, Editor, TrackEdit};
+
+    fn channel(animator: u64, parameter: TextParam) -> GraphChannel {
+        GraphChannel {
+            id: 1,
+            property: PropertyPath::TextAnimator {
+                animator,
+                parameter,
+            },
+        }
+    }
+
+    #[test]
+    fn extra_animator_addresses_require_v3_and_validate_every_slot_and_parameter() {
+        for parameter in TextParam::ALL.into_iter().filter(|p| p.is_animator()) {
+            let lane = channel(7, parameter);
+            let mut state = GraphChannels::default();
+            state.pin(lane).unwrap();
+            state.activate(lane);
+            state.ranges.insert(
+                lane,
+                GraphRanges {
+                    value: Some([-100., 100.]),
+                    speed: None,
+                },
+            );
+            let encoded = serde_json::to_value(&state).unwrap();
+            assert_eq!(encoded["version"], 3);
+            assert_eq!(encoded["active"]["property"]["kind"], "text_animator");
+            assert_eq!(
+                serde_json::from_value::<GraphChannels>(encoded.clone()).unwrap(),
+                state
+            );
+            for version in [1, 2, 4] {
+                let mut bad = encoded.clone();
+                bad["version"] = version.into();
+                assert!(serde_json::from_value::<GraphChannels>(bad).is_err());
+            }
+            for slot in ["pinned", "active", "ranges"] {
+                let address = encoded["active"].clone();
+                let mut bad =
+                    serde_json::json!({"version":2,"pinned":[],"active":null,"ranges":[]});
+                match slot {
+                    "pinned" => bad[slot] = serde_json::json!([address]),
+                    "active" => bad[slot] = address,
+                    _ => {
+                        bad[slot] =
+                            serde_json::json!([{"channel":address,"value":null,"speed":null}])
+                    }
+                }
+                assert!(serde_json::from_value::<GraphChannels>(bad).is_err());
+            }
+            for id in [0, u64::MAX] {
+                let mut bad = encoded.clone();
+                bad["active"]["property"]["animator"] = id.into();
+                assert!(serde_json::from_value::<GraphChannels>(bad).is_err());
+                state.active = Some(channel(id, parameter));
+                assert!(serde_json::to_value(&state).is_err());
+            }
+            let mut bad = encoded.clone();
+            bad["active"]["property"]["parameter"] = "FontSize".into();
+            assert!(serde_json::from_value::<GraphChannels>(bad).is_err());
+            state.active = Some(channel(7, TextParam::FontSize));
+            assert!(serde_json::to_value(&state).is_err());
+        }
+        let mut legacy = GraphChannels::default();
+        legacy.activate(GraphChannel {
+            id: 1,
+            property: Property::PositionX.into(),
+        });
+        assert_eq!(serde_json::to_value(&legacy).unwrap()["version"], 1);
+    }
+
+    #[test]
+    fn extra_animator_pins_survive_reorder_and_removal_undo_without_retargeting() {
+        let mut editor = Editor::default();
+        editor
+            .execute(Command::AddContent {
+                content: Content::Text {
+                    text: "Stack".into(),
+                    font_size: 48.,
+                },
+                width: 400.,
+                height: 120.,
+                name: "Text".into(),
+            })
+            .unwrap();
+        for _ in 0..2 {
+            editor.execute(Command::AddTextAnimator { id: 1 }).unwrap();
+        }
+        let lane = channel(2, TextParam::AnimatorRotation);
+        assert!(!lane.available(editor.project().composition()));
+        editor
+            .execute(Command::EditTrack {
+                id: 1,
+                property: lane.property,
+                edit: TrackEdit::ToggleAnimation { frame: 10 },
+            })
+            .unwrap();
+        let mut state = GraphChannels::default();
+        state.pin(lane).unwrap();
+        state.activate(lane);
+        state.ranges.insert(
+            lane,
+            GraphRanges {
+                value: Some([-180., 180.]),
+                speed: Some([-90., 90.]),
+            },
+        );
+        let saved = state.clone();
+        editor
+            .execute(Command::MoveTextAnimator {
+                id: 1,
+                animator: 2,
+                index: 0,
+            })
+            .unwrap();
+        state.reconcile(Some(editor.project().composition()), false);
+        assert_eq!(state, saved);
+        editor
+            .execute(Command::RemoveTextAnimator { id: 1, animator: 2 })
+            .unwrap();
+        state.reconcile(Some(editor.project().composition()), false);
+        assert!(state.is_pinned(lane));
+        assert!(!state.is_available(lane));
+        let mut pruned = state.clone();
+        pruned.prune(editor.project().composition());
+        assert!(pruned.is_legacy());
+        assert!(state.is_pinned(lane));
+        editor.undo();
+        state.reconcile(Some(editor.project().composition()), true);
+        assert_eq!(state.included(), vec![lane]);
+        assert_eq!(state.ranges, saved.ranges);
+        editor.redo();
+        editor.execute(Command::AddTextAnimator { id: 1 }).unwrap();
+        assert_ne!(
+            editor
+                .selected_layer()
+                .unwrap()
+                .text_animators()
+                .last()
+                .unwrap()
+                .id,
+            2
+        );
+        state.reconcile(Some(editor.project().composition()), false);
+        assert!(!state.is_available(lane));
     }
 }

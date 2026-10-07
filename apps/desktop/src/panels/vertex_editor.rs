@@ -93,6 +93,7 @@ impl Request {
         world: Affine,
     ) -> bool {
         s.vertex_editor.is_none()
+            && s.expression_editor.is_none()
             && Self::ready(s)
             && s.editor.selected() == Some(layer)
             && !indices.is_empty()
@@ -102,7 +103,8 @@ impl Request {
                 .is_some_and(|(actual, transform)| actual == *path && transform == world)
     }
     fn ready(s: &EditorState) -> bool {
-        s.tool == Tool::Pen
+        s.expression_editor.is_none()
+            && s.tool == Tool::Pen
             && !s.playing
             && !s.preview_caching
             && !s.new_composition_requested
@@ -157,6 +159,11 @@ fn evaluated_at(
         return None;
     }
     let layer = comp.layer(id).filter(|layer| !layer.locked())?;
+    if let PathTarget::Mask(mask) = target
+        && layer.has_enabled_expression(libre_effects_core::ExpressionTarget::MaskPath(mask))
+    {
+        return None;
+    }
     let world = comp.world_transform(id, frame)?;
     world.inverse()?;
     if let PathTarget::Contents(item) = target {

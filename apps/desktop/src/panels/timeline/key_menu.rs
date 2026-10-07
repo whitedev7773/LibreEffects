@@ -147,6 +147,11 @@ impl Timeline {
                 cx.notify();
             });
         }
+        if self.scope_blocked(filter_safety::TargetScope::Keys, cx) {
+            self.key_menu = None;
+            self.blocked_filter_edit(cx);
+            return;
+        }
         let s = self.state.read(cx);
         if s.selected_keys.is_empty() || s.graph_open {
             return;
@@ -168,6 +173,11 @@ impl Timeline {
         cx.notify();
     }
     fn activate_key_menu(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if self.scope_blocked(filter_safety::TargetScope::Keys, cx) {
+            self.key_menu = None;
+            self.blocked_filter_edit(cx);
+            return;
+        }
         let Some(menu) = self.key_menu.as_ref() else {
             return;
         };

@@ -1,3 +1,188 @@
+# Actual Playbar runtime and private94-layer increment
+
+Schema76 source/constructor/typechecks are ready. Qualify the actual six-layer
+Playbar and preserved Lyric/title before assembling players. Exact source programs
+now have typed text/path outputs and explicit lexical locals; dormant mask geometry
+and absent bar Position conventions remain disclosed. Continuous nested sampling
+is a separate required step for the original23fps players under60fps parents.
+See [NATIVE_PLAYBAR.md](NATIVE_PLAYBAR.md). Retain the61/62 unoptimized crate gate.
+
+# Actual Lyric runtime reliability candidate
+
+Qualify the calling-thread CPU / immutable-wrapper correction against the frozen
+actual 88-layer project before expanding Playbar/theme reconstruction. Preserve
+the observed native deadline incident and non-green unoptimized test gates. The
+fixed optimized full-output comparison passes; the hard process deadline remains.
+See [EXPRESSION_EXECUTION_BUDGET.md](EXPRESSION_EXECUTION_BUDGET.md).
+
+# Actual-reference increment awaiting native qualification
+
+The Lyric-plus-title/artist source now has genuine joined 2D Position and the
+original 16-layer title composition. Qualify the coherent schema 75 binary and
+private append before extending the actual project further. Retain the two
+expression 100ms deadline failures as an open reliability issue; do not report a
+full model pass or solve them by silently widening the budget. Next actual
+reference closures still need Playbar numeric/path/text expression targets and
+Spectrum/theme reconstruction. Generic AEP-open UI is not the user goal.
+
+# Current practical authoring milestone (2026-10-06)
+
+## Actual reference recreation: first partial Lyric project
+
+Schema 74 point-origin text and per-run leading are integrated, and the generic
+reviewed-data constructor has produced the original 72-layer Lyric composition
+privately. The independent source audit and combined all-target check passed;
+visible native rendering is pending. Name & Artist and final themes remain open.
+Original text, programs, fonts and media are not in Git. See
+[NATIVE_POINT_TEXT.md](NATIVE_POINT_TEXT.md).
+
+## Selected-character formatting checkpoint
+
+Native Character selection controls, exact face/size/fill drafts and run-font
+diagnostics are integrated. The final model run passes 274/275 with one unchanged
+expression-pooling budget failure; selected-text tests pass. Native qualification
+is pending. See [NATIVE_SELECTED_TEXT.md](NATIVE_SELECTED_TEXT.md).
+The preceding numeric-expression authoring checkpoint 6010f86 remains qualified.
+
+Null Slider authoring and the native2D numeric-expression draft editor are now
+source/type checked, with exact current test limitations recorded in STATUS.
+Qualify the from-blank user flow next; do not substitute a prepared project.
+Then address selected-range styling using the supplied exact faces, reference
+path/text-expression behavior, editable spatial setup/keys and Audio Spectrum.
+The reference project still cannot be fully recreated through all native tools.
+AEP opening/import remains excluded, and private assets/programs stay out of Git.
+
+# Current native JSX checkpoint (2026-10-06)
+
+The unchanged private automation script passes 14 isolated native-project
+execution/source/history scenarios. The reusable template, external-source
+harness and bounded ScriptUI size/focus changes are awaiting the final source
+gate and one coherent release/native batch. Native qualification should exercise
+the original dialog at normal/reduced viewports, sample/clear refocus, Tab reach,
+held-key nesting, all-mode generation and exact native Undo/Save/Reopen. Do not
+expand into AEP ingestion or unrelated expression APIs. Adobe visual/rich-text
+parity and marked IME remain separate unverified contracts.
+
+# Native JSX compatibility — Opacity73 integration checkpoint
+
+Updated 2026-10-06 UTC. The next original-script timing dependency is implemented
+in source with19 math tests,249 model tests and a real child-process roundtrip.
+Independent per-side modes, signed/tiny speeds and dormant endpoints are retained;
+raw sampling, expression views and clipped color drafts share the explicit owner.
+See [the contract](NATIVE_OPACITY_TIMING.md) and [STATUS](STATUS.md).
+
+The22-pair renderer helper and canonical all-target check now pass; a fresh
+release/native qualification remains pending. Preserve
+all legacy curves and explicit promotion limits; do not infer AE defaults or full
+original-script parity. After this coherent batch is qualified, remaining work is
+native template setup, required expression/API gaps and oracle-dependent
+TextDocument behavior. AEP opening/import remains outside acceptance.
+
+# Native JSX compatibility — joined XYZ source milestone
+
+Updated 2026-10-06 UTC. Joined native XYZ, explicit camera projection, metadata
+preservation, retime and JSX/ScriptUI are integrated with fresh model/render proof.
+See [STATUS](STATUS.md) and [the bounded contract](NATIVE_SPATIAL_POSITION.md).
+The last qualified binary remains 8729c0f; the new canonical all-target check
+passes in 42.402s. This source needs a fresh release/native batch. AEP opening/import is not an acceptance dependency.
+
+Next original-script dependency is faithful scalar Opacity incoming/outgoing modes,
+endpoint ease and tiny signed speeds. Continue with a separate native source
+contract that preserves legacy serialized tracks; do not clamp or reinterpret
+those speeds as spatial distance. Later required expression APIs, native template
+setup and oracle-dependent TextDocument replacement remain open. Spatial tilts,
+3D expressions, rendering effects/mattes and a general camera UI remain explicit
+unsupported scope. Do not claim the original JSX works end to end yet.
+
+# Native JSX compatibility — exact-source pooling checked
+
+Updated 2026-10-06 UTC. The user explicitly removed AEP opening/import from the
+required scope. The supplied AEP is reference material; existing importer code
+remains, but no new ingestion work is planned and its gaps are not acceptance
+blockers. Current focus is original JSX/ScriptUI on native LibreEffects layers
+and compositions, followed by required spatial Position/Opacity/TextDocument APIs.
+
+- Transient exact-source pooling carries one table through snapshot, child IPC
+  and QuickJS. **192 bindings / 6 programs** use **19,056 unique bytes** instead
+  of **609,792 repeated bytes**, under unchanged512KiB source limits. Per-property
+  execution/dependencies, authored native source and saved schemas are unchanged.
+- Fresh gates: **35 runtime tests**, **220 model tests** (10.50s), and the actual
+  production worker example pass. The worker checks192 distinct results at two
+  frames, invalid disabled IDs, duplicates, cancellation, permit reuse and exact
+  source bytes. Formatting/diff and independent source review pass.
+- The first aggregate-model compilation found one older process example still
+  using the old private API; it was migrated, compiled, and the full model gate
+  passed. No runtime limits were loosened. See [the contract](EXPRESSION_POOLING.md).
+- Desktop all-target, release, native and CLI qualification are deferred while
+  interrupted build sessions are being resolved. **c2a1210** remains a checked
+  XKB candidate, with no terminal corrective release result. Do not relabel the
+  earlier510244c binary or its intermittent held-key failure as a new pass.
+
+# X11 repeat-release correction — source checked, native rerun pending
+
+Updated 2026-10-06 UTC. This correction follows the mixed `510244c` qualification
+and preserves the full `a8ea6d2` evidence checkpoint below. The exact locked GPUI
+0.2.2 package is now vendored with its license, upstream hashes and build inputs.
+A small safe capability seam negotiates DetectableAutorepeat on the existing XCB
+client and verifies both supported/enabled bits. No new unsafe code or global
+keyboard settings are added. Unknown/error cases visibly require pointer modal
+buttons; text and navigation remain usable. See [the contract](XKB_REPEAT_BOUNDARY.md).
+
+- Fresh checks: **217 model tests pass**, **2 production reply-mask tests**,
+  **6 fingerprint tests**, canonical all-target check **59.047s**, formatting and
+  local-change whitespace checks. Seven unchanged upstream Metal mixed-indent
+  lines are retained byte-for-byte; no full workspace/desktop test executable ran.
+- First model run had two unchanged 100ms expression deadline failures (215/217).
+  All 15 expression-model tests then passed, followed by unchanged full 217/217
+  replay in 6.45s. No production budget or expression source was modified.
+- Independent source review found no blocking issue; fallback hint and explicit
+  reply-test coverage suggestions were addressed. Vendor change is six original
+  files plus one pure helper; renderer/project schemas are unchanged.
+- A new release and bounded held-key/forced-pointer-only native qualification
+  are still required. Earlier render/source passes keep `510244c` attribution.
+  The first intermittent native failure remains recorded below.
+
+# Reconstructed rich import — native checkpoint and remaining work
+
+Updated 2026-10-06 UTC. Clean510244c (production 0be291b) has a measured release,
+four exact full Renderer/CLI frames, actual supported typed import, schema 71 rich
+typing/style preservation, explicit negative admission and atomic history/reopen
+evidence. [STATUS](STATUS.md) gives exact scope and source attribution.
+
+The immediate correction is intermittent ScriptUI held-Return acceptance across
+a nested confirmation. One observed unintended name-only commit and a passing
+bounded repeat are both retained; this is not a completed latch qualification.
+Parent approved a narrow per-client repeat-release fix without global settings.
+Color native input passes with disclosed valid schema-floor 65→64 normalization.
+Narrow layout, real IME and other platforms remain unqualified.
+
+Binary AEP payload admission, AE baseline/style-replacement evidence and the lost
+spatial/Opacity/pooling/Slider/mask slices remain later reconstruction work. No
+original-template compatibility, original execution or recovered historical QA
+hashes are claimed. Use the active reconstruction checkout and fresh evidence.
+
+# Source-checked reconstruction checkpoint (historical)
+
+Updated 2026-10-06 UTC. After an execution-workspace change, verified complete
+history at `e7bb28d` was restored separately. Later objects were unavailable;
+the following code is newly reconstructed, not a recovered later release.
+Production source checkpoint: `0be291bad7eb8535a38c0e879c625412a81ecc76`.
+See [the reconstruction contract and fresh evidence](AE_RECONSTRUCTION.md).
+
+- Strict typed project ingestion and schema-71 rich character styles are usable
+  for supported synthetic 2D closures. Binary AEP payloads, true spatial 3D and
+  the original template remain blocked explicitly; no original was executed.
+- Versions 1–65 remain readable; unrecovered wire versions 66–70 reject before
+  decoding. Reusing their version numbers could silently discard source fields.
+- Fresh checks: **213 model tests**, **34 reader tests**, **6 fingerprint tests**,
+  canonical all-target **42.75s**, rustfmt/diff and fixture generation pass.
+- Rich compositor helper: **9 groups**, **6 independent RGBA comparisons**,
+  **691,200 pixels, zero differences**, rerun after schema-71 correction with
+  production-locked dependencies. This is not full Renderer/CLI/native evidence.
+- Full release, CLI pixel/source oracle and native import/typing/history/modal
+  qualification are pending. Earlier dated passes below keep their original
+  source attribution. Intermediate and coherent commits are backed up separately.
+
 # Libre Effects 추가 개발 기능과 우선순위
 
 2026년 10월 1일, 커밋 `0ce0022`의 Rust 데스크톱 앱과 공용 코어를 기준으로 조사했다. 목적은 단순한 2D 타이틀 편집기를 실제 제작에 사용할 수 있는 After Effects 계열 작업 도구로 발전시키는 것이다. **먼저 저장과 미디어 처리의 안정성을 보강하고, 프로젝트와 속성 모델을 확장한 뒤, 프리컴포지션·오디오·합성 기능을 연결해야 한다.**
@@ -10,6 +195,52 @@
 
 아래 날짜별 이력과 최초 조사 표는 각 체크포인트의 기록이다. 현재 A01–L05의 77개 항목별 구현/부분 구현/미구현/별도 고급 범위는 STATUS.md의 전체 목록을 기준으로 확인한다. 이력에 남은 테스트 수와 당시 미완료 문구를 현재 상태로 합산하거나 해석하지 않는다.
 
+### 숫자 표현식·프로세스 격리 통합 — 2026-10-05
+
+schema 65의 Position/Scale/Opacity/Slider 표현식과 실제 named Slider Control을
+저장하고, preview·출력·부모 transform·matte·중첩 comp의 공통 평가 경로에 연결했다.
+JSX와 표현식은 kill/reap 가능한 별도 프로세스에서 실행한다. held Return의 모달
+연속 승인 결함과 CR/LF/CRLF 문단 처리를 보완했다. **161개 모델, 15개 프로세스
+시나리오 및 7개 unit, 24개 표현식 테스트와 36.81초 all-target 검사를 통과**했다.
+픽셀·네이티브 검증은 한 번의 통합 corrective release에서 수행할 예정이다.
+[EXPRESSIONS.md](EXPRESSIONS.md)와 STATUS 최상단이 현재 계약이다. AEP/자산,
+rich runs·글꼴, 실제 3D·공간 보간과 추가 표현식·효과 API는 다음 호환성 단계다.
+
+### AE startTime·label 호환 모델 — 2026-10-05
+
+서로 독립적인 레이어 시간 원점과 trim, AE label 인덱스 0–16을 sparse schema 64로
+저장한다. 호스트의 startTime/label 대입, 네이티브 레이어 이동·FPS 변환 붙여넣기,
+재생 속도 변경 시 원점 보존과 Timeline 전용 label 표시를 연결했다. **133개 모델
+테스트와 47.72초 all-target 검사를 통과**했다. 원본 입력의 60 fps 한 프레임 원점과
+가사 타임스탬프·마커·마지막 두 레이어의 label 4 흐름을 독립 fixture로 검증했다.
+[LAYER_TIMING.md](LAYER_TIMING.md)에 세부 범위와 증거가 있다. 컴포지션 밖으로
+저장 범위나 키가 나가는 이동은 여전히 원자적으로 거부하며, signed/out-of-comp
+animation storage가 다음 호환성 의존성이다. 별도 worktree의 구현이며 현재
+ScriptUI native QA의 22f242f 릴리스를 변경하지 않았다. 전체 입력 호환 완료는 아니다.
+
+### 자동화·ScriptUI 기반 구현 — 2026-10-05
+
+QuickJS 기반 실제 JSX 실행, native ScriptUI 모달·여러 줄 입력, 제한된 AE2D
+호스트 및 성공 시 한 번 Undo가 구현됐다. **110개 경량 모델 테스트와 all-target
+컴파일을 통과**했고 native 배치 검증은 다음 단계다. 현재 범위·제한·독립 작성
+예제는 [SCRIPTING.md](SCRIPTING.md), 정확한 검증 이력은 STATUS 최상단을 따른다.
+사용자의 최신 목표는 제공 JSX+AEP 호환이므로 여기서 끝내지 않는다. AEP/자산
+가져오기, 별도 layer startTime·AE label, 표현식·effect/slider 속성, 문자별 스타일과
+글꼴, 실제3D·공간 보간을 원본 근거와 대조해 단계적으로 연결해야 한다.
+
+### 자동화·ScriptUI 우선순위 — 2026-10-05
+
+사용자가 기존 After Effects `Automation.jsx`를 제공하고 자동화 스크립트와
+ScriptUI 지원 개발을 요청했다. **K06 중 실제 제공 스크립트에 필요한 범위를
+활성 개발 대상으로 올린다.** [API 대응표와 단계별 검증 기준](../../docs/ae-jsx-compatibility.md)을
+따른다. 조사 기준 `53e9cba`에는 JSX 실행기·ScriptUI·AE 객체 바인딩이 없다.
+기존 텍스트·복제·마커·스칼라 키 모델을 재사용하되 시간 원점, 속성 대입,
+여러 컴포지션의 한 번 Undo 의미를 먼저 명확히 한다. parts/all 모드는 별도의
+3D 공간 Position 요구 때문에 그대로 실행할 수 없다. 첫 단계는 제한된 런타임과
+실제 모달 UI, 다음은 가사 워크플로다. 전체 AEP/플러그인/3D 지원으로 확대해
+완료를 주장하지 않는다. 원본은 저장소에 넣지 않고 독립 작성 fixture로 검증한다.
+이 항목은 구현 완료 기록이 아니며 최신 구현 범위는 STATUS의 후속 기록을 따른다.
+
 ### 현재 단계와 다음 개발
 
 **2026-10-03 사용자 우선순위:** 고유 `.lep` (Libre Effects Project) 파일 형식을 먼저 구현·실행 검증하고, 그 뒤 보류한 편집 기능과 나머지 백로그를 재개한다. `.lep`의 서명/컨테이너 버전/체크섬/제한된 청크와 Save/Open/CLI/복구/수집 연결을 구현했고 코어·데스크톱 기본 626개와 FFmpeg 30개, 릴리스 빌드가 통과했다. 기존 `.lfe.json`은 호환 입력으로 유지하며 Save는 `.lep` 사본을 만든다. 네이티브 복구·이동 수집까지 아래 범위의 end-to-end 검증을 마쳤다. 고유 형식의 기본 단계와 이어 재개한 같은 경로 박스 선택/Ctrl+A의 검증을 마쳤다. E04 Contents의 형제 항목 다중 선택·같은 부모 안의 묶음 순서 편집과 저장 포커스 회귀까지 검증을 마쳤다. 이어서 F03/D01의 레이어 전체 Text Fill/Stroke RGB와 Stroke Width 7개 스칼라 애니메이션을 연결하고 최종 네이티브 검증을 마쳤다. 문자별 스타일·Source Text animation·Text Animator는 별도 범위다. E02 단일 정점 숫자 모달과 F02 실제 fallback face/미해결 glyph 진단도 구현·자동/네이티브 검증을 마쳤다. D03 단일 채널 endpoint velocity 세로 변형도 검증했다. D03 다중 channel Graph의 pinned lane·교차 선택/시간 편집·lane-local 값/속도·VIEW metadata와 native Save/reopen도 검증했다. E02 선택 정점의 숫자 이동/회전/scale/pivot 변형은 기본920+FFmpeg30과 최적화 빌드, 고정 release의 bounded native12case 검증을 마쳤다. C09의 Reset Scale & Rotation/Flip/Fit/Center Anchor와 native rapid-Undo에서 발견한 Linux image lifetime 문제도 기본965+FFmpeg30, optimized release와 bounded native8case를 검증했다. F03 layer-wide Font Size·Tracking·Leading 세 scalar와 renderer·caret/paragraph geometry·font diagnostics의 현재 frame 평가도 기본 1010 + FFmpeg 30, 일반 optimized release 및 bounded native 10-case를 검증했다. E05 Trim Paths와 사용자 요청의 자동 About 빌드 번호는 기본 1102 + FFmpeg 31, optimized release, 실제 About A/B와 bounded Trim native 10-case 검증을 마쳤다. geometry-before-paint 순서, 원래 paint scope, contour/fragment identity와 수치·작업량 한도는 아래에 명시했다.
@@ -18,9 +249,87 @@
 
 - **구현·검증됨:** 다중 컴포지션/프리컴포지션, 공유 자산·폴더·썸네일·다중 파일/이미지 시퀀스 가져오기·FPS/알파 해석, 저장·복구·미디어 수집/재연결, 유리수 FPS, Null/Solid/Adjustment, 레이어 복사·마커·스냅·다중 정렬/분배·부모 Pick Whip, 변형/효과 키 편집, 영상·프리컴포지션 Time Remap, 순서 있는 효과 스택, 5종 블렌딩·4종 Track Matte, Curves/Gradient 등 기본 효과, 배경색 MP4·알파 MOV/PNG, 뷰 상태 저장·눈금자/가이드/채널/픽셀 정보, 스냅샷 기반 렌더 큐·다중 출력·재시도·출력 크기/FPS/채널/인코딩 설정, 독립/영상 오디오 메타데이터·파형·중첩 믹싱·AAC/PCM 영상 출력, 좌우 레벨·팬·페이드 애니메이션·오디오 스위치·구간 미터, Windows 기본 장치 재생·100ms 스크럽·장치 시계 기반 플레이헤드·재생 블록 미터, 지속 영상 디코더·제한된 순차 프리페치·비동기 합성과 오래된 요청 취소. 상세 제약은 아래 표에 남긴다.
 - **다음 핵심 개발(2026-10-02 사용자 우선순위 변경):** 실제 AE 첫 작업 화면을 기준으로 편집 도구·효과·텍스트·마스크와 관련 UI를 우선한다. J02 디스크 캐시/J03 증분 평가, 고급 출력·GPU·HDR·장치/코덱 확장은 뒤로 미룬다.
-- **정교한 편집에 남은 기능:** D02/D03 공간 보간·혼합 채널 수직/Speed corner 변형, E02/E03 경로 토폴로지·교차 경로/캔버스 affine 편집, E04 부모 간 guarded drag·복합 Colors 애니메이션, G01 가변 Feather·로토베지어, F01–F05 실제 IME 검증·문자별 스타일·Text Animator·경로 위 텍스트/인스턴스 컨트롤, B01/B05/B07 배치 회귀·단축키/접근성. 스칼라 양방향 시간 보간·Speed Graph, Contents·도형 속성 애니메이션, 직접 텍스트 편집과 B06 공통 색 선택기는 아래 이력의 범위로 이미 구현됐다.
+- **정교한 편집에 남은 기능:** D02/D03 공간 보간·혼합 채널 수직/Speed corner 변형, E02/E03 경로 토폴로지·교차 layer/mask 선택·custom pivot/skew·world-space 전체 pose 편집, E04 부모 간 guarded drag의 native 검증·compound Colors same-paint marquee/time scaling·Graph·cross-paint bulk·cross-composition/project Contents clipboard, G01 가변 Feather·로토베지어, F01–F05 실제 IME 검증·문자별 스타일·Text Animator·경로 위 텍스트/인스턴스 컨트롤, B01/B05/B07 배치 회귀·단축키/접근성. 스칼라 양방향 시간 보간·Speed Graph, Contents·도형 속성 애니메이션, 직접 텍스트 편집과 B06 공통 색 선택기는 아래 이력의 범위로 이미 구현됐다.
 - **후속 고급 기능:** 패널 도킹·소스 뷰어·최근 프로젝트, 타임라인 고급 시간 편집/검색/가상화, 공간 경로·프리셋·표현식, Shape 연산/SVG·Text Animator, 추가 효과·모션 블러, 고정밀 색/HDR·Proxy/GPU, 템플릿, 설치/업데이트·한글화와 UI 회귀 자동화.
 - **별도 대형 단계:** 3D/카메라/라이트·모델, 추적·로토/Puppet, 플러그인/교환 포맷 연구, 웹/API 제품 범위. AEP/MOGRT 호환은 구현되지 않았다.
+
+### B08 recent projects menu — 2026-10-05 implementation checkpoint
+
+- File → Open recent now has bounded local LEP history, exact-path dirty-project routing and Clear; integrated settings/problems/history remains separate scope.
+- Model `25b2dd9` and desktop `6d48cac`: 71 lightweight models pass; canonical all-target check passes. Seven desktop regressions compile only. Native acceptance joins the compact Project-controls batch; see [STATUS.md](STATUS.md).
+
+### E04 compound Colors pointer gestures — 2026-10-05 qualified continuation
+
+- Added same-paint group press/click/Shift selection, horizontal threshold, local ghosts, frozen receipts/mapping and one atomic MoveKeys release. Outside capture, common bounds, deterministic snap, collision/no-op/Redo and pending/stale/lock/focus/modifier guards retain full snapshots/modes and shortcut ownership. No schema/dependency changes.
+- Final 4010607, build 20261005.015007-b0495381d51ed0b2, passes 1,818 default +32 media and all 12 gates. Independent tests make 1,300 exact RGBA pairs. Eight actual native saves pass full source/VIEW and 520 pairs. Generated/native CLI makes 1,352 renders/1,040 exact pairs; 467 generated files stay immutable.
+- The uncompiled c9402a0 disk pause ended after approval, but `/workspace/shared` was already missing before cleanup; this task deleted nothing. Repository/full history survived. The still-open SVG project and old binary were recovered hash-exact; official tooling and new evidence now live in the persistent task workspace. Earlier missing QA archives are not claimed restored.
+- Native covers group overlap and noncontiguous outside release, Undo/Redo, vertical/away-back no-ops, collision/pending/locked rejection, repeated Delete isolation and actual reopen. First paint needed a resize/expose; Xfce intercepted Alt+drag, so Alt bypass remains headless-qualified and held-pointer interruption remains natively unqualified. Exact pins and limitations: [GRADIENT_POINTER_ACCEPTANCE.md](GRADIENT_POINTER_ACCEPTANCE.md).
+- E04 remains Partial. Complete the verified full-history bundle before same-paint marquee selection or one bounded advanced Text Animator selector. Keep compound Graph/scaling/cross-paint/topology and earlier native/platform/IME gaps separate. No push/deploy/user-desktop or next-feature work.
+
+### E06 bounded static SVG import — 2026-10-04 current continuation
+
+- Added one-file static SVG → editable Contents import at composition origin with integer viewport mask, fresh identities, source-preserving atomic history and guarded File/Search chooser receipts. Common primitives/paths, groups/transforms and solid paint/stroke semantics are bounded; unsupported CSS/resources/text/gradients/filters/masks/animation reject the whole file. XML/grammar/node/path/depth/file budgets are explicit; no source/script/resource execution or new schema.
+- Cubic normalization is disclosed in UI/help. Independent authored cubic SVG references give exact route/codec results, while unchanged raw-source SVG edge deltas are separately measured without masks. The zero-handle-line dash failure was corrected with linear controls; fractional viewport clipping rejects instead of rounding or accumulating wrong alpha.
+- Final `e078b4f`, build `20261004.214034-604994e339acebef`, passes all 12 gates: 1,781 default + 32 media tests, vendor/font/check/format and normal optimized release. Independent tests make 198 exact RGBA pairs; generated CLI 132 renders /165 pairs. All 69 generated files remain immutable.
+- All 8 actual final-build native saves pass exact source/VIEW and 120 five-route pairs across 3 frames. File import, one menu Undo, unsupported/fractional rejection, chooser Cancel, preserved one keyboard Redo, unfiltered Search-list activation and actual New→Open→SaveAs are qualified. Native CLI 48 renders /48 pairs; combined CLI 180 renders /213 pairs /8,179,200 pixels. Actual byte identity groups are01/05/06,02/03/04,07/08. App is clean on `08-final-reopened.lep`, frame 0; prior 3native projects remain hash-exact. See [SVG_IMPORT_ACCEPTANCE.md](SVG_IMPORT_ACCEPTANCE.md) for exact attribution and limits.
+- E06 and the 77-ID inventory remain Partial. Suggested next bounded slice is strict inline declarations for existing solid-paint/stroke/opacity fields, with explicit precedence/inheritance/token/resource contracts; no stylesheet or general CSS support. No next feature/push/deploy/user-desktop work started. Earlier native/platform/IME gaps remain distinct.
+
+### E04 compound Gradient Colors multi-key editing — 2026-10-04 previous checkpoint
+
+- Same-paint click/Shift-click selection, earliest-frame rigid group Move, atomic group Delete/modes and internal Copy/Paste retain complete snapshots, ordered stop IDs, mode metadata and relative timing. Selected-old-frame overlap is allowed; unselected collisions reject. Deleting all keys bakes the explicit playhead sample; exact duplicate paste preserves Redo.
+- Clipboard/source/selection/action/transport and Shell-modal receipts prevent source-ABA reuse, pending-blur edits and repeated-delete layer fallthrough. Source-neutral navigation/repeated paste remain supported; schema54/57, LEP/VIEW/address and topology Hold policy are unchanged.
+- Final `e8a159a` passes all 12 gates: 1,733 default + 32 media tests, vendor/font/check/format and normal release. Independent tests make 2,080 exact RGBA pairs; final generated CLI makes 780 renders/624 pairs, including 312 previous/current-release pairs. The 353 generated files remain immutable. Build `20261004.203455-f5679af4662cfe8a` matched About.
+- Initial `a4bc33f` native selection exposed intrinsic help width stretching the lane relative to its ruler. No saves were made there. The narrow three-file layout correction was fully regated and actual final selection kept markers aligned. All ten actual saves are attributed to `e8a159a` and pass full source/VIEW plus 13-frame checks (650 exact RGBA pairs/62,400,000 pixels). Native covers group Move/history/guards, repeated paste/no-op Redo, subset/all-key Delete/bake/isolation, About/Search retirement and actual New→Open/resave. Files 04/10 preserve all 6,726 bytes; app is clean on `10-final-reopened90.lep`, frame 90. Final native CLI makes 390 renders/260 exact RGBA pairs/24,960,000 pixels; see [GRADIENT_MULTIKEY_ACCEPTANCE.md](GRADIENT_MULTIKEY_ACCEPTANCE.md).
+- E04 and the 77-ID inventory remain Partial. Pointer group drag/selection gestures, marquee/time scaling, compound Graph, Bezier/velocity, topology reconciliation, cross-paint bulk and cross-project Contents clipboard remain. Earlier native E02/E04, real IME/adversarial/held-input/platform/DPI/device gaps stay distinct. A verified full-history bundle will follow this documentation checkpoint before bounded pointer gestures or one advanced Text Animator selector; no next feature/push/deploy/user-desktop work started.
+
+### E04 compound Gradient Colors interpolation/Timeline — 2026-10-04 continuation
+
+- Added sparse outgoing Hold (default), Linear and Smoothstep modes with explicit ordered paint-local stop identity. Both independent rows must match; added/removed/reordered IDs hold until the next key with visible status. Signed-zero ties and exact endpoints stay intact. Non-Hold metadata requires schema 57; legacy Hold 54, LEP/VIEW/address contracts remain.
+- Dedicated Timeline lanes provide exact key selection/navigation, Move frame, Delete and modes. Source/action/transport/IME/pending guards and shared selection ownership prevent stale edits or whole-layer shortcut fallthrough. Properties modes/status wrap in narrow sidebars. Move Enter/Escape returns Timeline focus.
+- Final `0bad9d1` passes 1,690 default + 32 media tests, full vendor/check/format and normal release. Independent tests: 1,330 exact RGBA pairs; final generated CLI: 432 renders/288 pairs. Twelve actual saves pass full source/VIEW and nine-frame verification; final native CLI: 216 renders / 108 pairs. Initial `b0f6851` interactions and final narrow-focus rerun are attributed separately.
+- Build `20261004.194304-fb65ebd14f0ff145` matches About; actual New→Open/resave preserves all 4,514 bytes. App remains clean on `12-final-reopened.lep` at frame 30, old Text Animator save and GitHub preserved. See [GRADIENT_INTERPOLATION_ACCEPTANCE.md](GRADIENT_INTERPOLATION_ACCEPTANCE.md).
+- E04 remains Partial: compound multi-key/drag/clipboard/Graph, Bezier/velocity, topology reconciliation, bulk/cross-project and previous native/IME/platform/DPI/device gaps remain. No push/deploy or next feature started.
+
+### F03 paragraph indents and spacing — 2026-10-04 continuation
+
+- Added five layer-wide static values: left/right/first-line indents and space before/after. Shared flow covers renderer/output, caret/hit geometry, Fit and conversion without changing font shaping. Zero values stay sparse; nonzero source needs schema55, with LEP/VIEW unchanged.
+- Core source-preserving commands, guarded precise typed fields, one-use pending receipts and independent pixel/source/codec/caret tests are separate local commits. Exact no-op preserves Redo and all animated Source Text/typography/paint data.
+- Final f9e6e1b passed1590default +32media tests and all release gates. Nine actual native saves cover fields, history/no-op, invalid/valid pending-button input, Fit and real Open/resave. Explicit expected workspace references account only for opening Paragraph/closing Properties; complete source/VIEW remain exact.
+- See [PARAGRAPH_STYLE_ACCEPTANCE.md](PARAGRAPH_STYLE_ACCEPTANCE.md) for build identity, initial failure, pixel counts and native boundaries. F03 remains Partial; per-character/per-paragraph styles, justification and Text Animator remain. No push/deploy occurred.
+
+### E02 교차 경로 선택과 캔버스 affine — 2026-10-04 후속
+
+- 같은 layer의 enabled Bezier Contents 경로에 Shift-click/marquee/Ctrl+A와 현재 frame의 composition-axis move/scale/rotate를 연결했다. 고정 center pivot·corner handle·Shift 균등 scale/15도 rotation을 제공하며 기존 box-off 단일 path local 편집은 유지한다.
+- core`ba54bc3`는 sampled pose·다른 key·base/dormant/unused pose·unselected vertex·schema/assets와 no-op Redo를 보존하는 원자적 command다. disabled/locked/singular/범위·storage·metadata 한도를 검사한다. core14개, UI10개, 독립 guard9개와 source/render/codec7개 회귀를 추가했다.
+- UI`7c3e946`, 독립`14973a1`/`b5edb9e`, help-only`e5bad8c`/`8f3cc72`를 별도 로컬 커밋했다. source/view/action/transport receipts, transient preview 취소와 한 번의 post-dispatch selection 복원을 검증했다.
+- 전체1550개+media32 및 독립324 exact RGBA쌍(31,104,000pixel)을 검증했다. native 이동/균등 scale/90도 회전, Undo/Redo, no-op과 실제 Save/Open을 실행했다. 이동/scale의 실제 pointer 정밀도 차이는 literal 기대값을 바꾸지 않고 별도의 제한된 공통 affine 검증으로 기록한다. 회전/no-op/reopen은 전체 source/VIEW가 정확히 일치했다.
+- 최종 build pin·help ON/OFF/save smoke 및 정확한 native attribution은 [CROSS_PATH_ACCEPTANCE.md](CROSS_PATH_ACCEPTANCE.md)를 따른다. E02는 Partial이며 기존 all-stored-pose native, 실제 marked IME와 다른 OS/DPI/device 검증을 닫지 않는다. push/deploy는 하지 않았다.
+
+### E04 Contents sibling clipboard — 2026-10-04 후속
+
+- core `a70d6b8`는 같은 composition/FPS 안의 Contents 형제 snapshot Copy/Cut/Paste를 구현했다. 전체 subtree·keys/handles·미사용 path poses·Hold Colors와 local gradient IDs를 보존하며, Paste마다 destination layer-local node ID를 새로 할당한다. Cut/Paste는 하나의 atomic Undo이고 원본/최종 schema·metadata·lock·duration·ID/depth/node/key 한도를 검증한다.
+- UI `a0c3fa0`는 Group 내부 끝/마지막 선택 형제 뒤/root 끝 및 다른 Contents layer를 지원한다. local transform과 paint scope가 적용되므로 pixel 보존 이동은 아니다. clipboard는 session-local이며 key/layer payload와 상호 배타적이다. New/Open/Recovery에서 지운다.
+- 정확한 field/action/transport receipt, stale/IME/playback/held-key guard, text clipboard 및 mouse menu→Find command의 소유권을 보강했다. 취소된 pointer/menu receipt는 다음 정상 입력을 막지 않는다.
+- 독립 테스트 `851657d`는 source/history/VIEW/LEP와 13개 nine-frame scenario의 351 exact RGBA pair/33,696,000 pixels를 검증했다. 생성 fixture는 19 project/38 JSON+LEP이며 실제 native save와 구분한다. 최종 aggregate/release/native 범위와 build identity는 [CONTENTS_CLIPBOARD_ACCEPTANCE.md](CONTENTS_CLIPBOARD_ACCEPTANCE.md)를 따른다.
+- E04 전체는 Partial이다. Cross-composition/FPS conversion·OS/project clipboard·implicit legacy Shape conversion·cross-parent source selection, compound interpolation/Timeline lanes 및 bulk Colors는 별도 범위다. 이전 native47case 및 IME/platform/DPI gaps를 이 단계로 닫지 않는다.
+
+### E04 Hold Colors와 일괄 animation — 2026-10-04 후속
+
+- core `df4eded`는 색/불투명도 stop 전체를 Hold snapshot으로 저장한다. key마다 개수·순서를 바꿀 수 있으며 다른 key/endpoint는 유지한다. 기존 scalar stop animation은 명시적으로 거부해 손실 변환하지 않는다. 실제 representation만 schema54를 요구하고 LEP1/VIEW1·2/address1은 그대로다.
+- core `fa5585b`와 UI `0e67882`는 공통 numeric channel의 Enable/Disable/Add key/Remove key를 명시적으로 적용한다. mixed 선택의 반대 방향 toggle은 없고 각 member의 sample·다른 keys/handles를 보존한다. Disable은 전체 keys 제거를 알리고 final key 제거는 해당 member의 현재 값만 static으로 유지한다.
+- 새 Colors modal은 원본과 분리된 현재 sample을 편집한 뒤 한 Set/Undo로 제출한다. scalar full precision, stop 선택 generation/IME guard, fractional RGB의 displayed-value 복귀 no-op 및 signed-zero tie-order를 다룬다. source/selection/frame/action/transport와 성공한 pending-field receipt를 검사한다.
+- 최종 기본1470(Core498/Desktop966/helper6), 명시적 media32, fmt/all-target와 vendor debug/release/no-std가 통과했다. release/About `20261004.140046-f635623df359cd3b`와352개 source hash가 일치한다. 독립338 exact RGBA 쌍(32,448,000pixel), CLI 생성78render/48쌍 및 실제 native42render/21쌍이 통과했다. 실제 저장7개가 전체 source/VIEW와9frame 비교를 통과했고 compound Open/resave는 byte-identical이다. 네 일괄 action과 한 compound Fill modal/topology/Undo/Redo 범위를 native에서 검증했다.14case 전체 통과가 아니라 부분 qualification이다.
+- 최종 자동·릴리스·native 결과와 빌드 식별은 [CONTENTS_ANIMATION_ACCEPTANCE.md](CONTENTS_ANIMATION_ACCEPTANCE.md)에 기록한다. 기존47개 native backlog 및 실제 Korean marked IME/Windows/macOS/DPI 검증은 별개다. E04는 Partial이며 보간·Timeline compound lane·native retiming·bulk Colors·Contents clipboard는 남는다.
+
+### E04 공통 숫자 속성과 CI 안정화 — 2026-10-04 재개
+
+- 사용자 요청에 따라 기존 `codex/ae-workspace` 이력을 보존하고 분야별 로컬 커밋을 남겼다: CI oracle `4c38913`, 원자적 core `e1004ce`, 독립 render/codec 검증 `8ea6de4`, guarded UI `56ef417`. 새 커밋은 push하지 않았다.
+- 여러 Contents 형제 항목의 typed scalar 교집합을 정확한 공통 값 또는 Mixed로 표시한다. 표시 frame의 유한·범위 내 절대값을 한 Undo로 적용하며 static은 static, animated 변경은 현재 key만 갱신한다. 이미 같은 sample인 member, dormant 값/keys/handles, schema/assets와 전체 no-op Redo를 보존한다. 원본·최종 project/metadata, parent/ID/lock/범위/10,000-key 한도를 원자적으로 검증한다.
+- gradient stop ID는 대응 관계로 사용하지 않는다. 공통 endpoint, 모두 radial일 때 highlight, 모두 존재하는 Dash/Gap만 허용한다. compound Colors, bulk animation toggle, scrubbing, delta/world alignment와 recursive Group 편집은 포함하지 않았다. 기존 LEP1/VIEW1·2/address1/schema는 그대로다.
+- immutable source, selection serial, frame, transport, editor-action generation으로 stale/ABA/중복 callback을 거부한다. invalid 입력은 source text로 복원한다. 독립 리뷰에서 앞 필드 blur 후 다음 필드의 전체 선택이 caret으로 바뀌어 70→7080이 될 수 있음을 찾아, pending/marked text가 없고 source display가 같은 경우에만 selection을 보존하도록 고쳤다. 실제 IME와 native event는 별도 gate다.
+- 최종 headless 기본 **1407개(Core472/Desktop929/helper6)**, 명시적 media32, fmt/all-target check를 통과했다. grid debug/release 각각 unit215+doc43(ignored doc2), no-std check도 통과했다. 독립 literal tracks/공식 LEP codec/15frame의45 exact RGBA 쌍(4,320,000pixel), 실제 EditorState Graph pin/range 보존을 검증했다. 첫 신규 test fixture의 source-order/signed-zero·화면 밖 geometry 준비 오류만 수정했고 assertion을 줄이지 않았다.
+- 이전 Windows CI의 frame30 전체 로그에서 path 좌표15곳만1–2ULP 차이를 확인했다. immutable oracle는 그대로 두고 path d 숫자에만2ULP를 허용하며 다른 모든 byte와 같은 runtime의 no-op Trim identity는 정확히 유지한다. renderer와 pixel assertion은 바꾸지 않았다. 새 Windows CI 통과를 의미하지 않는다.
+- 일반 release 빌드 `20261004.124444-7f1ec73f65e6e1c8`와 실행 중 About을 확인했다. CLI는 생성 fixture60render/30exact쌍(2,880,000pixel) 및 실제 native 저장파일30render/15exact쌍(1,440,000pixel)이 통과했다. native paste+Enter/blur·Mixed·연속 field·empty/Escape/no-op/Redo·lock/playback read-only와 실제 Save/Open/resave를 검증했다. 세 native 저장파일의 전체 source가 독립 기대 문서와 일치했고 다시 열어 저장한 LEP 전체 byte도 같았다. 직접 문자 입력/real Korean IME·tree-blur/hierarchy·paint/gradient 전용UI·일부 invalid/stale/modal·Windows/DPI는 미검증이다. 원래8case 계획은 부분 qualification이며 이전47개 native backlog는 그대로다. 상세 matrix는 BULK_FIELDS_ACCEPTANCE.md를 따른다. E04 전체를 완료로 바꾸지 않는다.
 
 ### E04 교차 부모 Contents 드래그 — 2026-10-04, headless 검증 완료·native 대기
 

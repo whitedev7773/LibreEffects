@@ -1,217 +1,43 @@
 //! Transactional point-text editing. The live document changes only at commit.
 use libre_effects_core::{Affine, Command, Content, Editor, Frame, LayerId, Project, Property};
+#[cfg(test)]
 use std::ops::Range;
+use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(test)]
 use unicode_segmentation::UnicodeSegmentation;
 #[path = "text_layout.rs"]
 pub(crate) mod layout;
 
+pub(crate) use libre_effects_editor_model::text_buffer::Buffer;
+
+static NEXT_TEXT_SESSION: AtomicU64 = AtomicU64::new(1);
+
+/// A picker or field owns one exact draft selection, including its history epoch.
 #[derive(Clone, Debug, PartialEq)]
-struct Snapshot {
-    text: String,
-    anchor: usize,
-    caret: usize,
+pub(crate) struct SelectionTarget {
+    serial: u64,
+    generation: u64,
+    range: std::ops::Range<usize>,
+    id: LayerId,
+    frame: Frame,
 }
-#[derive(Clone, Debug)]
-pub(crate) struct Buffer {
-    pub text: String,
-    pub anchor: usize,
-    pub caret: usize,
-    pub marked: Option<Range<usize>>,
-    undo: Vec<Snapshot>,
-    redo: Vec<Snapshot>,
-}
-impl Buffer {
-    pub fn new(text: String) -> Self {
-        let end = text.len();
-        Self {
-            text,
-            anchor: end,
-            caret: end,
-            marked: None,
-            undo: vec![],
-            redo: vec![],
-        }
+impl SelectionTarget {
+    pub fn binding(&self, field: &str) -> String {
+        format!("text-selection:{}:{}:{field}", self.serial, self.generation)
     }
-    pub fn selection(&self) -> Range<usize> {
-        self.anchor.min(self.caret)..self.anchor.max(self.caret)
-    }
-    pub fn byte(&self, units: usize) -> usize {
-        let mut count = 0;
-        for (i, c) in self.text.char_indices() {
-            if count + c.len_utf16() > units {
-                return i;
-            }
-            count += c.len_utf16();
-        }
-        self.text.len()
-    }
-    pub fn utf16(&self, range: Range<usize>) -> Range<usize> {
-        self.text[..range.start].encode_utf16().count()
-            ..self.text[..range.end].encode_utf16().count()
-    }
-    fn snapshot(&self) -> Snapshot {
-        Snapshot {
-            text: self.text.clone(),
-            anchor: self.anchor,
-            caret: self.caret,
-        }
-    }
-    fn restore(&mut self, s: Snapshot) {
-        self.text = s.text;
-        self.anchor = s.anchor;
-        self.caret = s.caret;
-        self.marked = None;
-    }
-    pub fn history(&mut self, redo: bool) {
-        self.marked = None;
-        if let Some(s) = if redo {
-            self.redo.pop()
-        } else {
-            self.undo.pop()
-        } {
-            let now = self.snapshot();
-            if redo {
-                self.undo.push(now);
-            } else {
-                self.redo.push(now);
-            }
-            self.restore(s);
-        }
-    }
-    pub fn replace(
-        &mut self,
-        range: Option<Range<usize>>,
-        text: &str,
-        mark: bool,
-        selected: Option<Range<usize>>,
-    ) -> Result<(), String> {
-        let range = range
-            .map(|r| self.byte(r.start)..self.byte(r.end))
-            .unwrap_or_else(|| self.marked.clone().unwrap_or_else(|| self.selection()));
-        if range.start > range.end {
-            return Err("Invalid text selection".into());
-        }
-        let text = text.replace("\r\n", "\n").replace('\r', "\n");
-        let text: String = text
-            .chars()
-            .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
-            .collect();
-        if self.text.len() - (range.end - range.start) + text.len() > 16384 {
-            return Err("Text is limited to 16 KiB".into());
-        }
-        if self.marked.is_none() {
-            if self.undo.len() == 100 {
-                self.undo.remove(0);
-            }
-            self.undo.push(self.snapshot());
-            self.redo.clear();
-        }
-        let start = range.start;
-        let end = start + text.len();
-        self.text.replace_range(range, &text);
-        self.anchor = end;
-        self.caret = end;
-        self.marked = if mark && start < end {
-            Some(start..end)
-        } else {
-            None
-        };
-        if mark {
-            if let Some(s) = selected {
-                let base = self.text[..start].encode_utf16().count();
-                self.anchor = self.byte(base + s.start).min(end);
-                self.caret = self.byte(base + s.end).min(end);
-            }
-        }
-        Ok(())
-    }
-    pub fn select(&mut self, at: usize, extend: bool) {
-        self.marked = None;
-        self.caret = at.min(self.text.len());
-        while !self.text.is_char_boundary(self.caret) {
-            self.caret -= 1;
-        }
-        if !extend {
-            self.anchor = self.caret;
-        }
-    }
-    pub fn all(&mut self) {
-        self.marked = None;
-        self.anchor = 0;
-        self.caret = self.text.len();
-    }
-    pub fn step(&mut self, right: bool, extend: bool) {
-        let range = self.selection();
-        let at = if !extend && !range.is_empty() {
-            if right { range.end } else { range.start }
-        } else if right {
-            self.text[self.caret..]
-                .graphemes(true)
-                .next()
-                .map_or(self.caret, |g| self.caret + g.len())
-        } else {
-            self.text[..self.caret]
-                .grapheme_indices(true)
-                .last()
-                .map_or(0, |(i, _)| i)
-        };
-        self.select(at, extend);
-    }
-    pub fn delete(&mut self, forward: bool) -> Result<(), String> {
-        if self.selection().is_empty() {
-            self.step(forward, true);
-        }
-        self.replace(None, "", false, None)
-    }
-    pub fn word(&mut self, right: bool, extend: bool) {
-        let at = if right {
-            self.text
-                .unicode_word_indices()
-                .map(|(i, _)| i)
-                .find(|i| *i > self.caret)
-                .unwrap_or(self.text.len())
-        } else {
-            self.text
-                .unicode_word_indices()
-                .map(|(i, _)| i)
-                .take_while(|i| *i < self.caret)
-                .last()
-                .unwrap_or(0)
-        };
-        self.select(at, extend);
-    }
-    pub fn select_word(&mut self, at: usize) {
-        let at = at.min(self.text.len());
-        let range = self
-            .text
-            .split_word_bound_indices()
-            .map(|(i, s)| i..i + s.len())
-            .find(|r| r.contains(&at))
-            .unwrap_or(at..at);
-        self.select(range.start, false);
-        self.select(range.end, true);
-    }
-    pub fn select_line(&mut self, at: usize) {
-        self.select(at, false);
-        self.line_edge(false, false, false);
-        self.line_edge(true, false, true);
-        if self.caret < self.text.len() {
-            self.caret += 1;
-        }
-    }
-    pub fn line_edge(&mut self, end: bool, document: bool, extend: bool) {
-        let at = if document {
-            if end { self.text.len() } else { 0 }
-        } else if end {
-            self.text[self.caret..]
-                .find('\n')
-                .map_or(self.text.len(), |i| self.caret + i)
-        } else {
-            self.text[..self.caret].rfind('\n').map_or(0, |i| i + 1)
-        };
-        self.select(at, extend);
+    pub fn current(&self, state: &crate::editor::EditorState) -> bool {
+        state.text_session.as_ref().is_some_and(|session| {
+            session.valid(state.editor.project(), state.document_revision, state.frame)
+                && session.serial == self.serial
+                && session.buffer.generation() == self.generation
+                && session.buffer.selection() == self.range
+                && session.buffer.marked.is_none()
+                && session.id == self.id
+                && session.frame == self.frame
+        })
     }
 }
+
 #[derive(Clone)]
 pub(crate) struct Session {
     pub buffer: Buffer,
@@ -228,8 +54,26 @@ pub(crate) struct Session {
     base: Project,
     seed: Vec<Command>,
     revision: u64,
+    serial: u64,
+    pub baseline_style: libre_effects_core::TextCharacterStyle,
+    format_error: Option<String>,
 }
 impl Session {
+    pub fn authored_spacing_reset(&self) -> bool {
+        self.base
+            .composition()
+            .layer(self.id)
+            .is_some_and(|layer| layer.has_authored_text_positions())
+            && self
+                .buffer
+                .rich_text
+                .as_ref()
+                .is_none_or(|rich| rich.positioning.is_none())
+    }
+
+    pub fn identity(&self) -> u64 {
+        self.serial
+    }
     pub fn line_edge(&mut self, end: bool, document: bool, extend: bool) {
         if document || !self.style.paragraph {
             self.buffer.line_edge(end, document, extend);
@@ -272,7 +116,30 @@ impl Session {
         let layout = layout::Layout::new(self);
         let mut p = self.caret_position(&layout);
         p[0] = *self.preferred_x.get_or_insert(p[0]);
-        p[1] += self.font_size * (0.5 + self.style.leading * if down { 1.0 } else { -1.0 });
+        // Use actual visual-line origins so paragraph spacing cannot trap Up/Down
+        // on the current line. Retain the existing point-text navigation path.
+        if self.style.paragraph || self.buffer.rich_text.is_some() {
+            p[1] = layout
+                .carets
+                .iter()
+                .map(|(_, q)| q[1])
+                .filter(|y| {
+                    if down {
+                        *y > p[1] + 0.001
+                    } else {
+                        *y < p[1] - 0.001
+                    }
+                })
+                .min_by(|a, b| (a - p[1]).abs().total_cmp(&(b - p[1]).abs()))
+                .unwrap_or(p[1]);
+            p[1] += if self.buffer.rich_text.is_some() {
+                layout.height_at(p) / 1.2 * 0.5
+            } else {
+                self.font_size * 0.5
+            };
+        } else {
+            p[1] += self.font_size * (0.5 + self.style.leading * if down { 1.0 } else { -1.0 });
+        }
         let (at, point) = layout.hit_caret(p);
         self.buffer.select(at, extend);
         self.caret_hint = Some((at, point));
@@ -358,6 +225,14 @@ impl Session {
         if layer.locked() {
             return Err("Unlock the text layer before editing".into());
         }
+        if layer.has_enabled_expression(libre_effects_core::ExpressionTarget::SourceText) {
+            return Err(
+                "Disable the Source Text expression before editing its visible text".into(),
+            );
+        }
+        if comp.layers().iter().any(|layer| layer.is_three_d()) {
+            return Err("Spatial composition text geometry is edited through scripting".into());
+        }
         let Some(text) = layer.source_text_at(frame) else {
             return Err("Select a text layer".into());
         };
@@ -368,8 +243,10 @@ impl Session {
         let typography = layer.text_typography_at(frame).unwrap();
         let mut style = layer.text_style();
         typography.apply_to_style(&mut style);
-        Ok(Self {
-            buffer: Buffer::new(text.into()),
+        let mut buffer = Buffer::new(text.into());
+        buffer.rich_text = layer.rich_text().cloned();
+        let session = Self {
+            buffer,
             id,
             frame,
             world,
@@ -382,10 +259,48 @@ impl Session {
             base: project.clone(),
             seed,
             revision,
-        })
+            serial: NEXT_TEXT_SESSION.fetch_add(1, Ordering::Relaxed),
+            baseline_style: layer.base_character_style().unwrap(),
+            format_error: layer.rich_text_eligibility().err(),
+        };
+        if let Some(error) = &layout::Layout::new(&session).error {
+            return Err(error.clone());
+        }
+        Ok(session)
     }
     pub fn valid(&self, project: &Project, revision: u64, frame: Frame) -> bool {
         self.revision == revision && self.frame == frame && &self.base == project
+    }
+    pub fn selection_target(&self) -> Result<SelectionTarget, String> {
+        if self.style.paragraph {
+            return Err("Character selections currently require point text".into());
+        }
+        if let Some(error) = &self.format_error {
+            return Err(error.clone());
+        }
+        if self.buffer.marked.is_some() {
+            return Err("Finish composing text before formatting a selection".into());
+        }
+        self.buffer.selection_style(&self.baseline_style)?;
+        Ok(SelectionTarget {
+            serial: self.serial,
+            generation: self.buffer.generation(),
+            range: self.buffer.selection(),
+            id: self.id,
+            frame: self.frame,
+        })
+    }
+    pub fn format_selection(
+        &mut self,
+        patch: &libre_effects_core::TextCharacterPatch,
+    ) -> Result<bool, String> {
+        self.selection_target()?;
+        let changed = self.buffer.format_selection(&self.baseline_style, patch)?;
+        if changed {
+            self.preferred_x = None;
+            self.caret_hint = None;
+        }
+        Ok(changed)
     }
     pub fn changed(&self) -> bool {
         if !self.seed.is_empty() {
@@ -394,6 +309,7 @@ impl Session {
             self.base.composition().layer(self.id).is_some_and(|l| {
                 l.source_text_at(self.frame)
                     .is_some_and(|text| text != self.buffer.text)
+                    || l.rich_text() != self.buffer.rich_text.as_ref()
                     || (self.style.paragraph
                         && (l.width() != self.width || l.height() != self.height))
             })
@@ -404,11 +320,32 @@ impl Session {
         if self.seed.is_empty() {
             // Edit from the immutable frame sample. Repeated previews operate on
             // fresh clones, so their interned drafts cannot grow the live pool.
-            commands.push(Command::EditSourceText {
-                id: self.id,
-                frame: self.frame,
-                text: self.buffer.text.clone(),
-            });
+            let source_changed = self
+                .base
+                .composition()
+                .layer(self.id)
+                .and_then(|layer| layer.source_text_at(self.frame))
+                != Some(self.buffer.text.as_str());
+            if let Some(rich_text) = &self.buffer.rich_text {
+                if source_changed {
+                    commands.push(Command::SetStyledText {
+                        id: self.id,
+                        text: self.buffer.text.clone(),
+                        rich_text: rich_text.clone(),
+                    });
+                } else {
+                    commands.push(Command::SetRichText {
+                        id: self.id,
+                        rich_text: Some(rich_text.clone()),
+                    });
+                }
+            } else if source_changed {
+                commands.push(Command::EditSourceText {
+                    id: self.id,
+                    frame: self.frame,
+                    text: self.buffer.text.clone(),
+                });
+            }
         } else {
             commands.push(Command::SetContent {
                 id: self.id,
@@ -416,6 +353,12 @@ impl Session {
                     text: self.buffer.text.clone(),
                     font_size: self.font_size,
                 },
+            });
+        }
+        if !self.seed.is_empty() && self.buffer.rich_text.is_some() {
+            commands.push(Command::SetRichText {
+                id: self.id,
+                rich_text: self.buffer.rich_text.clone(),
             });
         }
         if self.style.paragraph
@@ -443,6 +386,10 @@ impl Session {
 #[cfg(test)]
 #[path = "source_text_session_tests.rs"]
 mod source_text_tests;
+
+#[cfg(test)]
+#[path = "selected_text_session_tests.rs"]
+mod selected_text_tests;
 
 #[cfg(test)]
 #[path = "text_paint_session_tests.rs"]
@@ -513,6 +460,24 @@ mod tests {
         );
     }
     #[test]
+    fn paragraph_vertical_navigation_crosses_large_spacing_and_empty_paragraphs() {
+        let mut s = Session::new_box(&Project::default(), 0, 0, [0.0, 0.0, 500.0, 5000.0]).unwrap();
+        s.style.paragraph_space_before = 500.0;
+        s.style.paragraph_space_after = 800.0;
+        s.style.paragraph_left_indent = 30.0;
+        s.style.paragraph_first_line_indent = -10.0;
+        s.buffer.replace(None, "AB\n\nCD", false, None).unwrap();
+        s.buffer.select(0, false);
+        s.vertical(true, false);
+        assert_eq!(s.buffer.caret, 3);
+        s.vertical(true, false);
+        assert_eq!(s.buffer.caret, 4);
+        s.vertical(false, false);
+        assert_eq!(s.buffer.caret, 3);
+        s.vertical(false, false);
+        assert_eq!(s.buffer.caret, 0);
+    }
+    #[test]
     fn vertical_motion_remembers_the_original_column_across_short_lines() {
         let mut s = Session::new(&Project::default(), 0, 0, None, [0.0; 2]).unwrap();
         s.buffer
@@ -558,6 +523,48 @@ mod tests {
         assert_eq!(&b.text[b.selection()], "first 한글\n");
         b.select_line(b.text.len());
         assert_eq!(&b.text[b.selection()], "second line");
+    }
+
+    #[test]
+    fn editing_existing_mixed_breaks_preserves_bytes_and_utf16_positions() {
+        use libre_effects_core::text_paragraphs::paragraphs;
+        let text = "English\r日本語👩‍💻\r\n한국어\n\r끝\r\n";
+        let mut buffer = Buffer::new(text.into());
+        for paragraph in paragraphs(text) {
+            buffer.select(paragraph.range.start, false);
+            buffer.line_edge(true, false, false);
+            assert_eq!(buffer.caret, paragraph.range.end);
+            buffer.line_edge(false, false, false);
+            assert_eq!(buffer.caret, paragraph.range.start);
+            buffer.select_line(paragraph.range.start);
+            assert_eq!(buffer.selection(), paragraph.source_range());
+            let utf16 = buffer.utf16(paragraph.source_range());
+            assert_eq!(buffer.byte(utf16.start), paragraph.range.start);
+            assert_eq!(buffer.byte(utf16.end), paragraph.terminator.end);
+        }
+        let crlf = text.find("\r\n").unwrap();
+        let utf16 = buffer.utf16(crlf..crlf + 2);
+        assert_eq!(utf16.end - utf16.start, 2);
+        assert_eq!(buffer.byte(utf16.start + 1), crlf + 1);
+        buffer.select(crlf + 1, false);
+        buffer.line_edge(true, false, false);
+        assert_eq!(buffer.caret, crlf);
+        buffer.select(crlf + 2, false);
+        buffer.step(false, true);
+        assert_eq!(buffer.selection(), crlf..crlf + 2);
+        buffer.delete(false).unwrap();
+        assert_eq!(
+            buffer.text,
+            format!("{}{}", &text[..crlf], &text[crlf + 2..])
+        );
+        buffer.history(false);
+        assert_eq!(buffer.text, text);
+        // Native input replaces only the selected original byte range; all
+        // authored break styles and the unaffected source keep their offsets.
+        buffer.replace(Some(0..7), "Changed", false, None).unwrap();
+        assert_eq!(&buffer.text[7..], &text[7..]);
+        buffer.history(false);
+        assert_eq!(buffer.text, text);
     }
 
     #[test]
@@ -699,3 +706,7 @@ mod tests {
         assert!(Session::new(e.project(), 4, 0, Some(id), [0.0; 2]).is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "point_text_tests.rs"]
+mod point_text_tests;

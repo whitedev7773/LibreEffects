@@ -83,6 +83,7 @@ fn clone_editor(e: &Editor) -> Editor {
         current: e.current.clone(),
         undo: e.undo.clone(),
         redo: e.redo.clone(),
+        context_generation: e.context_generation,
     }
 }
 

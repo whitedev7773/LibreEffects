@@ -160,6 +160,7 @@ impl Layer {
         &self.source_text_animation
     }
     pub(super) fn bake_source_text(&mut self, text: String) -> Result<(), String> {
+        rich_text::replace_source(self, &text)?;
         let Content::Text { text: base, .. } = &mut self.content else {
             return Err("Source Text requires a text layer".into());
         };

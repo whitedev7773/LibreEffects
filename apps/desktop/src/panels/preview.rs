@@ -14,7 +14,7 @@ use std::{cell::Cell, rc::Rc};
 mod transform_gesture;
 use crate::viewer_tools::{self, Channel, RULER, ViewOption};
 use libre_effects_core::{Guide, GuideAxis};
-use transform_gesture::{TransformGesture, handles};
+use transform_gesture::{TransformGesture, layer_corners, layer_handles, layer_snap_points};
 #[path = "preview_render.rs"]
 mod preview_render;
 #[path = "shape_gesture.rs"]
@@ -26,10 +26,15 @@ use shape_gesture::ShapeGesture;
 mod contents_cross_parent_gesture_tests;
 #[path = "gradient_gesture.rs"]
 mod gradient_gesture;
+#[path = "../projected_selection.rs"]
+mod projected_selection;
 #[path = "text_box.rs"]
 mod text_box;
 #[path = "text_input.rs"]
 mod text_input;
+#[cfg(test)]
+use projected_selection::point_in_quad;
+use projected_selection::{projected_control_order, projected_layer_hit};
 
 /// Point text falls back to the layer box only when the current Hold sample
 /// is empty. The static baseline may contain a different string.
@@ -129,8 +134,10 @@ pub(crate) struct Preview {
     pending: Option<Request>,
     gradient_render_context: Option<preview_render::GradientContext>,
     decoder_revision: u64,
-    ready: Option<(Request, Result<image::RgbaImage, String>)>,
-    failed: Option<(libre_effects_core::Project, u32, u32, String)>,
+    ready: Option<(Request, Result<crate::rendering::RenderedFrame, String>)>,
+    // Only the displayed frame retains its evaluated scene, never every RAM frame.
+    displayed: Option<(Request, Option<std::sync::Arc<libre_effects_core::Project>>)>,
+    failed: Option<(Request, String)>,
     cached: Option<(
         libre_effects_core::Project,
         u32,
@@ -141,8 +148,42 @@ pub(crate) struct Preview {
 /// No canvas, ruler, text, guide, or toolbar-menu gesture may run behind either
 /// isolated geometry/paint modal, including a late release from an earlier drag.
 fn preview_modal_active(state: &EditorState) -> bool {
-    state.gradient_editor.is_some() || state.vertex_editor.is_some()
+    state.gradient_editor.is_some()
+        || state.vertex_editor.is_some()
+        || state.expression_editor.is_some()
 }
+/// Canvas edits are authored-coordinate operations. Expression scenes remain
+/// selectable through their evaluated bounds, while authoring uses explicit base
+/// values in the Inspector until evaluated-coordinate editing is implemented.
+fn expression_scene_active(state: &EditorState) -> bool {
+    state
+        .editor
+        .project()
+        .expression_roots(
+            state.editor.project().active_composition_id(),
+            state.frame,
+            true,
+        )
+        .map_or(true, |roots| !roots.is_empty())
+}
+fn spatial_scene_active(state: &EditorState) -> bool {
+    state
+        .editor
+        .project()
+        .composition()
+        .layers()
+        .iter()
+        .any(|layer| layer.has_joined_position())
+}
+fn canvas_read_only_message(state: &EditorState) -> &'static str {
+    if spatial_scene_active(state) {
+        "Spatial preview: select layers here; edit geometry through scripting. Hand and Zoom remain available"
+    } else {
+        EXPRESSION_CANVAS_READ_ONLY
+    }
+}
+const EXPRESSION_CANVAS_READ_ONLY: &str = "Expression-driven preview: select evaluated layers here; edit authored values in the Inspector";
+
 /// Outside mouse-up runs during GPUI capture, including when a modal occludes
 /// the canvas. A blocked release must remain untouched so the modal receives its
 /// own button click. Only invoke the canvas handler when no modal owns input.
@@ -184,20 +225,6 @@ fn vertex_overlay(
             )]
         })
         .unwrap_or_default()
-}
-fn point_in_quad(p: [f64; 2], corners: [[f64; 2]; 4]) -> bool {
-    let mut positive = false;
-    let mut negative = false;
-    let mut area = 0.0;
-    for i in 0..4 {
-        let a = corners[i];
-        let b = corners[(i + 1) % 4];
-        let cross = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
-        positive |= cross > 0.0;
-        negative |= cross < 0.0;
-        area += a[0] * b[1] - b[0] * a[1];
-    }
-    area.abs() > 0.001 && !(positive && negative)
 }
 fn geometry(
     bounds: Bounds<Pixels>,
@@ -242,22 +269,9 @@ fn pen_view(bounds: Option<Bounds<Pixels>>, state: &EditorState) -> Option<super
     );
     Some(super::pen::View::new(bounds, origin, zoom, state))
 }
-fn controls_active(
-    comp: &libre_effects_core::Composition,
-    layer: &libre_effects_core::Layer,
-    frame: u32,
-    selected: bool,
-) -> bool {
-    !matches!(layer.content(), libre_effects_core::Content::Audio { .. })
-        && (comp.layer_active(layer, frame, true)
-            || (selected
-                && frame >= layer.in_frame()
-                && frame < layer.out_frame(comp.duration())
-                && comp
-                    .layers()
-                    .iter()
-                    .any(|l| l.track_matte().is_some_and(|m| m.source == layer.id()))))
-}
+use libre_effects_editor_model::preview_scene::{
+    controls_active, selection_has_expression_transform,
+};
 
 impl Preview {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
@@ -296,6 +310,7 @@ impl Preview {
             gradient_render_context: None,
             decoder_revision: 0,
             ready: None,
+            displayed: None,
             failed: None,
             cached: None,
         }
@@ -344,9 +359,8 @@ impl Preview {
     }
     fn cache_pixels(
         &mut self,
-        project: libre_effects_core::Project,
-        frame: u32,
-        dimension: u32,
+        request: Request,
+        evaluated: Option<std::sync::Arc<libre_effects_core::Project>>,
         pixels: std::sync::Arc<image::RgbaImage>,
         channel: Channel,
         window: &mut Window,
@@ -358,11 +372,111 @@ impl Preview {
         self.raw = Some(pixels);
         self.display_channel = channel;
         self.cached = Some((
-            project,
-            frame,
-            dimension,
+            request.project.clone(),
+            request.frame,
+            request.dimension,
             std::sync::Arc::new(gpui::RenderImage::new(vec![image::Frame::new(display)])),
         ));
+        self.displayed = Some((request, evaluated));
+    }
+    fn canvas_geometry_read_only(&self, state: &EditorState) -> bool {
+        spatial_scene_active(state)
+            || expression_scene_active(state)
+            || selection_has_expression_transform(
+                state.editor.project().composition(),
+                state.selected_layers.iter().copied(),
+            )
+            || self
+                .displayed
+                .as_ref()
+                .is_some_and(|(_, view)| view.is_some())
+    }
+    fn current_scene<'a>(&'a self, state: &EditorState) -> Option<&'a libre_effects_core::Project> {
+        let (shown, evaluated) = self.displayed.as_ref()?;
+        let comp = state.editor.project().composition();
+        let dimension =
+            (comp.width().max(comp.height()).min(1280) / state.preview_resolution).max(1);
+        if shown.project != *state.editor.project()
+            || shown.frame != state.frame
+            || shown.dimension != dimension
+            || shown.revision != state.preview_revision
+            || shown.document_revision != state.document_revision
+            || shown.core_generation != state.editor.context_generation()
+            || shown.transport != state.transport_generation()
+            || shown.gradient_gesture.is_some()
+        {
+            return None;
+        }
+        shown.validate_evaluated_view(evaluated.as_deref()).ok()?;
+        Some(evaluated.as_deref().unwrap_or(&shown.project))
+    }
+    fn select_evaluated(
+        &mut self,
+        event: &MouseDownEvent,
+        point: [f64; 2],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let state = self.state.read(cx);
+        let Some(scene) = self.current_scene(state).filter(|_| !state.playing) else {
+            self.state.update(cx, |state, cx| {
+                state.status =
+                    "Pause and wait for the current rendered frame before selecting".into();
+                cx.notify();
+            });
+            return;
+        };
+        let comp = scene.composition();
+        let frame = state.frame;
+        // Hit-test the very same projection and paint order used for pixels.
+        // Selection does not require the legacy 2D position-space inverse.
+        let hit = match projected_layer_hit(comp, frame, point, &state.selected_layers, |layer| {
+            transform_gesture::layer_bounds(layer, frame)
+        }) {
+            Ok(hit) => hit,
+            Err(error) => {
+                self.state.update(cx, |state, cx| {
+                    state.status = error;
+                    cx.notify();
+                });
+                return;
+            }
+        };
+        self.state.update(cx, |state, cx| {
+            if let Some(id) = hit {
+                if event.modifiers.control
+                    || event.modifiers.shift
+                    || !state.selected_layers.contains(&id)
+                {
+                    state.dispatch(
+                        &Action::SelectMany(id, event.modifiers.control, event.modifiers.shift),
+                        window,
+                        cx,
+                    );
+                }
+            } else if !event.modifiers.control && !event.modifiers.shift {
+                state.editor.clear_selection();
+                state.selected_layers.clear();
+                state.selected_keys.clear();
+            }
+            state.status = canvas_read_only_message(state).into();
+            cx.notify();
+        });
+    }
+    /// Preserve view-only panning, but abandon every draft that could publish an
+    /// authored-coordinate edit after an expression becomes active mid-gesture.
+    fn cancel_expression_gestures(&mut self) {
+        self.gesture = self
+            .gesture
+            .take()
+            .filter(|gesture| gesture.layer.is_none());
+        self.pen.cancel();
+        self.drawing = None;
+        self.guide_gesture = None;
+        self.gradient_drag = None;
+        self.text_box_drag = None;
+        self.text_dragging = false;
+        self.text_resizing = false;
     }
     fn guide_update(&mut self, position: Point<Pixels>, cx: &Context<Self>) {
         let Some(bounds) = self.bounds.get() else {
@@ -426,10 +540,8 @@ impl Preview {
             {
                 return None;
             }
-            let (project, frame, _, _) = self.cached.as_ref()?;
-            if project != state.editor.project() || *frame != state.frame {
-                return None;
-            }
+            let project = self.current_scene(state)?;
+            let frame = state.frame;
             let comp = project.composition();
             let (zoom, origin) = geometry(
                 bounds,
@@ -446,7 +558,7 @@ impl Preview {
                     f64::from(f32::from(position.x - origin.x) / zoom),
                     f64::from(f32::from(position.y - origin.y) / zoom),
                 ],
-                *frame,
+                frame,
             )?;
             Some((
                 state.document_revision,
@@ -480,6 +592,32 @@ impl Preview {
         ])
     }
     fn down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.state.read(cx).tool == Tool::Pen
+            && !self.state.read(cx).colors.picking()
+            && self.state.read(cx).text_session.is_none()
+            && !super::pen::pointer_input_allowed(
+                self.state.read(cx),
+                event.button == MouseButton::Left,
+                window.is_window_active(),
+                TextField::is_composing(window, cx),
+                TextField::active_pending_binding(cx).is_some(),
+            )
+        {
+            self.pen.abandon_pointer();
+            if TextField::active_pending_binding(cx).is_some()
+                || TextField::is_composing(window, cx)
+            {
+                self.state.update(cx, |s, cx| {
+                    s.status =
+                        "Finish or cancel the active text field before editing Pen points".into();
+                    cx.notify();
+                });
+            }
+            window.prevent_default();
+            cx.stop_propagation();
+            cx.notify();
+            return;
+        }
         if preview_modal_active(self.state.read(cx)) {
             cx.stop_propagation();
             return;
@@ -490,6 +628,7 @@ impl Preview {
         self.pen.reset_if_stale(state);
         self.pen.validate_view(pen_view(self.bounds.get(), state));
         self.pen.abandon_pointer();
+        self.text_box_drag = None;
         if self.state.read(cx).colors.picking() {
             self.sample_pointer(event.position, cx);
             self.state.update(cx, |s, cx| {
@@ -532,6 +671,44 @@ impl Preview {
             f32::from(event.position.x - origin.x) as f64 / zoom as f64,
             f32::from(event.position.y - origin.y) as f64 / zoom as f64,
         ];
+        if self.canvas_geometry_read_only(state) {
+            let tool = state.tool;
+            let selection = tool == Tool::Select && state.text_session.is_none();
+            self.cancel_expression_gestures();
+            if tool == Tool::Hand {
+                self.gesture = Some(MoveGesture {
+                    start: event.position,
+                    delta: point(px(0.), px(0.)),
+                    layer: None,
+                    targets: Vec::new(),
+                    frame,
+                    zoom,
+                    pan,
+                    pointer: p,
+                    transform: None,
+                    constrained: false,
+                    moved: false,
+                    snap_points: Vec::new(),
+                });
+            } else if tool == Tool::Zoom {
+                self.state.update(cx, |state, cx| {
+                    state.dispatch(
+                        &Action::ZoomPreview(if event.modifiers.alt { 0.5 } else { 2.0 }),
+                        window,
+                        cx,
+                    );
+                });
+            } else if selection {
+                self.select_evaluated(event, p, window, cx);
+            } else {
+                self.state.update(cx, |state, cx| {
+                    state.status = canvas_read_only_message(state).into();
+                    cx.notify();
+                });
+            }
+            cx.stop_propagation();
+            return;
+        }
         if state.viewer.rulers
             && (event.position.x < bounds.left() + px(RULER)
                 || event.position.y < bounds.top() + px(RULER))
@@ -603,7 +780,17 @@ impl Preview {
                 .filter(|_| !(state.tool == Tool::Text && event.modifiers.shift));
             if id.is_some() || state.tool == Tool::Text {
                 if id.is_none() {
-                    self.text_box_drag = Some(text_box::TextBoxDrag::new(p, origin, zoom, state));
+                    // Freeze the visible frame before capturing insertion guards,
+                    // just as editing an existing text layer stops playback.
+                    self.state
+                        .update(cx, |s, cx| s.dispatch(&Action::Seek(frame), window, cx));
+                    self.text_box_drag = Some(text_box::TextBoxDrag::new(
+                        p,
+                        origin,
+                        zoom,
+                        bounds,
+                        self.state.read(cx),
+                    ));
                     cx.stop_propagation();
                     cx.notify();
                     return;
@@ -628,12 +815,11 @@ impl Preview {
                 Some(super::pen::View::new(bounds, origin, zoom, state)),
                 event.modifiers,
             );
-            self.state.update(cx, |s, cx| {
-                s.dispatch(&Action::Seek(frame), window, cx);
-                if let Some(command) = command {
-                    s.dispatch(&Action::Edit(command), window, cx);
-                }
-            });
+            if let Some(command) = command {
+                self.state
+                    .update(cx, |s, cx| s.dispatch(&Action::Edit(command), window, cx));
+                self.pen.did_commit(self.state.read(cx));
+            }
             cx.notify();
             return;
         }
@@ -683,11 +869,15 @@ impl Preview {
                 let world = comp.world_transform(l.id(), frame)?;
                 let points = if state.tool == Tool::Anchor {
                     vec![[
-                        l.property(Property::AnchorX).value_at(frame),
-                        l.property(Property::AnchorY).value_at(frame),
+                        l.property(Property::AnchorX)
+                            .expect("Anchor remains scalar")
+                            .value_at(frame),
+                        l.property(Property::AnchorY)
+                            .expect("Anchor remains scalar")
+                            .value_at(frame),
                     ]]
                 } else if state.tool == Tool::Select {
-                    handles(l.width(), l.height()).to_vec()
+                    layer_handles(l, frame).to_vec()
                 } else {
                     Vec::new()
                 };
@@ -697,38 +887,23 @@ impl Preview {
                         .then_some((l.id(), index))
                 })
             });
+        let projected_hit =
+            match projected_layer_hit(comp, frame, p, &state.selected_layers, |layer| {
+                transform_gesture::layer_bounds(layer, frame)
+            }) {
+                Ok(hit) => hit,
+                Err(error) => {
+                    self.state.update(cx, |state, cx| {
+                        state.status = error;
+                        cx.notify();
+                    });
+                    return;
+                }
+            };
         let hit = handle_hit
             .and_then(|(id, _)| comp.layer(id))
-            .or_else(|| {
-                comp.layers().iter().find(|l| {
-                    state.selected_layers.contains(&l.id())
-                        && !l.locked()
-                        && !comp.layer_active(l, frame, true)
-                        && controls_active(comp, l, frame, true)
-                        && comp
-                            .corners_at(l.id(), frame)
-                            .is_some_and(|corners| point_in_quad(p, corners))
-                })
-            })
-            .or_else(|| {
-                comp.layers().iter().find(|layer| {
-                    comp.layer_active(layer, frame, true)
-                        && !matches!(layer.content(), libre_effects_core::Content::Audio { .. })
-                        && !layer.locked()
-                        && comp
-                            .corners_at(layer.id(), frame)
-                            .is_some_and(|corners| point_in_quad(p, corners))
-                })
-            });
-        let (layer, _) = hit.map_or((None, [0.0, 0.0]), |layer| {
-            (
-                Some(layer.id()),
-                [
-                    layer.property(Property::PositionX).value_at(frame),
-                    layer.property(Property::PositionY).value_at(frame),
-                ],
-            )
-        });
+            .or_else(|| projected_hit.and_then(|id| comp.layer(id)));
+        let layer = hit.map(|layer| layer.id());
         let hand = state.tool == Tool::Hand;
         let inverse_space = layer
             .and_then(|id| comp.position_space(id, frame))
@@ -808,8 +983,8 @@ impl Preview {
                 Some((
                     l.id(),
                     [
-                        l.property(Property::PositionX).value_at(frame),
-                        l.property(Property::PositionY).value_at(frame),
+                        l.property(Property::PositionX)?.value_at(frame),
+                        l.property(Property::PositionY)?.value_at(frame),
                     ],
                     comp.position_space(l.id(), frame)?.inverse()?,
                 ))
@@ -817,8 +992,8 @@ impl Preview {
             .collect();
         let snap_points = targets
             .iter()
-            .filter_map(|(id, _, _)| comp.layer_bounds(*id, frame))
-            .flat_map(|[l, t, r, b]| [[l, t], [r, b], [(l + r) / 2.0, (t + b) / 2.0]])
+            .filter_map(|(id, _, _)| layer_snap_points(comp, *id, frame))
+            .flatten()
             .collect();
         if hand || layer.is_some() {
             self.gesture = Some(MoveGesture {
@@ -840,7 +1015,29 @@ impl Preview {
         }
         cx.notify();
     }
-    fn moving(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn moving(&mut self, event: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.canvas_geometry_read_only(self.state.read(cx)) {
+            self.cancel_expression_gestures();
+            self.sample_pointer(event.position, cx);
+            if self.gesture.is_none() {
+                return;
+            }
+        }
+        if self.state.read(cx).tool == Tool::Pen
+            && self.state.read(cx).text_session.is_none()
+            && !self.state.read(cx).colors.picking()
+            && (!super::pen::pointer_input_allowed(
+                self.state.read(cx),
+                event.pressed_button == Some(MouseButton::Left),
+                window.is_window_active(),
+                TextField::is_composing(window, cx),
+                TextField::active_pending_binding(cx).is_some(),
+            ) || !self.focus.is_focused(window))
+        {
+            self.pen.abandon_pointer();
+            cx.notify();
+            return;
+        }
         if preview_modal_active(self.state.read(cx)) {
             cx.stop_propagation();
             return;
@@ -856,6 +1053,11 @@ impl Preview {
         }
         if self.text_resizing {
             self.resize_text(event.position, cx);
+            return;
+        }
+        if self.text_box_drag.is_some() && event.pressed_button != Some(MouseButton::Left) {
+            self.text_box_drag = None;
+            cx.notify();
             return;
         }
         if let Some(drag) = &mut self.text_box_drag {
@@ -953,6 +1155,27 @@ impl Preview {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.canvas_geometry_read_only(self.state.read(cx)) {
+            self.cancel_expression_gestures();
+            if self.gesture.is_none() {
+                return;
+            }
+        }
+        if self.state.read(cx).tool == Tool::Pen
+            && self.state.read(cx).text_session.is_none()
+            && !self.state.read(cx).colors.picking()
+            && (!super::pen::pointer_input_allowed(
+                self.state.read(cx),
+                event.button == MouseButton::Left,
+                window.is_window_active(),
+                TextField::is_composing(window, cx),
+                TextField::active_pending_binding(cx).is_some(),
+            ) || !self.focus.is_focused(window))
+        {
+            self.pen.abandon_pointer();
+            cx.notify();
+            return;
+        }
         if self.gradient_drag.is_some() {
             self.update_gradient(
                 event.position,
@@ -976,7 +1199,10 @@ impl Preview {
         }
         if let Some(mut drag) = self.text_box_drag.take() {
             drag.update(event.position, event.modifiers.alt);
-            if drag.valid(self.state.read(cx)) {
+            if window.is_window_active()
+                && self.focus.is_focused(window)
+                && drag.valid(self.state.read(cx), self.bounds.get())
+            {
                 self.state
                     .update(cx, |s, cx| s.dispatch(&drag.action(), window, cx));
             }
@@ -1003,6 +1229,7 @@ impl Preview {
             if let Some(command) = command {
                 self.state
                     .update(cx, |s, cx| s.dispatch(&Action::Edit(command), window, cx));
+                self.pen.did_commit(self.state.read(cx));
             }
             cx.notify();
             return;
@@ -1085,12 +1312,14 @@ impl Render for Preview {
             self.gradient_focus_watch = Some([
                 cx.on_blur(&self.focus.clone(), window, |this, _, cx| {
                     this.gradient_drag = None;
+                    this.text_box_drag = None;
                     this.pen.cancel();
                     cx.notify();
                 }),
                 cx.observe_window_activation(window, |this, window, cx| {
                     if !window.is_window_active() {
                         this.gradient_drag = None;
+                        this.text_box_drag = None;
                         this.pen.cancel();
                         this.state.update(cx, |s, _| {
                             s.vertex_return = None;
@@ -1124,7 +1353,7 @@ impl Render for Preview {
         if self
             .text_box_drag
             .as_ref()
-            .is_some_and(|d| !d.valid(self.state.read(cx)))
+            .is_some_and(|d| !d.valid(self.state.read(cx), self.bounds.get()))
         {
             self.text_box_drag = None;
         }
@@ -1152,6 +1381,8 @@ impl Render for Preview {
         }
         if preview_modal_active(self.state.read(cx)) {
             self.cancel_canvas_gestures();
+        } else if self.canvas_geometry_read_only(self.state.read(cx)) {
+            self.cancel_expression_gestures();
         }
         let state = self.state.read(cx);
         self.pen.reset_if_stale(state);
@@ -1236,6 +1467,8 @@ impl Render for Preview {
         }
         let resolution = state.preview_resolution;
         let revision = state.preview_revision;
+        let document_revision = state.document_revision;
+        let core_generation = state.editor.context_generation();
         let playing = state.playing;
         let transport = state.transport_generation();
         let max_dimension = (comp.width().max(comp.height()).min(1280) / resolution).max(1);
@@ -1303,6 +1536,8 @@ impl Render for Preview {
             self.pen.overlay(state)
         };
         let pen_marquee = self.pen.marquee_overlay(state);
+        let pen_transform = pen_view(self.bounds.get(), state)
+            .and_then(|view| self.pen.transform_overlay(state, view.zoom()));
         if let Some(command) = self.gradient_drag.as_ref().and_then(|g| g.command(state)) {
             let mut temporary = libre_effects_core::Editor::default();
             if temporary.replace_project(render_project.clone()).is_ok()
@@ -1313,15 +1548,20 @@ impl Render for Preview {
         }
         let gradient_overlay = gradient_gesture::Overlay::current(state, &render_project);
         let gradient_point = self.gradient_point;
-        let pen_active = state.tool == Tool::Pen;
+        let spatial_scene = spatial_scene_active(state);
+        let expression_scene = self.canvas_geometry_read_only(state);
+        let pen_active = state.tool == Tool::Pen && !expression_scene;
         let pen_order_help = self.pen.order_help(state);
         let vertex_available = self.pen.numeric_vertex_available(state);
+        let transform_available = self.pen.transform_available(state);
+        let transform_enabled = self.pen.transform_enabled();
         let (vertex_caption, vertex_help) = self.pen.numeric_vertex_control_text(state);
         let comp = render_project.composition().clone();
-        // Numeric and gradient drafts share the globally unique transient-render
+        // Pen affine, numeric and gradient drafts share the globally unique transient-render
         // generation. Cancel/OK clears the displayed draft before source renders.
         let gradient_gesture = vertex_session(state)
             .map(|session| session.id)
+            .or_else(|| self.pen.render_generation(state))
             .or_else(|| {
                 state
                     .gradient_editor
@@ -1342,20 +1582,17 @@ impl Render for Preview {
                             .map(|d| d.gesture_id)
                     })
             });
-        self.update_render(
-            Request {
-                project: render_project.clone(),
-                frame,
-                dimension: max_dimension,
-                revision,
-                transport,
-                gradient_gesture,
-            },
-            playing,
-            channel,
-            window,
-            cx,
-        );
+        let request = Request {
+            project: render_project.clone(),
+            frame,
+            dimension: max_dimension,
+            revision,
+            document_revision,
+            core_generation,
+            transport,
+            gradient_gesture,
+        };
+        self.update_render(request.clone(), playing, channel, window, cx);
         if channel != self.display_channel {
             if let Some((_, _, _, image)) = &mut self.cached {
                 if let Some(raw) = &self.raw {
@@ -1370,11 +1607,60 @@ impl Render for Preview {
             }
         }
         let overlay_options = viewer.clone();
-        let error = self
+        let mut error = self
             .failed
             .as_ref()
-            .filter(|(p, f, _, _)| p == &render_project && *f == frame)
-            .map(|(_, _, _, e)| e.clone());
+            .filter(|(failed, _)| request.accepts(failed, false))
+            .map(|(_, e)| e.clone());
+        let scene = self
+            .displayed
+            .as_ref()
+            .and_then(|(shown, evaluated)| request.current_geometry(shown, evaluated.as_deref()));
+        let geometry_ready = scene.is_some();
+        let comp = scene
+            .map(|project| project.composition().clone())
+            .unwrap_or(comp);
+        let control_order = if geometry_ready {
+            match projected_control_order(&comp, frame, &selected) {
+                Ok(order) => order,
+                Err(problem) => {
+                    error.get_or_insert(problem);
+                    Vec::new()
+                }
+            }
+        } else {
+            Vec::new()
+        };
+        let pen_overlay = if expression_scene || !geometry_ready {
+            Vec::new()
+        } else {
+            pen_overlay
+        };
+        let pen_marquee = if expression_scene || !geometry_ready {
+            None
+        } else {
+            pen_marquee
+        };
+        let pen_transform = if expression_scene || !geometry_ready {
+            None
+        } else {
+            pen_transform
+        };
+        let gradient_overlay = if expression_scene || !geometry_ready {
+            None
+        } else {
+            gradient_overlay
+        };
+        let text_session = if expression_scene || !geometry_ready {
+            None
+        } else {
+            text_session
+        };
+        let text_box_rect = if expression_scene || !geometry_ready {
+            None
+        } else {
+            text_box_rect
+        };
         let rendered = self.cached.as_ref().map(|(_, _, _, image)| image.clone());
         let measured = self.bounds.clone();
         let measured_preview = cx.entity().downgrade();
@@ -1436,7 +1722,9 @@ impl Render for Preview {
                     .child(format!(
                         "{}  ›  Active Camera{}",
                         comp.name(),
-                        if text_session.is_some() { "  ·  Text: Ctrl+Enter finish · Esc cancel" } else if self.state.read(cx).colors.picking() { "  ·  Pick composition color · click to sample · Esc to return" } else if gradient_active { if gradient_point == 0 { "  ·  Gradient Start: drag · Tab switch · arrows move · Alt both · Esc close" } else { "  ·  Gradient End: drag · Tab switch · arrows move · Alt both · Esc close" } } else if pen_active { "  ·  Pen: Shift-click toggle · Shift-drag add box · Ctrl+A path vertices · drag selected · Esc cancel" } else if self.pending.is_some() {
+                        if spatial_scene { "  ·  Spatial: selection only · Geometry edits through scripting" } else if expression_scene { "  ·  Expressions: selection only · Inspector edits authored values" } else if text_session.is_some() { if text_session.as_ref().is_some_and(|s| s.style.paragraph) { "  ·  Paragraph text: Ctrl+Enter finish · Esc cancel" } else { "  ·  Auto-size text: Ctrl+Enter finish · Esc cancel" } } else if self.state.read(cx).colors.picking() { "  ·  Pick composition color · click to sample · Esc to return" } else if gradient_active { if gradient_point == 0 { "  ·  Gradient Start: drag · Tab switch · arrows move · Alt both · Esc close" } else { "  ·  Gradient End: drag · Tab switch · arrows move · Alt both · Esc close" } } else if pen_active { "  ·  Pen: Shift-click / Shift-drag select · Ctrl+A Contents points · drag selected · Shift+T transform · Esc cancel" } else if self.state.read(cx).tool == Tool::Text {
+                            "  ·  Click: auto-size text · Drag: paragraph box"
+                        } else if self.pending.is_some() {
                             "  ·  Rendering…"
                         } else {
                             ""
@@ -1458,6 +1746,18 @@ impl Render for Preview {
                         .text_color(rgb(ui::MUTED))
                         .tooltip(|_, cx| cx.new(|_| ui::Tip("Reorders the base and all animation poses. Curve geometry and key timing stay unchanged. Reverse may change Non-Zero compound fill holes; either action may change stroke dash placement.".into())).into())
                         .child(div().flex_1().min_w_0().overflow_hidden().child(pen_order_help))
+                        .child(ui::text_button("pen-canvas-transform", if transform_enabled { "Canvas Transform ON · Shift+T" } else { "Canvas Transform · Shift+T" })
+                            .h(px(20.0)).flex_none()
+                            .when(!transform_available, |button| button.opacity(0.35))
+                            .tooltip(|_, cx| cx.new(|_| ui::Tip("Enabled Contents points only, current frame. Corner handles scale in composition axes; top handle rotates around the fixed center. Shift: uniform scale, 15° rotation, axis-constrained move. Numeric editing still supports one path.".into())).into())
+                            .on_mouse_down(MouseButton::Left, cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                                window.prevent_default();
+                                if event.click_count == 1 && event.modifiers == gpui::Modifiers::default()
+                                    && this.focus.is_focused(window)
+                                    && super::pen::pointer_input_allowed(this.state.read(cx), true, window.is_window_active(), TextField::is_composing(window, cx), TextField::active_pending_binding(cx).is_some())
+                                { this.pen.toggle_transform(this.state.read(cx)); }
+                                cx.stop_propagation(); cx.notify();
+                            })))
                         .child(ui::text_button("pen-edit-vertex", vertex_caption)
                             .h(px(20.0))
                             .flex_none()
@@ -1467,6 +1767,9 @@ impl Render for Preview {
                                 // Prevent the button's default focus before capturing
                                 // the live Pen selection; canvas blur still cancels it.
                                 window.prevent_default();
+                                if !this.focus.is_focused(window)
+                                    || !super::pen::pointer_input_allowed(this.state.read(cx), true, window.is_window_active(), TextField::is_composing(window, cx), TextField::active_pending_binding(cx).is_some())
+                                { cx.stop_propagation(); return; }
                                 let request = this.pen.numeric_vertex_request(this.state.read(cx));
                                 if let Some(request) = request {
                                     this.state.update(cx, |s, cx| s.dispatch(&Action::OpenVertex(request), window, cx));
@@ -1481,11 +1784,21 @@ impl Render for Preview {
                     .track_focus(&self.focus)
                     .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
                         if preview_modal_active(this.state.read(cx)) { cx.stop_propagation(); return; }
+                        if this.canvas_geometry_read_only(this.state.read(cx)) {
+                            this.cancel_expression_gestures();
+                            return;
+                        }
                         if this.gradient_key(event, window, cx) { cx.stop_propagation(); return; }
                         if event.keystroke.key=="escape" && this.text_box_drag.take().is_some() {cx.stop_propagation();cx.notify();return;}
                         if this.text_key(event,window,cx) {return;}
                         if this.state.read(cx).colors.session.is_some() || this.state.read(cx).gradient_editor.is_some() { return; }
                         if this.state.read(cx).tool == Tool::Pen {
+                            if !this.focus.is_focused(window) || !window.is_window_active()
+                                || TextField::is_composing(window, cx) || TextField::active_pending_binding(cx).is_some()
+                            { return; }
+                            if this.pen.transform_key(event, true, false, this.state.read(cx)) {
+                                cx.stop_propagation(); cx.notify(); return;
+                            }
                             let (handled, request) = this.pen.numeric_vertex_key(
                                 event,
                                 this.focus.is_focused(window),
@@ -1512,11 +1825,16 @@ impl Render for Preview {
                             );
                             let (handled, command) = if ordered {
                                 (true, command)
-                            } else {
-                                this.pen.key(&event.keystroke.key, this.state.read(cx))
-                            };
+                            } else if event.keystroke.modifiers == gpui::Modifiers::default() {
+                                if event.is_held && matches!(event.keystroke.key.as_str(), "delete" | "backspace" | "enter" | "escape") {
+                                    (true, None)
+                                } else { this.pen.key(&event.keystroke.key, this.state.read(cx)) }
+                            } else { (false, None) };
                             if handled {
-                                if let Some(command) = command { this.state.update(cx, |s,cx| s.dispatch(&Action::Edit(command), window, cx)); }
+                                if let Some(command) = command {
+                                    this.state.update(cx, |s,cx| s.dispatch(&Action::Edit(command), window, cx));
+                                    this.pen.did_commit(this.state.read(cx));
+                                }
                                 cx.stop_propagation(); cx.notify(); return;
                             }
                         }
@@ -1543,7 +1861,30 @@ impl Render for Preview {
                     .when(!hand && text_session.is_none(), |s| s.cursor_crosshair())
                     .when(text_session.is_some(), |s| s.cursor_text())
                     .on_mouse_down(MouseButton::Left, cx.listener(Self::down))
-                    .on_mouse_down_out(cx.listener(|this, _: &MouseDownEvent, _, cx| {if !preview_modal_active(this.state.read(cx)) { this.state.update(cx,|s,cx|s.finish_text(true,cx)); }}))
+                    .on_mouse_down(MouseButton::Right, cx.listener(|this, _, window, cx| {
+                        this.text_box_drag = None;
+                        if this.state.read(cx).tool == Tool::Pen { this.pen.abandon_pointer(); window.prevent_default(); cx.stop_propagation(); }
+                        cx.notify();
+                    }))
+                    .on_mouse_down(MouseButton::Middle, cx.listener(|this, _, window, cx| {
+                        this.text_box_drag = None;
+                        if this.state.read(cx).tool == Tool::Pen { this.pen.abandon_pointer(); window.prevent_default(); cx.stop_propagation(); }
+                        cx.notify();
+                    }))
+                    .on_mouse_down_out(cx.listener(|this, _: &MouseDownEvent, window, cx| {
+                        this.pen.abandon_pointer();
+                        this.text_box_drag = None;
+                        if !preview_modal_active(this.state.read(cx)) && !crate::color_edit::preserving_text_selection(window, cx) {
+                            // Preview's capture precedes the Character field's
+                            // outside capture. Commit that field into its owned
+                            // draft before closing the text session.
+                            if this.state.read(cx).text_session.is_some() {
+                                crate::components::TextField::commit_text_selection_active(window, cx);
+                            }
+                            this.state.update(cx,|s,cx|s.finish_text(true,cx));
+                        }
+                        cx.notify();
+                    }))
                     .on_mouse_move(cx.listener(Self::moving))
                     .on_mouse_up(MouseButton::Left, cx.listener(Self::up))
                     .on_mouse_up_out(MouseButton::Left, cx.listener(Self::up))
@@ -1630,8 +1971,8 @@ impl Render for Preview {
                                                 );
                                             }
                                             for layer in
-                                                comp.layers().iter().rev().filter(|layer| {
-                                                    !pen_active && controls_active(
+                                                control_order.iter().filter_map(|id| comp.layer(*id)).filter(|layer| {
+                                                    geometry_ready && !pen_active && text_session.is_none() && controls_active(
                                                         &comp,
                                                         layer,
                                                         frame,
@@ -1639,10 +1980,10 @@ impl Render for Preview {
                                                     )
                                                 })
                                             {
-                                                let corners = comp
-                                                    .corners_at(layer.id(), frame)
-                                                    .unwrap_or([[0.0; 2]; 4])
-                                                    .map(|[x, y]| {
+                                                let Some(corners) = layer_corners(&comp, layer.id(), frame) else {
+                                                    continue;
+                                                };
+                                                let corners = corners.map(|[x, y]| {
                                                         point(
                                                             origin.x + px(x as f32 * zoom),
                                                             origin.y + px(y as f32 * zoom),
@@ -1672,14 +2013,15 @@ impl Render for Preview {
                                                             ),
                                                         );
                                                     }
-                                                    if !selected.contains(&layer.id()) {
+                                                    if !selected.contains(&layer.id()) || expression_scene {
                                                         continue;
                                                     }
-                                                    let world = comp
-                                                        .world_transform(layer.id(), frame)
-                                                        .unwrap_or_default();
+                                                    let Ok(projected) = comp.projected_geometry(layer.id(), frame) else {
+                                                        continue;
+                                                    };
+                                                    let world = projected.transform;
                                                     for handle in
-                                                        handles(layer.width(), layer.height())
+                                                        layer_handles(layer, frame)
                                                     {
                                                         let [x, y] = world.point(handle);
                                                         let corner = point(
@@ -1694,17 +2036,12 @@ impl Render for Preview {
                                                             rgb(ui::BLUE),
                                                         ));
                                                     }
-                                                    let anchor = comp
-                                                        .position_space(layer.id(), frame)
-                                                        .unwrap_or_default()
-                                                        .point([
-                                                            layer
-                                                                .property(Property::PositionX)
-                                                                .value_at(frame),
-                                                            layer
-                                                                .property(Property::PositionY)
-                                                                .value_at(frame),
-                                                        ]);
+                                                    let anchor = world.point([
+                                                        layer.property(Property::AnchorX)
+                                                            .expect("Anchor remains scalar").value_at(frame),
+                                                        layer.property(Property::AnchorY)
+                                                            .expect("Anchor remains scalar").value_at(frame),
+                                                    ]);
                                                     let anchor = point(
                                                         origin.x + px(anchor[0] as f32 * zoom),
                                                         origin.y + px(anchor[1] as f32 * zoom),
@@ -1728,6 +2065,7 @@ impl Render for Preview {
                                         },
                                     );
                                     super::pen::paint(&pen_overlay, pen_marquee, origin, zoom, window);
+                                    if let Some(overlay) = pen_transform { super::pen::paint_transform(overlay, origin, zoom, window); }
                                     if let Some(overlay) = &gradient_overlay { gradient_gesture::paint(overlay, gradient_point, origin, zoom, window); }
                                     if let Some(r)=text_box_rect {
                                         let b=Bounds::new(origin+point(px(r[0] as f32*zoom),px(r[1] as f32*zoom)),size(px(r[2] as f32*zoom),px(r[3] as f32*zoom)));

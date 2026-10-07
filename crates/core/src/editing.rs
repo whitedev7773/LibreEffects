@@ -282,8 +282,18 @@ pub(super) fn editable(state: &mut Snapshot, id: LayerId) -> Result<&mut Layer, 
     }
     Ok(l)
 }
+fn validate_scalar_keys(comp: &Composition, keys: &[KeyRef]) -> Result<(), String> {
+    for key in keys {
+        comp.layer(key.id)
+            .ok_or("Layer not found")?
+            .require_scalar_track(key.property)?;
+    }
+    Ok(())
+}
 fn shifted(frame: Frame, delta: i64, duration: Frame, endpoint: bool) -> Result<Frame, String> {
-    let f = frame as i64 + delta;
+    let f = i64::from(frame)
+        .checked_add(delta)
+        .ok_or("Move timing overflow")?;
     if f < 0 || f >= duration as i64 + i64::from(endpoint) {
         return Err("Move would leave the composition".into());
     }
@@ -470,6 +480,12 @@ pub(super) fn apply_extended(
                     }
                     _ => unreachable!(),
                 }
+                // Playback rebases its internal source clock to inPoint. Keep
+                // the independent layer origin when that clock changes.
+                let origin = layer.start_frame();
+                if layer_timing::content_origin(&layer.content) != i64::from(start) {
+                    layer.start_frame = Some(origin);
+                }
                 let (Content::Video {
                     start_frame,
                     playback,
@@ -520,6 +536,7 @@ pub(super) fn apply_extended(
                 }
                 for id in &ids {
                     editable(state, *id)?;
+                    state.project.composition.require_two_d_transform(*id)?;
                 }
                 let comp = &state.project.composition;
                 let commands: Result<Vec<_>, String> = ids
@@ -538,8 +555,16 @@ pub(super) fn apply_extended(
                         Ok(Command::SetPosition {
                             id: *id,
                             frame: *frame,
-                            x: layer.property(Property::PositionX).value_at(*frame) + d[0],
-                            y: layer.property(Property::PositionY).value_at(*frame) + d[1],
+                            x: layer
+                                .property(Property::PositionX)
+                                .ok_or("Scalar transform property is unavailable")?
+                                .value_at(*frame)
+                                + d[0],
+                            y: layer
+                                .property(Property::PositionY)
+                                .ok_or("Scalar transform property is unavailable")?
+                                .value_at(*frame)
+                                + d[1],
                         })
                     })
                     .collect();
@@ -553,6 +578,14 @@ pub(super) fn apply_extended(
                     return Err("Select a layer first".into());
                 }
                 let duration = state.project.composition.duration;
+                if matches!(command, Command::SplitLayers { .. })
+                    && state.project.composition.layers.iter().any(|layer| {
+                        layer.spectrum_sources().any(|source| ids.contains(&source))
+                            && !ids.contains(&layer.id)
+                    })
+                {
+                    return Err("Split an Audio Spectrum source together with all its consumers to preserve their timing".into());
+                }
                 if matches!(command, Command::SplitLayers { .. })
                     && state.project.composition.layers.iter().any(|l| {
                         l.track_matte.is_some_and(|m| ids.contains(&m.source))
@@ -613,6 +646,7 @@ pub(super) fn apply_extended(
                     }
                     copy.parent = copy.parent.map(|p| mapping.get(&p).copied().unwrap_or(p));
                     copy.remap_matte(&mapping);
+                    copy.remap_spectrum_sources(&mapping);
                     state.selected = Some(copy.id);
                     state.project.composition.layers.insert(index, copy);
                 }
@@ -625,19 +659,35 @@ pub(super) fn apply_extended(
                 layer_transform::apply(state, ids, *frame, *operation)?;
             }
             Command::SetAnchor { id, frame, x, y } => {
+                state.project.composition.require_two_d_transform(*id)?;
                 let layer = editable(state, *id)?;
                 let old = [
-                    layer.property(Property::AnchorX).value_at(*frame),
-                    layer.property(Property::AnchorY).value_at(*frame),
+                    layer
+                        .property(Property::AnchorX)
+                        .ok_or("Scalar transform property is unavailable")?
+                        .value_at(*frame),
+                    layer
+                        .property(Property::AnchorY)
+                        .ok_or("Scalar transform property is unavailable")?
+                        .value_at(*frame),
                 ];
                 // Compensate in position-property space so the rendered layer stays still,
                 // including when it has a rotated/scaled parent or a parenting offset.
                 let delta = layer
                     .local_transform(*frame)
+                    .ok_or("Cannot compensate an unsupported layer transform")?
                     .vector([x - old[0], y - old[1]]);
                 let position = [
-                    layer.property(Property::PositionX).value_at(*frame) + delta[0],
-                    layer.property(Property::PositionY).value_at(*frame) + delta[1],
+                    layer
+                        .property(Property::PositionX)
+                        .ok_or("Scalar transform property is unavailable")?
+                        .value_at(*frame)
+                        + delta[0],
+                    layer
+                        .property(Property::PositionY)
+                        .ok_or("Scalar transform property is unavailable")?
+                        .value_at(*frame)
+                        + delta[1],
                 ];
                 apply(
                     state,
@@ -751,8 +801,15 @@ pub(super) fn apply_extended(
             }
             Command::SetContent { id, content } => {
                 let layer = editable(state, *id)?;
-                if !layer.text_parameters.is_empty() && !matches!(content, Content::Text { .. }) {
-                    return Err("Text paint tracks require text content".into());
+                if (!layer.text_parameters.is_empty()
+                    || !layer.text_selector.is_default()
+                    || layer.next_text_range_selector_id != 1
+                    || !layer.text_range_selectors.is_empty()
+                    || layer.next_text_animator_id != 1
+                    || !layer.text_animators.is_empty())
+                    && !matches!(content, Content::Text { .. })
+                {
+                    return Err("Text tracks and selectors require text content".into());
                 }
                 if layer.source_text_animation.animated() {
                     match (&layer.content, content) {
@@ -760,7 +817,9 @@ pub(super) fn apply_extended(
                         _ => return Err("Edit animated Source Text at the current frame, or turn its animation off first".into()),
                     }
                 }
+                let origin = layer.start_frame();
                 layer.content = content.clone();
+                layer.preserve_start_frame(origin);
                 layer.asset = None;
                 layer.footage_interpretation = Default::default();
             }
@@ -772,29 +831,10 @@ pub(super) fn apply_extended(
             Command::SetColor { id, color } => editable(state, *id)?.color = *color,
             Command::ShiftLayer { id, delta } => {
                 let duration = state.project.composition.duration;
-                let l = editable(state, *id)?;
-                let end = l.out_frame(duration);
-                l.in_frame = shifted(l.in_frame, *delta, duration, false)?;
-                l.out_frame = Some(shifted(end, *delta, duration, true)?);
-                if let Content::Video { start_frame, .. }
-                | Content::Audio { start_frame, .. }
-                | Content::ImageSequence { start_frame, .. }
-                | Content::Composition { start_frame, .. } = &mut l.content
-                {
-                    *start_frame = start_frame
-                        .checked_add(*delta)
-                        .ok_or("Video timing overflow")?;
-                }
-                l.markers.shift(*delta, duration)?;
-                for track in l.all_tracks_mut() {
-                    track.keys = track
-                        .keys
-                        .iter()
-                        .map(|(f, k)| Ok((shifted(*f, *delta, duration, false)?, k.clone())))
-                        .collect::<Result<_, String>>()?;
-                }
+                layer_timing::shift(editable(state, *id)?, *delta, duration)?;
             }
             Command::MoveKeys { keys, delta } => {
+                validate_scalar_keys(&state.project.composition, keys)?;
                 let duration = state.project.composition.duration;
                 let mut removed = Vec::new();
                 for key in keys.iter().copied().collect::<BTreeSet<_>>() {
@@ -819,6 +859,7 @@ pub(super) fn apply_extended(
                 key_velocity_scale::apply(state, keys, *scale)?
             }
             Command::DeleteKeys(keys) => {
+                validate_scalar_keys(&state.project.composition, keys)?;
                 for key in keys.iter().copied().collect::<BTreeSet<_>>() {
                     let layer = editable(state, key.id)?;
                     let source_sample = (key.property == PropertyPath::SourceText)
@@ -845,6 +886,14 @@ pub(super) fn apply_extended(
                 frame,
                 target,
             } => {
+                for key in keys {
+                    state
+                        .project
+                        .composition
+                        .layer(target.unwrap_or(key.key.id))
+                        .ok_or("Layer not found")?
+                        .require_scalar_track(key.key.property)?;
+                }
                 let first = keys
                     .iter()
                     .map(|k| k.key.frame)

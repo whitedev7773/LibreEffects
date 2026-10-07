@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+fn is_zero(value: &f64) -> bool {
+    *value == 0.0
+}
+
 /// Only the font identity; replacing it preserves paint, paragraph and spacing.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TextFont {
@@ -39,11 +43,18 @@ pub(crate) fn replace_font(
     }
     let mut count = 0;
     for layer in state.project.compositions_mut().flat_map(|c| &mut c.layers) {
-        if !layer.locked
-            && matches!(layer.content, crate::Content::Text { .. })
-            && TextFont::of(&layer.text_style) == from
-        {
+        if layer.locked || !matches!(layer.content, crate::Content::Text { .. }) {
+            continue;
+        }
+        let mut changed = false;
+        if TextFont::of(&layer.text_style) == from {
             to.apply(&mut layer.text_style);
+            changed = true;
+        }
+        if let Some(rich) = &mut layer.rich_text {
+            rich.for_each_style(|style| changed |= style.replace_font(&from, &to));
+        }
+        if changed {
             count += 1;
         }
     }
@@ -82,6 +93,18 @@ pub struct TextStyle {
     pub align: TextAlign,
     /// Wrap and clip source text inside the layer's width and height.
     pub paragraph: bool,
+    /// Paragraph-only offsets in source pixels; retained while in point mode.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub paragraph_left_indent: f64,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub paragraph_right_indent: f64,
+    /// Added to the left indent on the first visual line of each paragraph.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub paragraph_first_line_indent: f64,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub paragraph_space_before: f64,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub paragraph_space_after: f64,
     pub fill_enabled: bool,
     pub stroke_enabled: bool,
     pub stroke_color: u32,
@@ -102,6 +125,11 @@ impl Default for TextStyle {
             tracking: 0.0,
             align: TextAlign::Left,
             paragraph: false,
+            paragraph_left_indent: 0.0,
+            paragraph_right_indent: 0.0,
+            paragraph_first_line_indent: 0.0,
+            paragraph_space_before: 0.0,
+            paragraph_space_after: 0.0,
             fill_enabled: true,
             stroke_enabled: false,
             stroke_color: 0,
@@ -126,9 +154,18 @@ impl TextStyle {
             && (0.1..=10.0).contains(&self.leading)
             && self.tracking.is_finite()
             && (-1000.0..=10000.0).contains(&self.tracking)
+            && TextParagraphField::ALL
+                .into_iter()
+                .all(|field| field.accepts(field.value(self)))
             && self.stroke_color <= 0xffffff
             && self.stroke_width.is_finite()
             && (0.0..=1000.0).contains(&self.stroke_width)
+    }
+    /// Includes dormant values so point-mode documents retain their schema gate.
+    pub fn has_paragraph_override(&self) -> bool {
+        TextParagraphField::ALL
+            .into_iter()
+            .any(|field| field.value(self) != 0.0)
     }
     pub fn has_paint_override(&self) -> bool {
         !self.fill_enabled
@@ -144,6 +181,120 @@ impl TextStyle {
             || self.weight != 400
             || self.italic
     }
+}
+
+/// Static whole-layer paragraph fields; these are not animation parameters.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextParagraphField {
+    LeftIndent,
+    RightIndent,
+    FirstLineIndent,
+    SpaceBefore,
+    SpaceAfter,
+}
+impl TextParagraphField {
+    pub const ALL: [Self; 5] = [
+        Self::LeftIndent,
+        Self::RightIndent,
+        Self::FirstLineIndent,
+        Self::SpaceBefore,
+        Self::SpaceAfter,
+    ];
+
+    pub const fn bounds(self) -> (f64, f64) {
+        match self {
+            Self::FirstLineIndent => (-16_384.0, 16_384.0),
+            _ => (0.0, 16_384.0),
+        }
+    }
+
+    pub fn value(self, style: &TextStyle) -> f64 {
+        match self {
+            Self::LeftIndent => style.paragraph_left_indent,
+            Self::RightIndent => style.paragraph_right_indent,
+            Self::FirstLineIndent => style.paragraph_first_line_indent,
+            Self::SpaceBefore => style.paragraph_space_before,
+            Self::SpaceAfter => style.paragraph_space_after,
+        }
+    }
+
+    fn accepts(self, value: f64) -> bool {
+        value.is_finite() && (self.bounds().0..=self.bounds().1).contains(&value)
+    }
+
+    fn set(self, style: &mut TextStyle, value: f64) {
+        match self {
+            Self::LeftIndent => style.paragraph_left_indent = value,
+            Self::RightIndent => style.paragraph_right_indent = value,
+            Self::FirstLineIndent => style.paragraph_first_line_indent = value,
+            Self::SpaceBefore => style.paragraph_space_before = value,
+            Self::SpaceAfter => style.paragraph_space_after = value,
+        }
+    }
+}
+
+impl crate::Layer {
+    /// Plan a static, exact paragraph-field edit without sampling typography or
+    /// Source Text. Equal finite values, including differently formatted zero,
+    /// preserve the authored source and create no history entry.
+    pub fn text_paragraph_value_command(
+        &self,
+        field: TextParagraphField,
+        value: f64,
+    ) -> Result<Option<crate::Command>, String> {
+        if !matches!(self.content, crate::Content::Text { .. }) {
+            return Err("Select a text layer".into());
+        }
+        if self.locked {
+            return Err("Unlock the layer before changing its text".into());
+        }
+        if !self.text_style.valid() || !field.accepts(value) {
+            return Err("Invalid paragraph style value".into());
+        }
+        Ok((field.value(&self.text_style) != value).then_some(
+            crate::Command::SetTextParagraphValue {
+                id: self.id,
+                field,
+                value,
+            },
+        ))
+    }
+}
+
+pub(super) fn paragraph_edits_only(command: &crate::Command) -> bool {
+    fn classify(command: &crate::Command) -> Option<bool> {
+        match command {
+            crate::Command::SetTextParagraphValue { .. } => Some(true),
+            crate::Command::Batch(commands) => commands
+                .iter()
+                .try_fold(false, |found, command| Some(found | classify(command)?)),
+            _ => None,
+        }
+    }
+    classify(command) == Some(true)
+}
+
+pub(super) fn paragraph_materialized(project: &crate::Project) -> bool {
+    project.compositions().into_iter().any(|(_, comp)| {
+        comp.layers
+            .iter()
+            .any(|layer| layer.text_style.has_paragraph_override())
+    })
+}
+
+pub(super) fn apply_paragraph_value(
+    state: &mut crate::Snapshot,
+    id: crate::LayerId,
+    field: TextParagraphField,
+    value: f64,
+) -> Result<(), String> {
+    let layer = crate::editing::editable(state, id)?;
+    // Validate eligibility and input even for exact no-ops. Equal values do not
+    // rewrite source bits, including dormant -0.0.
+    if layer.text_paragraph_value_command(field, value)?.is_some() {
+        field.set(&mut layer.text_style, value);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

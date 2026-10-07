@@ -1,0 +1,12 @@
+[package]
+name = "libre-effects-spatial"
+description = "Bounded native joined XYZ position tracks and spatial arc-length sampling"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = { version = "1", features = ["float_roundtrip"] }

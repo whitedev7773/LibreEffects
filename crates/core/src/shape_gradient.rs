@@ -87,7 +87,9 @@ pub struct ShapeGradient {
     pub radial: bool,
     pub colors: Vec<u64>,
     pub opacities: Vec<u64>,
-    next_stop: u64,
+    pub(super) next_stop: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) colors_animation: Option<GradientColorsAnimation>,
 }
 impl Default for ShapeGradient {
     fn default() -> Self {
@@ -96,11 +98,26 @@ impl Default for ShapeGradient {
             colors: vec![1, 2],
             opacities: vec![3, 4],
             next_stop: 5,
+            colors_animation: None,
         }
     }
 }
 impl ShapeGradient {
     pub const MAX_STOPS: usize = 32;
+    /// Construct static paired color/opacity rows with stable, paint-local IDs.
+    pub fn with_paired_stops(count: usize) -> Result<Self, String> {
+        if !(2..=Self::MAX_STOPS).contains(&count) {
+            return Err("Keep 2–32 paired gradient stops".into());
+        }
+        let count = count as u64;
+        Ok(Self {
+            colors: (1..=count).collect(),
+            opacities: (count + 1..=count * 2).collect(),
+            next_stop: count * 2 + 1,
+            ..Self::default()
+        })
+    }
+
     /// Sample a temporary editor gesture without changing tracks or history.
     pub fn preview_edit(
         &self,
@@ -110,7 +127,11 @@ impl ShapeGradient {
         parameter: GradientParam,
         value: f64,
     ) -> Vec<[f64; 4]> {
-        let mut draft = n.clone();
+        let mut draft = if self.colors_animation.is_some() {
+            self.sampled_node(n, frame)
+        } else {
+            n.clone()
+        };
         if value.is_finite()
             && let Some(track) = draft
                 .parameters
@@ -119,7 +140,11 @@ impl ShapeGradient {
             let (min, max) = parameter.bounds();
             *track = AnimatedProperty::new(value.clamp(min, max));
         }
-        self.preview(&draft, frame, count)
+        draft
+            .kind
+            .gradient()
+            .unwrap_or(self)
+            .preview(&draft, frame, count)
     }
     pub fn preview(&self, n: &ContentsNode, frame: Frame, count: usize) -> Vec<[f64; 4]> {
         let colors = self.stops(n, frame, false);
@@ -184,6 +209,9 @@ impl ShapeGradient {
             .collect()
     }
     pub fn color_at(&self, n: &ContentsNode, id: u64, frame: Frame) -> Option<u32> {
+        if self.colors_animation.is_some() {
+            return self.colors_at(n, frame).color_at(id);
+        }
         self.colors.contains(&id).then(|| {
             [
                 GradientParam::Red(id),
@@ -198,6 +226,32 @@ impl ShapeGradient {
     }
     fn stops(&self, n: &ContentsNode, frame: Frame, opacity: bool) -> Vec<Stop> {
         use GradientParam::*;
+        if self.colors_animation.is_some() {
+            let colors = self.colors_at(n, frame);
+            let mut stops: Vec<Stop> = if opacity {
+                colors
+                    .opacities
+                    .iter()
+                    .map(|s| Stop {
+                        position: s.position / 100.,
+                        midpoint: s.midpoint / 100.,
+                        value: [s.opacity / 100.; 3],
+                    })
+                    .collect()
+            } else {
+                colors
+                    .colors
+                    .iter()
+                    .map(|s| Stop {
+                        position: s.position / 100.,
+                        midpoint: s.midpoint / 100.,
+                        value: [s.red / 255., s.green / 255., s.blue / 255.],
+                    })
+                    .collect()
+            };
+            stops.sort_by(|a, b| a.position.total_cmp(&b.position));
+            return stops;
+        }
         let value = |p| n.value_at(ContentsParam::Gradient(p), frame);
         let ids = if opacity {
             &self.opacities
@@ -240,6 +294,9 @@ impl ShapeGradient {
             return Err("Stop location must be 0–100%".into());
         }
         let gradient = n.kind.gradient().ok_or("Select a gradient paint")?;
+        if gradient.colors_animation.is_some() {
+            return Err("Edit active Gradient Colors through its compound controls".into());
+        }
         let value = sample(&gradient.stops(n, frame, opacity), position / 100., false);
         let gradient = n.kind.gradient_mut().unwrap();
         let ids = if opacity {
@@ -277,6 +334,9 @@ impl ShapeGradient {
     }
     pub(crate) fn remove_stop(n: &mut ContentsNode, id: u64) -> Result<(), String> {
         let g = n.kind.gradient_mut().ok_or("Select a gradient paint")?;
+        if g.colors_animation.is_some() {
+            return Err("Edit active Gradient Colors through its compound controls".into());
+        }
         let ids = if g.colors.contains(&id) {
             &mut g.colors
         } else if g.opacities.contains(&id) {

@@ -6,8 +6,12 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+libre-effects-temporal-scalar = { path = "../temporal-scalar" }
+libre-effects-spatial = { path = "../spatial" }
+libre-effects-ae-expressions = { path = "../ae-expressions" }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 
 base64 = "0.22.1"
 crc32fast = "1.5.0"
+unicode-segmentation = "1"

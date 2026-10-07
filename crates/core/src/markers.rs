@@ -309,7 +309,16 @@ mod tests {
         assert_eq!(source.layer(2).unwrap().markers()[0].name(), "장면 전환");
         let restored = Project::from_json(&e.project().to_json().unwrap()).unwrap();
         assert_eq!(restored, *e.project());
-        assert_eq!(restored.version, 13);
+        assert_eq!(
+            restored
+                .composition_by_id(2)
+                .unwrap()
+                .layer(2)
+                .unwrap()
+                .start_frame,
+            Some(10)
+        );
+        assert_eq!(restored.version, 64);
     }
     #[test]
     fn clipboard_resamples_marker_start_and_end_and_rejects_time_collisions() {

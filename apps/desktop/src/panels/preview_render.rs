@@ -3,57 +3,9 @@
 use super::*;
 use std::sync::atomic::Ordering;
 
-// Only snapshots from the same active gradient gesture may display an intermediate frame.
-// Frame, resolution, decoder revision and transport still form a strict cancellation boundary.
-pub(super) type GradientContext = (u64, u32, u32, u64, u64);
-
-#[derive(Clone)]
-pub(super) struct Request {
-    pub project: libre_effects_core::Project,
-    pub frame: u32,
-    pub dimension: u32,
-    pub revision: u64,
-    pub transport: u64,
-    pub gradient_gesture: Option<u64>,
-}
-impl Request {
-    fn gradient_context(&self) -> Option<GradientContext> {
-        self.gradient_gesture.map(|id| {
-            (
-                id,
-                self.frame,
-                self.dimension,
-                self.revision,
-                self.transport,
-            )
-        })
-    }
-    fn same_gradient(&self, other: &Self) -> bool {
-        self.gradient_context().is_some() && self.gradient_context() == other.gradient_context()
-    }
-    fn discards_gradient_frame(
-        &self,
-        previous: Option<GradientContext>,
-        displayed: Option<(&libre_effects_core::Project, u32, u32)>,
-    ) -> bool {
-        previous.is_some()
-            && previous != self.gradient_context()
-            && displayed.is_some_and(|(p, f, d)| {
-                p != &self.project || f != self.frame || d != self.dimension
-            })
-    }
-    fn same_context(&self, other: &Self) -> bool {
-        self.project == other.project
-            && self.gradient_gesture == other.gradient_gesture
-            && self.dimension == other.dimension
-            && self.revision == other.revision
-            && self.transport == other.transport
-    }
-    fn accepts(&self, ready: &Self, playing: bool) -> bool {
-        self.same_context(ready)
-            && (self.frame == ready.frame || (playing && ready.frame < self.frame))
-    }
-}
+pub(super) use libre_effects_editor_model::preview_scene::{
+    GradientContext, PreviewRequest as Request,
+};
 impl Drop for Preview {
     fn drop(&mut self) {
         self.cancel.store(true, Ordering::Release);
@@ -138,10 +90,16 @@ impl Preview {
             self.cached.as_ref().map(|(p, f, d, _)| (p, *f, *d)),
         );
         self.gradient_render_context = gradient_context;
-        if changed || stale_gradient_frame {
+        let stale_receipt = self.displayed.as_ref().is_some_and(|(shown, _)| {
+            shown.document_revision != request.document_revision
+                || shown.core_generation != request.core_generation
+                || shown.transport != request.transport
+        });
+        if changed || stale_gradient_frame || stale_receipt {
             self.failed = None;
             if !keep_gradient_frame {
                 self.raw = None;
+                self.displayed = None;
                 if let Some((_, _, _, old)) = self.cached.take() {
                     self.retired_images.retire(old, window);
                 }
@@ -165,26 +123,25 @@ impl Preview {
             }
         }
         if let Some((ready, result)) = self.ready.take() {
+            // A successful pixel render cannot erase a missing/stale geometry failure.
+            let result = result.and_then(|rendered| {
+                ready.validate_evaluated_view(rendered.evaluated.as_deref())?;
+                Ok(rendered)
+            });
             if request.same_context(&ready) {
                 match result {
-                    Ok(pixels) => {
-                        let pixels = std::sync::Arc::new(pixels);
+                    Ok(rendered) => {
+                        let pixels = std::sync::Arc::new(rendered.pixels);
                         self.ram.insert(ready.frame, pixels.clone());
                         if request.accepts(&ready, playing) {
-                            self.cache_pixels(
-                                ready.project,
-                                ready.frame,
-                                ready.dimension,
-                                pixels,
-                                channel,
-                                window,
-                            );
+                            self.cache_pixels(ready, rendered.evaluated, pixels, channel, window);
                         }
                         self.failed = None;
                     }
                     Err(error) => {
                         if ready.frame == request.frame {
                             self.raw = None;
+                            self.displayed = None;
                             if let Some((_, _, _, old)) = self.cached.take() {
                                 self.retired_images.retire(old, window);
                             }
@@ -195,37 +152,31 @@ impl Preview {
                                 cx,
                             );
                         }
-                        self.failed = Some((ready.project, ready.frame, ready.dimension, error));
+                        self.failed = Some((ready, error));
                     }
                 }
             } else if request.same_gradient(&ready) {
                 // Complete one in-flight frame while the pointer moves, then start the latest
                 // snapshot. Never insert an intermediate project's pixels into the latest RAM cache.
-                if let Ok(pixels) = result {
+                if let Ok(rendered) = result {
                     self.cache_pixels(
-                        ready.project,
-                        ready.frame,
-                        ready.dimension,
-                        std::sync::Arc::new(pixels),
+                        ready,
+                        rendered.evaluated,
+                        std::sync::Arc::new(rendered.pixels),
                         channel,
                         window,
                     );
                 }
             }
         }
-        let mut current = self.cached.as_ref().is_some_and(|(p, f, d, _)| {
-            p == &request.project && *f == request.frame && *d == request.dimension
+        let mut current = self.displayed.as_ref().is_some_and(|(shown, view)| {
+            request.current_geometry(shown, view.as_deref()).is_some()
         });
-        if !current {
+        // RAM stores only pixels. Expression scenes must produce a matching current
+        // view again rather than retaining an entire evaluated project per cached frame.
+        if !current && !request.needs_evaluated_view() {
             if let Some(pixels) = self.ram.get(request.frame) {
-                self.cache_pixels(
-                    request.project.clone(),
-                    request.frame,
-                    request.dimension,
-                    pixels,
-                    channel,
-                    window,
-                );
+                self.cache_pixels(request.clone(), None, pixels, channel, window);
                 current = true;
             }
         }
@@ -233,9 +184,10 @@ impl Preview {
         if self.pending.is_some() {
             return;
         }
-        let failed = self.failed.as_ref().is_some_and(|(p, f, d, _)| {
-            p == &request.project && *f == request.frame && *d == request.dimension
-        });
+        let failed = self
+            .failed
+            .as_ref()
+            .is_some_and(|(failed, _)| request.accepts(failed, false));
         let job = if !current && !failed {
             Some(request)
         } else if self.warming.is_some() {
@@ -280,7 +232,7 @@ impl Preview {
                         renderer.clear_decoders();
                     }
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        renderer.render_preview(&job.project, job.frame, job.dimension)
+                        renderer.render_preview_with_view(&job.project, job.frame, job.dimension)
                     }))
                     .unwrap_or_else(|_| Err("Composition preview failed".into()));
                     if cancel.load(Ordering::Acquire) {
@@ -315,6 +267,8 @@ mod tests {
             frame: 0,
             dimension: 200,
             revision: 4,
+            document_revision: 2,
+            core_generation: 1,
             transport: 7,
             gradient_gesture: None,
         };
@@ -362,6 +316,8 @@ mod tests {
             frame: 30,
             dimension: 1280,
             revision: 1,
+            document_revision: 2,
+            core_generation: 1,
             transport: 8,
             gradient_gesture: None,
         };
@@ -394,6 +350,8 @@ mod tests {
             frame: 30,
             dimension: 1280,
             revision: 1,
+            document_revision: 2,
+            core_generation: 1,
             transport: 8,
             gradient_gesture: Some(17),
         };
@@ -413,6 +371,8 @@ mod tests {
             |r: &mut Request| r.frame += 1,
             |r: &mut Request| r.dimension /= 2,
             |r: &mut Request| r.revision += 1,
+            |r: &mut Request| r.document_revision += 1,
+            |r: &mut Request| r.core_generation += 1,
             |r: &mut Request| r.transport += 1,
         ] {
             let mut next = current.clone();

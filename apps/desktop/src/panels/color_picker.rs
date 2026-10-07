@@ -227,39 +227,49 @@ impl Render for ColorPicker {
                 MouseButton::Left,
                 cx.listener(|this, _, _, _| this.drag = None),
             )
-            .on_key_down(cx.listener(move |this, e: &gpui::KeyDownEvent, _, cx| {
-                let key = e.keystroke.key.as_str();
-                if !matches!(
-                    key,
-                    "left" | "right" | "up" | "down" | "pageup" | "pagedown"
-                ) {
-                    return;
-                }
-                let step = if e.keystroke.modifiers.shift {
-                    0.1
-                } else {
-                    0.01
-                };
-                this.state.update(cx, |s, cx| {
-                    if !session_current(s, serial) {
+            .on_key_down(
+                cx.listener(move |this, e: &gpui::KeyDownEvent, window, cx| {
+                    if this
+                        .fields
+                        .iter()
+                        .any(|field| field.read(cx).has_focus(window))
+                    {
+                        // Field keys must never also move the HSV selectors.
                         return;
                     }
-                    if let Some(session) = &mut s.colors.session {
-                        let mut hsv = session.hsv;
-                        match key {
-                            "left" => hsv[1] -= step,
-                            "right" => hsv[1] += step,
-                            "up" => hsv[2] += step,
-                            "down" => hsv[2] -= step,
-                            "pageup" => hsv[0] += step * 100.0,
-                            _ => hsv[0] -= step * 100.0,
-                        }
-                        session.set_hsv(hsv);
+                    let key = e.keystroke.key.as_str();
+                    if !matches!(
+                        key,
+                        "left" | "right" | "up" | "down" | "pageup" | "pagedown"
+                    ) {
+                        return;
                     }
-                    cx.notify();
-                });
-                cx.stop_propagation();
-            }));
+                    let step = if e.keystroke.modifiers.shift {
+                        0.1
+                    } else {
+                        0.01
+                    };
+                    this.state.update(cx, |s, cx| {
+                        if !session_current(s, serial) {
+                            return;
+                        }
+                        if let Some(session) = &mut s.colors.session {
+                            let mut hsv = session.hsv;
+                            match key {
+                                "left" => hsv[1] -= step,
+                                "right" => hsv[1] += step,
+                                "up" => hsv[2] += step,
+                                "down" => hsv[2] -= step,
+                                "pageup" => hsv[0] += step * 100.0,
+                                _ => hsv[0] -= step * 100.0,
+                            }
+                            session.set_hsv(hsv);
+                        }
+                        cx.notify();
+                    });
+                    cx.stop_propagation();
+                }),
+            );
         let mut maps = div().flex().gap_2();
         for index in 0..2 {
             let bounds = self.bounds[index].clone();
@@ -615,6 +625,7 @@ mod text_picker_tests {
                 assert_eq!(
                     layer
                         .property(libre_effects_core::Property::Opacity)
+                        .expect("every layer has a scalar Opacity track")
                         .value_at(17),
                     27.123456789012345
                 );

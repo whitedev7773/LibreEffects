@@ -5,10 +5,24 @@ use gpui::{Context, KeyDownEvent, Window, div, prelude::*, px, rgb};
 
 impl Shell {
     pub(super) fn open_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.state.read(cx).vertex_editor.is_some() {
+        self.menu_pointer_owner = None;
+        if self.state.read(cx).automation.is_some()
+            || self.state.read(cx).vertex_editor.is_some()
+            || self.state.read(cx).expression_editor.is_some()
+        {
             return;
         }
+        if self.menu.is_none() {
+            self.timeline_command_origin = Some(self.timeline_focus_origin(window, cx));
+            self.capture_clipboard_owner(window, cx);
+        }
+        self.svg_import_entry.begin(
+            self.menu.is_some(),
+            TextField::active_has_pending_source_input(cx)
+                || self.state.read(cx).text_session.is_some(),
+        );
         self.search_return_focus = self.menu_return_focus.take().or_else(|| window.focused(cx));
+        self.state.update(cx, |s, _| s.retire_colors_context());
         TextField::commit_active(window, cx);
         self.state.update(cx, |s, cx| s.finish_text(true, cx));
         self.menu = None;
@@ -25,6 +39,10 @@ impl Shell {
         cx.notify();
     }
     fn close_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.timeline_command_origin = None;
+        self.svg_import_entry.clear();
+        self.state
+            .update(cx, |state, _| state.shell_clipboard_blocked = false);
         self.search_open = false;
         if let Some(focus) = self.search_return_focus.take() {
             window.focus(&focus);

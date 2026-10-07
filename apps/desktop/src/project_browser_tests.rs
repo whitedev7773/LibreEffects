@@ -105,13 +105,21 @@ fn tree_search_sort_and_collapsed_folders_keep_stable_item_identity() {
         })
         .unwrap();
     }
-    let visible = rows(e.project(), "", false, false, &Default::default());
+    let visible = rows(
+        e.project(),
+        "",
+        ItemType::All,
+        false,
+        false,
+        &Default::default(),
+    );
     assert_eq!(visible.iter().find(|r| r.name == "Zulu").unwrap().depth, 2);
     assert_eq!(folder_path(e.project(), Some(2)), "Media / Nested");
     assert!(
         !rows(
             e.project(),
             "",
+            ItemType::All,
             false,
             false,
             &std::collections::BTreeSet::from([1])
@@ -123,6 +131,7 @@ fn tree_search_sort_and_collapsed_folders_keep_stable_item_identity() {
         rows(
             e.project(),
             "zUL",
+            ItemType::All,
             true,
             true,
             &std::collections::BTreeSet::from([1])
@@ -130,7 +139,14 @@ fn tree_search_sort_and_collapsed_folders_keep_stable_item_identity() {
         .item,
         ProjectItem::Asset(3)
     );
-    let images = rows(e.project(), "image", false, true, &Default::default());
+    let images = rows(
+        e.project(),
+        "image",
+        ItemType::All,
+        false,
+        true,
+        &Default::default(),
+    );
     assert_eq!(
         images.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
         ["Zulu", "Alpha"]

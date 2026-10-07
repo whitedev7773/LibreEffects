@@ -49,6 +49,7 @@ impl Interpretation {
                     }
                 });
             })
+            .tab_stop()
         });
         let edit = state.clone();
         let matte = cx.new(|cx| {
@@ -77,6 +78,7 @@ impl Interpretation {
                     }
                 });
             })
+            .tab_stop()
         });
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
         Self {

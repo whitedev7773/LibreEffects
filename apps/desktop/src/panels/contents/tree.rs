@@ -139,7 +139,7 @@ impl PressContext {
             project,
         )
     }
-    fn capture(
+    pub(super) fn capture(
         s: &EditorState,
         selection: &Selection,
         collapsed: &BTreeSet<u64>,
@@ -165,7 +165,7 @@ impl PressContext {
             collapsed: collapsed.clone(),
         }
     }
-    fn same_context(
+    pub(super) fn same_context(
         &self,
         s: &EditorState,
         selection: &Selection,
@@ -211,10 +211,11 @@ pub(super) struct Drag {
     pub moved: bool,
     pub preview: Option<super::tree_drop::DropPreview>,
 }
-fn blocked(s: &EditorState) -> bool {
+pub(super) fn blocked(s: &EditorState) -> bool {
     s.colors.session.is_some()
         || s.gradient_editor.is_some()
         || s.vertex_editor.is_some()
+        || s.expression_editor.is_some()
         || s.gradient_preview.is_some()
         || s.text_session.is_some()
         || s.media_open
@@ -306,6 +307,7 @@ fn key_route(key: TreeKey, s: &EditorState) -> KeyRoute {
     let modal = s.colors.session.is_some()
         || s.gradient_editor.is_some()
         || s.vertex_editor.is_some()
+        || s.expression_editor.is_some()
         || s.media_open
         || s.fonts_open
         || s.recovery.is_some()
@@ -461,8 +463,19 @@ impl ContentsControls {
         if publish {
             self.publish_tree_selection(cx);
         }
+        self.refresh_bulk_context(cx);
+        self.refresh_clipboard_context(cx);
     }
     pub(super) fn publish_tree_selection(&mut self, cx: &mut Context<Self>) {
+        // Even a source-equal A → B → A selection cycle retires old fields.
+        self.bulk_session.borrow_mut().invalidate();
+        self.clipboard_session.borrow_mut().invalidate();
+        self.colors_serial.set(
+            self.colors_serial
+                .get()
+                .checked_add(1)
+                .expect("Colors input serial exhausted"),
+        );
         self.tree_drag = None;
         if let Some(item) = self.selection.singleton()
             && let Some((_, layer)) = self.owner
@@ -479,6 +492,8 @@ impl ContentsControls {
         self.name = None;
         self.add_open = false;
         self.state.update(cx, |s, cx| {
+            s.retire_colors_clipboard();
+            s.colors_key_owned.set(false);
             s.contents_selection = None;
             if matches!(
                 s.gradient_controls,
@@ -829,6 +844,15 @@ impl ContentsControls {
         }
         cx.stop_propagation();
         if route == KeyRoute::Consume {
+            return;
+        }
+        if let Some(operation) = match key {
+            TreeKey::Copy => Some(super::clipboard::Operation::Copy),
+            TreeKey::Cut => Some(super::clipboard::Operation::Cut),
+            TreeKey::Paste => Some(super::clipboard::Operation::Paste),
+            _ => None,
+        } {
+            self.clipboard_key(operation, e.is_held, w, cx);
             return;
         }
         if matches!(key, TreeKey::MoveInto | TreeKey::MoveOut) {
@@ -1532,7 +1556,13 @@ mod tests {
                     }
                     for (key, control) in chords {
                         let owned = tree_key(key, control, shift, alt, other, true, false).unwrap();
-                        assert_eq!(key_route(owned, &s), KeyRoute::Consume, "{key}");
+                        let expected = if !shift && !alt && !other && matches!(key, "c" | "x" | "v")
+                        {
+                            KeyRoute::Handle
+                        } else {
+                            KeyRoute::Consume
+                        };
+                        assert_eq!(key_route(owned, &s), expected, "{key}");
                         // An editor TextField is outside the tree focus domain. Its
                         // clipboard shortcuts and IME candidates retain all input.
                         assert!(tree_key(key, control, shift, alt, other, false, false).is_none());

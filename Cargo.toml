@@ -3,6 +3,12 @@ resolver = "3"
 members = [
   'apps/desktop',
   'crates/core',
+  'crates/editor-model',
+  'crates/ae-expressions',
+  'crates/ae-project',
+  'crates/spatial',
+  'crates/temporal-scalar',
+  'crates/audio-spectrum',
 ]
 
 [workspace.package]
@@ -17,3 +23,12 @@ gpui = "0.2.2"
 # GPUI pins Taffy 0.9, which still requires grid 0.18. Keep its API while
 # backporting the upstream overflow fix; see vendor/grid/README.libreeffects.md.
 grid = { path = "vendor/grid" }
+
+# Preserve authoritative shaping clusters and all glyph paint formats for Text Animator.
+usvg = { path = "vendor/usvg" }
+
+# Checked, bounded Repeat Edge Pixels Gaussian rendering.
+resvg = { path = "vendor/resvg" }
+
+# Pinned GPUI: negotiate reliable X11 repeat releases on the existing client.
+gpui = { path = "vendor/gpui" }

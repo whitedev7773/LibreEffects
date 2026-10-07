@@ -59,6 +59,28 @@ fn files(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
         .collect()
 }
 
+fn contents_snapshot() -> libre_effects_core::ContentsClipboard {
+    let mut editor = Editor::default();
+    editor
+        .execute(Command::AddContent {
+            content: libre_effects_core::Content::ShapeContents(Default::default()),
+            width: 100.,
+            height: 100.,
+            name: "Clipboard".into(),
+        })
+        .unwrap();
+    editor
+        .execute(Command::Contents {
+            id: 1,
+            edit: libre_effects_core::ContentsEdit::Add {
+                parent: 0,
+                kind: libre_effects_core::ContentsKind::Group(vec![]),
+            },
+        })
+        .unwrap();
+    editor.copy_contents(1, 0, &[1]).unwrap()
+}
+
 fn dirty_state(recovery_root: &Path) -> EditorState {
     let mut state = EditorState::default();
     state.editor.execute(Command::AddRectangle).unwrap();
@@ -94,10 +116,12 @@ fn dirty_state(recovery_root: &Path) -> EditorState {
     assert!(state.dirty());
     assert!(state.editor.can_undo());
     assert!(state.editor.can_redo());
+    state.set_contents_clipboard(contents_snapshot());
     state
 }
 
 struct Before {
+    clipboard: Option<libre_effects_core::ContentsClipboard>,
     project: Project,
     saved: Project,
     path: Option<PathBuf>,
@@ -114,6 +138,7 @@ struct Before {
 impl Before {
     fn capture(state: &EditorState, recovery_root: &Path) -> Self {
         Self {
+            clipboard: state.contents_clipboard().cloned(),
             project: state.editor.project().clone(),
             saved: state.saved.clone(),
             path: state.path.clone(),
@@ -139,6 +164,7 @@ impl Before {
     }
     fn assert_unchanged(self, state: &mut EditorState, recovery_root: &Path) {
         assert_eq!(state.editor.project(), &self.project);
+        assert_eq!(state.contents_clipboard(), self.clipboard.as_ref());
         assert_eq!(state.saved, self.saved);
         assert_eq!(state.path, self.path);
         assert_eq!(state.source_format, self.format);
@@ -288,6 +314,7 @@ fn accepted_open_replaces_baseline_and_clears_old_history_and_checkpoint() {
         .unwrap();
     assert_eq!(state.editor.project(), &project);
     assert_eq!(state.saved, project);
+    assert!(state.contents_clipboard().is_none());
     assert_eq!(state.path, Some(path));
     assert_eq!(state.source_format, Some(ProjectFormat::Lep));
     assert_eq!(state.imported_original, None);
@@ -391,6 +418,7 @@ fn file_action_blur_preserves_other_chooser_guards() {
         Action::ImportImageSequence,
         Action::RelinkSequence(1),
         Action::ImportImage,
+        Action::ImportSvg,
         Action::ImportVideo,
         Action::RelinkVideo,
         Action::ExportFrame,
@@ -564,6 +592,7 @@ fn new_recovery_and_subsequent_open_replace_source_provenance() {
     let recovery_root = directory.path().join("recovery");
     let mut state = dirty_state(&recovery_root);
     state.install_new_project().unwrap();
+    assert!(state.contents_clipboard().is_none());
     assert_eq!(state.path, None);
     assert_eq!(state.source_format, None);
     assert_eq!(state.imported_original, None);
@@ -575,6 +604,7 @@ fn new_recovery_and_subsequent_open_replace_source_provenance() {
     let mut state = dirty_state(&recovery_root);
     assert!(state.recovery.is_some());
     state.apply_recovery(true).unwrap();
+    assert!(state.contents_clipboard().is_none());
     assert_eq!(state.path, None);
     assert_eq!(state.source_format, None);
     assert_eq!(state.imported_original, None);
@@ -648,6 +678,7 @@ fn stale_open_and_save_completions_cannot_replace_newer_document_or_provenance()
     // A newer document boundary invalidates both successful and failed old saves.
     let stale_save = state.begin_file_operation();
     state.install_new_project().unwrap();
+    assert!(state.contents_clipboard().is_none());
     for result in [Ok(()), Err("late failure".into())] {
         state.finish_save(stale_save, previous.clone(), legacy.clone(), result);
         assert_eq!(state.path, None);
@@ -756,6 +787,7 @@ fn recovery_cleanup_warning_still_installs_the_durable_restored_project() {
     // Simulate cleanup failure after the owned native copy was made durable.
     std::fs::create_dir(abandoned.with_extension("previous")).unwrap();
     state.apply_recovery(true).unwrap();
+    assert!(state.contents_clipboard().is_none());
     assert_eq!(state.editor.project(), &recovered);
     assert_eq!(state.path, None);
     assert_eq!(state.source_format, None);
@@ -892,6 +924,7 @@ fn numeric_vertex_valid_replacements_drop_sessions_return_tokens_and_late_callba
                 }
                 if new_document {
                     state.install_new_project().unwrap();
+                    assert!(state.contents_clipboard().is_none());
                 } else {
                     state
                         .install_opened_project(
@@ -993,7 +1026,7 @@ fn malformed_v2_open_preserves_explicit_graph_channels_and_full_editor_boundary(
             "future-address-v2.lep",
             serde_json::json!({
                 "version":2,"compositions":{"1":{"graph_channels":{
-                    "version":2,"pinned":[address.clone()],"active":address.clone(),"ranges":[]
+                    "version":4,"pinned":[address.clone()],"active":address.clone(),"ranges":[]
                 }}},"workspace":{}
             }),
         ),
@@ -1045,4 +1078,143 @@ fn malformed_v2_open_preserves_explicit_graph_channels_and_full_editor_boundary(
         before.assert_unchanged(&mut state, &recovery_root);
         assert_eq!(std::fs::read(&path).unwrap(), bytes);
     }
+}
+
+#[test]
+fn recent_history_remembers_only_successful_native_opens() {
+    let root = tempfile::tempdir().unwrap();
+    let native = root.path().join("native.lep");
+    let legacy = root.path().join("legacy.json");
+    crate::project_io::write_native_project(&native, &Project::default(), None).unwrap();
+    std::fs::write(&legacy, Project::default().to_json().unwrap()).unwrap();
+    let mut state = EditorState::default();
+    state.recent_projects = Default::default();
+    open_test_project(&mut state, &legacy).unwrap();
+    assert!(state.recent_projects.paths().is_empty());
+    open_test_project(&mut state, &native).unwrap();
+    assert_eq!(state.recent_projects.paths(), [native]);
+    state.install_new_project().unwrap();
+    assert_eq!(state.recent_projects.paths().len(), 1);
+    let history = state.recent_projects.clone();
+    let before = state.editor.project().clone();
+    let revision = state.document_revision;
+    let old = state.begin_file_operation();
+    let current = state.begin_file_operation();
+    state
+        .finish_open(
+            old,
+            revision,
+            &before,
+            Err("late read".into()),
+            root.path().join("late.lep"),
+        )
+        .unwrap();
+    assert!(
+        state
+            .finish_open(
+                current,
+                revision,
+                &before,
+                Err("missing".into()),
+                root.path().join("missing.lep")
+            )
+            .is_err()
+    );
+    assert_eq!(state.editor.project(), &before);
+    assert_eq!(state.recent_projects, history);
+    assert_eq!(state.path, None);
+}
+
+#[test]
+fn recent_history_ignores_stale_failed_canceled_and_direct_saves() {
+    let root = tempfile::tempdir().unwrap();
+    let mut state = EditorState::default();
+    state.recent_projects = Default::default();
+    let snapshot = state.editor.project().clone();
+    let stale = state.begin_file_operation();
+    state.begin_file_operation();
+    state.finish_chosen_save(
+        stale,
+        snapshot.clone(),
+        root.path().join("stale.lep"),
+        Ok(()),
+        true,
+    );
+    state.finish_chosen_save(
+        state.file_operation,
+        snapshot.clone(),
+        root.path().join("failed.lep"),
+        Err("failure".into()),
+        true,
+    );
+    state.cancel_save(state.file_operation);
+    state.finish_chosen_save(
+        state.file_operation,
+        snapshot.clone(),
+        root.path().join("direct.lep"),
+        Ok(()),
+        false,
+    );
+    assert!(state.recent_projects.paths().is_empty());
+    let selected = root.path().join("chosen.lep");
+    state.finish_chosen_save(
+        state.file_operation,
+        snapshot,
+        selected.clone(),
+        Ok(()),
+        true,
+    );
+    assert_eq!(state.recent_projects.paths(), [selected]);
+}
+
+#[test]
+fn recent_open_rejects_intervening_edits_without_changing_history() {
+    let root = tempfile::tempdir().unwrap();
+    let native = root.path().join("incoming.lep");
+    crate::project_io::write_native_project(&native, &Project::default(), None).unwrap();
+    let mut state = EditorState::default();
+    state.recent_projects = Default::default();
+    let before = state.editor.project().clone();
+    let revision = state.document_revision;
+    let operation = state.begin_file_operation();
+    state.editor.execute(Command::AddRectangle).unwrap();
+    let changed = state.editor.project().clone();
+    assert!(
+        state
+            .finish_open(
+                operation,
+                revision,
+                &before,
+                crate::project_io::read_editor_project(&native),
+                native
+            )
+            .is_err()
+    );
+    assert!(state.recent_projects.paths().is_empty());
+    assert_eq!(state.editor.project(), &changed);
+    assert!(state.editor.can_undo());
+    assert!(state.dirty());
+}
+
+#[test]
+fn recent_history_failed_writes_remain_retryable_and_newer_clear_wins() {
+    let root = tempfile::tempdir().unwrap();
+    let mut state = EditorState::default();
+    state.recent_projects = Default::default();
+    state.recent_projects.remember(&root.path().join("one.lep"));
+    let first = state.recent_projects.revision();
+    assert!(!state.finish_recent_projects_write(first, Err("temporary failure".into())));
+    assert!(state.recent_history_needs_save());
+    // Reopening the same entry need not move it to permit another write.
+    assert!(!state.recent_projects.remember(&root.path().join("one.lep")));
+    assert!(state.recent_history_needs_save());
+    assert!(state.recent_projects.clear(first));
+    let cleared = state.recent_projects.revision();
+    assert!(state.finish_recent_projects_write(first, Ok(())));
+    assert!(state.recent_history_needs_save());
+    assert!(!state.finish_recent_projects_write(cleared, Err("temporary failure".into())));
+    assert!(state.recent_history_needs_save());
+    assert!(!state.finish_recent_projects_write(cleared, Ok(())));
+    assert!(!state.recent_history_needs_save());
+    assert!(state.recent_projects.paths().is_empty());
 }

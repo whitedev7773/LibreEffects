@@ -221,6 +221,7 @@ fn singleton_request_requires_one_index_and_general_request_keeps_idle_guards() 
                     zoom: 1.,
                     moved: false,
                     vertices: [1].into(),
+                    contents: None,
                 })
             }
             7 => {
@@ -544,6 +545,7 @@ fn transform_request_rejects_every_unfinished_gesture_and_invalid_index_set() {
                         zoom: 1.,
                         moved: true,
                         vertices: [0, 2].into(),
+                        contents: None,
                     })
                 }
                 6 => {

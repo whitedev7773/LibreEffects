@@ -40,6 +40,13 @@ impl InputTarget {
             && self.revision == s.document_revision
             && self.origin.as_ref() == s.editor.project()
     }
+    /// The exact source/layer/document receipt without a playhead requirement.
+    /// A separate monotonic action/domain epoch must guard any retained clipboard.
+    pub(crate) fn source_current(&self, s: &crate::editor::EditorState) -> bool {
+        self.revision == s.document_revision
+            && Self::eligible_layer(s) == Some(self.layer)
+            && self.origin.as_ref() == s.editor.project()
+    }
     /// Use only after `current` was checked immediately before synchronously
     /// committing a pending field, then replan from the resulting document.
     pub fn same_context(&self, s: &crate::editor::EditorState) -> bool {
@@ -129,6 +136,16 @@ struct InputButton {
     target: InputTarget,
     hitbox: gpui::Hitbox,
     preserve_ime: bool,
+    allow_shift: bool,
+    allow_alt: bool,
+    guard: Option<TreeInputGuard>,
+}
+/// Read-only navigation has no editable layer receipt and never flushes input.
+#[derive(Clone)]
+struct NavigationRegion {
+    hitbox: gpui::Hitbox,
+    guard: std::rc::Rc<dyn Fn(&crate::editor::EditorState, &gpui::App) -> bool>,
+    text_selection: bool,
 }
 /// Contents labels opt into a down-only route. The guard is checked before any
 /// blur and again after the one authorized synchronous field flush.
@@ -179,16 +196,84 @@ pub(crate) fn tree_pointer_down_allowed(event: &gpui::MouseDownEvent) -> bool {
         && !event.modifiers.platform
         && !event.modifiers.function
 }
+
+/// Guarded controls must not even arm their session during marked composition,
+/// modified/repeated presses, inactive windows, or a stale rendered source.
+fn guarded_input_down_allowed(
+    event: &gpui::MouseDownEvent,
+    active: bool,
+    composing: bool,
+    source_current: bool,
+    prepare: impl FnOnce() -> bool,
+) -> bool {
+    active
+        && event.button == gpui::MouseButton::Left
+        && event.click_count == 1
+        && !event.modifiers.modified()
+        && !composing
+        && source_current
+        && prepare()
+}
+
+/// Only compound key selection opts into Shift; the original guard still owns
+/// active-window, IME, repeated-press and before-blur source validation.
+#[cfg(test)]
+fn guarded_input_down_allowed_with_shift(
+    event: &gpui::MouseDownEvent,
+    allow_shift: bool,
+    active: bool,
+    composing: bool,
+    source_current: bool,
+    prepare: impl FnOnce() -> bool,
+) -> bool {
+    guarded_input_down_allowed_with_modifiers(
+        event,
+        allow_shift,
+        false,
+        active,
+        composing,
+        source_current,
+        prepare,
+    )
+}
+
+fn guarded_input_down_allowed_with_modifiers(
+    event: &gpui::MouseDownEvent,
+    allow_shift: bool,
+    allow_alt: bool,
+    active: bool,
+    composing: bool,
+    source_current: bool,
+    prepare: impl FnOnce() -> bool,
+) -> bool {
+    let mut admitted = event.clone();
+    if allow_alt {
+        admitted.modifiers.alt = false;
+    }
+    if allow_shift {
+        admitted.modifiers.shift = false;
+    }
+    guarded_input_down_allowed(&admitted, active, composing, source_current, prepare)
+}
+
+/// Discover guarded hits for every mouse button so their rejection runs before
+/// descendant outside-down handlers. Ordinary buttons keep Left-only admission.
+fn input_button_candidate(button: gpui::MouseButton, guarded: bool) -> bool {
+    guarded || button == gpui::MouseButton::Left
+}
+
 fn pointer_preserves_composition(preserve_ime: bool, composing: bool) -> bool {
     preserve_ime && composing
 }
 #[derive(Default)]
 struct InputPointerWindow {
     buttons: Vec<InputButton>,
+    navigation_regions: Vec<NavigationRegion>,
     press: Option<InputPress>,
     tree_labels: Vec<TreeInputLabel>,
     tree_press: Option<TreeDownPress>,
     generation: u64,
+    preserve_text_selection: bool,
 }
 #[derive(Default)]
 struct InputPointers(std::collections::HashMap<u64, InputPointerWindow>);
@@ -207,22 +292,20 @@ pub(crate) fn input_pointer_root(
     let draw_state = state.clone();
     root.capture_any_mouse_down(move |event, window, cx| {
         let id = window.window_handle().window_id().as_u64();
-        let (candidate, tree_label) = {
+        let (candidate, tree_label, navigation) = {
             let pointers = cx.default_global::<InputPointers>();
             let entry = pointers.0.entry(id).or_default();
             entry.press = None;
             entry.tree_press = None;
+            entry.preserve_text_selection = false;
             entry.generation = entry.generation.wrapping_add(1);
-            let candidate = (event.button == gpui::MouseButton::Left)
-                .then(|| {
-                    entry
-                        .buttons
-                        .iter()
-                        .rev()
-                        .find(|b| b.hitbox.is_hovered(window))
-                        .cloned()
-                })
-                .flatten();
+            let candidate = entry
+                .buttons
+                .iter()
+                .rev()
+                .find(|b| b.hitbox.is_hovered(window))
+                .filter(|b| input_button_candidate(event.button, b.guard.is_some()))
+                .cloned();
             (
                 candidate,
                 entry
@@ -231,8 +314,56 @@ pub(crate) fn input_pointer_root(
                     .rev()
                     .find(|b| b.hitbox.is_hovered(window))
                     .cloned(),
+                entry
+                    .navigation_regions
+                    .iter()
+                    .rev()
+                    .find(|region| region.hitbox.is_hovered(window))
+                    .cloned(),
             )
         };
+        if state.read(cx).text_session.is_some()
+            && (crate::components::TextField::is_composing(window, cx)
+                || state
+                    .read(cx)
+                    .text_session
+                    .as_ref()
+                    .is_some_and(|s| s.buffer.marked.is_some()))
+        {
+            // A source or Character IME composition cannot be committed as a
+            // side effect of clicking another panel before its input callback.
+            window.prevent_default();
+            cx.stop_propagation();
+            return;
+        }
+        if let Some(region) = navigation {
+            // This must run before TextField's outside-down capture. A pending
+            // source draft or IME remains focused and cannot become a side-effect
+            // of inspecting/following a Project reference. No explicit flush.
+            if !window.is_window_active()
+                || event.first_mouse
+                || crate::components::TextField::is_composing(window, cx)
+                || (!region.text_selection
+                    && crate::components::TextField::active_has_pending_source_input(cx))
+                || (region.text_selection
+                    && state
+                        .read(cx)
+                        .text_session
+                        .as_ref()
+                        .is_some_and(|s| s.buffer.marked.is_some()))
+                || !(region.guard)(state.read(cx), cx)
+            {
+                window.prevent_default();
+                cx.stop_propagation();
+            } else if region.text_selection {
+                cx.default_global::<InputPointers>()
+                    .0
+                    .entry(id)
+                    .or_default()
+                    .preserve_text_selection = true;
+            }
+            return;
+        }
         if let Some(label) = tree_label {
             // Rejected labels cannot let a descendant outside-down handler blur
             // marked input or rebase an old render closure onto a new owner.
@@ -281,6 +412,25 @@ pub(crate) fn input_pointer_root(
             });
             return;
         }
+        // Session-bound buttons must reject before any descendant blur can
+        // commit input. Ordinary buttons retain their established behavior.
+        if candidate.as_ref().is_some_and(|button| {
+            button.guard.as_ref().is_some_and(|guard| {
+                !guarded_input_down_allowed_with_modifiers(
+                    event,
+                    button.allow_shift,
+                    button.allow_alt,
+                    window.is_window_active(),
+                    crate::components::TextField::is_composing(window, cx),
+                    button.target.current(state.read(cx)),
+                    || guard(state.read(cx), cx, false),
+                )
+            })
+        }) {
+            window.prevent_default();
+            cx.stop_propagation();
+            return;
+        }
         let Some(button) = candidate.filter(|b| b.target.current(state.read(cx))) else {
             return;
         };
@@ -295,6 +445,15 @@ pub(crate) fn input_pointer_root(
             return;
         }
         crate::components::TextField::commit_active(window, cx);
+        if button
+            .guard
+            .as_ref()
+            .is_some_and(|guard| !guard(state.read(cx), cx, true))
+        {
+            window.prevent_default();
+            cx.stop_propagation();
+            return;
+        }
         state.update(cx, |s, cx| {
             if button.target.same_context(s) {
                 s.finish_text(true, cx);
@@ -354,6 +513,7 @@ pub(crate) fn input_pointer_root(
                     .entry(id)
                     .or_default();
                 entry.buttons.clear();
+                entry.navigation_regions.clear();
                 entry.tree_labels.clear();
                 if !current {
                     entry.press = None;
@@ -362,6 +522,63 @@ pub(crate) fn input_pointer_root(
             |_, _, _, _| (),
         )
         .absolute()
+        .size_full(),
+    )
+}
+
+/// Register a masked, read-only navigation region for the workspace's earliest
+/// pointer capture. It is valid even in an empty composition with no layer target.
+pub(crate) fn input_pointer_navigation_guarded(
+    element: gpui::Stateful<gpui::Div>,
+    guard: impl Fn(&crate::editor::EditorState, &gpui::App) -> bool + 'static,
+) -> gpui::Stateful<gpui::Div> {
+    input_pointer_navigation_region(element, guard, false)
+}
+
+/// Character controls own a draft selection. The workspace capture admits the
+/// press before Preview's outside-down commit, preserving that draft through
+/// field focus and picker clicks. Marked input is never blurred by this route.
+pub(crate) fn input_pointer_text_selection_guarded(
+    element: gpui::Stateful<gpui::Div>,
+    guard: impl Fn(&crate::editor::EditorState, &gpui::App) -> bool + 'static,
+) -> gpui::Stateful<gpui::Div> {
+    input_pointer_navigation_region(element, guard, true)
+}
+
+pub(crate) fn preserving_text_selection(window: &gpui::Window, cx: &gpui::App) -> bool {
+    cx.try_global::<InputPointers>()
+        .and_then(|p| p.0.get(&window.window_handle().window_id().as_u64()))
+        .is_some_and(|p| p.preserve_text_selection)
+}
+
+fn input_pointer_navigation_region(
+    element: gpui::Stateful<gpui::Div>,
+    guard: impl Fn(&crate::editor::EditorState, &gpui::App) -> bool + 'static,
+    text_selection: bool,
+) -> gpui::Stateful<gpui::Div> {
+    use gpui::prelude::*;
+    let guard = std::rc::Rc::new(guard);
+    element.relative().child(
+        gpui::canvas(
+            move |bounds, window, cx| {
+                let hitbox = window.insert_hitbox(bounds, gpui::HitboxBehavior::Normal);
+                let id = window.window_handle().window_id().as_u64();
+                cx.default_global::<InputPointers>()
+                    .0
+                    .entry(id)
+                    .or_default()
+                    .navigation_regions
+                    .push(NavigationRegion {
+                        hitbox,
+                        guard: guard.clone(),
+                        text_selection,
+                    });
+            },
+            |_, _, _, _| (),
+        )
+        .absolute()
+        .top_0()
+        .left_0()
         .size_full(),
     )
 }
@@ -444,7 +661,7 @@ pub(crate) fn input_pointer_button(
     control: String,
     target: Option<InputTarget>,
 ) -> gpui::Stateful<gpui::Div> {
-    input_pointer_button_policy(button, control, target, false)
+    input_pointer_button_policy(button, control, target, false, false, false, None)
 }
 
 /// Opt-in hierarchy policy; existing picker and typography controls retain their
@@ -454,7 +671,64 @@ pub(crate) fn input_pointer_button_preserving_ime(
     control: String,
     target: Option<InputTarget>,
 ) -> gpui::Stateful<gpui::Div> {
-    input_pointer_button_policy(button, control, target, true)
+    input_pointer_button_policy(button, control, target, true, false, false, None)
+}
+
+/// Source/session-bound controls opt into before/after-flush validation. The
+/// guard may accept only an explicitly authorized synchronous input receipt;
+/// it must never generally relax source equality after a pointer press.
+pub(crate) fn input_pointer_button_guarded(
+    button: gpui::Stateful<gpui::Div>,
+    control: String,
+    target: Option<InputTarget>,
+    guard: impl Fn(&crate::editor::EditorState, &gpui::App, bool) -> bool + 'static,
+) -> gpui::Stateful<gpui::Div> {
+    input_pointer_button_policy(
+        button,
+        control,
+        target,
+        true,
+        false,
+        false,
+        Some(std::rc::Rc::new(guard)),
+    )
+}
+
+/// Dedicated compound key selection permits Shift, retaining all other guards.
+pub(crate) fn input_pointer_key_button_guarded(
+    button: gpui::Stateful<gpui::Div>,
+    control: String,
+    target: Option<InputTarget>,
+    guard: impl Fn(&crate::editor::EditorState, &gpui::App, bool) -> bool + 'static,
+) -> gpui::Stateful<gpui::Div> {
+    input_pointer_button_policy(
+        button,
+        control,
+        target,
+        true,
+        true,
+        false,
+        Some(std::rc::Rc::new(guard)),
+    )
+}
+
+/// Compound key drags alone permit Alt at press for the Timeline snap bypass.
+/// All original buttons retain their previous modifier policy.
+pub(crate) fn input_pointer_key_drag_guarded(
+    button: gpui::Stateful<gpui::Div>,
+    control: String,
+    target: Option<InputTarget>,
+    guard: impl Fn(&crate::editor::EditorState, &gpui::App, bool) -> bool + 'static,
+) -> gpui::Stateful<gpui::Div> {
+    input_pointer_button_policy(
+        button,
+        control,
+        target,
+        true,
+        true,
+        true,
+        Some(std::rc::Rc::new(guard)),
+    )
 }
 
 fn input_pointer_button_policy(
@@ -462,6 +736,9 @@ fn input_pointer_button_policy(
     control: String,
     target: Option<InputTarget>,
     preserve_ime: bool,
+    allow_shift: bool,
+    allow_alt: bool,
+    guard: Option<TreeInputGuard>,
 ) -> gpui::Stateful<gpui::Div> {
     use gpui::prelude::*;
     button.relative().child(
@@ -480,6 +757,9 @@ fn input_pointer_button_policy(
                             target: target.clone(),
                             hitbox,
                             preserve_ime,
+                            allow_shift,
+                            allow_alt,
+                            guard: guard.clone(),
                         });
                 }
             },
@@ -619,6 +899,7 @@ impl GradientDraft {
             && s.colors.session.is_none()
             && s.gradient_editor.is_none()
             && s.vertex_editor.is_none()
+            && s.expression_editor.is_none()
             && s.text_session.is_none()
             && s.editor.selected() == Some(self.layer)
             && s.contents_selection
@@ -831,7 +1112,13 @@ impl Session {
                         rgb: layer
                             .text_color_at(TextPaint::Fill, frame)
                             .unwrap_or_else(|| layer.color()),
-                        opacity: layer.property(Property::Opacity).value_at(frame),
+                        opacity: layer
+                            // A bounded picker shows clipped authored alpha.
+                            // Store this same clipped sample as both original
+                            // and current, so RGB edits and retyped 0/100 never
+                            // replace a raw native overshoot or insert a key.
+                            .opacity_at(frame, project.composition().fps().seconds(1))?
+                            .clamp(0.0, 100.0),
                     },
                 }
             }
@@ -1190,6 +1477,121 @@ impl Workflow {
 mod tests {
     use super::*;
     use libre_effects_core::Editor;
+
+    #[test]
+    fn native_opacity_clipped_picker_noops_and_rgb_edits_preserve_raw_keys() {
+        for high in [false, true] {
+            let mut editor = crate::opacity_test_support::overshoot_editor(high);
+            let before = editor.project().clone();
+            let raw = editor
+                .selected_layer()
+                .unwrap()
+                .opacity_at(15, 1.0 / 30.0)
+                .unwrap();
+            assert!((raw - if high { 200.0 } else { -100.0 }).abs() < 1e-10);
+            let clipped = if high { 100.0 } else { 0.0 };
+            let mut draft = Session::new(Target::Fill(1), editor.project(), 7, 15).unwrap();
+            assert_eq!(
+                (draft.original.opacity, draft.color.opacity),
+                (clipped, clipped)
+            );
+            assert!(draft.command().is_none());
+            draft
+                .input(4, if high { " 100.000 " } else { " -0.000 " })
+                .unwrap();
+            assert!(draft.command().is_none());
+            assert_eq!(editor.project(), &before);
+            assert!(!editor.can_undo());
+            draft.input(0, "fedcba").unwrap();
+            let command = draft.command().unwrap();
+            assert!(
+                matches!(&command, Command::Batch(commands) if matches!(commands.as_slice(), [Command::SetColor { id: 1, color: 0xfedcba }]))
+            );
+            editor.execute(command).unwrap();
+            let layer = editor.selected_layer().unwrap();
+            let prior = before.composition().layer(1).unwrap();
+            assert_eq!(layer.opacity_timing(), prior.opacity_timing());
+            assert_eq!(layer.opacity_key_count(), 2);
+            for frame in 0..=30 {
+                assert_eq!(
+                    layer.opacity_at(frame, 1.0 / 30.0),
+                    prior.opacity_at(frame, 1.0 / 30.0)
+                );
+            }
+            let after = editor.project().clone();
+            editor.undo();
+            assert_eq!(editor.project(), &before);
+            editor.redo();
+            assert_eq!(editor.project(), &after);
+            assert_eq!(
+                Project::from_json(&after.to_json().unwrap()).unwrap(),
+                after
+            );
+        }
+    }
+
+    #[test]
+    fn native_opacity_picker_changed_alpha_inserts_one_key_preserving_authored_sides() {
+        for high in [false, true] {
+            let mut editor = crate::opacity_test_support::overshoot_editor(high);
+            let before = editor.project().clone();
+            let mut draft = Session::new(Target::Fill(1), editor.project(), 7, 15).unwrap();
+            draft.input(4, "40.125").unwrap();
+            let command = draft.command().unwrap();
+            assert!(
+                matches!(&command, Command::Batch(commands) if matches!(commands.as_slice(), [Command::SetValue { id: 1, property: Property::Opacity, frame: 15, value: 40.125 }]))
+            );
+            editor.execute(command).unwrap();
+            let layer = editor.selected_layer().unwrap();
+            assert_eq!(layer.opacity_key_count(), 3);
+            assert_eq!(layer.opacity_at(15, 1.0 / 30.0).unwrap(), 40.125);
+            assert!(layer.property(Property::Opacity).is_none());
+            let original = before
+                .composition()
+                .layer(1)
+                .unwrap()
+                .opacity_timing()
+                .unwrap();
+            let timing = layer.opacity_timing().unwrap();
+            for frame in [0, 30] {
+                assert_eq!(timing.keys()[&frame], original.keys()[&frame]);
+            }
+            assert_eq!(
+                timing.keys()[&15],
+                libre_effects_core::OpacityKeyTiming::new()
+            );
+            let after = editor.project().clone();
+            editor.undo();
+            assert_eq!(editor.project(), &before);
+            editor.redo();
+            assert_eq!(editor.project(), &after);
+            assert_eq!(
+                Project::from_json(&after.to_json().unwrap()).unwrap(),
+                after
+            );
+        }
+    }
+
+    #[test]
+    fn native_opacity_picker_existing_key_preserves_tiny_dormant_endpoint_metadata() {
+        let mut editor = crate::opacity_test_support::overshoot_editor(true);
+        let before = editor.project().clone();
+        let mut draft = Session::new(Target::Fill(1), editor.project(), 3, 0).unwrap();
+        draft.input(4, "49.125").unwrap();
+        editor.execute(draft.command().unwrap()).unwrap();
+        let layer = editor.selected_layer().unwrap();
+        assert_eq!(layer.opacity_key_count(), 2);
+        assert_eq!(layer.opacity_key_value(0), Some(49.125));
+        assert_eq!(layer.opacity_key_value(30), Some(50.0));
+        assert_eq!(
+            layer.opacity_timing(),
+            before.composition().layer(1).unwrap().opacity_timing()
+        );
+        editor.undo();
+        assert_eq!(editor.project(), &before);
+        assert!(!editor.can_undo());
+    }
+
     #[test]
     fn gradient_ramp_overshoot_press_release_uses_visible_value_without_history() {
         use libre_effects_core::{Bezier, ContentsKind, Interpolation};
@@ -1452,8 +1854,21 @@ mod tests {
         assert!(s.validate(e.project(), 3, 30).is_err());
         let after = e.project().clone();
         let layer = after.composition().layer(1).unwrap();
-        assert_eq!(layer.property(Property::Opacity).value_at(0), 100.0);
-        assert_eq!(layer.property(Property::Opacity).keys().len(), 2);
+        assert_eq!(
+            layer
+                .property(Property::Opacity)
+                .expect("every layer has a scalar Opacity track")
+                .value_at(0),
+            100.0
+        );
+        assert_eq!(
+            layer
+                .property(Property::Opacity)
+                .expect("every layer has a scalar Opacity track")
+                .keys()
+                .len(),
+            2
+        );
         e.undo();
         assert_eq!(e.project(), &before);
         e.redo();
@@ -1537,6 +1952,7 @@ mod tests {
                 e.selected_layer()
                     .unwrap()
                     .property(Property::Opacity)
+                    .expect("every layer has a scalar Opacity track")
                     .value_at(40),
                 100.
             );
@@ -2097,10 +2513,19 @@ mod text_paint_controls_tests {
         assert_eq!(layer.text_color_at(TextPaint::Fill, 30), Some(0x123456));
         assert_eq!(layer.text_color_at(TextPaint::Stroke, 30), Some(0x6080a0));
         assert_eq!(
-            layer.property(Property::Opacity).value_at(30),
+            layer
+                .property(Property::Opacity)
+                .expect("every layer has a scalar Opacity track")
+                .value_at(30),
             128. * 100. / 255.
         );
-        assert_eq!(layer.property(Property::Opacity).value_at(0), 100.);
+        assert_eq!(
+            layer
+                .property(Property::Opacity)
+                .expect("every layer has a scalar Opacity track")
+                .value_at(0),
+            100.
+        );
         let mut stroke = Session::new(Target::Stroke(1), e.project(), 6, 30).unwrap();
         assert!(!stroke.target.alpha());
         assert!(stroke.input(0, "abcdef80").is_err());
@@ -2225,6 +2650,7 @@ mod text_paint_controls_tests {
             e.selected_layer()
                 .unwrap()
                 .property(Property::Opacity)
+                .expect("every layer has a scalar Opacity track")
                 .value_at(30),
             37.
         );
@@ -2276,12 +2702,14 @@ mod text_paint_controls_tests {
                         })
                     );
                     assert_eq!(
-                        l.property(Property::Opacity),
+                        l.property(Property::Opacity)
+                            .expect("every layer has a scalar Opacity track"),
                         before
                             .composition()
                             .layer(1)
                             .unwrap()
                             .property(Property::Opacity)
+                            .expect("every layer has a scalar Opacity track")
                     );
                     let other = if paint == TextPaint::Fill {
                         TextPaint::Stroke
@@ -2474,7 +2902,12 @@ mod text_paint_controls_tests {
             e.execute(session.command().unwrap()).unwrap();
             let l = e.selected_layer().unwrap();
             assert_eq!(l.text_value_at(paint.opacity(), 0), Some(100. / 255.));
-            assert_eq!(l.property(Property::Opacity).value_at(0), 100.);
+            assert_eq!(
+                l.property(Property::Opacity)
+                    .expect("every layer has a scalar Opacity track")
+                    .value_at(0),
+                100.
+            );
             let other = if paint == TextPaint::Fill {
                 TextPaint::Stroke
             } else {
@@ -2609,6 +3042,204 @@ mod typography_pointer_tests {
                 click_count: 1,
                 ..Default::default()
             },
+        }
+    }
+    #[test]
+    fn guarded_session_press_checks_ime_modifiers_repeats_and_source_before_arming() {
+        let event = down();
+        for (active, composing, current) in [
+            (false, false, true),
+            (true, true, true),
+            (true, false, false),
+        ] {
+            assert!(!guarded_input_down_allowed(
+                &event,
+                active,
+                composing,
+                current,
+                || { panic!("Rejected press cannot prepare a session or flush a field") }
+            ));
+        }
+        for invalid in 0..5 {
+            let mut event = event.clone();
+            match invalid {
+                0 => event.button = MouseButton::Right,
+                1 => event.click_count = 2,
+                2 => event.modifiers.shift = true,
+                3 => event.modifiers.control = true,
+                _ => event.modifiers.platform = true,
+            }
+            assert!(!guarded_input_down_allowed(
+                &event,
+                true,
+                false,
+                true,
+                || { panic!("Unsupported press cannot prepare a session") }
+            ));
+        }
+        let mut prepared = 0;
+        assert!(guarded_input_down_allowed(
+            &event,
+            true,
+            false,
+            true,
+            || {
+                prepared += 1;
+                true
+            }
+        ));
+        assert_eq!(prepared, 1);
+        assert!(!guarded_input_down_allowed(
+            &event,
+            true,
+            false,
+            true,
+            || false
+        ));
+    }
+    #[test]
+    fn compound_drag_alt_policy_is_opt_in_and_preserves_every_other_guard() {
+        let mut event = down();
+        event.modifiers.alt = true;
+        event.modifiers.shift = true;
+        assert!(!guarded_input_down_allowed_with_shift(
+            &event,
+            true,
+            true,
+            false,
+            true,
+            || panic!("old key policy must not admit Alt")
+        ));
+        assert!(guarded_input_down_allowed_with_modifiers(
+            &event,
+            true,
+            true,
+            true,
+            false,
+            true,
+            || true
+        ));
+        for case in 0..8 {
+            let mut event = event.clone();
+            let (mut active, mut composing, mut current) = (true, false, true);
+            match case {
+                0 => event.modifiers.control = true,
+                1 => event.modifiers.platform = true,
+                2 => event.modifiers.function = true,
+                3 => event.click_count = 2,
+                4 => event.button = MouseButton::Right,
+                5 => active = false,
+                6 => composing = true,
+                _ => current = false,
+            }
+            assert!(
+                !guarded_input_down_allowed_with_modifiers(
+                    &event,
+                    true,
+                    true,
+                    active,
+                    composing,
+                    current,
+                    || panic!("guard must reject before flush")
+                ),
+                "case {case}"
+            );
+        }
+        assert!(!guarded_input_down_allowed_with_modifiers(
+            &event,
+            true,
+            true,
+            true,
+            false,
+            true,
+            || false
+        ));
+    }
+    #[test]
+    fn compound_shift_guard_is_scoped_and_keeps_before_blur_rejection() {
+        let mut event = down();
+        event.modifiers.shift = true;
+        assert!(!guarded_input_down_allowed_with_shift(
+            &event,
+            false,
+            true,
+            false,
+            true,
+            || true
+        ));
+        assert!(guarded_input_down_allowed_with_shift(
+            &event,
+            true,
+            true,
+            false,
+            true,
+            || true
+        ));
+        for (active, composing, current, pending) in [
+            (false, false, true, false),
+            (true, true, true, false),
+            (true, false, false, false),
+            (true, false, true, true),
+        ] {
+            assert!(!guarded_input_down_allowed_with_shift(
+                &event,
+                true,
+                active,
+                composing,
+                current,
+                || !pending
+            ));
+        }
+        for invalid in 0..6 {
+            let mut event = event.clone();
+            match invalid {
+                0 => event.modifiers.control = true,
+                1 => event.modifiers.alt = true,
+                2 => event.modifiers.platform = true,
+                3 => event.modifiers.function = true,
+                4 => event.click_count = 2,
+                _ => event.button = MouseButton::Right,
+            }
+            assert!(!guarded_input_down_allowed_with_shift(
+                &event,
+                true,
+                true,
+                false,
+                true,
+                || panic!("rejected before blur")
+            ));
+        }
+    }
+    #[test]
+    fn guarded_nonleft_hit_routes_to_rejection_before_descendant_outside_down_flush() {
+        for button in [MouseButton::Left, MouseButton::Right, MouseButton::Middle] {
+            for guarded in [false, true] {
+                let event = MouseDownEvent { button, ..down() };
+                // These are the same candidate-admission and guard functions
+                // used by ancestor capture, in production order. The old route
+                // dropped non-left hits before the rejection guard could run.
+                let candidate = input_button_candidate(event.button, guarded);
+                assert_eq!(candidate, guarded || button == MouseButton::Left);
+                let mut prepared = 0;
+                let rejected = candidate
+                    && guarded
+                    && !guarded_input_down_allowed(&event, true, false, true, || {
+                        prepared += 1;
+                        true
+                    });
+                let descendant_flushes = usize::from(!rejected);
+                if guarded && button != MouseButton::Left {
+                    assert!(rejected);
+                    assert_eq!(prepared, 0);
+                    assert_eq!(descendant_flushes, 0);
+                } else {
+                    assert!(!rejected);
+                    // Unguarded non-left presses preserve ordinary outside-down
+                    // behavior; they never acquire an animation receipt.
+                    assert_eq!(prepared, usize::from(guarded));
+                    assert_eq!(descendant_flushes, 1);
+                }
+            }
         }
     }
     #[test]

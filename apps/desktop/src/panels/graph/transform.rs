@@ -572,6 +572,7 @@ impl Transform {
         bounds: Bounds<Pixels>,
         start: Point<Pixels>,
     ) -> Option<Self> {
+        selection::validate_scalar_selection(state).ok()?;
         if planning::multiple_channels(&selection::included(state)) {
             return None; // Mixed-unit selections use the shared time-only draft.
         }
@@ -649,6 +650,7 @@ impl Transform {
             && state.colors.session.is_none()
             && state.gradient_editor.is_none()
             && state.vertex_editor.is_none()
+            && state.expression_editor.is_none()
             && state.text_session.is_none()
             && !state.new_composition_requested
     }

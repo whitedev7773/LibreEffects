@@ -1,9 +1,83 @@
 # Libre Effects Project (`.lep`) container v1
 
+## Schema 73: independent native Opacity timing
+
+Optional `Layer.opacity_timing.keys` maps composition frames to records containing
+`in_interpolation`/`out_interpolation`, `in_ease`/`out_ease` (`speed` in signed
+percentage units per second, `influence` in percent), `temporal_continuous` and
+`temporal_auto_bezier`. Supported mode names are `Linear`, `Bezier`, `Hold`;
+automatic/continuous true flags reject. The nonempty key set must exactly match
+`properties.Opacity.keys`, which remains the only value store. Its legacy keys
+must have Linear interpolation and empty temporal handles, preventing conflicting
+timing authority. Absence retains the old scalar evaluation and wire format.
+
+Any materialized timing requires schema 73, including dormant endpoints and
+inactive compositions. Signed tiny finite speeds persist directly; no stored
+FPS conversion occurs. Authored values remain0–100; raw interpolated/expression
+results may overshoot and only painting clamps. Evaluated views are transient and
+cannot be saved. LEP1, VIEW1/2 and existing scalar address encodings do not change;
+annotated Opacity is unavailable through ambiguous scalar Graph operations.
+See [the ownership contract](../apps/desktop/NATIVE_OPACITY_TIMING.md).
+
+## Schema 72: joined XYZ and an explicit camera
+
+Optional `Layer.spatial_position` contains a static XYZ `value` and `keys`, a map
+of composition-frame strings to joined key objects. Each key stores `value`,
+`in_interpolation`/`out_interpolation` (`Linear`, `Bezier`, `Hold`),
+`in_ease`/`out_ease` (`speed` in nonnegative distance units per second, `influence`
+in 0.1–100 percent), relative XYZ `in_tangent`/`out_tangent`, and the four boolean
+`temporal_continuous`, `temporal_auto_bezier`, `spatial_continuous`,
+`spatial_auto_bezier` fields. A materialized joined source removes the scalar
+PositionX/Y entries from `properties`; readers reject coexisting scalar shadows.
+Unknown fields, nonfinite or out-of-bounds coordinates, invalid flags and out-of-composition
+key times reject. Dormant metadata and tiny finite values are retained exactly.
+
+Optional `Composition.camera` stores `position` (XYZ), `focal_distance`,
+`principal_point` (XY) and `near_clip`. It is an explicit positive-Z fixed-axis
+camera for the supported front-parallel native planes. Materialized camera or
+joined source, including in inactive compositions, requires schema 72. Absent
+fields are omitted; native 2D documents do not acquire them. LEP1, VIEW1/2 and
+legacy scalar addresses remain unchanged. Joined XYZ is not serialized as a
+scalar Graph address. See [the native contract](../apps/desktop/NATIVE_SPATIAL_POSITION.md)
+for supported rendering and explicit error/authoring behavior.
+
+## Schema 71: reconstructed static character runs
+
+Optional `Layer.rich_text` preserves a complete UTF-8 byte-range partition of
+static Source Text with resolved per-character style, including exact font-face
+identity. Existing layer-wide paragraph settings remain separate. Original
+CR/LF/CRLF bytes are preserved. The reconstruction uses schema 71 intentionally;
+unavailable earlier schema contracts 66–70 are rejected rather than reinterpreted.
+See [the reconstruction contract](../apps/desktop/AE_RECONSTRUCTION.md).
+
+## Schema 65: numeric programs and Slider Control
+
+Layers may store sparse numeric programs with stable transform/slider targets,
+exact source and an enabled flag. Nonempty program storage and Slider Control
+instances require model schema 65 in every composition. Programs are limited to
+16 KiB each; disabled source is retained and empty assignment removes a program.
+Slider instances use existing stable effect IDs and animated Amount tracks.
+Evaluated frame views are transient: core validation, JSON/native encoding,
+serde serialization and editor commits reject them. Authored tracks and programs
+are the only saved state. LEP1, VIEW1/2 and existing property-address formats do
+not change. See [EXPRESSIONS.md](../apps/desktop/EXPRESSIONS.md).
+
+## Schema 64: independent layer origin and indexed label
+
+Sparse `Layer.start_frame` stores an independent signed composition-frame origin;
+`Layer.label_index` stores a timeline-only integer 0–16. Either materialized field
+requires model schema 64, including inactive compositions. Neither field changes
+LEP container version 1, VIEW 1/2 or property-address versions. Absent legacy fields
+remain absent on unchanged load/save, and assigning an existing logical value is
+an exact no-op. Labels do not alter rendered fill colors. See
+[the timing contract](../apps/desktop/LAYER_TIMING.md) for move/trim/source-clock
+semantics and the remaining composition-bounded animation restriction.
+
+
 `.lep` is the native Libre Effects Project file extension. It is a bounded binary
 container for portable project metadata, optional editor view state, and embedded
 images. The container version is **1**. The project's JSON schema version remains
-independent (currently **53**); choosing this format does not upgrade that schema.
+independent (currently **73**); choosing this format does not upgrade that schema.
 Schema 48 adds optional layer-wide text-paint tracks. Schema 49 adds sparse
 `FontSize`, `Tracking` and `Leading` tracks in the same text-parameter map. Any
 materialized typography track, including a keyless override or an inactive
@@ -52,6 +126,180 @@ unreferenced pool storage can be reused. Every nondefault animation requires sch
 53, including in inactive compositions. Static old text does not gain the field.
 LEP 1 and VIEW 1/2 remain unchanged. Source Text is a nonnumeric property and cannot
 be serialized as a numeric Graph address; existing pins/ranges retain address 1.
+
+Schema 55 adds five individually default-skipped TextStyle numbers:
+`paragraph_left_indent`, `paragraph_right_indent`, `paragraph_first_line_indent`,
+`paragraph_space_before` and `paragraph_space_after`. Zero means the prior layout.
+They are layer-wide static source-pixel values, retained but dormant in point
+mode. Nonzero fields in any composition require 55 even when dormant. First-line
+accepts finite −16,384–16,384; the other four accept finite 0–16,384. Only LF starts
+a new paragraph; existing CRLF and Unicode line-break handling remain unchanged.
+The dedicated field edit validates original/final source and metadata budgets,
+preserves all unrelated source and only raises the version when necessary.
+Incompatible old-schema payload combinations are rejected atomically rather than
+implicitly migrating assets. LEP1, VIEW1/2 and property-address1 are unchanged.
+
+Schema 56 appends `AnimatorStart`, `AnimatorEnd`, `AnimatorPositionX`,
+`AnimatorPositionY` and `AnimatorOpacity` to the sparse `text_parameters` map.
+Absence gives 0%, 100%, 0 source pixels, 0 source pixels and 100%, respectively.
+Start/End/Opacity accept finite 0–100; Position X/Y accept finite ±1,000,000.
+Every materialized entry requires 56, including keyless identity tracks, disabled
+paint and inactive compositions. Existing scalar keyframes, interpolation,
+temporal metadata, retiming and clipboard routes apply unchanged. The renderer
+owns source grapheme selection and shaping-cluster mapping; core stores only
+bounded scalar samples. Empty or reversed ranges and neutral effects are identity.
+Animator-only scalar/key/temporal edit batches validate original/final source and metadata,
+preserve all unrelated authored values/assets, and raise the schema only when
+materialized data requires it. Equal sampled-value assignments do not add keys,
+rewrite dormant track values or clear Redo. Incompatible historical media/schema
+combinations reject atomically rather than migrating assets. LEP1, VIEW1/2 and
+property-address1 remain unchanged.
+
+Schema 58 adds `AnimatorOffset` (−100…100 percentage points, absent = 0).
+It shifts both endpoints, clips each to 0…100 and does not wrap. Schema 59 adds
+`AnimatorAmount` (0…100, absent = 100) and optional layer `text_selector`:
+`units` is `Graphemes` (default), `Words` or `Lines`; `shape` is `Square`
+(default), `RampUp`, `RampDown` or `Triangle`. Default selector storage is omitted.
+Any nondefault selector or materialized Amount track requires 59, including
+inactive compositions; all settings require text content. Unknown enum values
+or selector fields reject. Units/shape are static; Amount supports scalar animation.
+
+Selection samples logical unit centers in the shifted, clipped half-open range.
+Characters are extended graphemes. Words use Unicode UAX #29 alphanumeric word
+spans; separator/punctuation-only/emoji spans remain unaffected. Lines split only
+on source LF (CRLF is one break), counting blank/trailing empty lines; visual
+paragraph wraps do not add units. Within the effective range, normalized `t`
+gives weights 1, `t`, `1-t` or `1-|2t-1|`, multiplied by Amount/100. Connected
+shaping clusters and graphemes share their maximum weight; position is multiplied
+by it and opacity interpolates from 100% toward Animator Opacity. With only
+the primary selector, Amount 0 is identity. Animated Source Text is resegmented at each sampled frame; editing
+geometry, shaping and LEP/VIEW/address versions remain unchanged.
+
+Schema 60 adds `AnimatorScaleX`, `AnimatorScaleY` (finite 0–1000%, absent =
+100) and `AnimatorRotation` (finite −3600…3600 degrees, absent = 0). Negative
+scale/reflection is unsupported. Materialized tracks require 60, including
+identity tracks and inactive compositions; absent defaults remain sparse.
+They use the same scalar animation, guarded editing and history routes.
+
+Scale then rotation is applied after shaping/layout, about the first logical
+rendered glyph’s baseline origin in each protected character cluster or source
+Word/Line. A wrapped source unit shares that pivot across its rendered lines.
+Connected shaping clusters crossing unit boundaries merge transform units,
+using their maximum influence. Scale interpolates from 1 to scale/100 and
+rotation from 0 to the authored degrees. Existing per-cluster weighted Position
+is applied afterward; opacity keeps its existing protected grouping/weight.
+At full influence, zero scale collapses that unit’s ink. Paragraph clipping, layer transforms and
+paint/layer opacity follow; paragraph layout and caret geometry do not change.
+Identity channels preserve the preexisting rendering path and exact pixels.
+
+Schema 61 adds a sparse `text_range_selectors` list and
+`next_text_range_selector_id` allocator to text layers. The existing primary selector
+and its scalar tracks remain unchanged and always run first. Up to seven
+secondary selectors follow in list order. Each has a unique nonzero `id`,
+`mode` (`Add`, `Subtract`, `Intersect`), `start`, `end`, `offset`, `amount`, and
+`selector` containing the existing `units`/`shape`. These fields remain the static
+baselines. Start/End/Amount accept finite
+0–100; Offset accepts finite −100–100. Shift, clip and unit-center weighting are
+the same as the primary. The allocator defaults to 1 and is omitted until used;
+it stays above every stored ID, survives removal, and rejects overflow. Empty
+lists are omitted. Nondefault allocator/list storage requires schema 61, including
+inactive compositions; malformed IDs, lists, unknown fields and nontext storage
+reject. Empty `parameters` maps are omitted, so all schema-61 static selectors
+retain their exact serialized shape.
+
+Schema 62 adds optional sparse `parameters` to each secondary selector, keyed by
+`Start`, `End`, `Offset`, or `Amount`, with ordinary scalar `value`/`keys` tracks.
+A missing channel samples its corresponding static baseline. A stored track,
+even one with no keys, requires schema 62; absent tracks do not upgrade a static
+project. Each track permits at most 10,000 keys, finite in-range values, valid
+interpolation/temporal metadata, and key frames inside its composition. Both
+active and inactive compositions validate before edits or persistence. Source
+baselines are validated even when a track overrides them. Unknown parameters,
+stale selector IDs and invalid source versions reject without repair.
+
+The numeric property path is `TextSelector { selector: <stable ID>, parameter }`.
+It is independent of selector list position. Generic value, key, interpolation,
+move, paste, delete, scale and temporal-handle commands use this address; the
+pinned primary retains its original `Text` addresses. Untracked value edits
+change the static baseline; explicit key/animation commands materialize tracks.
+Unchanged sampled values do not insert keys, change dormant source values or
+clear Redo. Removing a selector also removes its tracks in the same transaction;
+Undo restores the complete selector. LEP1 and VIEW1/2 remain unchanged. Numeric
+graph-address version 2 adds the stable `TextSelector` property variant; version 1
+continues to encode existing properties and rejects the new variant. Secondary
+addresses reject zero and maximum-u64 IDs.
+
+At each frame, evaluate and clamp each secondary scalar to its own bounds before
+adding Offset and clipping Start/End to 0–100. Authored curve overshoot remains
+stored. Disabling animation bakes the bounded visible scalar sample.
+For each source grapheme, initialize influence from the sampled primary selector.
+Then fold secondary weights in order: Add is `min(1, influence + weight)`, Subtract
+is `max(0, influence - weight)`, and Intersect is `influence * weight`. An Add
+selector can therefore affect text when the primary range is empty or Amount 0.
+Only after composition do connected shaping/grapheme clusters receive their
+maximum combined weight. Primary Units still determines Scale/Rotation groups
+and pivots; secondary Units controls only that selector's contribution. Reordering
+secondaries never rebinds the primary's keys or another selector's values.
+Source Text is resegmented at the sampled frame. Add/remove/reorder/value edits
+are atomic history operations; an unchanged edit does not clear Redo. Old files
+without secondary storage keep their source version and exact single-selector
+rendering path.
+
+Schema 63 adds up to three independent additional text animators in an ordered
+sparse `text_animators` list, plus a durable `next_text_animator_id` allocator.
+The original primary animator remains pinned first in its existing fields,
+including its ordered animated secondary selectors and unchanged `Text` and
+`TextSelector` property addresses. Neither primary values nor selector IDs are
+migrated, copied into the new list or renumbered. Each additional animator has a
+nonzero layer-local stable `id`, an optional `selector` (Units and Shape), and
+optional sparse `parameters` keyed by the ten existing animator `TextParam`
+variants: Start, End, Offset, Amount, Position X/Y, Opacity, Scale X/Y and Rotation.
+Other text parameters and nested secondary selectors are rejected. Missing
+channels use neutral defaults (Start, Offset, Position and Rotation 0; End,
+Amount, Opacity and Scale 100). Default selector configuration and empty maps
+are omitted. Values use the existing channel bounds and animation semantics.
+
+Additional animator storage or a noninitial allocator requires schema 63. Empty
+new storage with allocator 1 remains absent in older sources; adding a neutral
+animator advances only the schema and the necessary new fields. Removing the
+last animator keeps the allocator and schema requirement, so stale addresses
+cannot bind to a subsequently added animator after save/load. IDs cannot be zero
+or maximum-u64, must be distinct and less than the allocator, and are preserved
+when reordering or duplicating a layer. Duplicates have independent layer IDs.
+
+The extra numeric path is `TextAnimator { animator: <stable ID>, parameter }`.
+Desktop Graph address version 3 adds the `text_animator` variant with its stable
+animator ID and animator-only parameter. Versions 1/2 reject that variant; v1
+also continues to reject secondary-selector addresses. Writers select the
+minimum address version from included pins, active channel and saved ranges.
+LEP1 and VIEW1/2 stay unchanged; ordinary legacy addresses remain version 1.
+All ten channels support generic value/key edits, interpolation, move, paste,
+delete, time/value scaling and temporal handles. Paths reject non-animator
+parameters and removed identities. Numeric edits materialize only changed
+channels; unchanged bounded samples preserve sparse/dormant values, keys, source
+bytes and Redo. Layer shifts and cross-frame-rate layer paste retime these tracks
+and their temporal slopes with other layer tracks. Add/remove/reorder and selector
+configuration changes use atomic history; invalid input cannot partially mutate
+or silently repair invalid source data in active or inactive compositions.
+
+Sampling returns the legacy primary first, then additional animators in stored
+order. Each extra range independently evaluates Start, End, Offset and Amount,
+clips the offset endpoints to 0–100, and uses its own Units and Shape. Its sample
+has no secondary ranges. Authored curve overshoot is retained; displayed samples
+are bounded and disabling animation bakes the visible bounded value. LEP1 and
+VIEW1/2 framing stay unchanged.
+
+The renderer applies Primary then extras in list order. Each animator independently
+protects the original shaping/grapheme clusters and uses its own Units to choose
+Scale/Rotation groups. Its pivot is that original source unit's first logical
+rendered-cluster baseline, including across visual wrapping, in layer-local
+coordinates. A step applies weighted Scale, then weighted Rotation around this
+unchanged original pivot, then weighted Position. Each step left-multiplies the
+accumulated matrix, so later transforms also transform earlier translations.
+Glyph geometry is materialized once after the full affine composition. Opacity
+multiplies the independent factors `1 + weight * (opacity/100 - 1)`; retained
+geometry bounds do not depend on opacity. Identity or empty animators are skipped,
+and zero or one active animator retains the exact legacy rendering route.
 
 The base/all-stored-pose vertex transform changes only existing VectorPath data.
 Its scope is transient editor state, not a serialized field or version change.

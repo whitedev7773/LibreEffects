@@ -9,6 +9,14 @@ pub enum PropertyPath {
     },
     Shape(ShapeParam),
     Text(TextParam),
+    TextSelector {
+        selector: u64,
+        parameter: TextSelectorParam,
+    },
+    TextAnimator {
+        animator: u64,
+        parameter: TextParam,
+    },
     SourceText,
     Path(PathTarget),
     Mask {
@@ -66,6 +74,34 @@ impl Layer {
                 }
                 "Source Text".into()
             }
+            PropertyPath::TextSelector {
+                selector,
+                parameter,
+            } => {
+                if !matches!(self.content, Content::Text { .. }) {
+                    return None;
+                }
+                self.text_range_selectors
+                    .iter()
+                    .find(|item| item.id == selector)?;
+                format!("Selector {} · {}", selector, parameter.label())
+            }
+            PropertyPath::TextAnimator {
+                animator,
+                parameter,
+            } => {
+                if !matches!(self.content, Content::Text { .. }) || !parameter.is_animator() {
+                    return None;
+                }
+                self.text_animators
+                    .iter()
+                    .find(|item| item.id == animator)?;
+                format!(
+                    "Animator {} · {}",
+                    animator,
+                    parameter.label().trim_start_matches("Animator · ")
+                )
+            }
             PropertyPath::Text(p) => {
                 if !matches!(self.content, Content::Text { .. }) {
                     return None;
@@ -90,7 +126,10 @@ impl Layer {
             ),
             PropertyPath::Audio(p) => p.label().into(),
             PropertyPath::TimeRemap => "Time Remap (s)".into(),
-            PropertyPath::Transform(p) => p.label().to_string(),
+            PropertyPath::Transform(p) => {
+                self.property(p)?;
+                p.label().to_string()
+            }
             PropertyPath::Effect { effect, parameter } => {
                 let effect = self.effect_stack.iter().find(|e| e.id() == effect)?;
                 let spec = effect
@@ -105,7 +144,12 @@ impl Layer {
     pub fn track(&self, path: PropertyPath) -> Option<&AnimatedProperty> {
         match path {
             PropertyPath::Contents { item, parameter } => match &self.content {
-                Content::ShapeContents(c) => c.node(item)?.parameters.get(&parameter),
+                Content::ShapeContents(c) => {
+                    let n = c.node(item)?;
+                    n.scalar_parameter_available(parameter)
+                        .then(|| n.parameters.get(&parameter))
+                        .flatten()
+                }
                 _ => None,
             },
             PropertyPath::Shape(p) => match &self.content {
@@ -114,6 +158,32 @@ impl Layer {
             },
             PropertyPath::SourceText => matches!(self.content, Content::Text { .. })
                 .then_some(&self.source_text_animation.timing),
+            PropertyPath::TextSelector {
+                selector,
+                parameter,
+            } => {
+                if !matches!(self.content, Content::Text { .. }) {
+                    return None;
+                }
+                self.text_range_selectors
+                    .iter()
+                    .find(|item| item.id == selector)?
+                    .parameters
+                    .get(&parameter)
+            }
+            PropertyPath::TextAnimator {
+                animator,
+                parameter,
+            } => {
+                if !matches!(self.content, Content::Text { .. }) || !parameter.is_animator() {
+                    return None;
+                }
+                self.text_animators
+                    .iter()
+                    .find(|item| item.id == animator)?
+                    .parameters
+                    .get(&parameter)
+            }
             PropertyPath::Text(p) => matches!(self.content, Content::Text { .. })
                 .then(|| self.text_parameters.get(&p))
                 .flatten(),
@@ -128,7 +198,7 @@ impl Layer {
                 .can_audio()
                 .then(|| &self.audio_controls.parameters[&p]),
             PropertyPath::TimeRemap => self.time_remap.as_ref(),
-            PropertyPath::Transform(p) => self.properties.get(&p),
+            PropertyPath::Transform(p) => self.property(p),
             PropertyPath::Effect { effect, parameter } => self
                 .effect_stack
                 .iter()
@@ -139,13 +209,43 @@ impl Layer {
     pub fn track_value(&self, path: PropertyPath, frame: Frame) -> Option<f64> {
         Some(match path {
             PropertyPath::Contents { item, parameter } => match &self.content {
-                Content::ShapeContents(c) => c.node(item)?.value_at(parameter, frame),
+                Content::ShapeContents(c) => {
+                    let n = c.node(item)?;
+                    if !n.scalar_parameter_available(parameter) {
+                        return None;
+                    }
+                    n.value_at(parameter, frame)
+                }
                 _ => return None,
             },
             PropertyPath::Shape(p) => match &self.content {
                 Content::Shape(s) if s.has_parameter(p) => s.value_at(p, frame, self.color),
                 _ => return None,
             },
+            PropertyPath::TextSelector {
+                selector,
+                parameter,
+            } => {
+                if !matches!(self.content, Content::Text { .. }) {
+                    return None;
+                }
+                self.text_range_selectors
+                    .iter()
+                    .find(|item| item.id == selector)?
+                    .value_at(parameter, frame)
+            }
+            PropertyPath::TextAnimator {
+                animator,
+                parameter,
+            } => {
+                if !matches!(self.content, Content::Text { .. }) {
+                    return None;
+                }
+                self.text_animators
+                    .iter()
+                    .find(|item| item.id == animator)?
+                    .value_at(parameter, frame)?
+            }
             PropertyPath::Text(p) => self.text_value_at(p, frame)?,
             PropertyPath::Path(_) | PropertyPath::SourceText => return None,
             PropertyPath::Mask { mask, parameter } => self
@@ -158,7 +258,7 @@ impl Layer {
                 .value_at(frame)
                 .clamp(p.bounds().0, p.bounds().1),
             PropertyPath::TimeRemap => self.time_remap.as_ref()?.value_at(frame),
-            PropertyPath::Transform(p) => self.property(p).value_at(frame),
+            PropertyPath::Transform(p) => self.property(p)?.value_at(frame),
             PropertyPath::Effect { effect, parameter } => {
                 let effect = self.effect_stack.iter().find(|e| e.id() == effect)?;
                 effect.parameter(parameter)?;
@@ -169,6 +269,7 @@ impl Layer {
     pub fn track_paths(&self) -> Vec<PropertyPath> {
         Property::ALL
             .into_iter()
+            .filter(|property| self.property(*property).is_some())
             .map(PropertyPath::from)
             .chain(
                 match &self.content {
@@ -182,6 +283,25 @@ impl Layer {
             )
             .chain(matches!(self.content, Content::Text { .. }).then_some(PropertyPath::SourceText))
             .chain(self.text_parameters.keys().copied().map(PropertyPath::Text))
+            .chain(self.text_range_selectors.iter().flat_map(|selector| {
+                selector.parameters.keys().copied().map(move |parameter| {
+                    PropertyPath::TextSelector {
+                        selector: selector.id,
+                        parameter,
+                    }
+                })
+            }))
+            .chain(self.text_animators.iter().flat_map(|animator| {
+                animator
+                    .parameters
+                    .keys()
+                    .copied()
+                    .filter(|parameter| parameter.is_animator())
+                    .map(move |parameter| PropertyPath::TextAnimator {
+                        animator: animator.id,
+                        parameter,
+                    })
+            }))
             .chain(self.time_remap.as_ref().map(|_| PropertyPath::TimeRemap))
             .chain(match &self.content {
                 Content::ShapeContents(c) => c
@@ -242,6 +362,8 @@ impl Layer {
             PropertyPath::Contents { .. } => None,
             PropertyPath::SourceText
             | PropertyPath::Text(_)
+            | PropertyPath::TextSelector { .. }
+            | PropertyPath::TextAnimator { .. }
             | PropertyPath::Shape(_)
             | PropertyPath::Path(_)
             | PropertyPath::Mask { .. }
@@ -270,14 +392,35 @@ impl Layer {
             },
         })
     }
+    pub(super) fn require_scalar_track(&self, path: PropertyPath) -> Result<(), String> {
+        if self.has_opacity_timing() && path == Property::Opacity.into() {
+            return Err("Native Opacity timing requires its dedicated key/ease commands".into());
+        }
+        if self.has_joined_position()
+            && matches!(
+                path,
+                PropertyPath::Transform(Property::PositionX | Property::PositionY)
+            )
+        {
+            return Err(if self.is_three_d() {
+                "Joined 3D Position does not support scalar key edits"
+            } else {
+                "Joined XY Position does not support scalar key edits"
+            }
+            .into());
+        }
+        Ok(())
+    }
     pub(super) fn track_mut(
         &mut self,
         path: PropertyPath,
     ) -> Result<&mut AnimatedProperty, String> {
+        self.require_scalar_track(path)?;
         match path {
             PropertyPath::Contents { item, parameter } => match &mut self.content {
                 Content::ShapeContents(c) => c
                     .node_mut(item)
+                    .filter(|n| n.scalar_parameter_available(parameter))
                     .and_then(|n| n.parameters.get_mut(&parameter)),
                 _ => None,
             },
@@ -287,6 +430,32 @@ impl Layer {
             },
             PropertyPath::SourceText => matches!(self.content, Content::Text { .. })
                 .then_some(&mut self.source_text_animation.timing),
+            PropertyPath::TextSelector {
+                selector,
+                parameter,
+            } => {
+                if matches!(self.content, Content::Text { .. }) {
+                    self.text_range_selectors
+                        .iter_mut()
+                        .find(|item| item.id == selector)
+                        .map(|item| item.track_mut(parameter))
+                } else {
+                    None
+                }
+            }
+            PropertyPath::TextAnimator {
+                animator,
+                parameter,
+            } => {
+                if matches!(self.content, Content::Text { .. }) {
+                    self.text_animators
+                        .iter_mut()
+                        .find(|item| item.id == animator)
+                        .and_then(|item| item.track_mut(parameter))
+                } else {
+                    None
+                }
+            }
             PropertyPath::Text(p) => self.text_track_mut(p),
             PropertyPath::Path(target) => {
                 self.path_animation_mut(target).map(|(_, a)| &mut a.timing)
@@ -567,7 +736,9 @@ mod tests {
 
 pub(super) fn command(id: LayerId, property: PropertyPath, edit: TrackEdit) -> Command {
     match property {
-        PropertyPath::SourceText => Command::EditTrack { id, property, edit },
+        PropertyPath::SourceText
+        | PropertyPath::TextSelector { .. }
+        | PropertyPath::TextAnimator { .. } => Command::EditTrack { id, property, edit },
         PropertyPath::Contents { item, parameter } => Command::Contents {
             id,
             edit: ContentsEdit::Track {

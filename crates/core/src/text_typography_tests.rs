@@ -787,7 +787,17 @@ fn text_typography_duplicate_split_shift_clipboard_fps_and_precompose_preserve_t
             .text_parameters,
         pasted_tracks
     );
-    assert_eq!(e.project().version, 49);
+    // Independent origin survives split, shift, FPS conversion and precompose.
+    assert_eq!(
+        e.project()
+            .composition_by_id(*composition)
+            .unwrap()
+            .layer(pasted)
+            .unwrap()
+            .start_frame,
+        Some(10)
+    );
+    assert_eq!(e.project().version, 64);
     let bytes = project_file::encode(e.project(), None).unwrap();
     assert_eq!(project_file::decode(&bytes).unwrap().project, *e.project());
 }

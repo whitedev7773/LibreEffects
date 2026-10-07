@@ -38,11 +38,33 @@ fn about_key_closes(key: &str, modified: bool) -> bool {
     !modified && matches!(key, "escape" | "enter" | "space")
 }
 
+/// An overlay keeps its explicit originating panel. Otherwise neutral Shell
+/// focus uses Timeline safety, so closing a menu or pressing Escape cannot turn
+/// a refused hidden-selection command into an unguarded keyboard command.
+fn timeline_command_owned(
+    captured_origin: Option<bool>,
+    timeline_focused: bool,
+    shell_focused: bool,
+) -> bool {
+    captured_origin.unwrap_or(timeline_focused || shell_focused)
+}
+
 pub(crate) struct Shell {
     state: Entity<EditorState>,
+    timeline: Entity<Timeline>,
+    script_ui: Entity<crate::panels::script_ui::ScriptUi>,
+    ae_import: Entity<crate::panels::ae_import::AeImport>,
+    ae_import_open: bool,
+    ae_confirmation_active: bool,
+    ae_exit_barrier: bool,
+    confirmation_focus: [FocusHandle; 3],
+    confirmation_keys: libre_effects_editor_model::automation_ui::ActivationKeys,
     color_picker: Entity<crate::panels::color_picker::ColorPicker>,
     gradient_editor: Entity<crate::panels::gradient_editor::GradientEditor>,
     vertex_editor: Entity<crate::panels::vertex_editor::VertexEditor>,
+    expression_editor: Entity<crate::panels::expression_editor::ExpressionEditor>,
+    expression_open: bool,
+    expression_exit_barrier: bool,
     font_manager: Entity<crate::panels::font_manager::FontManager>,
     layout: Entity<ResizablePanelGroup>,
     middle: Entity<ResizablePanelGroup>,
@@ -53,6 +75,20 @@ pub(crate) struct Shell {
     menu: Option<&'static str>,
     menu_cursor: Option<usize>,
     menu_return_focus: Option<FocusHandle>,
+    menu_pointer_owner: Option<(
+        gpui::MouseDownEvent,
+        bool,
+        Option<FocusHandle>,
+        u64,
+        bool,
+        bool,
+    )>,
+    // Preserve the originating panel while a menu or Find command owns focus.
+    // Some(false) is meaningful: explicit Graph/Inspector/canvas commands must
+    // not inherit a Timeline filter merely because an overlay moved focus.
+    timeline_command_origin: Option<bool>,
+    menu_pointer_source_pending: bool,
+    svg_import_entry: menu::SvgImportEntry,
     menu_scroll: gpui::ScrollHandle,
     search_open: bool,
     search_field: Entity<TextField>,
@@ -71,18 +107,23 @@ pub(crate) struct Shell {
     pending_save: bool,
     modal_active: FocuslessModals,
     replacing: bool,
+    automation_open: bool,
 }
 
 impl Shell {
     pub(crate) fn new(cx: &mut Context<Self>) -> Self {
         let state = cx.new(|_| EditorState::default());
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
+        let script_ui = cx.new(|cx| crate::panels::script_ui::ScriptUi::new(state.clone(), cx));
+        let ae_import = cx.new(|cx| crate::panels::ae_import::AeImport::new(state.clone(), cx));
         let color_picker =
             cx.new(|cx| crate::panels::color_picker::ColorPicker::new(state.clone(), cx));
         let gradient_editor =
             cx.new(|cx| crate::panels::gradient_editor::GradientEditor::new(state.clone(), cx));
         let vertex_editor =
             cx.new(|cx| crate::panels::vertex_editor::VertexEditor::new(state.clone(), cx));
+        let expression_editor =
+            cx.new(|cx| crate::panels::expression_editor::ExpressionEditor::new(state.clone(), cx));
         let browser = cx.new(|cx| Browser::new(state.clone(), cx));
         let font_manager =
             cx.new(|cx| crate::panels::font_manager::FontManager::new(state.clone(), cx));
@@ -90,8 +131,9 @@ impl Shell {
         let sidebar = cx.new(|cx| Sidebar::new(state.clone(), cx));
         let align = cx.new(|cx| Align::new(state.clone(), cx));
         let timeline = cx.new(|cx| Timeline::new(state.clone(), cx));
-        let render_dock =
-            cx.new(|cx| crate::panels::render_queue::RenderDock::new(state.clone(), timeline, cx));
+        let render_dock = cx.new(|cx| {
+            crate::panels::render_queue::RenderDock::new(state.clone(), timeline.clone(), cx)
+        });
         let upper = cx.new(|_| {
             ResizablePanelGroup::new(Orientation::Horizontal, browser, preview)
                 .initial_fraction(0.20)
@@ -133,9 +175,20 @@ impl Shell {
         cx.observe(&fields[5], |_, _, cx| cx.notify()).detach();
         Self {
             state,
+            timeline,
             color_picker,
             gradient_editor,
+            script_ui,
+            ae_import,
+            ae_import_open: false,
+            ae_confirmation_active: false,
+            ae_exit_barrier: false,
+            confirmation_focus: std::array::from_fn(|_| cx.focus_handle()),
+            confirmation_keys: crate::modal_keyboard::activation_keys(cx),
             vertex_editor,
+            expression_editor,
+            expression_open: false,
+            expression_exit_barrier: false,
             font_manager,
             layout,
             middle,
@@ -146,6 +199,10 @@ impl Shell {
             menu: None,
             menu_cursor: None,
             menu_return_focus: None,
+            menu_pointer_owner: None,
+            timeline_command_origin: None,
+            menu_pointer_source_pending: false,
+            svg_import_entry: Default::default(),
             menu_scroll: gpui::ScrollHandle::new(),
             search_open: false,
             search_field,
@@ -164,10 +221,18 @@ impl Shell {
             pending_save: false,
             modal_active: FocuslessModals::default(),
             replacing: false,
+            automation_open: false,
         }
     }
     pub(crate) fn replace_instance(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.state.update(cx, |s, _| s.discard_vertex_editor());
+        self.timeline_command_origin = None;
+        self.state.update(cx, |s, _| {
+            s.cancel_automation();
+            s.cancel_expression_editor();
+            s.cancel_ae_import();
+            s.retire_colors_context();
+            s.discard_vertex_editor();
+        });
         TextField::commit_active(window, cx);
         window.focus(&self.focus);
         self.replacing = true;
@@ -175,11 +240,35 @@ impl Shell {
         cx.notify();
     }
     fn dispatch(&mut self, mut action: Action, window: &mut Window, cx: &mut Context<Self>) {
-        if self.about
+        if self.state.read(cx).automation.is_some()
+            || self.about
             || self.state.read(cx).colors.session.is_some()
             || self.state.read(cx).gradient_editor.is_some()
             || self.state.read(cx).vertex_editor.is_some()
+            || self.state.read(cx).expression_editor.is_some()
         {
+            return;
+        }
+        if let Action::OpenRecent(path) = &action
+            && !self.state.read(cx).recent_projects.contains(path)
+        {
+            self.state.update(cx, |s, cx| {
+                s.status =
+                    "Recent project is no longer in the list; reopen File → Open recent".into();
+                cx.notify();
+            });
+            return;
+        }
+        let timeline_owned = timeline_command_owned(
+            self.timeline_command_origin,
+            self.timeline.read(cx).owns_focus(window, cx),
+            self.focus.is_focused(window),
+        );
+        if timeline_owned && self.timeline.read(cx).selection_action_blocked(&action, cx) {
+            self.state.update(cx, |state, cx| {
+                state.status = "Some targets are hidden in the Timeline. Clear the layer filters or select visible rows before editing.".into();
+                cx.notify();
+            });
             return;
         }
         if self.state.read(cx).queue_open && matches!(action, Action::Undo | Action::Redo) {
@@ -189,7 +278,10 @@ impl Shell {
                 crate::editor::queue::QueueAction::Undo
             });
         }
-        if matches!(action, Action::New | Action::Open) {
+        if matches!(
+            action,
+            Action::New | Action::Open | Action::OpenRecent(_) | Action::ApplyAeProject(_)
+        ) {
             if self.state.read(cx).saving {
                 self.state.update(cx, |s, cx| {
                     s.status = "Wait for the current save to finish.".into();
@@ -198,9 +290,11 @@ impl Shell {
                 return;
             }
             if self.state.read(cx).dirty() {
+                self.state.update(cx, |s, _| s.retire_colors_context());
                 self.pending_document = Some(action);
                 self.pending_save = false;
                 self.menu = None;
+                self.timeline_command_origin = None;
                 cx.notify();
                 return;
             }
@@ -209,7 +303,11 @@ impl Shell {
             .update(cx, |state, cx| state.dispatch(&action, window, cx));
     }
     fn reset_layout(&mut self, cx: &mut Context<Self>) {
-        if self.about || self.state.read(cx).vertex_editor.is_some() {
+        if self.state.read(cx).automation.is_some()
+            || self.about
+            || self.state.read(cx).vertex_editor.is_some()
+            || self.state.read(cx).expression_editor.is_some()
+        {
             return;
         }
         self.state.update(cx, |s, cx| {
@@ -224,13 +322,16 @@ impl Shell {
         self.right.update(cx, |p, cx| p.reset(cx));
     }
     fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.about
+        if self.state.read(cx).automation.is_some()
+            || self.about
             || self.state.read(cx).colors.session.is_some()
             || self.state.read(cx).gradient_editor.is_some()
             || self.state.read(cx).vertex_editor.is_some()
+            || self.state.read(cx).expression_editor.is_some()
         {
             return;
         }
+        self.state.update(cx, |s, _| s.retire_colors_context());
         self.settings_new = false;
         let comp = self.state.read(cx).editor.project().composition();
         let values = [
@@ -250,6 +351,9 @@ impl Shell {
         self.settings_error.clear();
         self.settings = true;
         self.menu = None;
+        self.timeline_command_origin = None;
+        self.state
+            .update(cx, |state, _| state.shell_clipboard_blocked = false);
         // Ctrl+K/Ctrl+N can originate in the Composition. Remove its key target
         // immediately, before a queued Delete/Escape or the next render.
         cx.stop_active_drag(window);
@@ -257,10 +361,12 @@ impl Shell {
         cx.notify();
     }
     fn new_composition(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.about
+        if self.state.read(cx).automation.is_some()
+            || self.about
             || self.state.read(cx).colors.session.is_some()
             || self.state.read(cx).gradient_editor.is_some()
             || self.state.read(cx).vertex_editor.is_some()
+            || self.state.read(cx).expression_editor.is_some()
         {
             return;
         }
@@ -277,7 +383,11 @@ impl Shell {
         self.fields[0].update(cx, |f, _| f.sync("new-composition".into(), name, window));
     }
     fn apply_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.about || self.state.read(cx).vertex_editor.is_some() {
+        if self.state.read(cx).automation.is_some()
+            || self.about
+            || self.state.read(cx).vertex_editor.is_some()
+            || self.state.read(cx).expression_editor.is_some()
+        {
             return;
         }
         let name = self.fields[0].read(cx).value().to_string();
@@ -349,12 +459,128 @@ impl Shell {
         }
         cx.notify();
     }
+    fn clipboard_owner(&self, window: &Window, cx: &Context<Self>) -> bool {
+        self.state
+            .read(cx)
+            .contents_tree_focus
+            .as_ref()
+            .is_some_and(|focus| focus.contains_focused(window, cx))
+            || TextField::active_has_focus(window, cx)
+    }
+    fn timeline_focus_origin(&self, window: &Window, cx: &Context<Self>) -> bool {
+        timeline_command_owned(
+            None,
+            self.timeline.read(cx).owns_focus(window, cx),
+            self.focus.is_focused(window),
+        )
+    }
+    fn capture_clipboard_owner(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let blocked = self.clipboard_owner(window, cx);
+        self.state
+            .update(cx, |state, _| state.shell_clipboard_blocked = blocked);
+    }
+    fn menu_pointer_down(
+        &mut self,
+        event: &gpui::MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.menu_pointer_owner = None;
+        if event.button == gpui::MouseButton::Left {
+            let (blocked, focus, timeline_owned) = if self.menu.is_some() {
+                (
+                    self.state.read(cx).shell_clipboard_blocked,
+                    self.menu_return_focus.clone(),
+                    self.timeline_command_origin.unwrap_or(false),
+                )
+            } else {
+                (
+                    self.clipboard_owner(window, cx),
+                    window.focused(cx),
+                    self.timeline_focus_origin(window, cx),
+                )
+            };
+            self.menu_pointer_owner = Some((
+                event.clone(),
+                blocked,
+                focus,
+                crate::color_edit::input_pointer_generation(window, cx),
+                self.menu_pointer_source_pending,
+                timeline_owned,
+            ));
+        }
+    }
+    fn click_menu(
+        &mut self,
+        name: &'static str,
+        event: &gpui::ClickEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let receipt = self.menu_pointer_owner.take();
+        if self.menu == Some(name) {
+            self.close_menu(window, cx);
+            return;
+        }
+        let origin = match (event, receipt) {
+            (
+                gpui::ClickEvent::Mouse(click),
+                Some((down, blocked, focus, generation, pending, timeline_owned)),
+            ) if generation == crate::color_edit::input_pointer_generation(window, cx)
+                && down.position == click.down.position
+                && down.button == click.down.button
+                && down.modifiers == click.down.modifiers
+                && down.click_count == click.down.click_count
+                && down.first_mouse == click.down.first_mouse =>
+            {
+                Some((blocked, focus, pending, timeline_owned))
+            }
+            _ => None,
+        };
+        if !menu::clipboard_menu_origin_allowed(
+            matches!(event, gpui::ClickEvent::Mouse(click) if !click.down.first_mouse),
+            self.menu.is_some(),
+            origin.is_some(),
+        ) {
+            return;
+        }
+        self.open_menu_owned(name, origin, window, cx);
+    }
     fn open_menu(&mut self, name: &'static str, window: &mut Window, cx: &mut Context<Self>) {
-        if self.about || self.state.read(cx).vertex_editor.is_some() {
+        self.menu_pointer_owner = None;
+        self.open_menu_owned(name, None, window, cx);
+    }
+    fn open_menu_owned(
+        &mut self,
+        name: &'static str,
+        origin: Option<(bool, Option<FocusHandle>, bool, bool)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.state.read(cx).automation.is_some()
+            || self.about
+            || self.state.read(cx).vertex_editor.is_some()
+            || self.state.read(cx).expression_editor.is_some()
+        {
             return;
         }
         if self.menu.is_none() {
-            self.menu_return_focus = window.focused(cx);
+            if let Some((blocked, focus, pending, timeline_owned)) = origin {
+                self.timeline_command_origin = Some(timeline_owned);
+                self.svg_import_entry.begin(false, pending);
+                self.state
+                    .update(cx, |state, _| state.shell_clipboard_blocked = blocked);
+                self.menu_return_focus = focus;
+            } else {
+                self.timeline_command_origin = Some(self.timeline_focus_origin(window, cx));
+                self.svg_import_entry.begin(
+                    false,
+                    TextField::active_has_pending_source_input(cx)
+                        || self.state.read(cx).text_session.is_some(),
+                );
+                self.capture_clipboard_owner(window, cx);
+                self.menu_return_focus = window.focused(cx);
+            }
         }
         TextField::commit_active(window, cx);
         self.state.update(cx, |s, cx| s.finish_text(true, cx));
@@ -365,6 +591,11 @@ impl Shell {
         cx.notify();
     }
     fn close_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.timeline_command_origin = None;
+        self.svg_import_entry.clear();
+        self.menu_pointer_owner = None;
+        self.state
+            .update(cx, |state, _| state.shell_clipboard_blocked = false);
         self.menu = None;
         self.menu_cursor = None;
         if let Some(focus) = self.menu_return_focus.take() {
@@ -375,27 +606,69 @@ impl Shell {
         cx.notify();
     }
     fn run_menu(&mut self, target: menu::Target, window: &mut Window, cx: &mut Context<Self>) {
-        if self.about || self.state.read(cx).vertex_editor.is_some() {
+        self.menu_pointer_owner = None;
+        if self.state.read(cx).automation.is_some()
+            || self.about
+            || self.state.read(cx).vertex_editor.is_some()
+            || self.state.read(cx).expression_editor.is_some()
+        {
+            self.timeline_command_origin = None;
+            return;
+        }
+        if let menu::Target::Menu(name) = target {
+            self.open_menu(name, window, cx);
+            return;
+        }
+        if matches!(target, menu::Target::Search) {
+            self.open_search(window, cx);
             return;
         }
         self.menu = None;
         self.menu_cursor = None;
         self.menu_return_focus = None;
+        if matches!(
+            target,
+            menu::Target::Settings
+                | menu::Target::NewComposition
+                | menu::Target::Help
+                | menu::Target::About
+                | menu::Target::Action(Action::New | Action::Open | Action::OpenRecent(_))
+        ) {
+            self.state.update(cx, |s, _| s.retire_colors_context());
+        }
+        if !self.svg_import_entry.finish(&target) {
+            self.timeline_command_origin = None;
+            self.state.update(cx, |s, cx| {
+                s.shell_clipboard_blocked = false;
+                s.status = "File operation not started: a source edit was pending when the menu opened; finish the edit and reopen File or Find command".into();
+                cx.notify();
+            });
+            window.focus(&self.focus);
+            cx.notify();
+            return;
+        }
         window.focus(&self.focus);
         match target {
-            menu::Target::Action(action) => self.dispatch(action, window, cx),
+            menu::Target::Action(action) => {
+                self.dispatch(action, window, cx);
+            }
             menu::Target::NewComposition => self.new_composition(window, cx),
             menu::Target::Settings => self.open_settings(window, cx),
             menu::Target::ResetWorkspace => self.reset_layout(cx),
             menu::Target::Help => self.help = true,
             menu::Target::About => self.open_about(window, cx),
             menu::Target::Search => self.open_search(window, cx),
+            menu::Target::Menu(name) => self.open_menu(name, window, cx),
         }
+        self.timeline_command_origin = None;
+        self.state
+            .update(cx, |state, _| state.shell_clipboard_blocked = false);
         cx.notify();
     }
     fn open_about(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let state = self.state.read(cx);
-        if self.settings
+        if state.automation.is_some()
+            || self.settings
             || self.help
             || self.closing
             || self.pending_document.is_some()
@@ -405,9 +678,11 @@ impl Shell {
             || state.colors.session.is_some()
             || state.gradient_editor.is_some()
             || state.vertex_editor.is_some()
+            || state.expression_editor.is_some()
         {
             return;
         }
+        self.state.update(cx, |s, _| s.retire_colors_context());
         self.about = true;
         cx.stop_active_drag(window);
         window.focus(&self.focus);
@@ -418,7 +693,139 @@ impl Shell {
         window.focus(&self.focus);
         cx.notify();
     }
+    fn ae_confirmation_choice(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !matches!(self.pending_document, Some(Action::ApplyAeProject(_))) {
+            return;
+        }
+        match index {
+            0 if !self.state.read(cx).saving => {
+                self.pending_save = true;
+                self.state
+                    .update(cx, |state, cx| state.dispatch(&Action::Save, window, cx));
+            }
+            1 if !self.state.read(cx).saving => {
+                self.pending_save = false;
+                if let Some(action) = self.pending_document.take() {
+                    self.state
+                        .update(cx, |state, cx| state.dispatch(&action, window, cx));
+                }
+            }
+            2 => {
+                self.pending_document = None;
+                self.pending_save = false;
+                self.state
+                    .update(cx, |state, _| state.cancel_ae_import_confirmation());
+            }
+            _ => {}
+        }
+        cx.notify();
+    }
     fn menu_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.ae_import_open && self.state.read(cx).ae_import.is_none() {
+            self.ae_exit_barrier = true;
+        }
+        let press = self
+            .confirmation_keys
+            .press_receipt(event.keystroke.key.as_str(), event.is_held);
+        crate::modal_keyboard::record_press(event, press, window, cx);
+        let activation = press.allowed();
+        if libre_effects_editor_model::input_routing::suppress_modal_exit_key(
+            self.ae_exit_barrier,
+            self.state.read(cx).ae_import.is_some(),
+            event.keystroke.key.as_str(),
+            activation,
+        ) {
+            cx.stop_propagation();
+            window.prevent_default();
+            return;
+        }
+        if self.state.read(cx).ae_import.is_none() {
+            self.ae_import.update(cx, |panel, _| {
+                panel.suppress_activation_key(event.keystroke.key.as_str(), event.is_held)
+            });
+        } else if matches!(self.pending_document, Some(Action::ApplyAeProject(_))) {
+            self.ae_import.update(cx, |panel, _| {
+                panel.suppress_activation_key(event.keystroke.key.as_str(), event.is_held)
+            });
+            let key = event.keystroke.key.as_str();
+            let modifiers = event.keystroke.modifiers;
+            if modifiers.alt && key == "f4" {
+                return;
+            }
+            cx.stop_propagation();
+            window.prevent_default();
+            if modifiers.control || modifiers.alt || modifiers.platform {
+                return;
+            }
+            if key == "tab" {
+                let at = self
+                    .confirmation_focus
+                    .iter()
+                    .position(|f| f.is_focused(window))
+                    .unwrap_or(2);
+                let next = if modifiers.shift {
+                    (at + 2) % 3
+                } else {
+                    (at + 1) % 3
+                };
+                window.focus(&self.confirmation_focus[next]);
+            } else if activation && !modifiers.shift {
+                if key == "escape" {
+                    self.ae_confirmation_choice(2, window, cx);
+                } else if matches!(key, "enter" | "space") {
+                    if let Some(at) = self
+                        .confirmation_focus
+                        .iter()
+                        .position(|f| f.is_focused(window))
+                    {
+                        self.ae_confirmation_choice(at, window, cx);
+                    }
+                }
+            }
+            return;
+        } else {
+            if !self.ae_import.read(cx).contains_focus(window, cx) {
+                cx.stop_propagation();
+                window.prevent_default();
+            }
+            return;
+        }
+        if self.expression_open && self.state.read(cx).expression_editor.is_none() {
+            self.expression_exit_barrier = true;
+        }
+        if libre_effects_editor_model::input_routing::suppress_modal_exit_key(
+            self.expression_exit_barrier,
+            self.state.read(cx).expression_editor.is_some(),
+            event.keystroke.key.as_str(),
+            activation,
+        ) {
+            cx.stop_propagation();
+            window.prevent_default();
+            return;
+        }
+        if self.state.read(cx).expression_editor.is_some() {
+            if !self.expression_editor.read(cx).contains_focus(window, cx) {
+                cx.stop_propagation();
+                window.prevent_default();
+            }
+            return;
+        }
+        self.expression_editor.update(cx, |panel, _| {
+            panel.suppress_activation_key(event.keystroke.key.as_str(), event.is_held)
+        });
+        if self.state.read(cx).automation.is_some() {
+            if !self.script_ui.read(cx).contains_focus(window, cx) {
+                cx.stop_propagation();
+                window.prevent_default();
+            }
+            return;
+        }
+        self.state.update(cx, |s, _| s.retire_pending_svg_import());
         let key = event.keystroke.key.as_str();
         let m = event.keystroke.modifiers;
         let state = self.state.read(cx);
@@ -450,6 +857,7 @@ impl Shell {
             || state.colors.session.is_some()
             || state.gradient_editor.is_some()
             || state.vertex_editor.is_some()
+            || state.expression_editor.is_some()
         {
             return;
         }
@@ -502,11 +910,29 @@ impl Shell {
         let name = self.menu.unwrap();
         let items = menu::items(name, self.state.read(cx));
         match key {
+            "escape" | "left" if name == "Open Recent" => self.open_menu("File", window, cx),
             "escape" | "f10" | "tab" => self.close_menu(window, cx),
-            "left" | "right" => self.open_menu(menu::adjacent(name, key == "right"), window, cx),
+            "right"
+                if !event.is_held
+                    && self
+                        .menu_cursor
+                        .and_then(|i| items.get(i))
+                        .is_some_and(|i| matches!(i.target, Some(menu::Target::Menu(_)))) =>
+            {
+                if let Some(menu::Target::Menu(name)) = self
+                    .menu_cursor
+                    .and_then(|i| items.get(i))
+                    .and_then(|i| i.target.clone())
+                {
+                    self.open_menu(name, window, cx);
+                }
+            }
+            "left" | "right" if name != "Open Recent" => {
+                self.open_menu(menu::adjacent(name, key == "right"), window, cx)
+            }
             "up" | "down" => self.menu_cursor = menu::step(&items, self.menu_cursor, key == "down"),
             "home" | "end" => self.menu_cursor = menu::initial(&items, key == "end"),
-            "enter" | "space" => {
+            "enter" | "space" if !event.is_held => {
                 if let Some(target) = self
                     .menu_cursor
                     .and_then(|i| items.get(i))
@@ -526,15 +952,47 @@ impl Shell {
         cx.notify();
     }
     fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.state.read(cx).ae_import.is_some()
+            && self.pending_document.is_none()
+            && !self.closing
+        {
+            return;
+        }
+        if self.state.read(cx).automation.is_some()
+            || self.state.read(cx).expression_editor.is_some()
+        {
+            return;
+        }
         if self.search_open {
             cx.stop_propagation();
             return;
         }
         let key = event.keystroke.key.as_str();
         let m = event.keystroke.modifiers;
+        // Focused text owns printable/dead/AltGr keys. Propagation must remain
+        // enabled for the native input handler, without firing editor shortcuts.
+        if (TextField::active_has_focus(window, cx) || self.state.read(cx).text_session.is_some())
+            && libre_effects_editor_model::input_routing::native_text_key(
+                key, m.control, m.platform, m.alt,
+            )
+        {
+            return;
+        }
+        // Source and selection-formatting controls own a text draft. Unhandled
+        // keys must not become layer deletion, nudging, creation or document
+        // history merely because focus moved from the preview to Character.
+        if self.state.read(cx).text_session.is_some()
+            && !((m.control || m.platform) && matches!(key, "s" | "o" | "n"))
+            && !(m.alt && key == "f4")
+        {
+            cx.stop_propagation();
+            window.prevent_default();
+            return;
+        }
         if self.state.read(cx).colors.session.is_some()
             || self.state.read(cx).gradient_editor.is_some()
             || self.state.read(cx).vertex_editor.is_some()
+            || self.state.read(cx).expression_editor.is_some()
         {
             if key == "escape" {
                 self.state.update(cx, |s, cx| {
@@ -553,15 +1011,21 @@ impl Shell {
             return;
         }
         if key == "escape" {
+            self.menu_pointer_owner = None;
+            self.timeline_command_origin = None;
             cx.stop_active_drag(window);
             self.closing = false;
             self.pending_document = None;
             self.pending_save = false;
             self.state.update(cx, |s, _| {
+                s.cancel_ae_import_confirmation();
                 s.close_after_save = false;
                 s.marker_selection = None;
                 s.media_open = false;
                 s.fonts_open = false;
+                s.shell_clipboard_blocked = false;
+                s.retire_colors_clipboard();
+                s.colors_key_owned.set(false);
             });
             self.menu = None;
             self.settings = false;
@@ -710,6 +1174,42 @@ impl Shell {
 
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Recovery may arrive after a background import has prepared its result.
+        // Retire the lower-priority import instead of trapping focus in controls
+        // hidden by the recovery prompt.
+        if self.state.read(cx).recovery.is_some() && self.state.read(cx).ae_import.is_some() {
+            if matches!(self.pending_document, Some(Action::ApplyAeProject(_))) {
+                self.pending_document = None;
+                self.pending_save = false;
+            }
+            self.state.update(cx, |state, _| state.cancel_ae_import());
+        }
+        self.state.update(cx, |state, _| {
+            state.invalidate_expression_editor();
+        });
+        let expression_open = self.state.read(cx).expression_editor.is_some();
+        if self.expression_open && !expression_open {
+            self.expression_exit_barrier = self.confirmation_keys.has_pressed_activation();
+            window.focus(&self.focus);
+        }
+        self.expression_open = expression_open;
+        let ae_import_open = self.state.read(cx).ae_import.is_some();
+        if self.ae_import_open && !ae_import_open {
+            self.ae_exit_barrier = self.confirmation_keys.has_pressed_activation();
+            window.focus(&self.focus);
+        }
+        self.ae_import_open = ae_import_open;
+        if let Some(operation) = self
+            .state
+            .update(cx, |state, _| state.take_ae_import_apply_request())
+        {
+            self.dispatch(Action::ApplyAeProject(operation), window, cx);
+        }
+        let automation_open = self.state.read(cx).automation.is_some();
+        if self.automation_open && !automation_open {
+            window.focus(&self.focus);
+        }
+        self.automation_open = automation_open;
         if let Some(color) = self
             .state
             .update(cx, |s, _| s.colors.background_result.take())
@@ -751,6 +1251,8 @@ impl Render for Shell {
                 crate::color_edit::cancel_input_pointer(window, cx);
                 let _ = weak.update(cx, |s, cx| {
                     s.state.update(cx, |state, cx| {
+                        state.cancel_automation(); state.cancel_ae_import(); state.cancel_expression_editor();
+                        state.retire_colors_context();
                         state.gradient_editor = None;
                         state.discard_vertex_editor();
                         cx.notify();
@@ -772,6 +1274,7 @@ impl Render for Shell {
                             s.closing = true;
                             cx.notify();
                         } else {
+                            s.state.read(cx).flush_recent_projects_on_close();
                             s.state.read(cx).clear_recovery();
                             window.remove_window();
                         }
@@ -823,7 +1326,10 @@ impl Render for Shell {
             && !state.importing_video
         {
             match state.preserve_replacement() {
-                Ok(()) => window.remove_window(),
+                Ok(()) => {
+                    state.flush_recent_projects_on_close();
+                    window.remove_window();
+                }
                 Err(error) => {
                     self.replacing = false;
                     self.state.update(cx, |s, cx| {
@@ -835,6 +1341,7 @@ impl Render for Shell {
         }
         let state = self.state.read(cx);
         if state.close_after_save && !state.saving && !state.dirty() && !state.exporting {
+            state.flush_recent_projects_on_close();
             state.clear_recovery();
             window.remove_window();
         }
@@ -843,6 +1350,12 @@ impl Render for Shell {
         let video_job = state.video_job.clone();
         let exporting = state.exporting;
         let mut root = crate::color_edit::input_pointer_root(div().id("editor-workspace"), &self.state)
+            .capture_any_mouse_down(cx.listener(|this, _, _, cx| {
+                // Capture before any child outside-down/blur commits a field.
+                this.menu_pointer_source_pending = TextField::active_has_pending_source_input(cx)
+                    || this.state.read(cx).text_session.is_some();
+                this.state.update(cx, |s, _| s.retire_pending_svg_import());
+            }))
             .track_focus(&self.focus)
             .relative()
             .flex()
@@ -853,6 +1366,13 @@ impl Render for Shell {
             .text_color(rgb(ui::TEXT))
             .bg(rgb(ui::BG))
             .capture_key_down(cx.listener(Self::menu_key))
+            .capture_key_up(cx.listener(|this, event: &gpui::KeyUpEvent, window, cx| {
+                crate::modal_keyboard::clear_press(window, cx);
+                this.ae_import.update(cx, |panel, _| panel.release_key(event.keystroke.key.as_str()));
+                this.expression_editor.update(cx, |panel, _| panel.release_key(event.keystroke.key.as_str()));
+                this.confirmation_keys.release(event.keystroke.key.as_str());
+                if !this.confirmation_keys.has_pressed_activation() { this.ae_exit_barrier = false; this.expression_exit_barrier = false; }
+            }))
             .on_key_down(cx.listener(Self::key))
             .child(
                 div()
@@ -868,10 +1388,8 @@ impl Render for Shell {
                         .map(|name| {
                             ui::text_button(name, name)
                                 .when(self.menu == Some(name), |s| s.bg(rgb(0x353535)))
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    if this.menu == Some(name) { this.close_menu(window, cx); }
-                                    else { this.open_menu(name, window, cx); }
-                                }))
+                                .capture_any_mouse_down(cx.listener(Self::menu_pointer_down))
+                                .on_click(cx.listener(move |this, event, window, cx| this.click_menu(name, event, window, cx)))
                         }),
                     ),
             )
@@ -921,8 +1439,8 @@ impl Render for Shell {
                     ))
                     .child(div().mx_2().w(px(1.0)).h(px(20.0)).bg(rgb(0x414141)))
                     .child(ui::action_tool("shape-tool", match tool { Tool::Shape(libre_effects_core::ShapeKind::Ellipse) => "circle", Tool::Shape(libre_effects_core::ShapeKind::Star) => "star", Tool::Shape(libre_effects_core::ShapeKind::Polygon) => "triangle-up", _ => "square" }, "Shape tool (Q cycles shapes) · Drag to draw · Shift constrains · Alt draws from center", &self.state, Action::SetTool(match tool {Tool::Shape(_) => tool, _ => Tool::Shape(libre_effects_core::ShapeKind::Rectangle)}), matches!(tool, Tool::Shape(_))))
-                    .child(ui::text_button("shape-menu", "▾").on_click(cx.listener(|this, _, window, cx| {if this.menu == Some("Shape") {this.close_menu(window,cx);} else {this.open_menu("Shape",window,cx);}})))
-                    .child(ui::action_tool("pen-tool", "pen", "Pen (G) · Shift-click toggles vertices on one path · Drag selected vertices together · Shift during drag constrains local X/Y · Delete selected vertices · Close at first point / Enter · Alt converts corners or breaks handles · Ctrl draws a mask on a shape", &self.state, Action::SetTool(Tool::Pen), tool == Tool::Pen))
+                    .child(ui::text_button("shape-menu", "▾").capture_any_mouse_down(cx.listener(Self::menu_pointer_down)).on_click(cx.listener(|this, event, window, cx| this.click_menu("Shape", event, window, cx))))
+                    .child(ui::action_tool("pen-tool", "pen", "Pen (G) · Shift-click / Shift-drag select · Contents: same-layer cross-path selection, Ctrl+A all points · Cross-path drag / Shift+T: composition axes, current frame · Ordinary single-path drag: local axes · First point / Enter finishes · Alt converts corners or breaks handles · Ctrl draws a mask on a shape", &self.state, Action::SetTool(Tool::Pen), tool == Tool::Pen))
                     .child(ui::action_tool("text-tool", "text", "Text tool (Ctrl+T) · Click point text · Drag a paragraph box", &self.state, Action::SetTool(Tool::Text), tool == Tool::Text))
                     .child(div().mx_2().w(px(1.0)).h(px(20.0)).bg(rgb(0x414141)))
                     .child(ui::text_button("toolbar-snapping", if self.state.read(cx).snapping {"☑ Snapping"} else {"☐ Snapping"}).on_click(cx.listener(|this,_,window,cx| {let _ = window; this.state.update(cx, |s,cx| {s.snapping = !s.snapping; cx.notify();});})))
@@ -1022,7 +1540,7 @@ impl Render for Shell {
                 .top(px(if menu == "Shape" { 63.0 } else { 27.0 }))
                 .left(px(match menu {
                     "Shape" => 165.0,
-                    "File" => 0.0,
+                    "File" | "Open Recent" => 0.0,
                     "Edit" => 40.0,
                     "Composition" => 78.0,
                     "Layer" => 180.0,
@@ -1046,6 +1564,9 @@ impl Render for Shell {
                     this.menu = None;
                     this.menu_cursor = None;
                     this.menu_return_focus = None;
+                    this.timeline_command_origin = None;
+                    this.state
+                        .update(cx, |state, _| state.shell_clipboard_blocked = false);
                     cx.notify();
                 }));
             for (index, item) in items.into_iter().enumerate() {
@@ -1061,8 +1582,20 @@ impl Render for Shell {
                         },
                         item.label
                     )
+                } else if let Some(menu::Target::Action(Action::OpenRecent(path))) = &item.target {
+                    format!(
+                        "{}. {}",
+                        item.label,
+                        path.file_name().unwrap_or_default().to_string_lossy()
+                    )
                 } else {
                     item.label.to_string()
+                };
+                let recent_path = match &item.target {
+                    Some(menu::Target::Action(Action::OpenRecent(path))) => {
+                        Some(path.display().to_string())
+                    }
+                    _ => None,
                 };
                 let enabled = item.target.is_some();
                 dropdown = dropdown.child(
@@ -1072,8 +1605,25 @@ impl Render for Shell {
                         .flex_none()
                         .when(!enabled, |s| s.opacity(0.4))
                         .when(self.menu_cursor == Some(index), |s| s.bg(rgb(0x164a7b)))
-                        .child(label)
-                        .child(div().text_color(rgb(ui::MUTED)).child(item.shortcut))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .child(label),
+                        )
+                        .child(
+                            div()
+                                .flex_none()
+                                .text_color(rgb(ui::MUTED))
+                                .child(item.shortcut),
+                        )
+                        .when_some(recent_path, |button, path| {
+                            button.tooltip(move |_, cx| {
+                                cx.new(|_| ui::Tip(path.clone().into())).into()
+                            })
+                        })
                         .on_hover(cx.listener(move |this, hovered, _, cx| {
                             if *hovered && enabled {
                                 this.menu_cursor = Some(index);
@@ -1284,17 +1834,25 @@ impl Render for Shell {
                     "Ctrl+T — Text tool · Click text to edit · Ctrl+Enter finish · Esc cancel",
                     "Ctrl+Shift+D — Split layers at playhead",
                     "Alt+[ / Alt+] — Trim In / Out to playhead",
-                    "Arrow keys — Move selected layers 1 px (Shift: 10 px)",
+                    "Preview arrow keys — Move selected layers 1 px (Shift: 10 px)",
                     "Drag handles — Scale    Shift — Proportional scale / 15° rotation",
                     "Esc — Cancel canvas drag",
                     "Ctrl+Z / Ctrl+Shift+Z — Undo / Redo",
                     "Ctrl+S / Ctrl+Shift+S — Save / Save as",
                     "Ctrl+I — Import image    Ctrl+C / Ctrl+X / Ctrl+V — Copy / Cut / Paste selection",
+                    "File → Import SVG as editable shapes · Static paths, primitives, groups and solid paints",
+                    "SVG: integer-pixel viewport · One layer at composition origin · One Undo",
+                    "SVG inline style: literal paint/stroke/opacity only; overrides attributes",
+                    "No stylesheets, resources, CSS-wide values or !important",
+                    "Geometry becomes editable cubic paths; antialiased edges may differ slightly",
+                    "Unsupported SVG features reject the entire import",
                     "Ctrl / Shift click — Toggle / Range select layers",
+                    "Timeline rows: Up/Down, Home/End — Select layer · Shift extends · Ctrl+A selects visible",
+                    "Timeline F2 / double-click layer name — Rename · Enter commits · Esc cancels",
                     "Drag empty time area — Box select keys or layers",
                     "Drag a number — Scrub value (Shift: faster, Alt: finer)",
                     "Ctrl+K — Composition settings",
-                    "Space — Play / Pause    Home / End — Seek",
+                    "Space — Play / Pause    Home / End outside Timeline rows — Seek",
                     "Page Up / Down — Step frame (Shift: 10 frames)",
                     "P / A / S / R / T — Reveal transform property",
                     "U — Animated properties    J / K — Previous / Next key",
@@ -1437,12 +1995,18 @@ impl Render for Shell {
             confirmation,
         };
         if focus_modals.opened_since(self.modal_active) {
+            self.state.update(cx, |s, _| s.retire_colors_context());
             cx.stop_active_drag(window);
             window.focus(&self.focus);
         }
         // Do not refocus on later renders: Settings/Media text fields own their
         // active editing focus. Color, Gradient, Vertex, Fonts and Search own their focus.
         self.modal_active = focus_modals;
+        let ae_confirmation = matches!(self.pending_document, Some(Action::ApplyAeProject(_)));
+        if ae_confirmation && !self.ae_confirmation_active {
+            window.focus(&self.confirmation_focus[2]);
+        }
+        self.ae_confirmation_active = ae_confirmation;
         if confirmation {
             let mut dialog = div()
                 .w(px(450.0))
@@ -1460,6 +2024,14 @@ impl Render for Shell {
                 } else {
                     "Save changes before switching projects?"
                 });
+            if ae_confirmation {
+                dialog = dialog.children(crate::modal_keyboard::warning(cx).map(|message| {
+                    div()
+                        .text_color(rgb(ui::MUTED))
+                        .text_size(px(11.0))
+                        .child(message)
+                }));
+            }
             if recovering {
                 let state = self.state.read(cx);
                 dialog = dialog
@@ -1488,22 +2060,44 @@ impl Render for Shell {
                     );
             } else {
                 dialog = dialog
-                    .child(ui::text_button("close-save", "Save and continue").on_click(
-                        cx.listener(|this, _, window, cx| {
-                            this.pending_save = this.pending_document.is_some();
-                            this.state.update(cx, |s, cx| {
-                                s.close_after_save = this.closing;
-                                s.dispatch(&Action::Save, window, cx);
-                            });
-                        }),
-                    ))
                     .child(
-                        ui::text_button("close-discard", "Discard changes").on_click(cx.listener(
-                            |this, _, window, cx| {
+                        ui::text_button("close-save", "Save and continue")
+                            .when(ae_confirmation, |button| {
+                                button.track_focus(&self.confirmation_focus[0])
+                            })
+                            .on_click(cx.listener(|this, event, window, cx| {
+                                if matches!(this.pending_document, Some(Action::ApplyAeProject(_)))
+                                {
+                                    if matches!(event, gpui::ClickEvent::Mouse(click) if !click.down.first_mouse) {
+                                        this.ae_confirmation_choice(0, window, cx);
+                                    }
+                                    return;
+                                }
+                                this.pending_save = this.pending_document.is_some();
+                                this.state.update(cx, |s, cx| {
+                                    s.close_after_save = this.closing;
+                                    s.dispatch(&Action::Save, window, cx);
+                                });
+                            })),
+                    )
+                    .child(
+                        ui::text_button("close-discard", "Discard changes")
+                            .when(ae_confirmation, |button| {
+                                button.track_focus(&self.confirmation_focus[1])
+                            })
+                            .on_click(cx.listener(|this, event, window, cx| {
+                                if matches!(this.pending_document, Some(Action::ApplyAeProject(_)))
+                                {
+                                    if matches!(event, gpui::ClickEvent::Mouse(click) if !click.down.first_mouse) {
+                                        this.ae_confirmation_choice(1, window, cx);
+                                    }
+                                    return;
+                                }
                                 if this.state.read(cx).saving {
                                     return;
                                 }
                                 if this.closing {
+                                    this.state.read(cx).flush_recent_projects_on_close();
                                     this.state.read(cx).clear_recovery();
                                     window.remove_window();
                                 } else if let Some(action) = this.pending_document.take() {
@@ -1512,19 +2106,30 @@ impl Render for Shell {
                                         .update(cx, |s, cx| s.dispatch(&action, window, cx));
                                 }
                                 cx.notify();
-                            },
-                        )),
+                            })),
                     )
                     .child(
-                        ui::text_button("close-cancel", "Cancel").on_click(cx.listener(
-                            |this, _, _, cx| {
+                        ui::text_button("close-cancel", "Cancel")
+                            .when(ae_confirmation, |button| {
+                                button.track_focus(&self.confirmation_focus[2])
+                            })
+                            .on_click(cx.listener(|this, event, window, cx| {
+                                if matches!(this.pending_document, Some(Action::ApplyAeProject(_)))
+                                {
+                                    if matches!(event, gpui::ClickEvent::Mouse(click) if !click.down.first_mouse) {
+                                        this.ae_confirmation_choice(2, window, cx);
+                                    }
+                                    return;
+                                }
                                 this.closing = false;
                                 this.pending_document = None;
                                 this.pending_save = false;
-                                this.state.update(cx, |s, _| s.close_after_save = false);
+                                this.state.update(cx, |s, _| {
+                                    s.close_after_save = false;
+                                    s.cancel_ae_import_confirmation();
+                                });
                                 cx.notify();
-                            },
-                        )),
+                            })),
                     );
             }
             root = root.child(
@@ -1574,6 +2179,22 @@ impl Render for Shell {
                 .with_priority(4),
             );
         }
+        if self.state.read(cx).expression_editor.is_some() {
+            root = root.child(
+                gpui::deferred(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(gpui::rgba(0x00000090))
+                        .occlude()
+                        .child(self.expression_editor.clone()),
+                )
+                .with_priority(6),
+            );
+        }
         if self.state.read(cx).colors.session.is_some() && !self.state.read(cx).colors.picking() {
             root = root.child(
                 gpui::deferred(
@@ -1590,13 +2211,70 @@ impl Render for Shell {
                 .with_priority(4),
             );
         }
+        if self.state.read(cx).ae_import.is_some() {
+            root = root.child(
+                gpui::deferred(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(gpui::rgba(0x00000090))
+                        .occlude()
+                        .child(self.ae_import.clone()),
+                )
+                .with_priority(4),
+            );
+        }
+        if self.state.read(cx).automation.is_some() {
+            root = root.child(
+                gpui::deferred(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(gpui::rgba(0x00000090))
+                        .occlude()
+                        .child(self.script_ui.clone()),
+                )
+                .with_priority(6),
+            );
+        }
         root
     }
 }
 
 #[cfg(test)]
 mod modal_focus_tests {
-    use super::{FocuslessModals, about_key_closes};
+    use super::{FocuslessModals, about_key_closes, timeline_command_owned};
+
+    #[test]
+    fn timeline_menu_origin_survives_overlay_focus_changes() {
+        for timeline in [false, true] {
+            for shell in [false, true] {
+                assert!(timeline_command_owned(Some(true), timeline, shell));
+                assert!(!timeline_command_owned(Some(false), timeline, shell));
+            }
+        }
+    }
+
+    #[test]
+    fn neutral_shell_uses_timeline_safety_without_overriding_other_panels() {
+        assert!(timeline_command_owned(None, true, false));
+        assert!(timeline_command_owned(None, false, true));
+        assert!(!timeline_command_owned(None, false, false));
+        // A refused menu command leaves neutral Shell focus. Repeated Delete
+        // remains guarded after the one-shot captured origin is cleared.
+        assert!(timeline_command_owned(Some(true), false, true));
+        assert!(timeline_command_owned(None, false, true));
+        // A menu originating in Graph remains explicit for that invocation;
+        // later Graph focus remains exempt from Timeline-only row filtering.
+        assert!(!timeline_command_owned(Some(false), false, true));
+        assert!(!timeline_command_owned(None, false, false));
+    }
 
     #[test]
     fn about_keyboard_dismissal_does_not_enable_editor_shortcuts() {

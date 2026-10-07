@@ -10,6 +10,7 @@ pub(super) fn row(state: &Entity<EditorState>, layer: &Layer, index: usize) -> D
     let id = layer.id();
     let mut row = div()
         .flex()
+        .flex_wrap()
         .items_center()
         .gap_1()
         .child(div().w(px(48.0)).child(format!("Mask {}", index + 1)));
@@ -66,5 +67,9 @@ pub(super) fn row(state: &Entity<EditorState>, layer: &Layer, index: usize) -> D
             }),
         );
     }
-    row
+    row.child(super::expression_editor::entry_button(
+        state,
+        layer,
+        libre_effects_core::ExpressionTarget::MaskPath(mask.id),
+    ))
 }

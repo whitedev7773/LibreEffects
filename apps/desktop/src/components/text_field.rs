@@ -6,7 +6,9 @@ use gpui::{
 };
 use std::{ops::Range, rc::Rc};
 
-type Commit = Rc<dyn Fn(&str, &mut Window, &mut App)>;
+// Guarded fields return their authoritative source display after validation.
+// Ordinary fields retain their existing optimistic acceptance policy.
+type Commit = Rc<dyn Fn(&str, &mut Window, &mut App) -> Option<String>>;
 
 struct ActiveField(gpui::WeakEntity<TextField>);
 impl gpui::Global for ActiveField {}
@@ -27,6 +29,7 @@ pub(crate) struct TextField {
     commit: Commit,
     numeric: bool,
     integer: bool,
+    guarded: bool,
     scrub: Option<(Pixels, f64)>,
     scrubbed: bool,
 }
@@ -41,6 +44,12 @@ impl TextField {
     pub fn focus_input(&self, window: &mut Window) {
         window.focus(&self.focus);
     }
+    pub fn focus_select_all(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.selection = 0..self.content.len();
+        window.focus(&self.focus);
+        cx.set_global(ActiveField(cx.entity().downgrade()));
+        cx.notify();
+    }
     pub fn is_composing(window: &Window, cx: &App) -> bool {
         cx.try_global::<ActiveField>()
             .and_then(|active| active.0.upgrade())
@@ -49,10 +58,57 @@ impl TextField {
                 field.focus.is_focused(window) && field.marked.is_some()
             })
     }
+    /// Read before a guarded pointer flush; a pending draft requires an explicit
+    /// successful receipt from its owning field callback.
+    pub(crate) fn active_pending_binding(cx: &App) -> Option<String> {
+        cx.try_global::<ActiveField>()
+            .and_then(|active| active.0.upgrade())
+            .and_then(|field| {
+                let field = field.read(cx);
+                field.has_pending_edit().then(|| field.binding.clone())
+            })
+    }
+    /// Async source additions cannot consume a pending draft or IME composition.
+    /// Command-search queries are not source drafts. This deliberately does
+    /// not submit or blur the owning field.
+    pub(crate) fn active_has_pending_source_input(cx: &App) -> bool {
+        cx.try_global::<ActiveField>()
+            .and_then(|active| active.0.upgrade())
+            .is_some_and(|field| {
+                let field = field.read(cx);
+                source_input_pending(
+                    &field.binding,
+                    field.has_pending_edit(),
+                    field.marked.is_some(),
+                )
+            })
+    }
+    pub(crate) fn active_has_focus(window: &Window, cx: &App) -> bool {
+        cx.try_global::<ActiveField>()
+            .and_then(|active| active.0.upgrade())
+            .is_some_and(|field| field.read(cx).has_focus(window))
+    }
     pub fn commit_active(window: &mut Window, cx: &mut App) {
         let field = cx.try_global::<ActiveField>().map(|f| f.0.clone());
         if let Some(field) = field {
             let _ = field.update(cx, |field, cx| field.submit(window, cx));
+        }
+    }
+    /// Preview's outside capture may finish a text draft before the Character
+    /// field receives its own outside event. Flush only its focused, unmarked
+    /// selection-bound field; unrelated source fields retain their own route.
+    pub(crate) fn commit_text_selection_active(window: &mut Window, cx: &mut App) {
+        let field = cx
+            .try_global::<ActiveField>()
+            .and_then(|active| active.0.upgrade())
+            .filter(|field| {
+                let field = field.read(cx);
+                field.has_focus(window)
+                    && field.marked.is_none()
+                    && field.binding.starts_with("text-selection:")
+            });
+        if let Some(field) = field {
+            field.update(cx, |field, cx| field.submit(window, cx));
         }
     }
     pub fn new(
@@ -70,9 +126,13 @@ impl TextField {
             line: None,
             bounds: None,
             blur: None,
-            commit: Rc::new(commit),
+            commit: Rc::new(move |value, w, cx| {
+                commit(value, w, cx);
+                None
+            }),
             numeric: false,
             integer: false,
+            guarded: false,
             scrub: None,
             scrubbed: false,
         }
@@ -84,6 +144,12 @@ impl TextField {
     pub fn integer(mut self) -> Self {
         self.numeric = true;
         self.integer = true;
+        self
+    }
+    /// Opt in only where the owning panel handles safe Tab traversal. GPUI's
+    /// element tab_index does not update an explicitly tracked focus handle.
+    pub fn tab_stop(mut self) -> Self {
+        self.focus = self.focus.tab_index(0).tab_stop(true);
         self
     }
     /// Keep keyboard editing in the owning panel after Enter or Escape.
@@ -110,6 +176,45 @@ impl TextField {
             self.marked = None;
         }
     }
+    /// Bulk-only source-bound text entry. The callback must return the current
+    /// source display after either acceptance or rejection. Binding changes
+    /// discard pending text before installing a fresh callback, even in focus.
+    /// These fields deliberately have no numeric scrub behavior.
+    pub fn sync_guarded(
+        &mut self,
+        binding: String,
+        value: String,
+        window: &mut Window,
+        commit: impl Fn(&str, &mut Window, &mut App) -> String + 'static,
+    ) {
+        let cancel_composition = binding != self.binding && self.marked.is_some();
+        let keep_selection = preserve_guarded_selection(
+            binding != self.binding,
+            self.focus.is_focused(window),
+            &self.content,
+            &self.original,
+            &value,
+            self.marked.is_some(),
+        );
+        let selection = self.selection.clone();
+        self.sync(binding, value, window);
+        if keep_selection {
+            // Outside-down may commit a different bulk field before this one
+            // receives mouse-down/select-all. A source rebind must not turn the
+            // next keystroke into append-to-old-value by losing that selection.
+            self.selection = selection;
+        }
+        self.guarded = true;
+        self.numeric = false;
+        self.scrub = None;
+        self.scrubbed = false;
+        self.commit = Rc::new(move |value, w, cx| Some(commit(value, w, cx)));
+        if cancel_composition && self.focus.is_focused(window) {
+            // An external context change must not let a delayed native IME
+            // commit land in the freshly rebound selection/frame.
+            window.blur();
+        }
+    }
     pub fn value(&self) -> &str {
         &self.content
     }
@@ -131,10 +236,20 @@ impl TextField {
         }
     }
     fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.content != self.original {
+        if pending_submission(
+            &self.content,
+            &self.original,
+            self.guarded,
+            self.marked.is_some(),
+        ) {
             let value = self.content.clone();
             self.original = value.clone();
-            (self.commit)(&value, window, cx);
+            if let Some(source) = (self.commit)(&value, window, cx) {
+                self.original = source.clone();
+                self.content = source;
+                self.selection = self.content.len()..self.content.len();
+                self.marked = None;
+            }
         }
         cx.notify();
     }
@@ -173,6 +288,22 @@ impl TextField {
             self.scrubbed = false;
         }
         let control = event.keystroke.modifiers.control || event.keystroke.modifiers.platform;
+        // Do not synthesize printable insertion here: the platform delivers
+        // exactly one composed/IME commit through EntityInputHandler.
+        if libre_effects_editor_model::input_routing::native_text_key(
+            key,
+            event.keystroke.modifiers.control,
+            event.keystroke.modifiers.platform,
+            event.keystroke.modifiers.alt,
+        ) {
+            return;
+        }
+        if self.guarded && self.marked.is_some() && key != "escape" {
+            // The platform IME owns marked text. In particular, Enter and file
+            // shortcuts must not submit or blur an unfinished composition.
+            cx.stop_propagation();
+            return;
+        }
         if (control && matches!(key, "s" | "o" | "n"))
             || (event.keystroke.modifiers.alt && key == "f4")
         {
@@ -406,6 +537,11 @@ impl Render for TextField {
             .on_mouse_down_out(cx.listener(|this, _: &gpui::MouseDownEvent, window, cx| {
                 // Commit during capture, before another control changes the bound layer.
                 if this.focus.is_focused(window) {
+                    if this.guarded && this.marked.is_some() {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        return;
+                    }
                     this.submit(window, cx);
                 }
             }))
@@ -516,6 +652,28 @@ impl Render for TextField {
     }
 }
 
+fn preserve_guarded_selection(
+    binding_changed: bool,
+    focused: bool,
+    content: &str,
+    original: &str,
+    source: &str,
+    marked: bool,
+) -> bool {
+    binding_changed && focused && !marked && content == original && content == source
+}
+
+fn source_input_pending(binding: &str, changed: bool, marked: bool) -> bool {
+    !matches!(binding, "command-search")
+        && !binding.starts_with("timeline-search:")
+        && !binding.starts_with("project-search:")
+        && (changed || marked)
+}
+
+fn pending_submission(content: &str, original: &str, guarded: bool, marked: bool) -> bool {
+    content != original && !(guarded && marked)
+}
+
 fn scrub_text(value: f64, integer: bool) -> String {
     if integer {
         format!("{value:.0}")
@@ -525,6 +683,69 @@ fn scrub_text(value: f64, integer: bool) -> String {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn guarded_rebind_preserves_fresh_focus_selection_but_never_stale_or_marked_text() {
+        assert!(super::preserve_guarded_selection(
+            true, true, "70", "70", "70", false
+        ));
+        assert!(super::preserve_guarded_selection(
+            true, true, "Mixed", "Mixed", "Mixed", false
+        ));
+        for (changed, focused, content, original, source, marked) in [
+            (true, true, "80", "70", "70", false),
+            (true, true, "70", "70", "80", false),
+            (true, true, "70", "70", "70", true),
+            (true, false, "70", "70", "70", false),
+            (false, true, "70", "70", "70", false),
+        ] {
+            assert!(!super::preserve_guarded_selection(
+                changed, focused, content, original, source, marked
+            ));
+        }
+        // The production rebind decision retains mouse-down's 0..2 selection,
+        // so the next insertion replaces "70" rather than producing "7080".
+        let mut text = "70".to_string();
+        let selected = if super::preserve_guarded_selection(true, true, &text, &text, &text, false)
+        {
+            0..2
+        } else {
+            2..2
+        };
+        text.replace_range(selected, "80");
+        assert_eq!(text, "80");
+    }
+    #[test]
+    fn svg_import_pending_input_guard_distinguishes_source_drafts_from_search_queries() {
+        for binding in ["layer-position", "gradient-colors", "composition-settings"] {
+            assert!(!super::source_input_pending(binding, false, false));
+            for (changed, marked) in [(true, false), (false, true), (true, true)] {
+                assert!(super::source_input_pending(binding, changed, marked));
+                for search in ["command-search", "timeline-search:0:1", "project-search:0"] {
+                    assert!(!super::source_input_pending(search, changed, marked));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn guarded_pending_text_keeps_mixed_unchanged_and_marked_ime_unsubmitted() {
+        for (content, original, marked, pending) in [
+            ("Mixed", "Mixed", false, false),
+            ("123.45678901234567", "123.45678901234567", false, false),
+            ("", "Mixed", false, true),
+            ("NaN", "Mixed", false, true),
+            ("125", "Mixed", false, true),
+            ("125", "Mixed", true, false),
+            ("", "Mixed", true, false),
+        ] {
+            assert_eq!(
+                super::pending_submission(content, original, true, marked),
+                pending
+            );
+        }
+        // Legacy fields deliberately retain their existing submission policy.
+        assert!(super::pending_submission("125", "100", false, true));
+    }
     #[test]
     fn gradient_integer_scrubs_round_fractional_pointer_and_alt_deltas() {
         for (value, text) in [(12.0, "12"), (12.25, "12"), (12.75, "13"), (0.4, "0")] {

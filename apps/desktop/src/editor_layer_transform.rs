@@ -57,6 +57,11 @@ impl EditorState {
             let Some(layer) = composition.layer(id) else {
                 return Availability::default();
             };
+            // These operations edit independent planar transform channels.
+            // Joined spatial geometry is currently authored through scripting.
+            if layer.is_three_d() {
+                return Availability::default();
+            }
             match layer.content() {
                 Content::Audio { .. } => return Availability::default(),
                 Content::Null => availability.source_bounds = false,
@@ -114,6 +119,7 @@ mod tests {
             .layer(id)
             .unwrap()
             .property(property)
+            .expect("2D test layer has scalar transform tracks")
             .value_at(frame)
     }
     fn invoke(state: &mut EditorState, action: &Action) {
@@ -147,6 +153,25 @@ mod tests {
             })
             .unwrap();
         state.editor.selected().unwrap()
+    }
+
+    #[test]
+    fn spatial_member_disables_all_planar_transform_menu_operations() {
+        let mut state = rectangles(2);
+        state
+            .editor
+            .execute(Command::SetThreeD {
+                id: 2,
+                enabled: true,
+            })
+            .unwrap();
+        for (_, operation) in ENTRIES {
+            assert!(!state.layer_transform_availability().allows(operation));
+        }
+        state.selected_layers = [1].into();
+        for (_, operation) in ENTRIES {
+            assert!(state.layer_transform_availability().allows(operation));
+        }
     }
 
     #[test]

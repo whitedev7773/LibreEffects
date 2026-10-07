@@ -45,6 +45,7 @@ impl Project {
 }
 impl Editor {
     pub fn activate_composition(&mut self, id: CompositionId) -> Result<(), String> {
+        let previous = (self.current.project.composition_id, self.current.selected);
         self.current.project.activate_composition(id)?;
         self.current.selected = self
             .current
@@ -53,6 +54,9 @@ impl Editor {
             .layers
             .first()
             .map(Layer::id);
+        if previous != (self.current.project.composition_id, self.current.selected) {
+            self.advance_context();
+        }
         Ok(())
     }
 }
@@ -101,6 +105,7 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                     layer.id = mapping[&layer.id];
                     layer.parent = layer.parent.map(|id| mapping[&id]);
                     layer.remap_matte(&mapping);
+                    layer.remap_spectrum_sources(&mapping);
                 }
                 comp.name = format!("{} copy", comp.name);
             } else {

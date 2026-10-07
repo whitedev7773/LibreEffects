@@ -215,6 +215,11 @@ fn render(options: Options) -> Result<(), String> {
     Ok(())
 }
 
+/// Private subprocess modes must run before any platform or window setup.
+pub(crate) fn run_worker() -> Option<Result<(), String>> {
+    crate::automation_process::dispatch_worker()
+}
+
 pub(crate) fn run() -> Result<bool, String> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.is_empty() {

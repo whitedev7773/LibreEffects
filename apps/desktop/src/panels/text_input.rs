@@ -82,6 +82,27 @@ impl Preview {
         let key = e.keystroke.key.as_str();
         let ctrl = e.keystroke.modifiers.control || e.keystroke.modifiers.platform;
         let shift = e.keystroke.modifiers.shift;
+        // Native text commits need propagation to remain enabled on Linux.
+        // The enclosing Preview listener still returns here; Shell must leave
+        // these bubbled text keys to the registered input handler.
+        if libre_effects_editor_model::input_routing::native_text_key(
+            key,
+            e.keystroke.modifiers.control,
+            e.keystroke.modifiers.platform,
+            e.keystroke.modifiers.alt,
+        ) {
+            return true;
+        }
+        if self
+            .state
+            .read(cx)
+            .text_session
+            .as_ref()
+            .is_some_and(|session| session.buffer.marked.is_some())
+        {
+            cx.stop_propagation();
+            return true;
+        }
         if (ctrl && matches!(key, "s" | "o" | "n")) || (e.keystroke.modifiers.alt && key == "f4") {
             self.state.update(cx, |s, cx| s.finish_text(true, cx));
             return false;
@@ -234,7 +255,7 @@ impl EntityInputHandler for Preview {
     fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         self.state.update(cx, |s, cx| {
             if let Some(s) = &mut s.text_session {
-                s.buffer.marked = None;
+                s.buffer.clear_mark();
             }
             cx.notify();
         });
@@ -372,7 +393,7 @@ pub(super) fn paint(
                 cell.x1,
                 cell.x2,
                 cell.y,
-                layout.line_height(),
+                cell.height,
                 gpui::rgba(0x3388ee55).into(),
             );
         }
@@ -385,7 +406,7 @@ pub(super) fn paint(
             quad(
                 cell.x1,
                 cell.x2,
-                cell.y + layout.size * 1.12,
+                cell.y + cell.height * (1.12 / 1.2),
                 1.5 / zoom as f64,
                 rgb(ui::BLUE).into(),
             );
@@ -396,9 +417,30 @@ pub(super) fn paint(
         p[0],
         p[0] + 1.5 / zoom as f64,
         p[1],
-        layout.line_height(),
+        layout.height_at(p),
         rgb(0xffffff).into(),
     );
+    let [x, y, width, height] = if session.style.paragraph {
+        [0.0, 0.0, session.width, session.height]
+    } else {
+        layout.bounds()
+    };
+    let corners = [
+        [x, y],
+        [x + width, y],
+        [x + width, y + height],
+        [x, y + height],
+    ]
+    .map(to_screen);
+    let mut path = PathBuilder::stroke(px(1.0));
+    path.move_to(corners[0]);
+    for p in &corners[1..] {
+        path.line_to(*p);
+    }
+    path.close();
+    if let Ok(path) = path.build() {
+        w.paint_path(path, rgb(ui::BLUE));
+    }
     if session.style.paragraph {
         let corner = to_screen([session.width, session.height]);
         resize_handle.set(Some(Bounds::new(
@@ -412,22 +454,6 @@ pub(super) fn paint(
             ),
             rgb(ui::BLUE),
         ));
-        let corners = [
-            [0.0, 0.0],
-            [session.width, 0.0],
-            [session.width, session.height],
-            [0.0, session.height],
-        ]
-        .map(to_screen);
-        let mut path = PathBuilder::stroke(px(1.0));
-        path.move_to(corners[0]);
-        for p in &corners[1..] {
-            path.line_to(*p);
-        }
-        path.close();
-        if let Ok(path) = path.build() {
-            w.paint_path(path, rgb(ui::BLUE));
-        }
         let flow = crate::text_flow::lines(
             &session.buffer.text,
             session.font_size,

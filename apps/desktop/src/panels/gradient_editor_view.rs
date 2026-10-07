@@ -97,6 +97,17 @@ impl GradientEditor {
     }
     fn close(&mut self, accept: bool, w: &mut Window, cx: &mut Context<Self>) {
         self.drag = None;
+        if accept
+            && TextField::is_composing(w, cx)
+            && self
+                .state
+                .read(cx)
+                .gradient_editor
+                .as_ref()
+                .is_some_and(|s| s.compound)
+        {
+            return;
+        }
         if accept {
             TextField::commit_active(w, cx);
         }
@@ -178,7 +189,16 @@ impl GradientEditor {
     }
     fn key(&mut self, e: &KeyDownEvent, w: &mut Window, cx: &mut Context<Self>) {
         let key = e.keystroke.key.as_str();
-        if matches!(key, "escape" | "enter") && TextField::is_composing(w, cx) {
+        if TextField::is_composing(w, cx)
+            && (matches!(key, "escape" | "enter")
+                || key == "tab"
+                    && self
+                        .state
+                        .read(cx)
+                        .gradient_editor
+                        .as_ref()
+                        .is_some_and(|s| s.compound))
+        {
             // Native IME owns confirmation/cancellation while marked text exists.
             // Do not submit the field or dismiss the modal from the same key event.
             cx.stop_propagation();
@@ -359,6 +379,19 @@ impl Render for GradientEditor {
             .border_1()
             .border_color(rgb(ui::BLUE))
             .occlude()
+            .capture_any_mouse_down(cx.listener(|this, _, w, cx| {
+                if TextField::is_composing(w, cx)
+                    && this
+                        .state
+                        .read(cx)
+                        .gradient_editor
+                        .as_ref()
+                        .is_some_and(|s| s.compound)
+                {
+                    w.prevent_default();
+                    cx.stop_propagation();
+                }
+            }))
             .capture_key_down(cx.listener(Self::key))
             .on_key_down(cx.listener(|this, e, w, cx| {
                 if this.focus.is_focused(w) {
@@ -387,6 +420,8 @@ impl Render for GradientEditor {
         let samples = gradient.preview(node, session.frame, 256);
         let error = session.error.clone();
         let input_error = session.input_error;
+        let compound = session.compound;
+        let selection_generation = session.selection_generation;
         let serial = session.id;
         let counts = [gradient.colors.len(), gradient.opacities.len()];
         let stops = [gradient.colors.clone(), gradient.opacities.clone()];
@@ -410,9 +445,9 @@ impl Render for GradientEditor {
             .iter()
             .any(|h| h.span.is_some() && h.parameter.stop() == Some(stop));
         let values = [
-            format!("{position:.2}"),
-            format!("{midpoint:.2}"),
-            format!("{alpha:.2}"),
+            session.number_text(position),
+            session.number_text(midpoint),
+            session.number_text(alpha),
             format!("{:06X}", color.unwrap_or(0)),
             format!("{}", color.unwrap_or(0) >> 16 & 255),
             format!("{}", color.unwrap_or(0) >> 8 & 255),
@@ -551,12 +586,27 @@ impl Render for GradientEditor {
                 continue;
             }
             if input_error != Some(index) {
+                let state = self.state.clone();
                 self.fields[index].update(cx, |f, _| {
-                    f.sync(
-                        format!("gradient-{serial}-{stop}-{index}"),
-                        values[index].clone(),
-                        w,
-                    )
+                    let binding =
+                        format!("gradient-{serial}-{stop}-{index}-{selection_generation}");
+                    if compound {
+                        f.sync_guarded(binding, values[index].clone(), w, move |text, _, cx| {
+                            state.update(cx, |s, cx| {
+                                let value = s.gradient_compound_input(
+                                    serial,
+                                    selection_generation,
+                                    stop,
+                                    index,
+                                    text,
+                                );
+                                cx.notify();
+                                value
+                            })
+                        });
+                    } else {
+                        f.sync(binding, values[index].clone(), w);
+                    }
                 });
             }
             fields = fields.child(
@@ -571,7 +621,11 @@ impl Render for GradientEditor {
         }
         root = root.child(fields)
             .child(div().text_size(px(11.)).text_color(rgb(ui::MUTED)).child(
-                "Existing animated channels get a value at the current frame; unanimated channels remain static. Adding or removing stops changes every frame. Each row supports 2–32 stops."))
+                if compound {
+                    "Edits replace the complete Colors snapshot at this frame. Topology holds until the next key; other keys and endpoints stay unchanged. Each row supports 2–32 stops."
+                } else {
+                    "Existing animated channels get a value at the current frame; unanimated channels remain static. Adding or removing stops changes every frame. Each row supports 2–32 stops."
+                }))
             .child(div().text_color(rgb(0xffaa88)).child(error))
             .child(div().flex().gap_2().justify_end()
                 .child(ui::text_button("accept-gradient", "OK").on_click(cx.listener(|this, _, w, cx| this.close(true, w, cx))))

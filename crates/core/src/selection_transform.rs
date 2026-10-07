@@ -8,6 +8,26 @@ pub enum AlignTarget {
 }
 
 impl Composition {
+    pub(super) fn require_two_d_transform(&self, id: LayerId) -> Result<(), String> {
+        if self
+            .layer(id)
+            .is_some_and(|layer| layer.planar_position().is_some())
+        {
+            return Err("Joined XY Position requires explicit vector transform edits".into());
+        }
+        let mut current = Some(id);
+        for _ in 0..=self.layers.len() {
+            let Some(id) = current else {
+                return Ok(());
+            };
+            let layer = self.layer(id).ok_or("Layer not found")?;
+            if layer.is_three_d() {
+                return Err("3D layers and their descendants do not support 2D transforms".into());
+            }
+            current = layer.parent;
+        }
+        Err("Invalid parent hierarchy".into())
+    }
     /// Selected ancestors carry their selected descendants. Validate the whole
     /// selection before changing anything, including locked descendants.
     pub fn selection_roots(&self, ids: &[LayerId]) -> Result<Vec<LayerId>, String> {
@@ -92,8 +112,16 @@ fn translation(
     Ok(Some(Command::SetPosition {
         id,
         frame,
-        x: layer.property(Property::PositionX).value_at(frame) + local[0],
-        y: layer.property(Property::PositionY).value_at(frame) + local[1],
+        x: layer
+            .property(Property::PositionX)
+            .ok_or("Scalar transform property is unavailable")?
+            .value_at(frame)
+            + local[0],
+        y: layer
+            .property(Property::PositionY)
+            .ok_or("Scalar transform property is unavailable")?
+            .value_at(frame)
+            + local[1],
     }))
 }
 
@@ -111,6 +139,9 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
             return Err("Transform frame must be inside the composition".into());
         }
         let roots = comp.selection_roots(ids)?;
+        for id in ids {
+            comp.require_two_d_transform(*id)?;
+        }
         let mut commands = Vec::new();
         match command {
             Command::AlignLayers { alignment, .. }
@@ -199,6 +230,7 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                             .layer(id)
                             .unwrap()
                             .property(Property::Rotation)
+                            .ok_or("Scalar transform property is unavailable")?
                             .value_at(frame)
                             + degrees,
                     });
@@ -219,7 +251,12 @@ pub(super) fn apply(state: &mut Snapshot, command: &Command) -> Option<Result<()
                             id,
                             property,
                             frame,
-                            value: comp.layer(id).unwrap().property(property).value_at(frame)
+                            value: comp
+                                .layer(id)
+                                .unwrap()
+                                .property(property)
+                                .ok_or("Scalar transform property is unavailable")?
+                                .value_at(frame)
                                 * factor[axis]
                                 + offset[axis],
                         });
@@ -268,6 +305,7 @@ mod tests {
             .layer(id)
             .unwrap()
             .property(p)
+            .unwrap()
             .value_at(f)
     }
     fn close(a: f64, b: f64) {
@@ -411,8 +449,8 @@ mod tests {
             .map(|id| {
                 let l = comp.layer(id).unwrap();
                 comp.world_transform(id, 0).unwrap().point([
-                    l.property(Property::AnchorX).value_at(0),
-                    l.property(Property::AnchorY).value_at(0),
+                    l.property(Property::AnchorX).unwrap().value_at(0),
+                    l.property(Property::AnchorY).unwrap().value_at(0),
                 ])
             })
             .into();
@@ -440,8 +478,8 @@ mod tests {
                 .world_transform(id, 0)
                 .unwrap()
                 .point([
-                    l.property(Property::AnchorX).value_at(0),
-                    l.property(Property::AnchorY).value_at(0),
+                    l.property(Property::AnchorX).unwrap().value_at(0),
+                    l.property(Property::AnchorY).unwrap().value_at(0),
                 ]);
             close(anchor[0], anchors[i][0]);
             close(anchor[1], anchors[i][1]);
@@ -493,6 +531,7 @@ mod tests {
                     .layer(id)
                     .unwrap()
                     .property(Property::PositionX)
+                    .unwrap()
                     .value_at(0),
             );
         }

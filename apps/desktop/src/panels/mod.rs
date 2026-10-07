@@ -1,8 +1,10 @@
 mod audio_controls;
 mod audio_waveform;
+mod authored_spacing;
 mod blend;
 mod browser;
 mod character;
+mod character_range;
 mod color_curve;
 mod contents;
 mod effects;
@@ -23,6 +25,7 @@ mod shape_controls;
 mod shape_stroke;
 mod shape_values;
 mod sidebar;
+mod text_animator;
 mod timeline;
 mod timeline_snap;
 pub(crate) use sidebar::{Align, Sidebar};
@@ -31,6 +34,10 @@ pub(crate) use browser::Browser;
 pub(crate) use inspector::Inspector;
 pub(crate) use preview::Preview;
 pub(crate) use timeline::Timeline;
+#[cfg(test)]
+pub(crate) use timeline::compound_colors::{
+    Input as CompoundColorsInput, PointerGeometry as CompoundPointerGeometry,
+};
 
 pub(crate) mod render_queue;
 
@@ -41,4 +48,8 @@ pub(crate) mod font_manager;
 
 pub(crate) mod gradient_editor;
 
+pub(crate) mod expression_editor;
 pub(crate) mod vertex_editor;
+
+pub(crate) mod ae_import;
+pub(crate) mod script_ui;

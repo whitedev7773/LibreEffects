@@ -2,6 +2,13 @@
 use crate::editor::{Action, EditorState, PropertyFilter, Tool};
 use libre_effects_core::Command;
 
+/// Mouse activation must carry ownership captured before a menu button stole
+/// focus. Existing open-menu navigation retains that owner; keyboard activation
+/// uses its current focus. A missing/stale first mouse receipt fails closed.
+pub(super) fn clipboard_menu_origin_allowed(pointer: bool, menu_open: bool, receipt: bool) -> bool {
+    !pointer || menu_open || receipt
+}
+
 pub const MENUS: [&str; 9] = [
     "File",
     "Edit",
@@ -16,6 +23,7 @@ pub const MENUS: [&str; 9] = [
 #[derive(Clone)]
 pub enum Target {
     Action(Action),
+    Menu(&'static str),
     NewComposition,
     Settings,
     ResetWorkspace,
@@ -23,6 +31,33 @@ pub enum Target {
     About,
     Search,
 }
+/// Import-only entry receipt. General menus keep their existing commit-on-open
+/// behavior, but those commits cannot turn a pending source draft into implicit
+/// permission to begin SVG import. A fresh clean entry clears the receipt.
+#[derive(Default)]
+pub(super) struct SvgImportEntry {
+    pending_source: bool,
+}
+impl SvgImportEntry {
+    pub(super) fn begin(&mut self, continuing_menu: bool, pending_source: bool) {
+        if !continuing_menu {
+            self.pending_source = pending_source;
+        }
+    }
+    pub(super) fn finish(&mut self, target: &Target) -> bool {
+        let allowed = !self.pending_source
+            || !matches!(
+                target,
+                Target::Action(Action::ImportSvg | Action::RunScript | Action::ImportAeProject)
+            );
+        self.clear();
+        allowed
+    }
+    pub(super) fn clear(&mut self) {
+        self.pending_source = false;
+    }
+}
+
 pub struct Item {
     pub label: &'static str,
     pub shortcut: &'static str,
@@ -38,6 +73,38 @@ impl Item {
     }
 }
 pub fn items(menu: &str, state: &EditorState) -> Vec<Item> {
+    if menu == "Open Recent" {
+        let mut result = vec![Item::special("‹ File", "Left", Target::Menu("File"))];
+        // Static keys keep command-search identities unchanged. Actual filenames
+        // and full-path tooltips are derived only for this bounded submenu.
+        for (number, path) in ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
+            .into_iter()
+            .zip(state.recent_projects.paths())
+        {
+            result.push(Item::special(
+                number,
+                "",
+                Target::Action(Action::OpenRecent(path.clone())),
+            ));
+        }
+        if state.recent_projects.paths().is_empty() {
+            result.push(Item {
+                label: "No recent projects",
+                shortcut: "",
+                target: None,
+            });
+        }
+        result.push(Item {
+            label: "Clear recent list",
+            shortcut: "",
+            target: (!state.recent_projects.paths().is_empty()
+                || state.recent_history_needs_save())
+            .then_some(Target::Action(Action::ClearRecentProjects(
+                state.recent_projects.revision(),
+            ))),
+        });
+        return result;
+    }
     let selected = state.editor.selected();
     let items: Vec<(&str, &str, Option<Action>)> = match menu {
         "File" => vec![
@@ -51,7 +118,24 @@ pub fn items(menu: &str, state: &EditorState) -> Vec<Item> {
                 "",
                 state.collecting.then_some(Action::CancelCollection),
             ),
+            (
+                "Run script (.jsx / .js)…",
+                "",
+                state.automation_available().then_some(Action::RunScript),
+            ),
             ("Import footage…", "Ctrl+I", Some(Action::ImportImage)),
+            (
+                "Import AE project data…",
+                "",
+                state
+                    .ae_import_available()
+                    .then_some(Action::ImportAeProject),
+            ),
+            (
+                "Import SVG as editable shapes…",
+                "",
+                state.svg_import_available().then_some(Action::ImportSvg),
+            ),
             (
                 "Import image sequence…",
                 "",
@@ -97,9 +181,22 @@ pub fn items(menu: &str, state: &EditorState) -> Vec<Item> {
             ("Cancel render", "", Some(Action::CancelExport)),
         ],
         "Edit" => vec![
-            ("Copy selection", "Ctrl+C", Some(Action::CopySelection)),
-            ("Cut selection", "Ctrl+X", Some(Action::CutSelection)),
-            ("Paste", "Ctrl+V", Some(Action::PasteSelection)),
+            (
+                "Copy selection",
+                "Ctrl+C",
+                (!state.shell_clipboard_blocked).then_some(Action::CopySelection),
+            ),
+            (
+                "Cut selection",
+                "Ctrl+X",
+                (!state.shell_clipboard_blocked).then_some(Action::CutSelection),
+            ),
+            (
+                "Paste",
+                "Ctrl+V",
+                (!state.shell_clipboard_blocked && state.contents_clipboard().is_none())
+                    .then_some(Action::PasteSelection),
+            ),
             ("Copy layers", "", Some(Action::CopyLayers)),
             ("Paste layers", "", Some(Action::PasteLayers)),
             ("Undo", "Ctrl+Z", Some(Action::Undo)),
@@ -216,6 +313,12 @@ pub fn items(menu: &str, state: &EditorState) -> Vec<Item> {
             .collect(),
         "Effect" => libre_effects_core::EffectKind::ALL
             .into_iter()
+            .filter(|kind| {
+                state
+                    .editor
+                    .selected_layer()
+                    .is_none_or(|layer| layer.supports_effect_kind(*kind))
+            })
             .map(|kind| {
                 (
                     kind.label(),
@@ -223,15 +326,7 @@ pub fn items(menu: &str, state: &EditorState) -> Vec<Item> {
                     state
                         .editor
                         .selected_layer()
-                        .filter(|l| {
-                            !l.locked()
-                                && !matches!(l.content(), libre_effects_core::Content::Null)
-                                && (kind != libre_effects_core::EffectKind::LumaKey
-                                    || !matches!(
-                                        l.content(),
-                                        libre_effects_core::Content::Audio { .. }
-                                    ))
-                        })
+                        .filter(|l| !l.locked() && l.supports_effect_kind(kind))
                         .map(|l| {
                             Action::Edit(Command::Effect {
                                 id: l.id(),
@@ -342,6 +437,10 @@ pub fn items(menu: &str, state: &EditorState) -> Vec<Item> {
         })
         .collect();
     match menu {
+        "File" => result.insert(
+            2,
+            Item::special("Open recent", "›", Target::Menu("Open Recent")),
+        ),
         "Layer" => {
             let availability = state.layer_transform_availability();
             let transforms =
@@ -454,7 +553,7 @@ pub fn search(query: &str, state: &EditorState) -> Vec<Match> {
     let mut matches = vec![];
     for category in MENUS.into_iter().chain(["Tools", "Shape", "Preview"]) {
         for item in items(category, state) {
-            if matches!(item.target, Some(Target::Search)) {
+            if matches!(item.target, Some(Target::Search | Target::Menu(_))) {
                 continue;
             }
             let label = item.label.to_lowercase();
@@ -516,6 +615,139 @@ pub fn resolve(key: Key, state: &EditorState) -> Option<Target> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recent_menu_is_bounded_explicit_and_uses_exact_paths() {
+        let root = tempfile::tempdir().unwrap();
+        let mut state = EditorState::default();
+        state.recent_projects = Default::default();
+        let empty = items("Open Recent", &state);
+        assert_eq!(empty.len(), 3);
+        assert!(empty[1].target.is_none());
+        assert!(empty[2].target.is_none());
+        assert!(matches!(
+            resolve(
+                Key {
+                    category: "File",
+                    label: "Open recent"
+                },
+                &state
+            ),
+            Some(Target::Menu("Open Recent"))
+        ));
+        for i in 0..12 {
+            state
+                .recent_projects
+                .remember(&root.path().join(format!("{i}/same.lep")));
+        }
+        let entries = items("Open Recent", &state);
+        assert_eq!(entries.len(), 12);
+        assert!(
+            matches!(&entries[1].target, Some(Target::Action(Action::OpenRecent(path))) if *path == root.path().join("11/same.lep"))
+        );
+        assert!(
+            matches!(&entries[10].target, Some(Target::Action(Action::OpenRecent(path))) if *path == root.path().join("2/same.lep"))
+        );
+        assert!(
+            matches!(&entries[11].target, Some(Target::Action(Action::ClearRecentProjects(revision))) if *revision == state.recent_projects.revision())
+        );
+        // Navigation-only submenus never enter Find command or transfer its
+        // focus/input receipts. Stored paths are not indexed by command search.
+        assert!(search("Open recent", &state).is_empty());
+        assert!(search("same.lep", &state).is_empty());
+    }
+
+    #[test]
+    fn clipboard_menu_rejects_missing_mouse_owner_and_blocks_generic_targets() {
+        assert!(!clipboard_menu_origin_allowed(true, false, false));
+        assert!(clipboard_menu_origin_allowed(true, false, true));
+        assert!(clipboard_menu_origin_allowed(true, true, false));
+        assert!(clipboard_menu_origin_allowed(false, false, false));
+        let mut state = EditorState::default();
+        for blocked in [false, true, false] {
+            state.shell_clipboard_blocked = blocked;
+            for label in ["Copy selection", "Cut selection", "Paste"] {
+                assert_eq!(
+                    resolve(
+                        Key {
+                            category: "Edit",
+                            label
+                        },
+                        &state
+                    )
+                    .is_some(),
+                    !blocked
+                );
+                assert_eq!(
+                    search(label, &state)
+                        .iter()
+                        .find(|entry| entry.key.label == label)
+                        .unwrap()
+                        .item
+                        .target
+                        .is_some(),
+                    !blocked
+                );
+            }
+            assert!(
+                resolve(
+                    Key {
+                        category: "Edit",
+                        label: "Copy layers"
+                    },
+                    &state
+                )
+                .is_some()
+            );
+        }
+    }
+
+    #[test]
+    fn svg_import_entry_guard_covers_pointer_keyboard_search_and_reopen() {
+        for route in ["pointer menu", "keyboard menu", "command search"] {
+            let mut entry = SvgImportEntry::default();
+            // Capture precedes the existing commit/blur for every entry route.
+            entry.begin(false, true);
+            assert!(!entry.finish(&Target::Action(Action::ImportSvg)), "{route}");
+            entry.begin(false, false);
+            assert!(entry.finish(&Target::Action(Action::ImportSvg)), "{route}");
+        }
+        let mut entry = SvgImportEntry::default();
+        entry.begin(false, true);
+        entry.begin(true, false); // Menu → command search retains the original receipt.
+        assert!(!entry.finish(&Target::Action(Action::ImportSvg)));
+        entry.begin(false, true);
+        assert!(entry.finish(&Target::Action(Action::ImportImage))); // Other actions unchanged.
+        assert!(entry.finish(&Target::Action(Action::ImportSvg)));
+        entry.begin(false, true);
+        entry.clear(); // Esc/Close must not leave import disabled.
+        entry.begin(false, false);
+        assert!(entry.finish(&Target::Action(Action::ImportSvg)));
+    }
+
+    #[test]
+    fn svg_import_is_explicit_file_menu_and_search_command() {
+        let mut state = EditorState::default();
+        for enabled in [true, false] {
+            state.saving = !enabled;
+            let item = items("File", &state)
+                .into_iter()
+                .find(|item| item.label == "Import SVG as editable shapes…")
+                .unwrap();
+            assert!(item.shortcut.is_empty());
+            assert_eq!(item.target.is_some(), enabled);
+            let results = search("svg editable", &state);
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].key.category, "File");
+            assert_eq!(results[0].item.target.is_some(), enabled);
+            if enabled {
+                assert!(matches!(
+                    resolve(results[0].key, &state),
+                    Some(Target::Action(Action::ImportSvg))
+                ));
+            }
+        }
+    }
 
     #[test]
     fn about_is_a_dedicated_help_command_and_search_result() {

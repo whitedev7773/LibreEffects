@@ -66,10 +66,84 @@ mod tests {
             .layer(2)
             .unwrap()
             .property(p)
+            .expect("2D fixture property")
             .value_at(0)
     }
     fn close(a: f64, b: f64) {
         assert!((a - b).abs() < 1e-7, "{a} != {b}");
+    }
+    #[test]
+    fn point_text_controls_follow_shaped_bounds_and_scale_the_clicked_handle() {
+        let mut e = scene();
+        e.execute(Command::SetContent {
+            id: 2,
+            content: libre_effects_core::Content::Text {
+                text: "Short\nLonger line".into(),
+                font_size: 48.0,
+            },
+        })
+        .unwrap();
+        e.execute(Command::SetTextStyle {
+            id: 2,
+            style: libre_effects_core::TextStyle {
+                align: libre_effects_core::TextAlign::Center,
+                ..Default::default()
+            },
+        })
+        .unwrap();
+        let comp = e.project().composition();
+        let layer = comp.layer(2).unwrap();
+        let bounds = layer_bounds(layer, 0);
+        assert!(bounds[0] > 0.0);
+        assert!(bounds[2] < layer.width());
+        let corners = layer_corners(comp, 2, 0).unwrap();
+        let snaps = layer_snap_points(comp, 2, 0).unwrap();
+        close(
+            snaps[0][0],
+            corners.iter().map(|p| p[0]).fold(f64::INFINITY, f64::min),
+        );
+        close(
+            snaps[1][1],
+            corners
+                .iter()
+                .map(|p| p[1])
+                .fold(f64::NEG_INFINITY, f64::max),
+        );
+        close(snaps[2][0], (snaps[0][0] + snaps[1][0]) / 2.0);
+        close(snaps[2][1], (snaps[0][1] + snaps[1][1]) / 2.0);
+        let before = corners[2];
+        let g = TransformGesture::scale(comp, 2, 0, 4).unwrap();
+        let delta = [31.0, -17.0];
+        e.execute(g.command(0, delta, false)).unwrap();
+        let after = layer_corners(e.project().composition(), 2, 0).unwrap()[2];
+        close(after[0], before[0] + delta[0]);
+        close(after[1], before[1] + delta[1]);
+        let layer = e.project().composition().layer(2).unwrap();
+        assert_eq!([layer.width(), layer.height()], [320.0, 200.0]);
+    }
+    #[test]
+    fn paragraph_and_nontext_controls_keep_authored_boxes() {
+        let mut e = scene();
+        let comp = e.project().composition();
+        assert_eq!(layer_corners(comp, 2, 0), comp.corners_at(2, 0));
+        e.execute(Command::SetContent {
+            id: 2,
+            content: libre_effects_core::Content::Text {
+                text: "Short".into(),
+                font_size: 48.0,
+            },
+        })
+        .unwrap();
+        e.execute(Command::SetTextStyle {
+            id: 2,
+            style: libre_effects_core::TextStyle {
+                paragraph: true,
+                ..Default::default()
+            },
+        })
+        .unwrap();
+        let comp = e.project().composition();
+        assert_eq!(layer_corners(comp, 2, 0), comp.corners_at(2, 0));
     }
     #[test]
     fn scale_handle_tracks_pointer_under_rotated_nonuniform_parent() {
@@ -116,8 +190,12 @@ mod tests {
         let comp = e.project().composition();
         let l = comp.layer(2).unwrap();
         let center = [
-            l.property(Property::PositionX).value_at(0),
-            l.property(Property::PositionY).value_at(0),
+            l.property(Property::PositionX)
+                .expect("2D fixture property")
+                .value_at(0),
+            l.property(Property::PositionY)
+                .expect("2D fixture property")
+                .value_at(0),
         ];
         let space = comp.position_space(2, 0).unwrap();
         let pointer = |angle: f64| {
@@ -188,6 +266,7 @@ mod tests {
                 .layer(1)
                 .unwrap()
                 .property(Property::Rotation)
+                .expect("2D fixture property")
                 .value_at(0),
             120.0,
         );
@@ -197,6 +276,7 @@ mod tests {
                 .layer(3)
                 .unwrap()
                 .property(Property::Rotation)
+                .expect("2D fixture property")
                 .value_at(0),
             75.0,
         );
@@ -225,6 +305,7 @@ mod tests {
                 .layer(1)
                 .unwrap()
                 .property(Property::ScaleX)
+                .expect("2D fixture property")
                 .value_at(0),
             -80.0,
         );
@@ -234,6 +315,7 @@ mod tests {
                 .layer(3)
                 .unwrap()
                 .property(Property::ScaleX)
+                .expect("2D fixture property")
                 .value_at(0),
             30.0,
         );
@@ -243,6 +325,7 @@ mod tests {
                 .layer(3)
                 .unwrap()
                 .property(Property::ScaleY)
+                .expect("2D fixture property")
                 .value_at(0),
             280.0,
         );
@@ -283,6 +366,7 @@ mod tests {
                 .layer(1)
                 .unwrap()
                 .property(Property::ScaleX)
+                .expect("2D fixture property")
                 .value_at(0),
             10.0,
         );
@@ -309,6 +393,47 @@ pub(super) fn handles(width: f64, height: f64) -> [[f64; 2]; 8] {
         [0.0, height / 2.0],
     ]
 }
+/// Point text uses the current shaped source for editing geometry. Keep stored
+/// dimensions intact: they still define legacy alignment and effect semantics.
+pub(super) fn layer_bounds(layer: &libre_effects_core::Layer, frame: u32) -> [f64; 4] {
+    if !layer.text_style().paragraph
+        && let Some(layout) = crate::text_edit::layout::Layout::for_layer(layer, frame)
+    {
+        return layout.bounds();
+    }
+    [0.0, 0.0, layer.width(), layer.height()]
+}
+pub(super) fn layer_handles(layer: &libre_effects_core::Layer, frame: u32) -> [[f64; 2]; 8] {
+    let [x, y, width, height] = layer_bounds(layer, frame);
+    handles(width, height).map(|p| [p[0] + x, p[1] + y])
+}
+pub(super) fn layer_corners(comp: &Composition, id: LayerId, frame: u32) -> Option<[[f64; 2]; 4]> {
+    let h = layer_handles(comp.layer(id)?, frame);
+    let world = comp.projected_geometry(id, frame).ok()?.transform;
+    Some([h[0], h[2], h[4], h[6]].map(|p| world.point(p)))
+}
+pub(super) fn layer_snap_points(
+    comp: &Composition,
+    id: LayerId,
+    frame: u32,
+) -> Option<[[f64; 2]; 3]> {
+    let corners = layer_corners(comp, id, frame)?;
+    let left = corners.iter().map(|p| p[0]).fold(f64::INFINITY, f64::min);
+    let top = corners.iter().map(|p| p[1]).fold(f64::INFINITY, f64::min);
+    let right = corners
+        .iter()
+        .map(|p| p[0])
+        .fold(f64::NEG_INFINITY, f64::max);
+    let bottom = corners
+        .iter()
+        .map(|p| p[1])
+        .fold(f64::NEG_INFINITY, f64::max);
+    Some([
+        [left, top],
+        [right, bottom],
+        [(left + right) / 2.0, (top + bottom) / 2.0],
+    ])
+}
 impl TransformGesture {
     pub fn with_selection(
         self,
@@ -316,6 +441,12 @@ impl TransformGesture {
         ids: Vec<LayerId>,
         frame: u32,
     ) -> Result<Self, String> {
+        if ids
+            .iter()
+            .any(|id| comp.layer(*id).is_some_and(|layer| layer.is_three_d()))
+        {
+            return Err("Spatial layer geometry is edited through scripting".into());
+        }
         if ids.len() <= 1 || matches!(self, Self::Anchor { .. }) {
             return Ok(self);
         }
@@ -326,10 +457,19 @@ impl TransformGesture {
         comp.selection_roots(&ids)?;
         let layer = comp.layer(id).ok_or("Layer not found")?;
         Ok(Self::Selection {
-            rotation: layer.property(Property::Rotation).value_at(frame),
+            rotation: layer
+                .property(Property::Rotation)
+                .expect("Non-Position transform properties remain scalar")
+                .value_at(frame),
             scale: [
-                layer.property(Property::ScaleX).value_at(frame),
-                layer.property(Property::ScaleY).value_at(frame),
+                layer
+                    .property(Property::ScaleX)
+                    .expect("Non-Position transform properties remain scalar")
+                    .value_at(frame),
+                layer
+                    .property(Property::ScaleY)
+                    .expect("Non-Position transform properties remain scalar")
+                    .value_at(frame),
             ],
             driver: Box::new(self),
             ids,
@@ -338,11 +478,19 @@ impl TransformGesture {
     pub fn scale(comp: &Composition, id: LayerId, frame: u32, handle: usize) -> Option<Self> {
         let l = comp.layer(id)?;
         let anchor = [
-            l.property(Property::AnchorX).value_at(frame),
-            l.property(Property::AnchorY).value_at(frame),
+            l.property(Property::AnchorX)
+                .expect("Non-Position transform properties remain scalar")
+                .value_at(frame),
+            l.property(Property::AnchorY)
+                .expect("Non-Position transform properties remain scalar")
+                .value_at(frame),
         ];
-        let h = handles(l.width(), l.height())[handle];
-        let angle = -l.property(Property::Rotation).value_at(frame).to_radians();
+        let h = layer_handles(l, frame)[handle];
+        let angle = -l
+            .property(Property::Rotation)
+            .expect("Non-Position transform properties remain scalar")
+            .value_at(frame)
+            .to_radians();
         let (sin, cos) = angle.sin_cos();
         let inverse = Affine([cos, sin, -sin, cos, 0.0, 0.0])
             .compose(comp.position_space(id, frame)?.inverse()?);
@@ -351,8 +499,12 @@ impl TransformGesture {
             inverse,
             arms: [h[0] - anchor[0], h[1] - anchor[1]],
             scale: [
-                l.property(Property::ScaleX).value_at(frame),
-                l.property(Property::ScaleY).value_at(frame),
+                l.property(Property::ScaleX)
+                    .expect("Non-Position transform properties remain scalar")
+                    .value_at(frame),
+                l.property(Property::ScaleY)
+                    .expect("Non-Position transform properties remain scalar")
+                    .value_at(frame),
             ],
             axes: [!matches!(handle, 1 | 5), !matches!(handle, 3 | 7)],
         })
@@ -361,8 +513,8 @@ impl TransformGesture {
         let l = comp.layer(id)?;
         let inverse = comp.position_space(id, frame)?.inverse()?;
         let center = [
-            l.property(Property::PositionX).value_at(frame),
-            l.property(Property::PositionY).value_at(frame),
+            l.property(Property::PositionX)?.value_at(frame),
+            l.property(Property::PositionY)?.value_at(frame),
         ];
         let p = inverse.point(pointer);
         Some(Self::Rotate {
@@ -370,7 +522,10 @@ impl TransformGesture {
             inverse,
             center,
             previous: [p[0] - center[0], p[1] - center[1]],
-            rotation: l.property(Property::Rotation).value_at(frame),
+            rotation: l
+                .property(Property::Rotation)
+                .expect("Non-Position transform properties remain scalar")
+                .value_at(frame),
             angle: 0.0,
         })
     }
@@ -380,8 +535,12 @@ impl TransformGesture {
             id,
             inverse: comp.world_transform(id, frame)?.inverse()?,
             anchor: [
-                l.property(Property::AnchorX).value_at(frame),
-                l.property(Property::AnchorY).value_at(frame),
+                l.property(Property::AnchorX)
+                    .expect("Non-Position transform properties remain scalar")
+                    .value_at(frame),
+                l.property(Property::AnchorY)
+                    .expect("Non-Position transform properties remain scalar")
+                    .value_at(frame),
             ],
         })
     }

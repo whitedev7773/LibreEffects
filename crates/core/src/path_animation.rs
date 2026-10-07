@@ -164,6 +164,70 @@ impl PathAnimation {
         self.poses.push(path.clone());
         Ok((self.poses.len() - 1) as f64)
     }
+    /// Change the rendered pose without recycling any authored pose slots.
+    /// Existing keys keep all metadata; dormant static pools keep their base and
+    /// stored poses and remain static. Equal samples are strict source no-ops.
+    pub(super) fn edit_sample_preserving_source(
+        &mut self,
+        base: &mut VectorPath,
+        frame: Frame,
+        path: &VectorPath,
+    ) -> Result<(), String> {
+        if !path.valid() || path.closed != base.closed || path.vertices.len() != base.vertices.len()
+        {
+            return Err("Current-frame path edits must preserve valid topology".into());
+        }
+        if self.at(base, frame) == *path {
+            return Ok(());
+        }
+        if self.is_default() {
+            *base = path.clone();
+            return Ok(());
+        }
+        // Numeric equality ignores signed zero. Reuse only bit-identical poses,
+        // otherwise an unchanged vertex/handle could acquire another slot's bits.
+        let same_bits = |pose: &VectorPath| {
+            pose.closed == path.closed
+                && pose.vertices.len() == path.vertices.len()
+                && pose.vertices.iter().zip(&path.vertices).all(|(a, b)| {
+                    a.position
+                        .into_iter()
+                        .chain(a.incoming)
+                        .chain(a.outgoing)
+                        .zip(b.position.into_iter().chain(b.incoming).chain(b.outgoing))
+                        .all(|(a, b)| a.to_bits() == b.to_bits())
+                })
+        };
+        let value = if let Some(index) = self.poses.iter().position(same_bits) {
+            index as f64
+        } else {
+            if self.poses.len() >= 10000 || (self.poses.len() + 1) * path.vertices.len() > 200000 {
+                return Err("Path animation geometry limit reached".into());
+            }
+            self.poses.push(path.clone());
+            (self.poses.len() - 1) as f64
+        };
+        if self.animated() {
+            if let Some(key) = self.timing.keys.get_mut(&frame) {
+                key.value = value;
+            } else {
+                if self.timing.keys.len() >= 10000 {
+                    return Err("Path animation key limit reached".into());
+                }
+                self.timing.keys.insert(
+                    frame,
+                    Keyframe {
+                        value,
+                        interpolation: Interpolation::Linear,
+                        temporal: TemporalHandles::default(),
+                    },
+                );
+            }
+        } else {
+            self.timing.value = value;
+        }
+        Ok(())
+    }
     pub(super) fn validate(
         &self,
         base: &VectorPath,

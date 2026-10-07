@@ -198,7 +198,10 @@ mod tests {
         e
     }
     fn track(e: &Editor) -> &AnimatedProperty {
-        e.selected_layer().unwrap().property(Property::PositionX)
+        e.selected_layer()
+            .unwrap()
+            .property(Property::PositionX)
+            .expect("2D test layer has independent Position tracks")
     }
     fn geometry() -> (View, Bounds<Pixels>) {
         (

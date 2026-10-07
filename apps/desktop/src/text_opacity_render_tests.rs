@@ -646,7 +646,16 @@ fn text_opacity_animated_width_preserves_filter_allocation_and_legacy_raster_sta
                     style,
                     [fill, stroke],
                     true,
-                );
+                    libre_effects_core::TextAnimatorSample {
+                        start: 0.,
+                        end: 100.,
+                        position: [0., 0.],
+                        opacity: 100.,
+                        ..Default::default()
+                    },
+                    "opacity-regression",
+                )
+                .unwrap();
                 assert_eq!(
                     retained_bounds.as_deref(),
                     Some(legacy.as_str()),
