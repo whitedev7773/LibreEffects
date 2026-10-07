@@ -1,0 +1,17 @@
+[package]
+name = "libre-effects-ae-expressions"
+description = "Bounded read-only expression evaluation over detached frame snapshots"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rquickjs = { version = "0.14", default-features = false, features = ["std"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+libc = "=0.2.188"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "=0.59.0", features = ["Win32_Foundation", "Win32_System_Threading"] }

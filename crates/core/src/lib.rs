@@ -1,0 +1,2879 @@
+//! UI-independent editing model. Frame numbers are integral; layer index zero is on top.
+use std::collections::{BTreeMap, BTreeSet};
+
+use serde::{Deserialize, Serialize};
+
+const PROJECT_VERSION: u32 = 80;
+pub type Frame = u32;
+pub type LayerId = u64;
+pub type CompositionId = u64;
+
+mod blend;
+pub use blend::BlendMode;
+mod paint_blend;
+pub use paint_blend::PaintBlend;
+mod color_curves;
+pub use color_curves::{CurveChannel, sample_color_curve};
+mod compositions;
+mod document;
+mod editing;
+mod key_scale;
+mod key_velocity_scale;
+mod media_sharing;
+pub mod project_file;
+mod project_transaction;
+pub use key_scale::KeyScale;
+pub use key_velocity_scale::KeyVelocityScale;
+pub use media_sharing::MediaSharing;
+mod expressions;
+pub use expressions::{ExpressionTarget, MAX_EXPRESSION_SOURCE_BYTES, NumericExpression};
+pub use libre_effects_ae_expressions as expression_runtime;
+mod audio_spectrum;
+mod effects;
+pub use audio_spectrum::{
+    AudioSpectrumSettings, SpectrumDisplay, SpectrumInputScope, SpectrumProfile, SpectrumSide,
+    SpectrumSource,
+};
+pub use effects::{
+    EffectColorSpace, EffectEdit, EffectId, EffectInstance, EffectKind, EffectParam, EffectPreset,
+    GaussianEdgeMode, LumaKeyMode, ParameterSpec,
+};
+mod geometry;
+mod layer_transform;
+#[cfg(test)]
+mod luma_key_tests;
+pub use layer_transform::LayerTransformOp;
+mod layer_timing;
+mod opacity_timing;
+pub use opacity_timing::{
+    OpacityEase, OpacityEdit, OpacityInterpolation, OpacityKeyTiming, OpacityTiming,
+};
+mod layer_workflow;
+pub use layer_workflow::{LayerClipboard, LayerSwitch};
+mod markers;
+mod matte;
+pub use matte::{MatteMode, TrackMatte};
+mod media;
+pub use media::MediaReplacement;
+mod guides;
+mod render_sampling;
+pub use render_sampling::RenderSampleReceipt;
+mod sample_time;
+pub use sample_time::{CompositionSample, CompositionSampleKey};
+mod precompositions;
+pub use guides::{Guide, GuideAxis};
+mod selection_transform;
+pub use selection_transform::AlignTarget;
+mod audio_controls;
+pub use audio_controls::AudioParam;
+mod audio;
+pub use audio::AudioMetadata;
+mod assets;
+mod footage_interpretation;
+mod image_sequence;
+pub use footage_interpretation::{AlphaInterpretation, FootageInterpretation};
+pub use image_sequence::MissingFramePolicy;
+mod time;
+mod time_remap;
+pub use assets::{AssetId, AssetLibrary, FolderId, MediaAsset, ProjectFolder, ProjectItem};
+mod source_text_animation;
+pub use source_text_animation::SourceTextAnimation;
+mod contents_points;
+mod path_animation;
+mod path_transform;
+pub use contents_points::transform_path_in_world;
+pub use path_transform::{PathTransformSpec, transform_path};
+#[cfg(test)]
+mod source_text_tests;
+pub use path_animation::{PathAnimation, PathTarget};
+mod mask_animation;
+pub use mask_animation::MaskParam;
+mod paths;
+pub use paths::{PathMask, PathMaskMode, PathOrder, PathVertex, VectorPath};
+mod shape_animation;
+mod shape_stroke;
+pub use shape_animation::ShapeParam;
+mod shape_color;
+pub use shape_color::ShapePaint;
+mod contents_clipboard;
+pub use contents_clipboard::ContentsClipboard;
+mod contents_bulk_fields;
+pub use contents_bulk_fields::ContentsAnimationAction;
+#[cfg(test)]
+mod contents_bulk_fields_tests;
+#[cfg(test)]
+mod editor_context_tests;
+mod polystar;
+mod shape_contents;
+mod svg_import;
+mod trim_paths;
+pub use trim_paths::{ContentsRenderBudget, ContentsRenderError, ContentsRenderErrorKind};
+mod gradient_colors;
+pub use gradient_colors::{
+    GradientColorStop, GradientColors, GradientColorsAnimation, GradientColorsEdit,
+    GradientColorsHoldReason, GradientColorsInterpolation, GradientColorsKeyCopy,
+    GradientColorsSegmentStatus, GradientOpacityStop,
+};
+#[cfg(test)]
+mod gradient_colors_tests;
+mod shape_gradient;
+pub use shape_gradient::{GradientParam, ShapeGradient};
+mod shape_conversion;
+pub use shape_contents::{
+    ContentsEdit, ContentsKind, ContentsNode, ContentsParam, PaintComposite, ShapeContents,
+    TrimParam,
+};
+#[cfg(test)]
+mod shape_contents_tests;
+mod shapes;
+#[cfg(test)]
+mod trim_contents_tests;
+pub use shape_stroke::{ShapeStroke, StrokeCap, StrokeJoin};
+mod planar;
+mod projection;
+mod spatial;
+pub use libre_effects_spatial::{
+    SpatialEase, SpatialInterpolation, SpatialKey2, SpatialKey3, SpatialPosition2, SpatialPosition3,
+};
+pub use planar::PlanarEdit;
+pub use projection::{Camera3, ProjectedLayerGeometry};
+pub use spatial::SpatialEdit;
+mod authored_text;
+mod rich_text;
+pub use authored_text::{AuthoredTextGlyph, AuthoredTextLine, AuthoredTextPositions};
+mod text_animation;
+pub mod text_paragraphs;
+mod text_style;
+pub use rich_text::{
+    MAX_TEXT_STYLE_RUNS, RichText, RichTextLineMetrics, TextCharacterPatch, TextCharacterStyle,
+    TextLeading, TextSelectionStyle, TextStyleRun,
+};
+pub use text_animation::{
+    MAX_TEXT_ANIMATORS, MAX_TEXT_RANGE_SELECTORS, TextAnimator, TextAnimatorSample, TextPaint,
+    TextParam, TextRangeSelector, TextRangeSelectorSample, TextSelector, TextSelectorMode,
+    TextSelectorParam, TextSelectorShape, TextSelectorUnits, TextTypography,
+};
+#[cfg(test)]
+mod text_animation_tests;
+#[cfg(test)]
+mod text_animator_offset_tests;
+#[cfg(test)]
+mod text_animator_tests;
+#[cfg(test)]
+mod text_animator_transform_tests;
+#[cfg(test)]
+mod text_multiple_animator_tests;
+#[cfg(test)]
+mod text_opacity_tests;
+#[cfg(test)]
+mod text_paragraph_tests;
+#[cfg(test)]
+mod text_range_selector_tests;
+#[cfg(test)]
+mod text_selector_animation_tests;
+#[cfg(test)]
+mod text_selector_tests;
+#[cfg(test)]
+mod text_typography_tests;
+pub use shapes::{Shape, ShapeKind};
+pub use text_style::{TextAlign, TextFont, TextParagraphField, TextStrokeJoin, TextStyle};
+mod temporal;
+pub use temporal::{TemporalHandle, TemporalHandles, TemporalMode};
+mod tracks;
+pub use editing::{Content, Effects, KeyCopy, KeyRef, Mask, VideoPlayback};
+pub use geometry::{Affine, Bezier};
+pub use markers::{Marker, MarkerEdit, MarkerId, MarkerTarget};
+pub use time::{FrameRate, FrameRounding};
+pub use tracks::{PropertyPath, TrackEdit};
+
+#[derive(Clone, Copy, Debug)]
+pub enum Alignment {
+    Left,
+    HorizontalCenter,
+    Right,
+    Top,
+    VerticalCenter,
+    Bottom,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub enum Interpolation {
+    #[default]
+    Linear,
+    Hold,
+    /// Smoothstep interpolation, not After Effects temporal Bezier compatibility.
+    Smooth,
+    Bezier(Bezier),
+}
+
+impl Interpolation {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Linear => Self::Hold,
+            Self::Hold => Self::Smooth,
+            Self::Smooth => Self::Bezier(Bezier::default()),
+            Self::Bezier(_) => Self::Linear,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Linear => "Linear",
+            Self::Hold => "Hold",
+            Self::Smooth => "Smoothstep",
+            Self::Bezier(_) => "Bezier",
+        }
+    }
+    fn valid(self) -> bool {
+        match self {
+            Self::Bezier(curve) => curve.valid(),
+            _ => true,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum Property {
+    PositionX,
+    PositionY,
+    AnchorX,
+    AnchorY,
+    ScaleX,
+    ScaleY,
+    Rotation,
+    Opacity,
+}
+
+impl Property {
+    pub const ALL: [Self; 8] = [
+        Self::PositionX,
+        Self::PositionY,
+        Self::AnchorX,
+        Self::AnchorY,
+        Self::ScaleX,
+        Self::ScaleY,
+        Self::Rotation,
+        Self::Opacity,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::PositionX => "Position X",
+            Self::PositionY => "Position Y",
+            Self::AnchorX => "Anchor X",
+            Self::AnchorY => "Anchor Y",
+            Self::ScaleX => "Scale X (%)",
+            Self::ScaleY => "Scale Y (%)",
+            Self::Rotation => "Rotation (deg)",
+            Self::Opacity => "Opacity (%)",
+        }
+    }
+
+    fn accepts(self, value: f64) -> bool {
+        value.is_finite()
+            && match self {
+                Self::Opacity => (0.0..=100.0).contains(&value),
+                Self::ScaleX | Self::ScaleY => (-10_000.0..=10_000.0).contains(&value),
+                _ => value.abs() <= 1_000_000.0,
+            }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Keyframe {
+    #[serde(default, skip_serializing_if = "TemporalHandles::is_empty")]
+    pub temporal: TemporalHandles,
+    pub value: f64,
+    /// Controls the segment leaving this keyframe.
+    pub interpolation: Interpolation,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AnimatedProperty {
+    value: f64,
+    keys: BTreeMap<Frame, Keyframe>,
+}
+
+impl AnimatedProperty {
+    fn new(value: f64) -> Self {
+        Self {
+            value,
+            keys: BTreeMap::new(),
+        }
+    }
+
+    pub fn keys(&self) -> &BTreeMap<Frame, Keyframe> {
+        &self.keys
+    }
+
+    pub fn value_at(&self, frame: Frame) -> f64 {
+        self.sample(frame as f64)
+    }
+
+    /// Fractional frames are used by the value graph and future subframe rendering.
+    pub fn sample(&self, frame: f64) -> f64 {
+        let frame = if frame.is_finite() {
+            frame.max(0.0)
+        } else {
+            0.0
+        };
+        let left = self.keys.range(..=frame.floor() as Frame).next_back();
+        let right = self.keys.range(frame.ceil() as Frame..).next();
+        match (left, right) {
+            (Some((start, a)), Some((end, b))) if start != end => {
+                let t = (frame - *start as f64) / (end - start) as f64;
+                if a.interpolation != Interpolation::Hold
+                    && (a.temporal.outgoing.is_some()
+                        || b.temporal.incoming.is_some()
+                        || a.temporal.mode == TemporalMode::Auto
+                        || b.temporal.mode == TemporalMode::Auto)
+                {
+                    return temporal::sample(
+                        &self.resolved_key(*start),
+                        &self.resolved_key(*end),
+                        (end - start) as f64,
+                        t,
+                    );
+                }
+                let t = match a.interpolation {
+                    Interpolation::Linear => t,
+                    Interpolation::Hold => 0.0,
+                    Interpolation::Smooth => t * t * (3.0 - 2.0 * t),
+                    Interpolation::Bezier(curve) => curve.progress(t),
+                };
+                a.value + (b.value - a.value) * t
+            }
+            (Some((_, key)), _) | (_, Some((_, key))) => key.value,
+            _ => self.value,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Layer {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    planar_position: Option<SpatialPosition2>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    opacity_timing: Option<OpacityTiming>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    spatial_position: Option<SpatialPosition3>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    expressions: Vec<NumericExpression>,
+    /// Independent composition-time origin, unrelated to the visible trim range.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    start_frame: Option<i64>,
+    /// Timeline-only label. Absence preserves the legacy layer-color swatch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    label_index: Option<u8>,
+    #[serde(default, skip_serializing_if = "TextStyle::is_default")]
+    text_style: TextStyle,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rich_text: Option<RichText>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    text_parameters: BTreeMap<TextParam, AnimatedProperty>,
+    #[serde(default, skip_serializing_if = "TextSelector::is_default")]
+    text_selector: TextSelector,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    text_range_selectors: Vec<TextRangeSelector>,
+    #[serde(
+        default = "text_animation::first_selector_id",
+        skip_serializing_if = "text_animation::is_first_selector_id"
+    )]
+    next_text_range_selector_id: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    text_animators: Vec<TextAnimator>,
+    #[serde(
+        default = "text_animation::first_selector_id",
+        skip_serializing_if = "text_animation::is_first_selector_id"
+    )]
+    next_text_animator_id: u64,
+    #[serde(default, skip_serializing_if = "SourceTextAnimation::is_default")]
+    source_text_animation: SourceTextAnimation,
+    #[serde(
+        default,
+        skip_serializing_if = "audio_controls::AudioControls::is_default"
+    )]
+    audio_controls: audio_controls::AudioControls,
+    #[serde(default, skip_serializing_if = "FootageInterpretation::is_default")]
+    footage_interpretation: FootageInterpretation,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    asset: Option<AssetId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    time_remap: Option<AnimatedProperty>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    track_matte: Option<TrackMatte>,
+    #[serde(default, skip_serializing_if = "BlendMode::is_normal")]
+    blend_mode: BlendMode,
+    #[serde(default, skip_serializing_if = "markers::Markers::is_default")]
+    markers: markers::Markers,
+    #[serde(default)]
+    content: Content,
+    #[serde(default)]
+    effects: Effects,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    effect_stack: Vec<EffectInstance>,
+    #[serde(default = "effects::first_effect_id")]
+    next_effect_id: EffectId,
+    #[serde(default)]
+    mask: Option<Mask>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    path_masks: Vec<PathMask>,
+    #[serde(default = "effects::first_effect_id")]
+    next_mask_id: u64,
+    id: LayerId,
+    name: String,
+    visible: bool,
+    locked: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    solo: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    shy: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    guide: bool,
+    width: f64,
+    height: f64,
+    color: u32,
+    properties: BTreeMap<Property, AnimatedProperty>,
+    #[serde(default)]
+    in_frame: Frame,
+    #[serde(default)]
+    out_frame: Option<Frame>,
+    #[serde(default)]
+    parent: Option<LayerId>,
+    /// Compensation applied before local transforms, preserving pose on reparenting.
+    #[serde(default)]
+    transform_offset: Affine,
+}
+
+impl Layer {
+    pub fn text_style(&self) -> TextStyle {
+        self.text_style.clone()
+    }
+
+    pub fn blend_mode(&self) -> BlendMode {
+        self.blend_mode
+    }
+    pub fn solo(&self) -> bool {
+        self.solo
+    }
+    pub fn shy(&self) -> bool {
+        self.shy
+    }
+    pub fn guide(&self) -> bool {
+        self.guide
+    }
+    pub fn content(&self) -> &Content {
+        &self.content
+    }
+    pub fn effects(&self) -> Effects {
+        self.effects
+    }
+    pub fn path_masks(&self) -> &[PathMask] {
+        &self.path_masks
+    }
+    pub fn mask(&self) -> Option<Mask> {
+        self.mask
+    }
+    pub fn width(&self) -> f64 {
+        self.width
+    }
+    pub fn height(&self) -> f64 {
+        self.height
+    }
+    pub fn parent(&self) -> Option<LayerId> {
+        self.parent
+    }
+    pub fn local_transform(&self, frame: Frame) -> Option<Affine> {
+        // Legacy callers have no timebase and cannot sample joined animation.
+        if self.planar_position.is_some() {
+            return None;
+        }
+        self.local_transform_at(frame, 1.0)
+    }
+    pub fn local_transform_at(&self, frame: Frame, seconds_per_frame: f64) -> Option<Affine> {
+        let v = |p| self.property(p).map(|track| track.value_at(frame));
+        let position = self.position2_at(frame, seconds_per_frame).ok()?;
+        let (sin, cos) = v(Property::Rotation)?.to_radians().sin_cos();
+        let (sx, sy) = (v(Property::ScaleX)? / 100.0, v(Property::ScaleY)? / 100.0);
+        let (a, b, c, d) = (cos * sx, sin * sx, -sin * sy, cos * sy);
+        Some(Affine([
+            a,
+            b,
+            c,
+            d,
+            position[0] - a * v(Property::AnchorX)? - c * v(Property::AnchorY)?,
+            position[1] - b * v(Property::AnchorX)? - d * v(Property::AnchorY)?,
+        ]))
+    }
+    pub fn in_frame(&self) -> Frame {
+        self.in_frame
+    }
+    pub fn out_frame(&self, duration: Frame) -> Frame {
+        self.out_frame.unwrap_or(duration)
+    }
+    pub fn active_at(&self, frame: Frame, duration: Frame) -> bool {
+        self.visible && frame >= self.in_frame && frame < self.out_frame(duration)
+    }
+    pub fn id(&self) -> LayerId {
+        self.id
+    }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn visible(&self) -> bool {
+        self.visible
+    }
+    pub fn locked(&self) -> bool {
+        self.locked
+    }
+    pub fn color(&self) -> u32 {
+        self.color
+    }
+    /// Scalar source only. Joined spatial Position has no independently
+    /// authoritative X/Y tracks; callers must explicitly select its vector API.
+    pub fn property(&self, property: Property) -> Option<&AnimatedProperty> {
+        if property == Property::Opacity && self.has_opacity_timing() {
+            return None; // Generic scalar sampling lacks the required timebase.
+        }
+        self.properties.get(&property)
+    }
+
+    /// Unparented corners, ignoring compensation. Renderers should use Composition::corners_at.
+    pub fn corners_at(&self, frame: Frame) -> Option<[[f64; 2]; 4]> {
+        let transform = self.local_transform(frame)?;
+        Some(
+            [
+                [0., 0.],
+                [self.width, 0.],
+                [self.width, self.height],
+                [0., self.height],
+            ]
+            .map(|point| transform.point(point)),
+        )
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Composition {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    preserve_nested_frame_rate: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    camera: Option<Camera3>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    guides: Vec<Guide>,
+    #[serde(default, skip_serializing_if = "markers::Markers::is_default")]
+    markers: markers::Markers,
+    name: String,
+    width: u32,
+    height: u32,
+    fps: FrameRate,
+    /// Non-drop-frame display offset; source sampling remains zero based.
+    #[serde(default)]
+    display_start: Frame,
+    duration: Frame,
+    /// Preview and opaque-output matte; does not change the composition's alpha.
+    #[serde(default)]
+    background_color: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    work_area: Option<[Frame; 2]>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    hide_shy: bool,
+    layers: Vec<Layer>,
+}
+
+impl Composition {
+    pub fn display_start(&self) -> Frame {
+        self.display_start
+    }
+    pub fn timecode(&self, frame: Frame) -> String {
+        self.fps
+            .timecode(u64::from(self.display_start) + u64::from(frame))
+    }
+    pub fn hide_shy(&self) -> bool {
+        self.hide_shy
+    }
+    pub fn layer_enabled(&self, layer: &Layer, include_guides: bool) -> bool {
+        layer.visible
+            && (include_guides || !layer.guide)
+            && (layer.solo || !self.layers.iter().any(|l| l.solo))
+    }
+    pub fn layer_active(&self, layer: &Layer, frame: Frame, include_guides: bool) -> bool {
+        self.layer_enabled(layer, include_guides) && layer.active_at(frame, self.duration)
+    }
+    pub fn world_transform(&self, id: LayerId, frame: Frame) -> Option<Affine> {
+        let mut current = Some(id);
+        let mut result = Affine::default();
+        for _ in 0..=self.layers.len() {
+            let Some(id) = current else {
+                return result.valid().then_some(result);
+            };
+            let layer = self.layer(id)?;
+            result = layer
+                .transform_offset
+                .compose(layer.local_transform_at(frame, self.fps.seconds(1))?)
+                .compose(result);
+            current = layer.parent;
+        }
+        None
+    }
+    pub fn position_space(&self, id: LayerId, frame: Frame) -> Option<Affine> {
+        let layer = self.layer(id)?;
+        if layer.is_three_d() {
+            return None;
+        }
+        let parent = match layer.parent {
+            Some(parent) => self.world_transform(parent, frame)?,
+            None => Affine::default(),
+        };
+        Some(parent.compose(layer.transform_offset))
+    }
+    pub fn corners_at(&self, id: LayerId, frame: Frame) -> Option<[[f64; 2]; 4]> {
+        if self.layer(id)?.is_three_d() {
+            return self
+                .projected_geometry(id, frame)
+                .ok()
+                .map(|geometry| geometry.corners);
+        }
+        let layer = self.layer(id)?;
+        let world = self.world_transform(id, frame)?;
+        Some(
+            [
+                [0.0, 0.0],
+                [layer.width, 0.0],
+                [layer.width, layer.height],
+                [0.0, layer.height],
+            ]
+            .map(|p| world.point(p)),
+        )
+    }
+    pub fn can_parent(&self, child: LayerId, parent: Option<LayerId>) -> bool {
+        let mut current = parent;
+        for _ in 0..=self.layers.len() {
+            let Some(id) = current else {
+                return true;
+            };
+            if id == child {
+                return false;
+            }
+            let Some(layer) = self.layer(id) else {
+                return false;
+            };
+            current = layer.parent;
+        }
+        false
+    }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+    pub fn fps(&self) -> FrameRate {
+        self.fps
+    }
+    pub fn duration(&self) -> Frame {
+        self.duration
+    }
+    pub fn background_color(&self) -> u32 {
+        self.background_color
+    }
+    pub fn work_area(&self) -> std::ops::Range<Frame> {
+        let [start, end] = self.work_area.unwrap_or([0, self.duration]);
+        start..end
+    }
+    pub fn layers(&self) -> &[Layer] {
+        &self.layers
+    }
+    pub fn layer(&self, id: LayerId) -> Option<&Layer> {
+        self.layers.iter().find(|layer| layer.id == id)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Project {
+    /// A detached evaluated render view is never a persistable authored document.
+    #[serde(
+        default,
+        skip_deserializing,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "expressions::reject_transient_serialization"
+    )]
+    evaluated_frame: Option<(CompositionId, Frame)>,
+    #[serde(
+        default,
+        skip_deserializing,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "render_sampling::reject_serialization"
+    )]
+    render_sample: Option<RenderSampleReceipt>,
+    #[serde(default, skip_serializing_if = "AssetLibrary::is_default")]
+    asset_library: AssetLibrary,
+    version: u32,
+    next_layer_id: LayerId,
+    composition: Composition,
+    #[serde(default = "first_composition_id")]
+    composition_id: CompositionId,
+    #[serde(default = "next_composition_id")]
+    next_composition_id: CompositionId,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    other_compositions: BTreeMap<CompositionId, Composition>,
+}
+fn first_composition_id() -> CompositionId {
+    1
+}
+fn is_false(value: &bool) -> bool {
+    !value
+}
+fn next_composition_id() -> CompositionId {
+    2
+}
+
+impl Default for Project {
+    fn default() -> Self {
+        Self {
+            evaluated_frame: None,
+            render_sample: None,
+            version: 1,
+            asset_library: AssetLibrary::default(),
+            next_layer_id: 1,
+            composition_id: 1,
+            next_composition_id: 2,
+            other_compositions: BTreeMap::new(),
+            composition: Composition {
+                preserve_nested_frame_rate: None,
+                camera: None,
+                guides: Vec::new(),
+                markers: Default::default(),
+                name: "Composition 01".into(),
+                width: 1920,
+                height: 1080,
+                fps: 30.into(),
+                display_start: 0,
+                duration: 150,
+                background_color: 0x000000,
+                work_area: None,
+                hide_shy: false,
+                layers: Vec::new(),
+            },
+        }
+    }
+}
+
+impl Project {
+    pub fn composition(&self) -> &Composition {
+        &self.composition
+    }
+
+    pub fn to_json(&self) -> Result<String, String> {
+        document::encode(self)
+    }
+
+    pub fn from_json(json: &str) -> Result<Self, String> {
+        document::finish(document::decode(json)?)
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        if self.evaluated_frame.is_some() || self.render_sample.is_some() {
+            return Err("An evaluated render view cannot be saved or committed".into());
+        }
+        document::reject_unsupported_version(u64::from(self.version))?;
+        if !(1..=PROJECT_VERSION).contains(&self.version) {
+            return Err("Unsupported project version".into());
+        }
+        if self.version < 79 && audio_spectrum::materialized(self) {
+            return Err("Native Audio Spectrum and Difference require project version 79".into());
+        }
+        if self.version < 78 && effects::has_repeat_edges(self) {
+            return Err("Repeat Edge Pixels requires project version 78".into());
+        }
+        if self.version < 77 && render_sampling::materialized(self) {
+            return Err("Explicit nested frame sampling requires project version 77".into());
+        }
+        if self.version < 9
+            && (self.composition_id != 1
+                || self.next_composition_id != 2
+                || !self.other_compositions.is_empty())
+        {
+            return Err("Multiple compositions require project version 9".into());
+        }
+        if self.composition_id == 0
+            || self.composition_id >= self.next_composition_id
+            || self.other_compositions.len() >= 100
+            || self.other_compositions.contains_key(&self.composition_id)
+            || self
+                .other_compositions
+                .keys()
+                .any(|id| *id == 0 || *id >= self.next_composition_id)
+            || self.next_composition_id == u64::MAX
+        {
+            return Err("Invalid composition IDs".into());
+        }
+        let mut ids = BTreeSet::new();
+        let mut images = BTreeSet::new();
+        let mut image_bytes = 0usize;
+        assets::validate(self)?;
+        for asset in self.asset_library.assets.values() {
+            if let Content::Image { png } = &asset.content {
+                if images.insert(png.as_ptr() as usize) {
+                    image_bytes = image_bytes.saturating_add(png.len());
+                }
+            }
+        }
+        if image_bytes > document::MAX_IMAGE_BYTES {
+            return Err("Embedded image assets exceed 128 MiB".into());
+        }
+        for (_, comp) in self.compositions() {
+            projection::validate_comp(comp, self.version)?;
+            for layer in &comp.layers {
+                for path in layer.track_paths() {
+                    if let Some(track) = layer.track(path) {
+                        for key in track.keys.values() {
+                            if !key.temporal.valid()
+                                || (self.version < 36 && !key.temporal.mode.is_independent())
+                                || (!key.temporal.is_empty()
+                                    && (self.version < 35
+                                        || matches!(
+                                            path,
+                                            PropertyPath::Path(_) | PropertyPath::SourceText
+                                        )))
+                            {
+                                return Err(
+                                    "Invalid temporal handles or project version (handles require 35, linked modes require 36)"
+                                        .into(),
+                                );
+                            }
+                        }
+                    }
+                }
+                let has_path = matches!(&layer.content, Content::Shape(s) if s.path.is_some());
+                if let Content::ShapeContents(contents) = &layer.content {
+                    if self.version < 43 {
+                        return Err("Shape Contents requires project version 43".into());
+                    }
+                    contents.validate_version(comp.duration, self.version)?;
+                }
+                if self.version < 37
+                    && matches!(&layer.content, Content::Shape(s) if !s.stroke_style.is_default())
+                {
+                    return Err("Shape stroke styles require project version 37".into());
+                }
+                if (has_path || !layer.path_masks.is_empty()) && self.version < 29 {
+                    return Err("Vector paths require project version 29".into());
+                }
+                if layer.path_masks.len() > 64 || layer.path_masks.iter().any(|m| !m.valid()) {
+                    return Err(
+                        "Invalid path mask: at most 64 closed paths with 3–1024 finite vertices"
+                            .into(),
+                    );
+                }
+            }
+            matte::validate(comp, self.version)?;
+            guides::validate(&comp.guides)?;
+            if self.version < 27
+                && comp
+                    .layers
+                    .iter()
+                    .any(|l| matches!(l.content(), Content::Shape(_)))
+            {
+                return Err("Shape content requires project version 27".into());
+            }
+            if self.version < 20 && !comp.guides.is_empty() {
+                return Err("Composition guides require project version 20".into());
+            }
+            if self.version < 51
+                && comp
+                    .layers
+                    .iter()
+                    .flat_map(|l| &l.effect_stack)
+                    .any(|e| e.kind() == EffectKind::LumaKey)
+            {
+                return Err("Luma Key requires project version 51".into());
+            }
+            if self.version < 19
+                && comp.layers.iter().flat_map(|l| &l.effect_stack).any(|e| {
+                    matches!(
+                        e.kind(),
+                        EffectKind::Curves
+                            | EffectKind::LinearGradient
+                            | EffectKind::RadialGradient
+                    )
+                })
+            {
+                return Err("Curves and gradients require project version 19".into());
+            }
+            if self.version < 17 && comp.layers.iter().any(|l| !l.blend_mode.is_normal()) {
+                return Err("Layer blending modes require project version 17".into());
+            }
+            if self.version < 16
+                && comp
+                    .layers
+                    .iter()
+                    .any(|l| matches!(l.content, Content::Solid | Content::Adjustment))
+            {
+                return Err("Solid and adjustment sources require project version 16".into());
+            }
+            if self.version < 14 && (comp.fps.denominator() != 1 || comp.display_start != 0) {
+                return Err(
+                    "Fractional frame rates and start timecode require project version 14".into(),
+                );
+            }
+            comp.markers.validate(comp.duration)?;
+            if self.version < 13
+                && (!comp.markers.is_default()
+                    || comp.layers.iter().any(|l| !l.markers.is_default()))
+            {
+                return Err("Markers require project version 13".into());
+            }
+            if self.version < 12 && comp.layers.iter().any(|l| !l.effect_stack.is_empty()) {
+                return Err("Effect stacks require project version 12".into());
+            }
+            if self.version < 11
+                && (comp.hide_shy
+                    || comp
+                        .layers
+                        .iter()
+                        .any(|l| l.solo || l.shy || l.guide || matches!(l.content, Content::Null)))
+            {
+                return Err("Layer switches and null objects require project version 11".into());
+            }
+            if !(1..=16_384).contains(&comp.width)
+                || !(1..=16_384).contains(&comp.height)
+                || !comp.fps.valid()
+                || comp.duration == 0
+                || comp.duration > comp.fps.max_duration()
+                || comp.display_start >= comp.fps.nominal() * 86_400
+                || comp.layers.len() > 1_000
+                || comp.name.len() > 1024
+                || comp.background_color > 0xffffff
+                || comp.work_area().is_empty()
+                || comp.work_area().end > comp.duration
+            {
+                return Err("Invalid composition settings".into());
+            }
+            for layer in &comp.layers {
+                layer_timing::validate(layer, self.version)?;
+                expressions::validate(layer, self.version)?;
+                time_remap::validate(layer, comp.duration, self.version)?;
+                if !layer.text_style.valid()
+                    || (layer.text_style.has_paragraph_override()
+                        && (self.version < 55 || !matches!(layer.content, Content::Text { .. })))
+                    || (layer.text_style.has_paint_override()
+                        && (self.version < 34 || !matches!(layer.content, Content::Text { .. })))
+                    || (layer.text_style.paragraph
+                        && (self.version < 33 || !matches!(layer.content, Content::Text { .. })))
+                    || (layer.text_style.has_font_override() && self.version < 32)
+                    || (!layer.text_style.is_default() && self.version < 28)
+                {
+                    return Err("Invalid or unsupported text style".into());
+                }
+                mask_animation::validate(layer, comp.duration, self.version)?;
+                shape_animation::validate(layer, comp.duration, self.version)?;
+                text_animation::validate(layer, comp.duration, self.version)?;
+                path_animation::validate(layer, comp.duration, self.version)?;
+                source_text_animation::validate(layer, comp.duration, self.version)?;
+                rich_text::validate(layer, self.version)?;
+                audio_controls::validate(layer, comp.duration, self.version)?;
+                layer.markers.validate(comp.duration)?;
+                effects::validate(layer, comp.duration)?;
+                if let Content::Image { png } = &layer.content {
+                    if images.insert(png.as_ptr() as usize) {
+                        image_bytes = image_bytes.saturating_add(png.len());
+                    }
+                    if image_bytes > document::MAX_IMAGE_BYTES {
+                        return Err("Embedded images exceed 128 MiB. Remove unused image layers before importing more.".into());
+                    }
+                }
+                editing::validate_content_version(
+                    &layer.content,
+                    layer.effects,
+                    layer.mask,
+                    self.version,
+                )?;
+                if layer.id == 0
+                    || !layer.transform_offset.valid()
+                    || !comp.can_parent(layer.id, layer.parent)
+                    || layer.in_frame >= layer.out_frame(comp.duration)
+                    || layer.out_frame(comp.duration) > comp.duration
+                    || layer.id >= self.next_layer_id
+                    || !ids.insert(layer.id)
+                    || layer.name.len() > 1024
+                    || layer.color > 0xff_ffff
+                    || !layer.width.is_finite()
+                    || !(1.0..=16_384.0).contains(&layer.width)
+                    || !layer.height.is_finite()
+                    || !(1.0..=16_384.0).contains(&layer.height)
+                    || layer.properties.len()
+                        != Property::ALL.len() - if layer.has_joined_position() { 2 } else { 0 }
+                {
+                    return Err("Invalid layer".into());
+                }
+                spatial::validate_layer(layer, comp.duration, self.version)?;
+                planar::validate_layer(layer, comp.duration, self.version)?;
+                opacity_timing::validate(layer, self.version)?;
+                for property in Property::ALL {
+                    if layer.has_joined_position() && spatial::position_axis(property) {
+                        continue;
+                    }
+                    let track = layer
+                        .properties
+                        .get(&property)
+                        .ok_or("Missing transform property")?;
+                    if !property.accepts(track.value)
+                        || track.keys.iter().any(|(frame, key)| {
+                            *frame >= comp.duration
+                                || !property.accepts(key.value)
+                                || !key.interpolation.valid()
+                        })
+                    {
+                        return Err("Invalid property or keyframe".into());
+                    }
+                }
+            }
+        }
+        if ids.len() > 1000 {
+            return Err("Project limit is 1000 layers across all compositions".into());
+        }
+        if self.next_layer_id == 0 || self.next_layer_id == u64::MAX {
+            return Err("Invalid next layer ID".into());
+        }
+        precompositions::validate(self)?;
+        audio_spectrum::validate_project(self)?;
+        Ok(())
+    }
+}
+
+/// The future scripting bridge and native controls both dispatch these commands.
+#[derive(Clone, Debug)]
+pub enum Command {
+    SetPreserveNestedFrameRate {
+        composition: CompositionId,
+        preserve: bool,
+    },
+    SetOpacityTiming {
+        id: LayerId,
+        edit: OpacityEdit,
+    },
+    /// Author numeric source without evaluating JavaScript. Existing numeric edits
+    /// continue to edit the pre-expression value and preserve this program.
+    SetExpression {
+        id: LayerId,
+        target: ExpressionTarget,
+        source: String,
+        enabled: bool,
+    },
+    SetExpressionLocalBindings {
+        id: LayerId,
+        target: ExpressionTarget,
+        bindings: Vec<String>,
+    },
+    SetExpressionEnabled {
+        id: LayerId,
+        target: ExpressionTarget,
+        enabled: bool,
+    },
+    RemoveExpression {
+        id: LayerId,
+        target: ExpressionTarget,
+    },
+    SetSequenceMissing {
+        asset: AssetId,
+        missing: MissingFramePolicy,
+    },
+    RelinkSequence {
+        asset: AssetId,
+        frames: std::sync::Arc<Vec<String>>,
+    },
+    InterpretAsset {
+        asset: AssetId,
+        interpretation: FootageInterpretation,
+    },
+    CompositionFromAsset(AssetId),
+    ImportAsset {
+        content: Content,
+        width: f64,
+        height: f64,
+        name: String,
+        folder: Option<FolderId>,
+        frame: Option<Frame>,
+    },
+    AddAssetLayer {
+        asset: AssetId,
+        frame: Frame,
+    },
+    NewProjectFolder {
+        name: String,
+        parent: Option<FolderId>,
+    },
+    RenameProjectItem {
+        item: ProjectItem,
+        name: String,
+    },
+    MoveProjectItem {
+        item: ProjectItem,
+        folder: Option<FolderId>,
+    },
+    DeleteProjectItem(ProjectItem),
+    SetAudioEnabled {
+        id: LayerId,
+        enabled: bool,
+    },
+    EditAudio {
+        id: LayerId,
+        parameter: AudioParam,
+        edit: TrackEdit,
+    },
+    FadeAudio {
+        id: LayerId,
+        start: Frame,
+        end: Frame,
+        fade_in: bool,
+    },
+    SetTimeRemap {
+        id: LayerId,
+        enabled: bool,
+    },
+    FreezeTimeRemap {
+        id: LayerId,
+        frame: Frame,
+    },
+    EditTimeRemap {
+        id: LayerId,
+        edit: TrackEdit,
+    },
+    SetGuides(Vec<Guide>),
+    SetTrackMatte {
+        id: LayerId,
+        matte: Option<TrackMatte>,
+    },
+    SetBlendMode {
+        id: LayerId,
+        mode: BlendMode,
+    },
+    AddSolid,
+    AddAdjustment,
+    ConfigureSolid {
+        id: LayerId,
+        width: u32,
+        height: u32,
+        color: u32,
+    },
+    RelinkMedia(Vec<MediaReplacement>),
+    ReplaceTextFont {
+        from: TextFont,
+        to: TextFont,
+    },
+    Marker {
+        target: MarkerTarget,
+        edit: MarkerEdit,
+    },
+    SetTemporalHandle {
+        id: LayerId,
+        property: PropertyPath,
+        frame: Frame,
+        incoming: bool,
+        handle: TemporalHandle,
+    },
+    SetTemporalMode {
+        id: LayerId,
+        property: PropertyPath,
+        frame: Frame,
+        mode: TemporalMode,
+    },
+    EditTrack {
+        id: LayerId,
+        property: PropertyPath,
+        edit: TrackEdit,
+    },
+    Batch(Vec<Command>),
+    Effect {
+        id: LayerId,
+        edit: EffectEdit,
+    },
+    AddNull,
+    SetLayerSwitch {
+        id: LayerId,
+        switch: LayerSwitch,
+        enabled: bool,
+    },
+    SetHideShy(bool),
+    PasteLayers(LayerClipboard),
+    NewComposition,
+    DuplicateComposition,
+    DeleteComposition,
+    AddCompositionLayer {
+        composition: CompositionId,
+        frame: Frame,
+    },
+    Precompose {
+        layers: Vec<LayerId>,
+        name: String,
+    },
+    SetCompositionBackground(u32),
+    SetWorkArea {
+        start: Frame,
+        end: Frame,
+    },
+    AddBackgroundSolid,
+    TrimLayers {
+        ids: Vec<LayerId>,
+        frame: Frame,
+        start: bool,
+    },
+    NudgeLayers {
+        ids: Vec<LayerId>,
+        frame: Frame,
+        delta: [f64; 2],
+    },
+    DuplicateLayers(Vec<LayerId>),
+    SplitLayers {
+        ids: Vec<LayerId>,
+        frame: Frame,
+    },
+    TransformLayers {
+        ids: Vec<LayerId>,
+        frame: Frame,
+        operation: LayerTransformOp,
+    },
+    SetAnchor {
+        id: LayerId,
+        frame: Frame,
+        x: f64,
+        y: f64,
+    },
+    AddContent {
+        content: Content,
+        width: f64,
+        height: f64,
+        name: String,
+    },
+    /// One source-preserving static SVG import. The host parses a restricted
+    /// SVG into editable Contents; this transaction never stores SVG or assets.
+    ImportSvg {
+        contents: ShapeContents,
+        width: f64,
+        height: f64,
+        name: String,
+    },
+    EditSourceText {
+        id: LayerId,
+        frame: Frame,
+        text: String,
+    },
+    /// Exact optional static character-style payload, validated against source.
+    SetRichText {
+        id: LayerId,
+        rich_text: Option<RichText>,
+    },
+    /// Exact static source and character styles committed as one validated edit.
+    SetStyledText {
+        id: LayerId,
+        text: String,
+        rich_text: RichText,
+    },
+    /// Native UTF-8 byte range replacement, preserving inherited insertion style.
+    ReplaceTextRange {
+        id: LayerId,
+        start: usize,
+        end: usize,
+        text: String,
+    },
+    SetTextStyle {
+        id: LayerId,
+        style: TextStyle,
+    },
+    /// Source-preserving static paragraph assignment; dormant point-mode values
+    /// remain stored, and only materialized nonzero values require schema 55.
+    SetTextParagraphValue {
+        id: LayerId,
+        field: TextParagraphField,
+        value: f64,
+    },
+    SetTextBox {
+        id: LayerId,
+        width: f64,
+        height: f64,
+    },
+    SetContent {
+        id: LayerId,
+        content: Content,
+    },
+    /// Freeze parametric geometry at this frame as an editable Bezier path.
+    ConvertShapeToPath {
+        id: LayerId,
+        frame: Frame,
+    },
+    Contents {
+        id: LayerId,
+        edit: ContentsEdit,
+    },
+    /// Changes footage sampling only; keeps the layer range and transform keys.
+    SetVideoSpeed {
+        id: LayerId,
+        speed: f64,
+    },
+    SetVideoSourceIn {
+        id: LayerId,
+        seconds: f64,
+    },
+    ReverseVideo {
+        id: LayerId,
+    },
+    FreezeVideo {
+        id: LayerId,
+        frame: Frame,
+    },
+    SetEffects {
+        id: LayerId,
+        effects: Effects,
+    },
+    EditText {
+        id: LayerId,
+        parameter: TextParam,
+        edit: TrackEdit,
+    },
+    SetTextSelector {
+        id: LayerId,
+        selector: TextSelector,
+    },
+    /// Append a neutral animator after the pinned primary and any additional animators.
+    AddTextAnimator {
+        id: LayerId,
+    },
+    RemoveTextAnimator {
+        id: LayerId,
+        animator: u64,
+    },
+    /// Move within the additional animator list; index zero follows the primary.
+    MoveTextAnimator {
+        id: LayerId,
+        animator: u64,
+        index: usize,
+    },
+    SetTextAnimatorSelector {
+        id: LayerId,
+        animator: u64,
+        selector: TextSelector,
+    },
+    /// Append a static secondary selector after the pinned primary selector.
+    AddTextRangeSelector {
+        id: LayerId,
+    },
+    RemoveTextRangeSelector {
+        id: LayerId,
+        selector: u64,
+    },
+    /// Move within the secondary list; index zero follows the pinned primary.
+    MoveTextRangeSelector {
+        id: LayerId,
+        selector: u64,
+        index: usize,
+    },
+    /// Replace only an existing selector with this same stable ID.
+    SetTextRangeSelector {
+        id: LayerId,
+        selector: TextRangeSelector,
+    },
+    EditShape {
+        id: LayerId,
+        parameter: ShapeParam,
+        edit: TrackEdit,
+    },
+    EditMask {
+        id: LayerId,
+        mask: u64,
+        parameter: MaskParam,
+        edit: TrackEdit,
+    },
+    EditPath {
+        id: LayerId,
+        target: PathTarget,
+        frame: Frame,
+        path: VectorPath,
+    },
+    AnimatePath {
+        id: LayerId,
+        target: PathTarget,
+        edit: TrackEdit,
+    },
+    /// Reindex the base path and every stored pose without changing timing.
+    ReorderPath {
+        id: LayerId,
+        target: PathTarget,
+        order: PathOrder,
+    },
+    /// Transform selected vertices in the base and every stored pose, without retiming.
+    TransformPathPoses {
+        id: LayerId,
+        target: PathTarget,
+        indices: BTreeSet<usize>,
+        transform: PathTransformSpec,
+    },
+    /// Transform a nonempty, same-layer Contents point selection at one frame.
+    /// Translation, pivot, rotation and scale use composition axes, including
+    /// every selected path's actual layer and ancestor group transforms.
+    TransformContentsPoints {
+        id: LayerId,
+        frame: Frame,
+        selections: BTreeMap<u64, BTreeSet<usize>>,
+        transform: PathTransformSpec,
+    },
+    SetPathMasks {
+        id: LayerId,
+        masks: Vec<PathMask>,
+    },
+    SetMask {
+        id: LayerId,
+        mask: Option<Mask>,
+    },
+    SetThreeD {
+        id: LayerId,
+        enabled: bool,
+    },
+    SetSpatialPosition {
+        id: LayerId,
+        edit: SpatialEdit,
+    },
+    /// Install an authoritative joined XY source while retaining 2D rendering.
+    SetPlanarPosition {
+        id: LayerId,
+        position: SpatialPosition2,
+    },
+    EditPlanarPosition {
+        id: LayerId,
+        edit: PlanarEdit,
+    },
+    /// Retain authored local 2D coordinates rather than compensate world pose.
+    SetPlanarParent {
+        id: LayerId,
+        parent: Option<LayerId>,
+    },
+    /// Native parenting with explicitly retained local XYZ/plane transforms.
+    SetSpatialParent {
+        id: LayerId,
+        parent: Option<LayerId>,
+    },
+    SetCamera {
+        camera: Option<Camera3>,
+    },
+    SetColor {
+        id: LayerId,
+        color: u32,
+    },
+    /// Move a layer's independent origin, trim, source mapping and all animation.
+    SetLayerStart {
+        id: LayerId,
+        frame: i64,
+    },
+    /// Set the timeline-only label index (0–16), without changing rendered colors.
+    SetLayerLabel {
+        id: LayerId,
+        index: u8,
+    },
+    ShiftLayer {
+        id: LayerId,
+        delta: i64,
+    },
+    MoveKeys {
+        keys: Vec<KeyRef>,
+        delta: i64,
+    },
+    ScaleKeys {
+        keys: Vec<KeyRef>,
+        scale: KeyScale,
+    },
+    /// Scale signed scalar endpoint velocities without moving keys or values.
+    ScaleKeyVelocities {
+        keys: Vec<KeyRef>,
+        scale: KeyVelocityScale,
+    },
+    DeleteKeys(Vec<KeyRef>),
+    PasteKeys {
+        keys: Vec<KeyCopy>,
+        frame: Frame,
+        target: Option<LayerId>,
+    },
+    AddRectangle,
+    AlignLayer {
+        id: LayerId,
+        frame: Frame,
+        alignment: Alignment,
+    },
+    AlignLayers {
+        ids: Vec<LayerId>,
+        frame: Frame,
+        alignment: Alignment,
+        target: AlignTarget,
+    },
+    DistributeLayers {
+        ids: Vec<LayerId>,
+        frame: Frame,
+        alignment: Alignment,
+    },
+    RotateLayers {
+        ids: Vec<LayerId>,
+        frame: Frame,
+        degrees: f64,
+    },
+    ScaleLayers {
+        ids: Vec<LayerId>,
+        frame: Frame,
+        factor: [f64; 2],
+        /// Percentage-point adjustment for a driving axis starting at zero.
+        offset: [f64; 2],
+    },
+    SetParent {
+        id: LayerId,
+        parent: Option<LayerId>,
+        frame: Frame,
+    },
+    EditKeyframe {
+        id: LayerId,
+        property: Property,
+        from: Frame,
+        to: Frame,
+        value: f64,
+    },
+    SetPosition {
+        id: LayerId,
+        frame: Frame,
+        x: f64,
+        y: f64,
+    },
+    DuplicateLayer(LayerId),
+    RenameLayer {
+        id: LayerId,
+        name: String,
+    },
+    SetLayerRange {
+        id: LayerId,
+        start: Frame,
+        end: Frame,
+    },
+    ConfigureComposition {
+        name: String,
+        width: u32,
+        height: u32,
+        fps: u32,
+        duration: Frame,
+    },
+    ConfigureCompositionRate {
+        name: String,
+        width: u32,
+        height: u32,
+        fps: FrameRate,
+        duration: Frame,
+        display_start: Frame,
+    },
+    MoveKeyframe {
+        id: LayerId,
+        property: Property,
+        from: Frame,
+        to: Frame,
+    },
+    ToggleAnimation {
+        id: LayerId,
+        property: Property,
+        frame: Frame,
+    },
+    RemoveLayer(LayerId),
+    MoveLayer {
+        id: LayerId,
+        index: usize,
+    },
+    ToggleVisible(LayerId),
+    ToggleLocked(LayerId),
+    SetValue {
+        id: LayerId,
+        property: Property,
+        frame: Frame,
+        value: f64,
+    },
+    ToggleKeyframe {
+        id: LayerId,
+        property: Property,
+        frame: Frame,
+    },
+    SetInterpolation {
+        id: LayerId,
+        property: Property,
+        frame: Frame,
+        interpolation: Interpolation,
+    },
+}
+
+impl Command {
+    /// A dedicated preservation route for cross-parent moves and optional
+    /// Contents permutations. Path reorders and empty/mixed batches retain their
+    /// existing routes; at least one nonempty sibling move must be present.
+    fn contents_sibling_moves_only(&self) -> bool {
+        fn classify(command: &Command) -> Option<bool> {
+            match command {
+                Command::Contents {
+                    edit: ContentsEdit::MoveSiblings { items, .. },
+                    ..
+                } if !items.is_empty() => Some(true),
+                Command::Contents {
+                    edit: ContentsEdit::Reorder { .. },
+                    ..
+                } => Some(false),
+                Command::Batch(commands) if !commands.is_empty() => commands
+                    .iter()
+                    .try_fold(false, |found, command| Some(found | classify(command)?)),
+                _ => None,
+            }
+        }
+        classify(self) == Some(true)
+    }
+
+    fn reorders_only(&self) -> bool {
+        match self {
+            Self::ReorderPath { .. }
+            | Self::Contents {
+                edit: ContentsEdit::Reorder { .. },
+                ..
+            } => true,
+            Self::Batch(commands) => {
+                !commands.is_empty() && commands.iter().all(Self::reorders_only)
+            }
+            _ => false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Snapshot {
+    project: Project,
+    selected: Option<LayerId>,
+}
+
+#[derive(Default)]
+pub struct Editor {
+    current: Snapshot,
+    undo: Vec<Snapshot>,
+    redo: Vec<Snapshot>,
+    // Session-only identity: never restored by Undo or serialized with sources.
+    context_generation: u64,
+}
+
+impl Editor {
+    /// Monotonic receipt for source, active-composition, selection and history
+    /// changes within this editor instance, including edit/Undo and selection ABA.
+    /// Failed commands and exact no-ops leave it unchanged.
+    pub fn context_generation(&self) -> u64 {
+        self.context_generation
+    }
+
+    fn advance_context(&mut self) {
+        self.context_generation = self
+            .context_generation
+            .checked_add(1)
+            .expect("Editor context generation exhausted");
+    }
+
+    pub fn project(&self) -> &Project {
+        &self.current.project
+    }
+    pub fn selected(&self) -> Option<LayerId> {
+        self.current.selected
+    }
+    pub fn selected_layer(&self) -> Option<&Layer> {
+        self.selected()
+            .and_then(|id| self.project().composition.layer(id))
+    }
+    pub fn select(&mut self, id: LayerId) {
+        if self.current.selected != Some(id) && self.project().composition.layer(id).is_some() {
+            self.current.selected = Some(id);
+            self.advance_context();
+        }
+    }
+    pub fn clear_selection(&mut self) {
+        if self.current.selected.take().is_some() {
+            self.advance_context();
+        }
+    }
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+    pub fn clear_history(&mut self) {
+        if self.undo.is_empty() && self.redo.is_empty() {
+            return;
+        }
+        self.undo.clear();
+        self.redo.clear();
+        self.advance_context();
+    }
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+
+    fn record(&mut self, previous: Snapshot) {
+        const HISTORY_LIMIT: usize = 100;
+        if self.undo.len() == HISTORY_LIMIT {
+            self.undo.remove(0);
+        }
+        self.undo.push(previous);
+        self.redo.clear();
+        self.advance_context();
+    }
+
+    /// Loading is undoable, so opening a project does not discard current work.
+    pub fn replace_project(&mut self, project: Project) -> Result<(), String> {
+        project.validate()?;
+        document::validate_budget(&project)?;
+        let selected = project.composition.layers.first().map(Layer::id);
+        let previous = std::mem::replace(&mut self.current, Snapshot { project, selected });
+        self.record(previous);
+        Ok(())
+    }
+
+    pub fn undo(&mut self) {
+        if let Some(previous) = self.undo.pop() {
+            self.redo
+                .push(std::mem::replace(&mut self.current, previous));
+            self.advance_context();
+        }
+    }
+    pub fn redo(&mut self) {
+        if let Some(next) = self.redo.pop() {
+            self.undo.push(std::mem::replace(&mut self.current, next));
+            self.advance_context();
+        }
+    }
+
+    fn accept_candidate(&mut self, mut next: Snapshot) -> Result<(), String> {
+        if audio_spectrum::materialized(&next.project) {
+            next.project.version = next.project.version.max(79);
+        }
+        if render_sampling::materialized(&next.project) {
+            next.project.version = next.project.version.max(77);
+        }
+        if effects::has_repeat_edges(&next.project) {
+            next.project.version = next.project.version.max(78);
+        }
+        next.project.validate()?;
+        if next != self.current {
+            document::validate_budget(&next.project)?;
+            let previous = std::mem::replace(&mut self.current, next);
+            self.record(previous);
+        }
+        Ok(())
+    }
+
+    pub fn execute(&mut self, command: Command) -> Result<(), String> {
+        if svg_import::route(&command)? {
+            self.current.project.validate()?;
+            document::validate_budget(&self.current.project)?;
+            let mut next = self.current.clone();
+            svg_import::apply(&mut next, command)?;
+            return self.accept_candidate(next);
+        }
+        let expressions_only = expressions::edits_only(&self.current.project, &command)
+            || render_sampling::edits_only(&command)
+            || effects::gaussian_mode_edits_only(&command)
+            || audio_spectrum::edits_only(&command);
+        let layer_timing_only = layer_timing::edits_only(&command);
+        let contents_clipboard_only = contents_clipboard::route(&command)?;
+        gradient_colors::validate_new_edit_batch(&command)?;
+        // Apply to a candidate so invalid commands never partially mutate the project.
+        let mut next = self.current.clone();
+        let reorder_only = command.reorders_only();
+        let contents_sibling_moves_only = command.contents_sibling_moves_only();
+        let text_values_only = text_animation::value_edits_only(&command)
+            || source_text_animation::value_edits_only(&command);
+        let trim_values_only = shape_contents::trim_value_edits_only(&command);
+        let contents_shared_values_only = contents_bulk_fields::edits_only(&command);
+        let gradient_colors_only = gradient_colors::edits_only(&command);
+        let paragraph_values_only = text_style::paragraph_edits_only(&command);
+        let rich_text_only = rich_text::edits_only(&command);
+        let spatial_only = spatial::edits_only(&command);
+        let planar_only = planar::edits_only(&command);
+        let opacity_only = opacity_timing::edits_only(&self.current.project, &command);
+        let text_animator_only = text_animation::animator_edits_only(&command);
+        let luma_values_only = effects::luma_value_edits_only(&command);
+        let velocity_scales_only = key_velocity_scale::edits_only(&command);
+        let layer_transforms_only = layer_transform::edits_only(&command);
+        let path_transforms_only = path_transform::edits_only(&command);
+        if expressions_only
+            || layer_timing_only
+            || contents_sibling_moves_only
+            || contents_shared_values_only
+            || gradient_colors_only
+            || contents_clipboard_only
+            || paragraph_values_only
+            || rich_text_only
+            || spatial_only
+            || planar_only
+            || opacity_only
+            || text_animator_only
+        {
+            // Validate the source too: a source-preserving edit must not repair invalid
+            // historical schemas, excessive nesting or an oversized document.
+            self.current.project.validate()?;
+            document::validate_budget(&self.current.project)?;
+        }
+        apply(&mut next, command)?;
+        if expressions_only && next != self.current && expressions::materialized(&next.project) {
+            next.project.version =
+                next.project
+                    .version
+                    .max(if expressions::requires_playbar_version(&next.project) {
+                        76
+                    } else {
+                        65
+                    });
+        }
+        if layer_timing_only && next != self.current && layer_timing::materialized(&next.project) {
+            next.project.version = next.project.version.max(64);
+        }
+        if gradient_colors_only && next != self.current {
+            if let Some(version) = gradient_colors::required_version(&next.project) {
+                next.project.version = next.project.version.max(version);
+            }
+        }
+        if paragraph_values_only
+            && next != self.current
+            && text_style::paragraph_materialized(&next.project)
+        {
+            next.project.version = next.project.version.max(55);
+        }
+        if opacity_only && next != self.current && opacity_timing::materialized(&next.project) {
+            next.project.version = next.project.version.max(73);
+        }
+        if spatial_only && next != self.current && spatial::materialized(&next.project) {
+            next.project.version = next.project.version.max(72);
+        }
+        if planar_only && next != self.current && planar::materialized(&next.project) {
+            next.project.version = next.project.version.max(75);
+        }
+        if rich_text_only && next != self.current {
+            if let Some(version) = rich_text::required_version(&next.project) {
+                next.project.version = next.project.version.max(version);
+            }
+        }
+        if text_animator_only && next != self.current {
+            if let Some(version) = text_animation::animator_required_version(&next.project) {
+                next.project.version = next.project.version.max(version);
+            }
+        }
+        if expressions_only
+            || layer_timing_only
+            || contents_sibling_moves_only
+            || contents_shared_values_only
+            || gradient_colors_only
+            || contents_clipboard_only
+            || paragraph_values_only
+            || rich_text_only
+            || spatial_only
+            || planar_only
+            || opacity_only
+            || text_animator_only
+        {
+            return self.accept_candidate(next);
+        }
+        if (text_values_only || trim_values_only || luma_values_only) && next == self.current {
+            return Ok(());
+        }
+        if path_transforms_only {
+            // Existing geometry only: preserve schema and asset identity even for
+            // old files and exact no-ops. Validate the original metadata budget
+            // too, so a transform cannot repair or silently accept invalid input.
+            self.current.project.validate()?;
+            document::validate_budget(&self.current.project)?;
+            return self.accept_candidate(next);
+        }
+        if reorder_only || velocity_scales_only || layer_transforms_only {
+            // Reindexing, velocity scaling and layer essentials need no unrelated schema/asset migration.
+            // Velocity scaling applies only its existing temporal schema minimums.
+            return self.accept_candidate(next);
+        }
+        // Older applications must reject projects they cannot render faithfully.
+        if next.project.composition.layers.iter().any(|layer| {
+            layer.parent.is_some()
+                || layer.transform_offset != Affine::default()
+                || layer.properties.values().any(|track| {
+                    track
+                        .keys
+                        .values()
+                        .any(|key| matches!(key.interpolation, Interpolation::Bezier(_)))
+                })
+        }) {
+            next.project.version = 2;
+        }
+        if next.project.composition.layers.iter().any(|l| {
+            l.content != Content::Rectangle || l.effects != Effects::default() || l.mask.is_some()
+        }) {
+            next.project.version = 3;
+        }
+        if next
+            .project
+            .composition
+            .layers
+            .iter()
+            .any(|l| matches!(l.content, Content::Video { .. }))
+        {
+            next.project.version = 4;
+        }
+        if next.project.composition.layers.iter().any(|l| {
+            matches!(l.content, Content::Video { playback, .. } if playback != VideoPlayback::default())
+        }) {
+            next.project.version = 5;
+        }
+        if next.project.composition.background_color != 0 {
+            next.project.version = 6;
+        }
+        if next
+            .project
+            .composition
+            .layers
+            .iter()
+            .any(|l| matches!(l.content, Content::Image { .. }))
+        {
+            next.project.version = 7;
+        }
+        if next.project.composition.work_area.is_some() {
+            next.project.version = 8;
+        }
+        if next.project.next_composition_id > 2
+            || next.project.composition_id != 1
+            || !next.project.other_compositions.is_empty()
+        {
+            next.project.version = 9;
+        }
+        if next.project.compositions().into_iter().any(|(_, comp)| {
+            comp.layers
+                .iter()
+                .any(|layer| matches!(layer.content, Content::Composition { .. }))
+        }) {
+            next.project.version = 10;
+        }
+        if next.project.compositions().into_iter().any(|(_, comp)| {
+            comp.hide_shy
+                || comp
+                    .layers
+                    .iter()
+                    .any(|l| l.solo || l.shy || l.guide || matches!(l.content, Content::Null))
+        }) {
+            next.project.version = 11;
+        }
+        if next
+            .project
+            .compositions()
+            .into_iter()
+            .any(|(_, c)| c.layers.iter().any(|l| !l.effect_stack.is_empty()))
+        {
+            next.project.version = 12;
+        }
+        if next.project.compositions().into_iter().any(|(_, c)| {
+            !c.markers.is_default() || c.layers.iter().any(|l| !l.markers.is_default())
+        }) {
+            next.project.version = 13;
+        }
+        if next
+            .project
+            .compositions()
+            .into_iter()
+            .any(|(_, c)| c.fps.denominator() != 1 || c.display_start != 0)
+        {
+            next.project.version = 14;
+        }
+        if next.project.compositions().into_iter().any(|(_, c)| {
+            c.layers
+                .iter()
+                .any(|l| matches!(l.content, Content::Solid | Content::Adjustment))
+        }) {
+            next.project.version = 16;
+        }
+        if next
+            .project
+            .compositions()
+            .into_iter()
+            .any(|(_, c)| c.layers.iter().any(|l| !l.blend_mode.is_normal()))
+        {
+            next.project.version = 17;
+        }
+        if next
+            .project
+            .compositions()
+            .into_iter()
+            .any(|(_, c)| c.layers.iter().any(|l| l.track_matte.is_some()))
+        {
+            next.project.version = 18;
+        }
+        if next.project.compositions().into_iter().any(|(_, c)| {
+            c.layers.iter().flat_map(|l| &l.effect_stack).any(|e| {
+                matches!(
+                    e.kind(),
+                    EffectKind::Curves | EffectKind::LinearGradient | EffectKind::RadialGradient
+                )
+            })
+        }) {
+            next.project.version = 19;
+        }
+        if next
+            .project
+            .compositions()
+            .into_iter()
+            .any(|(_, c)| !c.guides.is_empty())
+        {
+            next.project.version = 20;
+        }
+        if next
+            .project
+            .compositions()
+            .into_iter()
+            .any(|(_, c)| c.layers.iter().any(|l| l.time_remap.is_some()))
+        {
+            next.project.version = 21;
+        }
+        next.project.sync_assets()?;
+        if next
+            .project
+            .compositions()
+            .into_iter()
+            .any(|(_, c)| c.layers.iter().any(|l| !l.audio_controls.is_default()))
+        {
+            next.project.version = 26;
+        }
+        if next.project.compositions().into_iter().any(|(_, c)| {
+            c.layers
+                .iter()
+                .any(|l| matches!(l.content, Content::Shape(_)))
+        }) {
+            next.project.version = next.project.version.max(27);
+        }
+        if next
+            .project
+            .compositions()
+            .into_iter()
+            .any(|(_, c)| c.layers.iter().any(|l| !l.text_style.is_default()))
+        {
+            next.project.version = next.project.version.max(28);
+        }
+        if next.project.compositions().into_iter().any(|(_, c)| {
+            c.layers.iter().any(|l| {
+                !l.path_masks.is_empty()
+                    || matches!(&l.content, Content::Shape(s) if s.path.is_some())
+            })
+        }) {
+            next.project.version = next.project.version.max(29);
+        }
+        if next
+            .project
+            .compositions()
+            .into_iter()
+            .any(|(_, c)| c.layers.iter().any(|l| !l.path_masks.is_empty()))
+        {
+            next.project.version = next.project.version.max(30);
+        }
+        if next.project.compositions().into_iter().any(|(_, c)| {
+            c.layers.iter().any(|l| {
+                matches!(&l.content,Content::Shape(s) if !s.path_animation.is_default())
+                    || l.path_masks.iter().any(|m| !m.animation.is_default())
+            })
+        }) {
+            next.project.version = next.project.version.max(31);
+        }
+        if next
+            .project
+            .compositions()
+            .into_iter()
+            .any(|(_, c)| c.layers.iter().any(|l| l.text_style.has_font_override()))
+        {
+            next.project.version = next.project.version.max(32);
+        }
+        if next
+            .project
+            .compositions()
+            .into_iter()
+            .any(|(_, c)| c.layers.iter().any(|l| l.text_style.paragraph))
+        {
+            next.project.version = next.project.version.max(33);
+        }
+        if next
+            .project
+            .compositions()
+            .into_iter()
+            .any(|(_, c)| c.layers.iter().any(|l| l.text_style.has_paint_override()))
+        {
+            next.project.version = next.project.version.max(34);
+        }
+        if next.project.compositions().into_iter().any(|(_, c)| {
+            c.layers.iter().any(|l| {
+                l.track_paths()
+                    .iter()
+                    .filter_map(|p| l.track(*p))
+                    .any(|t| t.keys.values().any(|k| !k.temporal.is_empty()))
+            })
+        }) {
+            next.project.version = next.project.version.max(35);
+        }
+        if next.project.compositions().into_iter().any(|(_, c)| {
+            c.layers.iter().any(|l| {
+                l.track_paths()
+                    .iter()
+                    .filter_map(|p| l.track(*p))
+                    .any(|t| t.keys.values().any(|k| !k.temporal.mode.is_independent()))
+            })
+        }) {
+            next.project.version = next.project.version.max(36);
+        }
+        if next.project.compositions().into_iter().any(|(_, c)| {
+            c.layers
+                .iter()
+                .any(|l| matches!(&l.content, Content::Shape(s) if !s.stroke_style.is_default()))
+        }) {
+            next.project.version = next.project.version.max(37);
+        }
+        if next.project.compositions().into_iter().any(|(_, c)| {
+            c.layers
+                .iter()
+                .any(|l| matches!(&l.content, Content::Shape(s) if !s.parameters.is_empty()))
+        }) {
+            next.project.version = next.project.version.max(38);
+        }
+        if next.project.compositions().into_iter().any(|(_, c)| c.layers.iter().any(|l| matches!(&l.content, Content::Shape(s) if s.parameters.keys().any(|p| matches!(p, ShapeParam::DashLength(_)))))) {
+            next.project.version = next.project.version.max(39);
+        }
+        if next.project.compositions().into_iter().any(|(_, c)| {
+            c.layers
+                .iter()
+                .any(|l| matches!(&l.content, Content::Shape(s) if s.has_paint_opacity()))
+        }) {
+            next.project.version = next.project.version.max(40);
+        }
+        if next.project.compositions().into_iter().any(|(_, c)| {
+            c.layers
+                .iter()
+                .any(|l| matches!(&l.content, Content::Shape(s) if s.has_paint_color_tracks()))
+        }) {
+            next.project.version = next.project.version.max(41);
+        }
+        if next.project.compositions().into_iter().any(|(_, c)| {
+            c.layers.iter().any(|l| matches!(&l.content, Content::Shape(s) if s.parameters.contains_key(&ShapeParam::Points)))
+        }) {
+            next.project.version = next.project.version.max(42);
+        }
+        if next.project.compositions().into_iter().any(|(_, c)| {
+            c.layers
+                .iter()
+                .any(|l| matches!(l.content, Content::ShapeContents(_)))
+        }) {
+            let version = next
+                .project
+                .compositions()
+                .into_iter()
+                .flat_map(|(_, c)| &c.layers)
+                .filter_map(|l| {
+                    if let Content::ShapeContents(c) = &l.content {
+                        Some(c)
+                    } else {
+                        None
+                    }
+                })
+                .flat_map(ShapeContents::rows)
+                .map(|(_, _, n)| {
+                    if matches!(n.kind, ContentsKind::TrimPaths) {
+                        50
+                    } else if n.blend != PaintBlend::Normal {
+                        47
+                    } else if n.composite != PaintComposite::BelowPrevious {
+                        46
+                    } else if n.kind.gradient().is_some() {
+                        45
+                    } else {
+                        44
+                    }
+                })
+                .max()
+                .unwrap_or(44);
+            next.project.version = next.project.version.max(version);
+        }
+        if let Some(version) = next
+            .project
+            .compositions()
+            .into_iter()
+            .flat_map(|(_, c)| &c.layers)
+            .flat_map(|layer| layer.text_parameters.keys())
+            .map(|parameter| parameter.required_version())
+            .max()
+        {
+            next.project.version = next.project.version.max(version);
+        }
+        if next.project.compositions().into_iter().any(|(_, comp)| {
+            comp.layers
+                .iter()
+                .flat_map(|l| &l.effect_stack)
+                .any(|e| e.kind() == EffectKind::LumaKey)
+        }) {
+            next.project.version = next.project.version.max(51);
+        }
+        if next.project.compositions().into_iter().any(|(_, comp)| {
+            comp.layers
+                .iter()
+                .any(|layer| !layer.source_text_animation.is_default())
+        }) {
+            next.project.version = next.project.version.max(53);
+        }
+        if let Some(version) = gradient_colors::required_version(&next.project) {
+            next.project.version = next.project.version.max(version);
+        }
+        if text_style::paragraph_materialized(&next.project) {
+            next.project.version = next.project.version.max(55);
+        }
+        if let Some(version) = text_animation::animator_required_version(&next.project) {
+            next.project.version = next.project.version.max(version);
+        }
+        if layer_timing::materialized(&next.project) {
+            next.project.version = next.project.version.max(64);
+        }
+        if expressions::materialized(&next.project) {
+            next.project.version =
+                next.project
+                    .version
+                    .max(if expressions::requires_playbar_version(&next.project) {
+                        76
+                    } else {
+                        65
+                    });
+        }
+        if let Some(version) = rich_text::required_version(&next.project) {
+            next.project.version = next.project.version.max(version);
+        }
+        if spatial::materialized(&next.project) {
+            next.project.version = next.project.version.max(72);
+        }
+        if opacity_timing::materialized(&next.project) {
+            next.project.version = next.project.version.max(73);
+        }
+        if planar::materialized(&next.project) {
+            next.project.version = next.project.version.max(75);
+        }
+        self.accept_candidate(next)
+    }
+}
+
+fn apply(state: &mut Snapshot, command: Command) -> Result<(), String> {
+    if let Some(result) = render_sampling::apply(state, &command) {
+        return result;
+    }
+    planar::guard(state, &command)?;
+    if let Some(result) = planar::apply(state, &command) {
+        return result;
+    }
+    opacity_timing::guard(state, &command)?;
+    if let Some(result) = opacity_timing::apply(state, &command) {
+        return result;
+    }
+    spatial::guard(state, &command)?;
+    if let Some(result) = spatial::apply(state, &command) {
+        return result;
+    }
+    if let Some(result) = rich_text::apply(state, &command) {
+        return result;
+    }
+    rich_text::prepare(state, &command)?;
+    if let Some(result) = expressions::apply(state, &command) {
+        return result;
+    }
+    if let Some(result) = layer_timing::apply(state, &command) {
+        return result;
+    }
+    if let Command::SetTextParagraphValue { id, field, value } = command {
+        return text_style::apply_paragraph_value(state, id, field, value);
+    }
+    if let Some(result) = contents_points::apply(state, &command) {
+        return result;
+    }
+    if let Some(result) = shape_contents::apply(state, &command) {
+        return result;
+    }
+    if let Some(result) = shape_conversion::apply(state, &command) {
+        return result;
+    }
+    if let Some(result) = source_text_animation::apply(state, &command) {
+        return result;
+    }
+    if let Some(result) = text_animation::apply(state, &command) {
+        return result;
+    }
+    if let Some(result) = shape_animation::apply(state, &command) {
+        return result;
+    }
+    if let Some(result) = temporal::apply(state, &command) {
+        return result;
+    }
+    if let Some(result) = path_animation::apply(state, &command) {
+        return result;
+    }
+    if let Some(result) = mask_animation::apply(state, &command) {
+        return result;
+    }
+    if let Some(result) = audio_controls::apply(state, &command) {
+        return result;
+    }
+    if let Some(result) = image_sequence::apply(state, &command) {
+        return result;
+    }
+    if let Some(result) = footage_interpretation::apply(state, &command) {
+        return result;
+    }
+    if let Some(result) = assets::apply(state, &command) {
+        return result;
+    }
+    if let Some(result) = time_remap::apply(state, &command) {
+        return result;
+    }
+    if let Command::SetGuides(guides) = command {
+        guides::validate(&guides)?;
+        state.project.composition.guides = guides;
+        return Ok(());
+    }
+    if let Command::SetTrackMatte { id, matte } = command {
+        return matte::set(state, id, matte);
+    }
+    if let Command::RelinkMedia(replacements) = command {
+        return media::relink(state, replacements);
+    }
+    if let Command::ReplaceTextFont { from, to } = command {
+        return text_style::replace_font(state, from, to);
+    }
+    if let Command::ConfigureComposition {
+        name,
+        width,
+        height,
+        fps,
+        duration,
+    } = command
+    {
+        return apply(
+            state,
+            Command::ConfigureCompositionRate {
+                name,
+                width,
+                height,
+                fps: fps.into(),
+                duration,
+                display_start: state.project.composition.display_start,
+            },
+        );
+    }
+    if let Command::Marker { target, edit } = command {
+        return markers::apply(state, target, edit);
+    }
+    if let Command::EditTrack { id, property, edit } = command {
+        return apply(state, tracks::command(id, property, edit));
+    }
+    if let Command::Effect { id, edit } = command {
+        return effects::apply(state, id, edit);
+    }
+    if let Some(result) = layer_workflow::apply(state, &command) {
+        return result;
+    }
+    if let Some(result) = precompositions::apply(state, &command) {
+        return result;
+    }
+    if let Some(result) = compositions::apply(state, &command) {
+        return result;
+    }
+    if let Command::SetWorkArea { start, end } = command {
+        let comp = &mut state.project.composition;
+        if start >= end || end > comp.duration {
+            return Err("Work area must be nonempty and inside the composition".into());
+        }
+        comp.work_area = (start != 0 || end != comp.duration).then_some([start, end]);
+        return Ok(());
+    }
+    if let Command::SetCompositionBackground(color) = command {
+        if color > 0xffffff {
+            return Err("Background color must be a 24-bit RGB color".into());
+        }
+        state.project.composition.background_color = color;
+        return Ok(());
+    }
+    if let Some(result) = editing::apply_extended(state, &command) {
+        return result;
+    }
+    if let Some(result) = selection_transform::apply(state, &command) {
+        return result;
+    }
+    if let Command::AlignLayer {
+        id,
+        frame,
+        alignment,
+    } = command
+    {
+        let comp = &state.project.composition;
+        let layer = comp.layer(id).ok_or("Layer not found")?;
+        let corners = comp
+            .corners_at(id, frame)
+            .ok_or("Invalid layer transform")?;
+        let min_x = corners.iter().map(|p| p[0]).fold(f64::INFINITY, f64::min);
+        let max_x = corners
+            .iter()
+            .map(|p| p[0])
+            .fold(f64::NEG_INFINITY, f64::max);
+        let min_y = corners.iter().map(|p| p[1]).fold(f64::INFINITY, f64::min);
+        let max_y = corners
+            .iter()
+            .map(|p| p[1])
+            .fold(f64::NEG_INFINITY, f64::max);
+        let delta = match alignment {
+            Alignment::Left => [-min_x, 0.0],
+            Alignment::HorizontalCenter => [(comp.width as f64 - min_x - max_x) / 2.0, 0.0],
+            Alignment::Right => [comp.width as f64 - max_x, 0.0],
+            Alignment::Top => [0.0, -min_y],
+            Alignment::VerticalCenter => [0.0, (comp.height as f64 - min_y - max_y) / 2.0],
+            Alignment::Bottom => [0.0, comp.height as f64 - max_y],
+        };
+        let delta = comp
+            .position_space(id, frame)
+            .and_then(Affine::inverse)
+            .ok_or("Cannot align through a zero-scale parent")?
+            .vector(delta);
+        let x = layer
+            .property(Property::PositionX)
+            .ok_or("Joined XYZ Position cannot use scalar alignment")?
+            .value_at(frame)
+            + delta[0];
+        let y = layer
+            .property(Property::PositionY)
+            .ok_or("Joined XYZ Position cannot use scalar alignment")?
+            .value_at(frame)
+            + delta[1];
+        return apply(state, Command::SetPosition { id, frame, x, y });
+    }
+    if let Command::EditKeyframe {
+        id,
+        property,
+        from,
+        to,
+        value,
+    } = command
+    {
+        apply(
+            state,
+            Command::MoveKeyframe {
+                id,
+                property,
+                from,
+                to,
+            },
+        )?;
+        return apply(
+            state,
+            Command::SetValue {
+                id,
+                property,
+                frame: to,
+                value,
+            },
+        );
+    }
+    if let Command::SetPosition { id, frame, x, y } = command {
+        apply(
+            state,
+            Command::SetValue {
+                id,
+                property: Property::PositionX,
+                frame,
+                value: x,
+            },
+        )?;
+        return apply(
+            state,
+            Command::SetValue {
+                id,
+                property: Property::PositionY,
+                frame,
+                value: y,
+            },
+        );
+    }
+    let comp = &mut state.project.composition;
+    if let Command::SetParent { id, parent, frame } = command {
+        let layer = comp.layer(id).ok_or("Layer not found")?;
+        if layer.locked {
+            return Err("Unlock the layer before editing".into());
+        }
+        if frame >= comp.duration || !comp.can_parent(id, parent) {
+            return Err("Invalid parent: missing layer or circular hierarchy".into());
+        }
+        if layer.parent == parent {
+            return Ok(());
+        }
+        let old_space = comp
+            .position_space(id, frame)
+            .ok_or("Invalid parent transform")?;
+        let new_space = match parent {
+            Some(id) => comp
+                .world_transform(id, frame)
+                .ok_or("Invalid parent transform")?,
+            None => Affine::default(),
+        };
+        let offset = new_space
+            .inverse()
+            .ok_or("Cannot parent to a layer with zero scale")?
+            .compose(old_space);
+        if !offset.valid() {
+            return Err("Parent transform is outside supported range".into());
+        }
+        let layer = comp.layers.iter_mut().find(|l| l.id == id).unwrap();
+        layer.parent = parent;
+        layer.transform_offset = offset;
+        return Ok(());
+    }
+    if let Command::ConfigureCompositionRate {
+        name,
+        width,
+        height,
+        fps,
+        duration,
+        display_start,
+    } = &command
+    {
+        if *width as u64 * *height as u64 > 33_554_432 {
+            return Err("Composition exceeds the 32 megapixel render limit".into());
+        }
+        if name.trim().is_empty()
+            || name.len() > 1024
+            || !(1..=16_384).contains(width)
+            || !(1..=16_384).contains(height)
+            || !fps.valid()
+            || *duration == 0
+            || *duration > fps.max_duration()
+            || *display_start >= fps.nominal() * 86_400
+        {
+            return Err("Invalid composition settings".into());
+        }
+        if comp.layers.iter().any(Layer::has_opacity_timing) && *fps != comp.fps {
+            return Err(
+                "Changing FPS with native Opacity timing requires an explicit retiming contract"
+                    .into(),
+            );
+        }
+        if comp.layers.iter().any(Layer::has_joined_position) && *fps != comp.fps {
+            return Err(
+                "Changing FPS with joined spatial animation requires an explicit retiming contract"
+                    .into(),
+            );
+        }
+        if comp.layers.iter().any(|layer| {
+            layer
+                .spatial_position
+                .as_ref()
+                .is_some_and(|position| position.keys.keys().any(|frame| frame >= duration))
+                || layer
+                    .planar_position
+                    .as_ref()
+                    .is_some_and(|position| position.keys.keys().any(|frame| frame >= duration))
+                || layer.in_frame >= *duration
+                || layer.out_frame.is_some_and(|end| end > *duration)
+                || layer
+                    .properties
+                    .values()
+                    .any(|track| track.keys.keys().any(|frame| frame >= duration))
+        }) {
+            return Err("Duration would exclude existing layer ranges or keyframes".into());
+        }
+        comp.name = name.trim().into();
+        comp.width = *width;
+        comp.height = *height;
+        comp.fps = *fps;
+        comp.display_start = *display_start;
+        comp.duration = *duration;
+        if let Some([start, end]) = comp.work_area {
+            comp.work_area = Some([start.min(duration - 1), end.min(*duration)]);
+        }
+        return Ok(());
+    }
+    if let Command::AddRectangle = command {
+        if comp.layers.len() >= 1_000 || state.project.next_layer_id >= u64::MAX - 1 {
+            return Err("Layer limit reached".into());
+        }
+        let id = state.project.next_layer_id;
+        state.project.next_layer_id += 1;
+        let colors = [0x9a8cff, 0x53d8c4, 0xffbc70, 0xf580ad];
+        comp.layers.insert(
+            0,
+            Layer {
+                expressions: Vec::new(),
+                start_frame: None,
+                label_index: None,
+                footage_interpretation: Default::default(),
+                asset: None,
+                text_style: Default::default(),
+                rich_text: None,
+                spatial_position: None,
+                planar_position: None,
+                opacity_timing: None,
+                text_parameters: BTreeMap::new(),
+                text_selector: TextSelector::default(),
+                text_range_selectors: Vec::new(),
+                next_text_range_selector_id: 1,
+                text_animators: Vec::new(),
+                next_text_animator_id: 1,
+                source_text_animation: SourceTextAnimation::default(),
+                audio_controls: Default::default(),
+                time_remap: None,
+                track_matte: None,
+                blend_mode: BlendMode::Normal,
+                markers: Default::default(),
+                content: Content::default(),
+                effects: Effects::default(),
+                effect_stack: Vec::new(),
+                next_effect_id: 1,
+                mask: None,
+                path_masks: Vec::new(),
+                next_mask_id: 1,
+                id,
+                name: format!("Rectangle {id}"),
+                visible: true,
+                locked: false,
+                solo: false,
+                shy: false,
+                guide: false,
+                width: 320.0,
+                height: 200.0,
+                color: colors[((id - 1) % 4) as usize],
+                in_frame: 0,
+                out_frame: None,
+                parent: None,
+                transform_offset: Affine::default(),
+                properties: Property::ALL
+                    .into_iter()
+                    .map(|property| {
+                        let value = match property {
+                            Property::PositionX => comp.width as f64 / 2.0,
+                            Property::PositionY => comp.height as f64 / 2.0,
+                            Property::AnchorX => 160.0,
+                            Property::AnchorY => 100.0,
+                            Property::ScaleX | Property::ScaleY | Property::Opacity => 100.0,
+                            Property::Rotation => 0.0,
+                        };
+                        (property, AnimatedProperty::new(value))
+                    })
+                    .collect(),
+            },
+        );
+        state.selected = Some(id);
+        return Ok(());
+    }
+    let id = match &command {
+        Command::RemoveLayer(id)
+        | Command::ToggleVisible(id)
+        | Command::ToggleLocked(id)
+        | Command::DuplicateLayer(id) => *id,
+        Command::RenameLayer { id, .. }
+        | Command::SetLayerRange { id, .. }
+        | Command::MoveKeyframe { id, .. }
+        | Command::ToggleAnimation { id, .. } => *id,
+        Command::MoveLayer { id, .. }
+        | Command::SetValue { id, .. }
+        | Command::ToggleKeyframe { id, .. }
+        | Command::SetInterpolation { id, .. } => *id,
+        Command::AlignLayer { .. }
+        | Command::SetParent { .. }
+        | Command::EditKeyframe { .. }
+        | Command::AddRectangle
+        | Command::ConfigureComposition { .. }
+        | Command::SetPosition { .. }
+        | Command::SetThreeD { .. }
+        | Command::SetSpatialPosition { .. }
+        | Command::SetSpatialParent { .. }
+        | Command::SetCamera { .. }
+        | Command::SetOpacityTiming { .. } => unreachable!(),
+        _ => unreachable!("extended command handled above"),
+    };
+    let index = comp
+        .layers
+        .iter()
+        .position(|layer| layer.id == id)
+        .ok_or("Layer not found")?;
+    let layer = &mut comp.layers[index];
+    if layer.locked && !matches!(command, Command::ToggleLocked(_)) {
+        return Err("Unlock the layer before editing".into());
+    }
+    match command {
+        Command::DuplicateLayer(_) => {
+            if comp.layers.len() >= 1_000 || state.project.next_layer_id >= u64::MAX - 1 {
+                return Err("Layer limit reached".into());
+            }
+            let mut copy = comp.layers[index].clone();
+            copy.id = state.project.next_layer_id;
+            // Keep a bounded name even when duplicating repeatedly.
+            if copy.name.len() < 1000 {
+                copy.name.push_str(" copy");
+            }
+            state.project.next_layer_id += 1;
+            state.selected = Some(copy.id);
+            comp.layers.insert(index, copy);
+        }
+        Command::RenameLayer { name, .. } => {
+            if name.trim().is_empty() || name.len() > 1024 {
+                return Err("Enter a layer name (1–1024 bytes)".into());
+            }
+            layer.name = name.trim().into();
+        }
+        Command::SetLayerRange { start, end, .. } => {
+            if start >= end || end > comp.duration {
+                return Err("Layer range must fit the composition".into());
+            }
+            layer.in_frame = start;
+            layer.out_frame = Some(end);
+        }
+        Command::MoveKeyframe {
+            property, from, to, ..
+        } => {
+            if to >= comp.duration {
+                return Err("Keyframe is outside the composition".into());
+            }
+            let track = layer
+                .properties
+                .get_mut(&property)
+                .ok_or("Property not found")?;
+            if from != to && track.keys.contains_key(&to) {
+                return Err("A keyframe already exists at that frame".into());
+            }
+            let key = track.keys.remove(&from).ok_or("Keyframe not found")?;
+            track.keys.insert(to, key);
+        }
+        Command::ToggleAnimation {
+            property, frame, ..
+        } => {
+            if frame >= comp.duration {
+                return Err("Frame out of range".into());
+            }
+            let track = layer
+                .properties
+                .get_mut(&property)
+                .ok_or("Property not found")?;
+            let value = track.value_at(frame);
+            if track.keys.is_empty() {
+                track.keys.insert(
+                    frame,
+                    Keyframe {
+                        temporal: TemporalHandles::default(),
+                        value,
+                        interpolation: Interpolation::Linear,
+                    },
+                );
+            } else {
+                track.value = value;
+                track.keys.clear();
+            }
+        }
+        Command::RemoveLayer(_) => {
+            if comp.layers.iter().any(|l| l.parent == Some(id)) {
+                return Err("Unparent child layers before deleting this parent".into());
+            }
+            comp.layers.remove(index);
+            if state.selected == Some(id) {
+                state.selected = comp.layers.first().map(Layer::id);
+            }
+        }
+        Command::MoveLayer { index: target, .. } => {
+            if target >= comp.layers.len() {
+                return Err("Layer index out of range".into());
+            }
+            let layer = comp.layers.remove(index);
+            comp.layers.insert(target, layer);
+        }
+        Command::ToggleVisible(_) => layer.visible = !layer.visible,
+        Command::ToggleLocked(_) => layer.locked = !layer.locked,
+        Command::SetValue {
+            property,
+            frame,
+            value,
+            ..
+        } => {
+            if frame >= comp.duration || !property.accepts(value) {
+                return Err("Value or frame out of range".into());
+            }
+            let track = layer
+                .properties
+                .get_mut(&property)
+                .ok_or("Property not found")?;
+            if track.keys.is_empty() {
+                track.value = value;
+            } else {
+                let interpolation = track
+                    .keys
+                    .range(..=frame)
+                    .next_back()
+                    .map_or(Interpolation::Linear, |(_, key)| key.interpolation);
+                track.keys.insert(
+                    frame,
+                    Keyframe {
+                        temporal: track
+                            .keys
+                            .get(&frame)
+                            .map_or(TemporalHandles::default(), |k| k.temporal),
+                        value,
+                        interpolation,
+                    },
+                );
+            }
+        }
+        Command::ToggleKeyframe {
+            property, frame, ..
+        } => {
+            if frame >= comp.duration {
+                return Err("Frame out of range".into());
+            }
+            let track = layer
+                .properties
+                .get_mut(&property)
+                .ok_or("Property not found")?;
+            let value = track.value_at(frame);
+            if track.keys.remove(&frame).is_some() {
+                // Removing the final key retains its value as a static property.
+                if track.keys.is_empty() {
+                    track.value = value;
+                }
+            } else {
+                track.keys.insert(
+                    frame,
+                    Keyframe {
+                        temporal: TemporalHandles::default(),
+                        value,
+                        interpolation: Interpolation::Linear,
+                    },
+                );
+            }
+        }
+        Command::SetInterpolation {
+            property,
+            frame,
+            interpolation,
+            ..
+        } => {
+            if !interpolation.valid() {
+                return Err("Invalid Bezier handles".into());
+            }
+            layer
+                .properties
+                .get_mut(&property)
+                .ok_or("Property not found")?
+                .set_interpolation(frame, interpolation)?;
+        }
+        Command::AlignLayer { .. }
+        | Command::SetParent { .. }
+        | Command::EditKeyframe { .. }
+        | Command::AddRectangle
+        | Command::ConfigureComposition { .. }
+        | Command::SetPosition { .. }
+        | Command::SetThreeD { .. }
+        | Command::SetSpatialPosition { .. }
+        | Command::SetSpatialParent { .. }
+        | Command::SetCamera { .. }
+        | Command::SetOpacityTiming { .. } => unreachable!(),
+        _ => unreachable!("extended command handled above"),
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests;

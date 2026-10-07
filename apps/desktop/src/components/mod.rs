@@ -3,7 +3,11 @@ mod button;
 mod context_menu;
 mod label;
 mod resizable;
+mod script_text_input;
 mod separator;
+mod text_field;
+pub(crate) use script_text_input::ScriptTextInput;
+pub(crate) use text_field::TextField;
 
 pub(crate) use badge::{Badge, BadgeVariant};
 pub(crate) use button::{Button, ButtonSize, ButtonVariant};

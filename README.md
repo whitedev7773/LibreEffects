@@ -1,31 +1,46 @@
-<table width="100%">
-  <tr>
-    <td align="left" width="120">
-      <img src="https://assets.opencut.app/branding/symbol.svg" alt="OpenCut Logo" width="100" />
-    </td>
-    <td align="right">
-      <h1>OpenCut</h1>
-      <h3 style="margin-top: -10px;">A free and open source video editor for web, desktop, and mobile.</h3>
-    </td>
-  </tr>
-</table>
+# Libre Effects
 
-[![Discord](https://img.shields.io/discord/1386309140057690133?label=Discord&logo=discord&logoColor=fff&color=5865F2&style=flat)](https://discord.gg/zmR9N35cjK)
-[![X](https://img.shields.io/badge/follow-%40opencutapp-000?logo=x&logoColor=fff&style=flat)](https://x.com/opencutapp)
+A Windows-first, open source motion graphics and compositing editor, forked from
+[OpenCut](https://github.com/opencut-app/opencut). The goal is a composition and
+layer workflow familiar to After Effects users, with extensive scripting support.
+
 [![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat)](LICENSE)
 
 ## Status
 
-**OpenCut is being rewritten from the ground up.** What's coming:
+**Early 2D desktop editor.** The Rust/GPUI application supports multiple
+compositions, layers and precompositions, shared media import, text and vector
+Contents, masks, effects, scalar Value/Speed Graph editing, project recovery,
+render queues, and PNG/H.264/ProRes output. Preview and export share the compositor.
+The shared editing model lives in `crates/core`.
 
-- An Editor API
-- First-class third party plugins (made possible by a plugin-first architecture)
-- Desktop, mobile, and browser from one codebase (Rust core)
-- MCP server (for AI agents)
-- Headless mode (automation, batch rendering)
-- A scripting tab directly in the editor
+This is not a complete After Effects replacement. JSX/ExtendScript, expressions,
+3D, tracking, Adobe project compatibility and the web editor remain separate
+future work. Audio-device preview currently targets Windows; file rendering and
+other editor workflows are also validated on Linux.
 
-You can still find the previous version at [opencut-app/opencut-classic](https://github.com/opencut-app/opencut-classic), which is the one to reach for today. [opencut.app](https://opencut.app) still runs the classic version. The rewrite will live at [new.opencut.app](https://new.opencut.app) until it's ready to take over.
+See [the desktop guide](apps/desktop/README.md) for current behavior,
+[the current implementation status](apps/desktop/STATUS.md) for verified work and
+remaining milestones, and [the development backlog](apps/desktop/DEVELOPMENT_BACKLOG.md)
+for the dated design and validation history. Original OpenCut copyright and MIT
+license notices are retained.
+
+## Native projects
+
+Save and Save As use **Libre Effects Project (`.lep`)**, a versioned binary
+container with project metadata, optional editor views, and shared embedded PNG
+images. Linked audio, video and image-sequence frames stay external; Collect
+project files creates a portable folder containing `project.lep` and `Media`.
+Existing `.lfe.json` projects remain supported imports. Opening detects the file
+contents, and saving an imported project creates a `.lep` copy without replacing
+the original.
+
+Open [`examples/native-project-study.lep`](examples/native-project-study.lep)
+through File → Open for a 1280 × 720, 30 fps, three-second sample with gradient
+fills, two layers sharing one PNG, animated image rotation, and a saved playhead
+at frame 30. The [desktop guide](apps/desktop/README.md#native-lep-files-and-legacy-imports)
+describes the format, compatibility, limits and sample generator. Historical
+`.lfe.json` examples throughout that guide remain valid imports.
 
 ## Development
 

@@ -1,0 +1,831 @@
+{
+  "version": 19,
+  "next_layer_id": 9,
+  "composition": {
+    "name": "Tonal Color Study",
+    "width": 960,
+    "height": 540,
+    "fps": 30,
+    "display_start": 0,
+    "duration": 90,
+    "background_color": 1120034,
+    "layers": [
+      {
+        "content": {
+          "Text": {
+            "text": "Animated curves and gradient endpoints",
+            "font_size": 20
+          }
+        },
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 8,
+        "name": "Animated curves and gradient endpoints",
+        "visible": true,
+        "locked": false,
+        "width": 850,
+        "height": 28.0,
+        "color": 16777215,
+        "properties": {
+          "PositionX": {
+            "value": 40,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 453,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "content": {
+          "Text": {
+            "text": "TONE / COLOR",
+            "font_size": 48
+          }
+        },
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 7,
+        "name": "TONE / COLOR",
+        "visible": true,
+        "locked": false,
+        "width": 850,
+        "height": 67.19999999999999,
+        "color": 16777215,
+        "properties": {
+          "PositionX": {
+            "value": 40,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 36,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "content": {
+          "Text": {
+            "text": "03  RADIAL",
+            "font_size": 18
+          }
+        },
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 6,
+        "name": "03  RADIAL",
+        "visible": true,
+        "locked": false,
+        "width": 850,
+        "height": 25.2,
+        "color": 16777215,
+        "properties": {
+          "PositionX": {
+            "value": 640,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 125,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "content": "Solid",
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 2,
+        "mask": null,
+        "id": 5,
+        "name": "Radial ramp",
+        "visible": true,
+        "locked": false,
+        "width": 280,
+        "height": 250,
+        "color": 16777215,
+        "properties": {
+          "PositionX": {
+            "value": 640,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 165,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "effect_stack": [
+          {
+            "id": 1,
+            "kind": "RadialGradient",
+            "name": "Radial Gradient",
+            "bypassed": false,
+            "color_space": "Srgb",
+            "parameters": {
+              "StartX": {
+                "value": 140,
+                "keys": {
+                  "0": {
+                    "value": 90,
+                    "interpolation": "Smooth"
+                  },
+                  "45": {
+                    "value": 190,
+                    "interpolation": "Smooth"
+                  },
+                  "89": {
+                    "value": 90,
+                    "interpolation": "Smooth"
+                  }
+                }
+              },
+              "StartY": {
+                "value": 125,
+                "keys": {}
+              },
+              "EndX": {
+                "value": 265,
+                "keys": {}
+              },
+              "EndY": {
+                "value": 125,
+                "keys": {}
+              },
+              "DarkRed": {
+                "value": 48,
+                "keys": {}
+              },
+              "DarkGreen": {
+                "value": 93,
+                "keys": {}
+              },
+              "DarkBlue": {
+                "value": 245,
+                "keys": {}
+              },
+              "Red": {
+                "value": 255,
+                "keys": {}
+              },
+              "Green": {
+                "value": 180,
+                "keys": {}
+              },
+              "Blue": {
+                "value": 95,
+                "keys": {}
+              },
+              "BlendOriginal": {
+                "value": 0,
+                "keys": {}
+              }
+            }
+          }
+        ]
+      },
+      {
+        "content": {
+          "Text": {
+            "text": "02  CURVES",
+            "font_size": 18
+          }
+        },
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 4,
+        "name": "02  CURVES",
+        "visible": true,
+        "locked": false,
+        "width": 850,
+        "height": 25.2,
+        "color": 16777215,
+        "properties": {
+          "PositionX": {
+            "value": 340,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 125,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "content": "Solid",
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 3,
+        "mask": null,
+        "id": 3,
+        "name": "Curve contrast",
+        "visible": true,
+        "locked": false,
+        "width": 280,
+        "height": 250,
+        "color": 16777215,
+        "properties": {
+          "PositionX": {
+            "value": 340,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 165,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "effect_stack": [
+          {
+            "id": 1,
+            "kind": "LinearGradient",
+            "name": "Linear Gradient",
+            "bypassed": false,
+            "color_space": "Srgb",
+            "parameters": {
+              "StartX": {
+                "value": 0,
+                "keys": {}
+              },
+              "StartY": {
+                "value": 0,
+                "keys": {}
+              },
+              "EndX": {
+                "value": 280,
+                "keys": {}
+              },
+              "EndY": {
+                "value": 250,
+                "keys": {}
+              },
+              "DarkRed": {
+                "value": 48,
+                "keys": {}
+              },
+              "DarkGreen": {
+                "value": 93,
+                "keys": {}
+              },
+              "DarkBlue": {
+                "value": 245,
+                "keys": {}
+              },
+              "Red": {
+                "value": 255,
+                "keys": {}
+              },
+              "Green": {
+                "value": 180,
+                "keys": {}
+              },
+              "Blue": {
+                "value": 95,
+                "keys": {}
+              },
+              "BlendOriginal": {
+                "value": 0,
+                "keys": {}
+              }
+            }
+          },
+          {
+            "id": 2,
+            "kind": "Curves",
+            "name": "Curves",
+            "bypassed": false,
+            "color_space": "Srgb",
+            "parameters": {
+              "Curve0": {
+                "value": 0,
+                "keys": {}
+              },
+              "Curve25": {
+                "value": 63.75,
+                "keys": {
+                  "0": {
+                    "value": 63.75,
+                    "interpolation": "Smooth"
+                  },
+                  "45": {
+                    "value": 20,
+                    "interpolation": "Smooth"
+                  },
+                  "89": {
+                    "value": 63.75,
+                    "interpolation": "Smooth"
+                  }
+                }
+              },
+              "Curve50": {
+                "value": 127.5,
+                "keys": {}
+              },
+              "Curve75": {
+                "value": 191.25,
+                "keys": {
+                  "0": {
+                    "value": 191.25,
+                    "interpolation": "Smooth"
+                  },
+                  "45": {
+                    "value": 235,
+                    "interpolation": "Smooth"
+                  },
+                  "89": {
+                    "value": 191.25,
+                    "interpolation": "Smooth"
+                  }
+                }
+              },
+              "Curve100": {
+                "value": 255,
+                "keys": {}
+              },
+              "RedCurve0": {
+                "value": 0,
+                "keys": {}
+              },
+              "RedCurve25": {
+                "value": 63.75,
+                "keys": {}
+              },
+              "RedCurve50": {
+                "value": 127.5,
+                "keys": {}
+              },
+              "RedCurve75": {
+                "value": 191.25,
+                "keys": {}
+              },
+              "RedCurve100": {
+                "value": 255,
+                "keys": {}
+              },
+              "GreenCurve0": {
+                "value": 0,
+                "keys": {}
+              },
+              "GreenCurve25": {
+                "value": 63.75,
+                "keys": {}
+              },
+              "GreenCurve50": {
+                "value": 127.5,
+                "keys": {}
+              },
+              "GreenCurve75": {
+                "value": 191.25,
+                "keys": {}
+              },
+              "GreenCurve100": {
+                "value": 255,
+                "keys": {}
+              },
+              "BlueCurve0": {
+                "value": 0,
+                "keys": {}
+              },
+              "BlueCurve25": {
+                "value": 63.75,
+                "keys": {}
+              },
+              "BlueCurve50": {
+                "value": 127.5,
+                "keys": {}
+              },
+              "BlueCurve75": {
+                "value": 191.25,
+                "keys": {}
+              },
+              "BlueCurve100": {
+                "value": 255,
+                "keys": {}
+              }
+            }
+          }
+        ]
+      },
+      {
+        "content": {
+          "Text": {
+            "text": "01  LINEAR",
+            "font_size": 18
+          }
+        },
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 1,
+        "mask": null,
+        "id": 2,
+        "name": "01  LINEAR",
+        "visible": true,
+        "locked": false,
+        "width": 850,
+        "height": 25.2,
+        "color": 16777215,
+        "properties": {
+          "PositionX": {
+            "value": 40,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 125,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "content": "Solid",
+        "effects": {
+          "blur": 0.0,
+          "brightness": 1.0,
+          "grayscale": false
+        },
+        "next_effect_id": 2,
+        "mask": null,
+        "id": 1,
+        "name": "Linear ramp",
+        "visible": true,
+        "locked": false,
+        "width": 280,
+        "height": 250,
+        "color": 16777215,
+        "properties": {
+          "PositionX": {
+            "value": 40,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 165,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 0,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 0,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null,
+        "parent": null,
+        "transform_offset": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "effect_stack": [
+          {
+            "id": 1,
+            "kind": "LinearGradient",
+            "name": "Linear Gradient",
+            "bypassed": false,
+            "color_space": "Srgb",
+            "parameters": {
+              "StartX": {
+                "value": 0,
+                "keys": {}
+              },
+              "StartY": {
+                "value": 0,
+                "keys": {}
+              },
+              "EndX": {
+                "value": 280,
+                "keys": {}
+              },
+              "EndY": {
+                "value": 250,
+                "keys": {}
+              },
+              "DarkRed": {
+                "value": 48,
+                "keys": {}
+              },
+              "DarkGreen": {
+                "value": 93,
+                "keys": {}
+              },
+              "DarkBlue": {
+                "value": 245,
+                "keys": {}
+              },
+              "Red": {
+                "value": 255,
+                "keys": {}
+              },
+              "Green": {
+                "value": 180,
+                "keys": {}
+              },
+              "Blue": {
+                "value": 95,
+                "keys": {}
+              },
+              "BlendOriginal": {
+                "value": 0,
+                "keys": {}
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "composition_id": 1,
+  "next_composition_id": 2
+}

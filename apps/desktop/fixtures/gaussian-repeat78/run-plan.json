@@ -1,0 +1,1093 @@
+{
+  "schema": 1,
+  "fixture_project_schema": 78,
+  "prepared_against": "ad3bd23 model; current production render modules",
+  "rendered_during_preparation": false,
+  "cwd": "The directory containing this run-plan.json",
+  "probe_contract": "PROBE INPUT COMPOSITION FRAME OUTDIR; supply a verified schema78 production-module probe",
+  "capture_contract": "For every case save renders/NAME/result.json containing exit_code, stdout and stderr after probe exit. The probe requires OUTDIR not to exist when invoked. Capture first, then create OUTDIR if necessary and write result.json. Never fabricate success receipts.",
+  "png_encoding": "8-bit straight RGBA PNG; internal filtering is premultiplied. RGB is ignored only when expected alpha is zero.",
+  "oracle_provenance": "Authored source/coverage geometry and constant RGBA invariants. Frozen nonzero default-off step sentinels at native sigma2 use five width3, byte-rounded averaging passes: opaque edge [154,201,233,249,254,255], alpha128 edge [77,101,117,125,127,128]. This is a native legacy compatibility sentinel, not an ideal-Gaussian or AE-equivalence oracle. No production renderer was imported or executed to obtain expected pixels.",
+  "cases": [
+    {
+      "name": "constant-repeat",
+      "input": "constant-boundaries.lep",
+      "composition": 1,
+      "frame": 0,
+      "size": [
+        128,
+        64
+      ],
+      "output_directory": "renders/constant-repeat",
+      "probe_argv": [
+        "constant-boundaries.lep",
+        "1",
+        "0",
+        "renders/constant-repeat"
+      ],
+      "assertions": [
+        {
+          "type": "literal_rectangles",
+          "rectangles": [
+            [
+              8,
+              12,
+              36,
+              36,
+              [
+                0,
+                255,
+                255,
+                255
+              ]
+            ],
+            [
+              80,
+              12,
+              36,
+              36,
+              [
+                255,
+                0,
+                0,
+                128
+              ]
+            ]
+          ]
+        }
+      ],
+      "purpose": "Original input D is each 20x20 source. Repeat O retains finite sigma*4 padding; partial alpha is inside the precomposition before filtering."
+    },
+    {
+      "name": "constant-omitted-off",
+      "input": "constant-boundaries.lep",
+      "composition": 2,
+      "frame": 0,
+      "size": [
+        128,
+        64
+      ],
+      "output_directory": "renders/constant-omitted-off",
+      "probe_argv": [
+        "constant-boundaries.lep",
+        "2",
+        "0",
+        "renders/constant-omitted-off"
+      ],
+      "assertions": [
+        {
+          "type": "alpha_zero_outside",
+          "rectangles": [
+            [
+              8,
+              12,
+              36,
+              36
+            ],
+            [
+              80,
+              12,
+              36,
+              36
+            ]
+          ]
+        },
+        {
+          "type": "literal_pixels",
+          "pixels": [
+            [
+              16,
+              30,
+              [
+                0,
+                255,
+                255,
+                154
+              ]
+            ],
+            [
+              17,
+              30,
+              [
+                0,
+                255,
+                255,
+                201
+              ]
+            ],
+            [
+              18,
+              30,
+              [
+                0,
+                255,
+                255,
+                233
+              ]
+            ],
+            [
+              19,
+              30,
+              [
+                0,
+                255,
+                255,
+                249
+              ]
+            ],
+            [
+              20,
+              30,
+              [
+                0,
+                255,
+                255,
+                254
+              ]
+            ],
+            [
+              21,
+              30,
+              [
+                0,
+                255,
+                255,
+                255
+              ]
+            ],
+            [
+              88,
+              30,
+              [
+                255,
+                0,
+                0,
+                77
+              ]
+            ],
+            [
+              89,
+              30,
+              [
+                255,
+                0,
+                0,
+                101
+              ]
+            ],
+            [
+              90,
+              30,
+              [
+                255,
+                0,
+                0,
+                117
+              ]
+            ],
+            [
+              91,
+              30,
+              [
+                255,
+                0,
+                0,
+                125
+              ]
+            ],
+            [
+              92,
+              30,
+              [
+                255,
+                0,
+                0,
+                127
+              ]
+            ],
+            [
+              93,
+              30,
+              [
+                255,
+                0,
+                0,
+                128
+              ]
+            ]
+          ]
+        }
+      ],
+      "purpose": "Original input D is each 20x20 source. Repeat O retains finite sigma*4 padding; partial alpha is inside the precomposition before filtering."
+    },
+    {
+      "name": "constant-explicit-off",
+      "input": "constant-boundaries.lep",
+      "composition": 3,
+      "frame": 0,
+      "size": [
+        128,
+        64
+      ],
+      "output_directory": "renders/constant-explicit-off",
+      "probe_argv": [
+        "constant-boundaries.lep",
+        "3",
+        "0",
+        "renders/constant-explicit-off"
+      ],
+      "assertions": [
+        {
+          "type": "alpha_zero_outside",
+          "rectangles": [
+            [
+              8,
+              12,
+              36,
+              36
+            ],
+            [
+              80,
+              12,
+              36,
+              36
+            ]
+          ]
+        },
+        {
+          "type": "literal_pixels",
+          "pixels": [
+            [
+              16,
+              30,
+              [
+                0,
+                255,
+                255,
+                154
+              ]
+            ],
+            [
+              17,
+              30,
+              [
+                0,
+                255,
+                255,
+                201
+              ]
+            ],
+            [
+              18,
+              30,
+              [
+                0,
+                255,
+                255,
+                233
+              ]
+            ],
+            [
+              19,
+              30,
+              [
+                0,
+                255,
+                255,
+                249
+              ]
+            ],
+            [
+              20,
+              30,
+              [
+                0,
+                255,
+                255,
+                254
+              ]
+            ],
+            [
+              21,
+              30,
+              [
+                0,
+                255,
+                255,
+                255
+              ]
+            ],
+            [
+              88,
+              30,
+              [
+                255,
+                0,
+                0,
+                77
+              ]
+            ],
+            [
+              89,
+              30,
+              [
+                255,
+                0,
+                0,
+                101
+              ]
+            ],
+            [
+              90,
+              30,
+              [
+                255,
+                0,
+                0,
+                117
+              ]
+            ],
+            [
+              91,
+              30,
+              [
+                255,
+                0,
+                0,
+                125
+              ]
+            ],
+            [
+              92,
+              30,
+              [
+                255,
+                0,
+                0,
+                127
+              ]
+            ],
+            [
+              93,
+              30,
+              [
+                255,
+                0,
+                0,
+                128
+              ]
+            ]
+          ]
+        },
+        {
+          "type": "equal_image",
+          "other": "constant-omitted-off"
+        }
+      ],
+      "purpose": "Original input D is each 20x20 source. Repeat O retains finite sigma*4 padding; partial alpha is inside the precomposition before filtering."
+    },
+    {
+      "name": "constant-radius0-repeat",
+      "input": "constant-boundaries.lep",
+      "composition": 4,
+      "frame": 0,
+      "size": [
+        128,
+        64
+      ],
+      "output_directory": "renders/constant-radius0-repeat",
+      "probe_argv": [
+        "constant-boundaries.lep",
+        "4",
+        "0",
+        "renders/constant-radius0-repeat"
+      ],
+      "assertions": [
+        {
+          "type": "literal_rectangles",
+          "rectangles": [
+            [
+              16,
+              20,
+              20,
+              20,
+              [
+                0,
+                255,
+                255,
+                255
+              ]
+            ],
+            [
+              88,
+              20,
+              20,
+              20,
+              [
+                255,
+                0,
+                0,
+                128
+              ]
+            ]
+          ]
+        }
+      ],
+      "purpose": "Original input D is each 20x20 source. Repeat O retains finite sigma*4 padding; partial alpha is inside the precomposition before filtering."
+    },
+    {
+      "name": "constant-radius0-off",
+      "input": "constant-boundaries.lep",
+      "composition": 5,
+      "frame": 0,
+      "size": [
+        128,
+        64
+      ],
+      "output_directory": "renders/constant-radius0-off",
+      "probe_argv": [
+        "constant-boundaries.lep",
+        "5",
+        "0",
+        "renders/constant-radius0-off"
+      ],
+      "assertions": [
+        {
+          "type": "literal_rectangles",
+          "rectangles": [
+            [
+              16,
+              20,
+              20,
+              20,
+              [
+                0,
+                255,
+                255,
+                255
+              ]
+            ],
+            [
+              88,
+              20,
+              20,
+              20,
+              [
+                255,
+                0,
+                0,
+                128
+              ]
+            ]
+          ]
+        }
+      ],
+      "purpose": "Original input D is each 20x20 source. Repeat O retains finite sigma*4 padding; partial alpha is inside the precomposition before filtering."
+    },
+    {
+      "name": "constant-bypassed-repeat",
+      "input": "constant-boundaries.lep",
+      "composition": 6,
+      "frame": 0,
+      "size": [
+        128,
+        64
+      ],
+      "output_directory": "renders/constant-bypassed-repeat",
+      "probe_argv": [
+        "constant-boundaries.lep",
+        "6",
+        "0",
+        "renders/constant-bypassed-repeat"
+      ],
+      "assertions": [
+        {
+          "type": "literal_rectangles",
+          "rectangles": [
+            [
+              16,
+              20,
+              20,
+              20,
+              [
+                0,
+                255,
+                255,
+                255
+              ]
+            ],
+            [
+              88,
+              20,
+              20,
+              20,
+              [
+                255,
+                0,
+                0,
+                128
+              ]
+            ]
+          ]
+        }
+      ],
+      "purpose": "Original input D is each 20x20 source. Repeat O retains finite sigma*4 padding; partial alpha is inside the precomposition before filtering."
+    },
+    {
+      "name": "adjustment-contrast-repeat",
+      "input": "interior-adjustment.lep",
+      "composition": 1,
+      "frame": 0,
+      "size": [
+        96,
+        64
+      ],
+      "output_directory": "renders/adjustment-contrast-repeat",
+      "probe_argv": [
+        "interior-adjustment.lep",
+        "1",
+        "0",
+        "renders/adjustment-contrast-repeat"
+      ],
+      "assertions": [
+        {
+          "type": "adjustment_literal",
+          "effective_coverage": [
+            32,
+            28,
+            24,
+            8
+          ],
+          "transition_rgba": [
+            [
+              101,
+              0,
+              154,
+              255
+            ],
+            [
+              54,
+              0,
+              201,
+              255
+            ],
+            [
+              22,
+              0,
+              233,
+              255
+            ],
+            [
+              6,
+              0,
+              249,
+              255
+            ],
+            [
+              1,
+              0,
+              254,
+              255
+            ]
+          ]
+        }
+      ],
+      "purpose": "D is full lower composition [0,0,96,64], expressed in adjustment local space as [-32,-24,96,64]. Coverage [32,24,32,16] intersects hidden matte [32,28,24,8]. Red must cross the coverage left boundary into filtered blue; no coverage or matte expansion."
+    },
+    {
+      "name": "adjustment-constant-repeat",
+      "input": "interior-adjustment.lep",
+      "composition": 2,
+      "frame": 0,
+      "size": [
+        96,
+        64
+      ],
+      "output_directory": "renders/adjustment-constant-repeat",
+      "probe_argv": [
+        "interior-adjustment.lep",
+        "2",
+        "0",
+        "renders/adjustment-constant-repeat"
+      ],
+      "assertions": [
+        {
+          "type": "literal_rectangles",
+          "rectangles": [
+            [
+              0,
+              0,
+              96,
+              64,
+              [
+                0,
+                255,
+                255,
+                255
+              ]
+            ]
+          ]
+        }
+      ],
+      "purpose": "D is full lower composition [0,0,96,64], expressed in adjustment local space as [-32,-24,96,64]. Coverage [32,24,32,16] intersects hidden matte [32,28,24,8]. Red must cross the coverage left boundary into filtered blue; no coverage or matte expansion."
+    },
+    {
+      "name": "adjustment-contrast-off",
+      "input": "interior-adjustment.lep",
+      "composition": 3,
+      "frame": 0,
+      "size": [
+        96,
+        64
+      ],
+      "output_directory": "renders/adjustment-contrast-off",
+      "probe_argv": [
+        "interior-adjustment.lep",
+        "3",
+        "0",
+        "renders/adjustment-contrast-off"
+      ],
+      "assertions": [
+        {
+          "type": "adjustment_literal",
+          "effective_coverage": [
+            32,
+            28,
+            24,
+            8
+          ],
+          "transition_rgba": [
+            [
+              101,
+              0,
+              154,
+              255
+            ],
+            [
+              54,
+              0,
+              201,
+              255
+            ],
+            [
+              22,
+              0,
+              233,
+              255
+            ],
+            [
+              6,
+              0,
+              249,
+              255
+            ],
+            [
+              1,
+              0,
+              254,
+              255
+            ]
+          ]
+        },
+        {
+          "type": "equal_image",
+          "other": "adjustment-contrast-repeat"
+        }
+      ],
+      "purpose": "D is full lower composition [0,0,96,64], expressed in adjustment local space as [-32,-24,96,64]. Coverage [32,24,32,16] intersects hidden matte [32,28,24,8]. Red must cross the coverage left boundary into filtered blue; no coverage or matte expansion."
+    },
+    {
+      "name": "shadow-then-repeat",
+      "input": "ordered-shadow.lep",
+      "composition": 1,
+      "frame": 0,
+      "size": [
+        128,
+        80
+      ],
+      "output_directory": "renders/shadow-then-repeat",
+      "probe_argv": [
+        "ordered-shadow.lep",
+        "1",
+        "0",
+        "renders/shadow-then-repeat"
+      ],
+      "assertions": [
+        {
+          "type": "alpha_zero_outside",
+          "rectangles": [
+            [
+              8,
+              16,
+              52,
+              36
+            ]
+          ]
+        },
+        {
+          "type": "literal_pixels",
+          "pixels": [
+            [
+              17,
+              30,
+              [
+                0,
+                0,
+                0,
+                0
+              ]
+            ],
+            [
+              56,
+              30,
+              [
+                0,
+                0,
+                0,
+                255
+              ]
+            ],
+            [
+              59,
+              30,
+              [
+                0,
+                0,
+                0,
+                255
+              ]
+            ],
+            [
+              60,
+              30,
+              [
+                0,
+                0,
+                0,
+                0
+              ]
+            ],
+            [
+              32,
+              17,
+              [
+                0,
+                255,
+                255,
+                255
+              ]
+            ],
+            [
+              32,
+              51,
+              [
+                0,
+                255,
+                255,
+                255
+              ]
+            ]
+          ]
+        }
+      ],
+      "purpose": "Shadow D becomes [-8,0,36,20]; Repeat reads that preceding stage and emits O [-16,-8,52,36]. Cyan source local [0,0,20,20]; shadow extends to x28. Right black edge repeats to x36, while the transparent left domain edge remains transparent.",
+      "reduced_note": null
+    },
+    {
+      "name": "shadow-translated",
+      "input": "ordered-shadow.lep",
+      "composition": 2,
+      "frame": 0,
+      "size": [
+        128,
+        80
+      ],
+      "output_directory": "renders/shadow-translated",
+      "probe_argv": [
+        "ordered-shadow.lep",
+        "2",
+        "0",
+        "renders/shadow-translated"
+      ],
+      "assertions": [
+        {
+          "type": "alpha_zero_outside",
+          "rectangles": [
+            [
+              24,
+              24,
+              52,
+              36
+            ]
+          ]
+        },
+        {
+          "type": "literal_pixels",
+          "pixels": [
+            [
+              33,
+              38,
+              [
+                0,
+                0,
+                0,
+                0
+              ]
+            ],
+            [
+              72,
+              38,
+              [
+                0,
+                0,
+                0,
+                255
+              ]
+            ],
+            [
+              75,
+              38,
+              [
+                0,
+                0,
+                0,
+                255
+              ]
+            ],
+            [
+              76,
+              38,
+              [
+                0,
+                0,
+                0,
+                0
+              ]
+            ],
+            [
+              48,
+              25,
+              [
+                0,
+                255,
+                255,
+                255
+              ]
+            ],
+            [
+              48,
+              59,
+              [
+                0,
+                255,
+                255,
+                255
+              ]
+            ]
+          ]
+        },
+        {
+          "type": "translated_image",
+          "other": "shadow-then-repeat",
+          "offset": [
+            16,
+            8
+          ]
+        }
+      ],
+      "purpose": "Shadow D becomes [-8,0,36,20]; Repeat reads that preceding stage and emits O [-16,-8,52,36]. Cyan source local [0,0,20,20]; shadow extends to x28. Right black edge repeats to x36, while the transparent left domain edge remains transparent.",
+      "reduced_note": null
+    },
+    {
+      "name": "shadow-half-scale",
+      "input": "ordered-shadow.lep",
+      "composition": 3,
+      "frame": 0,
+      "size": [
+        64,
+        40
+      ],
+      "output_directory": "renders/shadow-half-scale",
+      "probe_argv": [
+        "ordered-shadow.lep",
+        "3",
+        "0",
+        "renders/shadow-half-scale"
+      ],
+      "assertions": [
+        {
+          "type": "alpha_zero_outside",
+          "rectangles": [
+            [
+              4,
+              8,
+              26,
+              18
+            ]
+          ]
+        },
+        {
+          "type": "literal_pixels",
+          "pixels": [
+            [
+              28,
+              17,
+              [
+                0,
+                0,
+                0,
+                255
+              ]
+            ],
+            [
+              30,
+              17,
+              [
+                0,
+                0,
+                0,
+                0
+              ]
+            ],
+            [
+              5,
+              17,
+              [
+                0,
+                0,
+                0,
+                0
+              ]
+            ]
+          ]
+        }
+      ],
+      "purpose": "Shadow D becomes [-8,0,36,20]; Repeat reads that preceding stage and emits O [-16,-8,52,36]. Cyan source local [0,0,20,20]; shadow extends to x28. Right black edge repeats to x36, while the transparent left domain edge remains transparent.",
+      "reduced_note": "Half-scale composition uses 50% source transform. It exercises the raster transform and finite extent; not a test of the render_output resize API."
+    },
+    {
+      "name": "reject-rotation",
+      "input": "unsupported-transforms.lep",
+      "composition": 1,
+      "frame": 0,
+      "size": [
+        96,
+        64
+      ],
+      "output_directory": "renders/reject-rotation",
+      "probe_argv": [
+        "unsupported-transforms.lep",
+        "1",
+        "0",
+        "renders/reject-rotation"
+      ],
+      "assertions": [],
+      "expected_error": {
+        "stderr_contains": [
+          "Repeat Edge Pixels",
+          "UnsupportedTransform"
+        ],
+        "nonzero_exit": true,
+        "must_not_write": "actual.png"
+      },
+      "purpose": "An ordinary non-axis-aligned source must report rejection, never silently render transparent-edge blur or blank success."
+    },
+    {
+      "name": "reject-shear",
+      "input": "unsupported-transforms.lep",
+      "composition": 2,
+      "frame": 0,
+      "size": [
+        96,
+        64
+      ],
+      "output_directory": "renders/reject-shear",
+      "probe_argv": [
+        "unsupported-transforms.lep",
+        "2",
+        "0",
+        "renders/reject-shear"
+      ],
+      "assertions": [],
+      "expected_error": {
+        "stderr_contains": [
+          "Repeat Edge Pixels",
+          "UnsupportedTransform"
+        ],
+        "nonzero_exit": true,
+        "must_not_write": "actual.png"
+      },
+      "purpose": "An ordinary non-axis-aligned source must report rejection, never silently render transparent-edge blur or blank success."
+    },
+    {
+      "name": "white-dimensions-diagnostic",
+      "input": "white-dimensions-diagnostic.lep",
+      "composition": 1,
+      "frame": 0,
+      "size": [
+        1920,
+        960
+      ],
+      "output_directory": "renders/white-dimensions-diagnostic",
+      "probe_argv": [
+        "white-dimensions-diagnostic.lep",
+        "1",
+        "0",
+        "renders/white-dimensions-diagnostic"
+      ],
+      "assertions": [
+        {
+          "type": "literal_rectangles",
+          "rectangles": [
+            [
+              0,
+              0,
+              1920,
+              960,
+              [
+                0,
+                255,
+                255,
+                255
+              ]
+            ]
+          ]
+        }
+      ],
+      "purpose": "Synthetic large-canvas stress diagnostic: 1920x960 canvas and1800x682 adjustment at(60,60). Native sigma70 is a deliberate stress value, not a calibration to any third-party blur parameter. No external media or project content is used.",
+      "optional": true
+    }
+  ],
+  "files": [
+    {
+      "path": "constant-boundaries.lep",
+      "bytes": 11172,
+      "sha256": "509b6865996b7388938874381ec9b383d24b9aa904d8888df2487e0811ff655e"
+    },
+    {
+      "path": "interior-adjustment.lep",
+      "bytes": 7782,
+      "sha256": "91bad42785a53a852d2bce8c239d633980a1ef8569b1215a04a1be69b3b02ce2"
+    },
+    {
+      "path": "ordered-shadow.lep",
+      "bytes": 3849,
+      "sha256": "d237cab46434ed5e18dae80720ce9992b719143a32b303cf2b31150321fce527"
+    },
+    {
+      "path": "unsupported-transforms.lep",
+      "bytes": 1943,
+      "sha256": "d3dc7c72dbf0e12eb67d38e47371b6459f938baf43e835726f83f4e15bf78d77"
+    },
+    {
+      "path": "white-dimensions-diagnostic.lep",
+      "bytes": 1712,
+      "sha256": "1b23a5959c374714a1869e419c3f769a3bb1e2abd2fafe4b8e372c765341ec2e"
+    }
+  ],
+  "limits": [
+    "Bounded metadata, coverage, ordering, output extent and failure-route checks; vendor tests own broad kernel accuracy.",
+    "No media, original expression/program payload, original-file modification or fake missing-MV content.",
+    "Half-scale is a native smaller composition plus scaled source transform; separate probe resize API coverage remains the lead's responsibility."
+  ]
+}

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160" style="opacity:0.8;fill:#d94435">
+  <g id="isolated" opacity="0.9" style="opacity:0.5">
+    <g id="no-inherited-opacity">
+      <path id="isolated-first" d="M12 18 C32 18 52 18 72 18 C72 46 72 74 72 102 C52 102 32 102 12 102 C12 74 12 46 12 18 Z"/>
+      <path id="isolated-second" style="fill:#376cb9" d="M42 48 C62 48 82 48 102 48 C102 76 102 104 102 132 C82 132 62 132 42 132 C42 104 42 76 42 48 Z"/>
+    </g>
+  </g>
+  <g id="inherited-fill-alpha" style="fill-opacity:0.5">
+    <path id="translucent-first" d="M132 18 C152 18 172 18 192 18 C192 46 192 74 192 102 C172 102 152 102 132 102 C132 74 132 46 132 18 Z"/>
+    <path id="translucent-second" style="fill:#376cb9" d="M162 48 C182 48 202 48 222 48 C222 76 222 104 222 132 C202 132 182 132 162 132 C162 104 162 76 162 48 Z"/>
+  </g>
+</svg>

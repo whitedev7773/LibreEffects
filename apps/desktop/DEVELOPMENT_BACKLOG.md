@@ -1,0 +1,1302 @@
+# Actual Playbar runtime and private94-layer increment
+
+Schema76 source/constructor/typechecks are ready. Qualify the actual six-layer
+Playbar and preserved Lyric/title before assembling players. Exact source programs
+now have typed text/path outputs and explicit lexical locals; dormant mask geometry
+and absent bar Position conventions remain disclosed. Continuous nested sampling
+is a separate required step for the original23fps players under60fps parents.
+See [NATIVE_PLAYBAR.md](NATIVE_PLAYBAR.md). Retain the61/62 unoptimized crate gate.
+
+# Actual Lyric runtime reliability candidate
+
+Qualify the calling-thread CPU / immutable-wrapper correction against the frozen
+actual 88-layer project before expanding Playbar/theme reconstruction. Preserve
+the observed native deadline incident and non-green unoptimized test gates. The
+fixed optimized full-output comparison passes; the hard process deadline remains.
+See [EXPRESSION_EXECUTION_BUDGET.md](EXPRESSION_EXECUTION_BUDGET.md).
+
+# Actual-reference increment awaiting native qualification
+
+The Lyric-plus-title/artist source now has genuine joined 2D Position and the
+original 16-layer title composition. Qualify the coherent schema 75 binary and
+private append before extending the actual project further. Retain the two
+expression 100ms deadline failures as an open reliability issue; do not report a
+full model pass or solve them by silently widening the budget. Next actual
+reference closures still need Playbar numeric/path/text expression targets and
+Spectrum/theme reconstruction. Generic AEP-open UI is not the user goal.
+
+# Current practical authoring milestone (2026-10-06)
+
+## Actual reference recreation: first partial Lyric project
+
+Schema 74 point-origin text and per-run leading are integrated, and the generic
+reviewed-data constructor has produced the original 72-layer Lyric composition
+privately. The independent source audit and combined all-target check passed;
+visible native rendering is pending. Name & Artist and final themes remain open.
+Original text, programs, fonts and media are not in Git. See
+[NATIVE_POINT_TEXT.md](NATIVE_POINT_TEXT.md).
+
+## Selected-character formatting checkpoint
+
+Native Character selection controls, exact face/size/fill drafts and run-font
+diagnostics are integrated. The final model run passes 274/275 with one unchanged
+expression-pooling budget failure; selected-text tests pass. Native qualification
+is pending. See [NATIVE_SELECTED_TEXT.md](NATIVE_SELECTED_TEXT.md).
+The preceding numeric-expression authoring checkpoint 6010f86 remains qualified.
+
+Null Slider authoring and the native2D numeric-expression draft editor are now
+source/type checked, with exact current test limitations recorded in STATUS.
+Qualify the from-blank user flow next; do not substitute a prepared project.
+Then address selected-range styling using the supplied exact faces, reference
+path/text-expression behavior, editable spatial setup/keys and Audio Spectrum.
+The reference project still cannot be fully recreated through all native tools.
+AEP opening/import remains excluded, and private assets/programs stay out of Git.
+
+# Current native JSX checkpoint (2026-10-06)
+
+The unchanged private automation script passes 14 isolated native-project
+execution/source/history scenarios. The reusable template, external-source
+harness and bounded ScriptUI size/focus changes are awaiting the final source
+gate and one coherent release/native batch. Native qualification should exercise
+the original dialog at normal/reduced viewports, sample/clear refocus, Tab reach,
+held-key nesting, all-mode generation and exact native Undo/Save/Reopen. Do not
+expand into AEP ingestion or unrelated expression APIs. Adobe visual/rich-text
+parity and marked IME remain separate unverified contracts.
+
+# Native JSX compatibility — Opacity73 integration checkpoint
+
+Updated 2026-10-06 UTC. The next original-script timing dependency is implemented
+in source with19 math tests,249 model tests and a real child-process roundtrip.
+Independent per-side modes, signed/tiny speeds and dormant endpoints are retained;
+raw sampling, expression views and clipped color drafts share the explicit owner.
+See [the contract](NATIVE_OPACITY_TIMING.md) and [STATUS](STATUS.md).
+
+The22-pair renderer helper and canonical all-target check now pass; a fresh
+release/native qualification remains pending. Preserve
+all legacy curves and explicit promotion limits; do not infer AE defaults or full
+original-script parity. After this coherent batch is qualified, remaining work is
+native template setup, required expression/API gaps and oracle-dependent
+TextDocument behavior. AEP opening/import remains outside acceptance.
+
+# Native JSX compatibility — joined XYZ source milestone
+
+Updated 2026-10-06 UTC. Joined native XYZ, explicit camera projection, metadata
+preservation, retime and JSX/ScriptUI are integrated with fresh model/render proof.
+See [STATUS](STATUS.md) and [the bounded contract](NATIVE_SPATIAL_POSITION.md).
+The last qualified binary remains 8729c0f; the new canonical all-target check
+passes in 42.402s. This source needs a fresh release/native batch. AEP opening/import is not an acceptance dependency.
+
+Next original-script dependency is faithful scalar Opacity incoming/outgoing modes,
+endpoint ease and tiny signed speeds. Continue with a separate native source
+contract that preserves legacy serialized tracks; do not clamp or reinterpret
+those speeds as spatial distance. Later required expression APIs, native template
+setup and oracle-dependent TextDocument replacement remain open. Spatial tilts,
+3D expressions, rendering effects/mattes and a general camera UI remain explicit
+unsupported scope. Do not claim the original JSX works end to end yet.
+
+# Native JSX compatibility — exact-source pooling checked
+
+Updated 2026-10-06 UTC. The user explicitly removed AEP opening/import from the
+required scope. The supplied AEP is reference material; existing importer code
+remains, but no new ingestion work is planned and its gaps are not acceptance
+blockers. Current focus is original JSX/ScriptUI on native LibreEffects layers
+and compositions, followed by required spatial Position/Opacity/TextDocument APIs.
+
+- Transient exact-source pooling carries one table through snapshot, child IPC
+  and QuickJS. **192 bindings / 6 programs** use **19,056 unique bytes** instead
+  of **609,792 repeated bytes**, under unchanged512KiB source limits. Per-property
+  execution/dependencies, authored native source and saved schemas are unchanged.
+- Fresh gates: **35 runtime tests**, **220 model tests** (10.50s), and the actual
+  production worker example pass. The worker checks192 distinct results at two
+  frames, invalid disabled IDs, duplicates, cancellation, permit reuse and exact
+  source bytes. Formatting/diff and independent source review pass.
+- The first aggregate-model compilation found one older process example still
+  using the old private API; it was migrated, compiled, and the full model gate
+  passed. No runtime limits were loosened. See [the contract](EXPRESSION_POOLING.md).
+- Desktop all-target, release, native and CLI qualification are deferred while
+  interrupted build sessions are being resolved. **c2a1210** remains a checked
+  XKB candidate, with no terminal corrective release result. Do not relabel the
+  earlier510244c binary or its intermittent held-key failure as a new pass.
+
+# X11 repeat-release correction — source checked, native rerun pending
+
+Updated 2026-10-06 UTC. This correction follows the mixed `510244c` qualification
+and preserves the full `a8ea6d2` evidence checkpoint below. The exact locked GPUI
+0.2.2 package is now vendored with its license, upstream hashes and build inputs.
+A small safe capability seam negotiates DetectableAutorepeat on the existing XCB
+client and verifies both supported/enabled bits. No new unsafe code or global
+keyboard settings are added. Unknown/error cases visibly require pointer modal
+buttons; text and navigation remain usable. See [the contract](XKB_REPEAT_BOUNDARY.md).
+
+- Fresh checks: **217 model tests pass**, **2 production reply-mask tests**,
+  **6 fingerprint tests**, canonical all-target check **59.047s**, formatting and
+  local-change whitespace checks. Seven unchanged upstream Metal mixed-indent
+  lines are retained byte-for-byte; no full workspace/desktop test executable ran.
+- First model run had two unchanged 100ms expression deadline failures (215/217).
+  All 15 expression-model tests then passed, followed by unchanged full 217/217
+  replay in 6.45s. No production budget or expression source was modified.
+- Independent source review found no blocking issue; fallback hint and explicit
+  reply-test coverage suggestions were addressed. Vendor change is six original
+  files plus one pure helper; renderer/project schemas are unchanged.
+- A new release and bounded held-key/forced-pointer-only native qualification
+  are still required. Earlier render/source passes keep `510244c` attribution.
+  The first intermittent native failure remains recorded below.
+
+# Reconstructed rich import — native checkpoint and remaining work
+
+Updated 2026-10-06 UTC. Clean510244c (production 0be291b) has a measured release,
+four exact full Renderer/CLI frames, actual supported typed import, schema 71 rich
+typing/style preservation, explicit negative admission and atomic history/reopen
+evidence. [STATUS](STATUS.md) gives exact scope and source attribution.
+
+The immediate correction is intermittent ScriptUI held-Return acceptance across
+a nested confirmation. One observed unintended name-only commit and a passing
+bounded repeat are both retained; this is not a completed latch qualification.
+Parent approved a narrow per-client repeat-release fix without global settings.
+Color native input passes with disclosed valid schema-floor 65→64 normalization.
+Narrow layout, real IME and other platforms remain unqualified.
+
+Binary AEP payload admission, AE baseline/style-replacement evidence and the lost
+spatial/Opacity/pooling/Slider/mask slices remain later reconstruction work. No
+original-template compatibility, original execution or recovered historical QA
+hashes are claimed. Use the active reconstruction checkout and fresh evidence.
+
+# Source-checked reconstruction checkpoint (historical)
+
+Updated 2026-10-06 UTC. After an execution-workspace change, verified complete
+history at `e7bb28d` was restored separately. Later objects were unavailable;
+the following code is newly reconstructed, not a recovered later release.
+Production source checkpoint: `0be291bad7eb8535a38c0e879c625412a81ecc76`.
+See [the reconstruction contract and fresh evidence](AE_RECONSTRUCTION.md).
+
+- Strict typed project ingestion and schema-71 rich character styles are usable
+  for supported synthetic 2D closures. Binary AEP payloads, true spatial 3D and
+  the original template remain blocked explicitly; no original was executed.
+- Versions 1–65 remain readable; unrecovered wire versions 66–70 reject before
+  decoding. Reusing their version numbers could silently discard source fields.
+- Fresh checks: **213 model tests**, **34 reader tests**, **6 fingerprint tests**,
+  canonical all-target **42.75s**, rustfmt/diff and fixture generation pass.
+- Rich compositor helper: **9 groups**, **6 independent RGBA comparisons**,
+  **691,200 pixels, zero differences**, rerun after schema-71 correction with
+  production-locked dependencies. This is not full Renderer/CLI/native evidence.
+- Full release, CLI pixel/source oracle and native import/typing/history/modal
+  qualification are pending. Earlier dated passes below keep their original
+  source attribution. Intermediate and coherent commits are backed up separately.
+
+# Libre Effects 추가 개발 기능과 우선순위
+
+2026년 10월 1일, 커밋 `0ce0022`의 Rust 데스크톱 앱과 공용 코어를 기준으로 조사했다. 목적은 단순한 2D 타이틀 편집기를 실제 제작에 사용할 수 있는 After Effects 계열 작업 도구로 발전시키는 것이다. **먼저 저장과 미디어 처리의 안정성을 보강하고, 프로젝트와 속성 모델을 확장한 뒤, 프리컴포지션·오디오·합성 기능을 연결해야 한다.**
+
+아래 내용은 코드 조사와 Adobe 공식 문서 대조를 통해 작성한 개발 제안이다. 이번 조사에서는 앱을 수정하거나 새로운 런타임 테스트를 수행하지 않았다. 현재 열려 있는 After Effects 화면을 다시 측정한 결과도 아니다. 기존 README의 화면 비교 기록은 참고하되, 픽셀 단위 UI 일치는 별도 검증 과제로 남긴다. 모든 Adobe 효과·코덱·플러그인의 개별 옵션을 망라한 명세는 아니며, 주요 제작 작업 영역의 백로그다.
+
+## 구현 진행 상황
+
+현재 소스의 복구·검증 결과와 기능군별 잔여 범위는 [STATUS.md](STATUS.md)를 먼저 확인한다. 아래 날짜별 기록은 당시의 검증 이력이며 이전 미완료 문구는 이후 구현으로 대체될 수 있다.
+
+아래 날짜별 이력과 최초 조사 표는 각 체크포인트의 기록이다. 현재 A01–L05의 77개 항목별 구현/부분 구현/미구현/별도 고급 범위는 STATUS.md의 전체 목록을 기준으로 확인한다. 이력에 남은 테스트 수와 당시 미완료 문구를 현재 상태로 합산하거나 해석하지 않는다.
+
+### 숫자 표현식·프로세스 격리 통합 — 2026-10-05
+
+schema 65의 Position/Scale/Opacity/Slider 표현식과 실제 named Slider Control을
+저장하고, preview·출력·부모 transform·matte·중첩 comp의 공통 평가 경로에 연결했다.
+JSX와 표현식은 kill/reap 가능한 별도 프로세스에서 실행한다. held Return의 모달
+연속 승인 결함과 CR/LF/CRLF 문단 처리를 보완했다. **161개 모델, 15개 프로세스
+시나리오 및 7개 unit, 24개 표현식 테스트와 36.81초 all-target 검사를 통과**했다.
+픽셀·네이티브 검증은 한 번의 통합 corrective release에서 수행할 예정이다.
+[EXPRESSIONS.md](EXPRESSIONS.md)와 STATUS 최상단이 현재 계약이다. AEP/자산,
+rich runs·글꼴, 실제 3D·공간 보간과 추가 표현식·효과 API는 다음 호환성 단계다.
+
+### AE startTime·label 호환 모델 — 2026-10-05
+
+서로 독립적인 레이어 시간 원점과 trim, AE label 인덱스 0–16을 sparse schema 64로
+저장한다. 호스트의 startTime/label 대입, 네이티브 레이어 이동·FPS 변환 붙여넣기,
+재생 속도 변경 시 원점 보존과 Timeline 전용 label 표시를 연결했다. **133개 모델
+테스트와 47.72초 all-target 검사를 통과**했다. 원본 입력의 60 fps 한 프레임 원점과
+가사 타임스탬프·마커·마지막 두 레이어의 label 4 흐름을 독립 fixture로 검증했다.
+[LAYER_TIMING.md](LAYER_TIMING.md)에 세부 범위와 증거가 있다. 컴포지션 밖으로
+저장 범위나 키가 나가는 이동은 여전히 원자적으로 거부하며, signed/out-of-comp
+animation storage가 다음 호환성 의존성이다. 별도 worktree의 구현이며 현재
+ScriptUI native QA의 22f242f 릴리스를 변경하지 않았다. 전체 입력 호환 완료는 아니다.
+
+### 자동화·ScriptUI 기반 구현 — 2026-10-05
+
+QuickJS 기반 실제 JSX 실행, native ScriptUI 모달·여러 줄 입력, 제한된 AE2D
+호스트 및 성공 시 한 번 Undo가 구현됐다. **110개 경량 모델 테스트와 all-target
+컴파일을 통과**했고 native 배치 검증은 다음 단계다. 현재 범위·제한·독립 작성
+예제는 [SCRIPTING.md](SCRIPTING.md), 정확한 검증 이력은 STATUS 최상단을 따른다.
+사용자의 최신 목표는 제공 JSX+AEP 호환이므로 여기서 끝내지 않는다. AEP/자산
+가져오기, 별도 layer startTime·AE label, 표현식·effect/slider 속성, 문자별 스타일과
+글꼴, 실제3D·공간 보간을 원본 근거와 대조해 단계적으로 연결해야 한다.
+
+### 자동화·ScriptUI 우선순위 — 2026-10-05
+
+사용자가 기존 After Effects `Automation.jsx`를 제공하고 자동화 스크립트와
+ScriptUI 지원 개발을 요청했다. **K06 중 실제 제공 스크립트에 필요한 범위를
+활성 개발 대상으로 올린다.** [API 대응표와 단계별 검증 기준](../../docs/ae-jsx-compatibility.md)을
+따른다. 조사 기준 `53e9cba`에는 JSX 실행기·ScriptUI·AE 객체 바인딩이 없다.
+기존 텍스트·복제·마커·스칼라 키 모델을 재사용하되 시간 원점, 속성 대입,
+여러 컴포지션의 한 번 Undo 의미를 먼저 명확히 한다. parts/all 모드는 별도의
+3D 공간 Position 요구 때문에 그대로 실행할 수 없다. 첫 단계는 제한된 런타임과
+실제 모달 UI, 다음은 가사 워크플로다. 전체 AEP/플러그인/3D 지원으로 확대해
+완료를 주장하지 않는다. 원본은 저장소에 넣지 않고 독립 작성 fixture로 검증한다.
+이 항목은 구현 완료 기록이 아니며 최신 구현 범위는 STATUS의 후속 기록을 따른다.
+
+### 현재 단계와 다음 개발
+
+**2026-10-03 사용자 우선순위:** 고유 `.lep` (Libre Effects Project) 파일 형식을 먼저 구현·실행 검증하고, 그 뒤 보류한 편집 기능과 나머지 백로그를 재개한다. `.lep`의 서명/컨테이너 버전/체크섬/제한된 청크와 Save/Open/CLI/복구/수집 연결을 구현했고 코어·데스크톱 기본 626개와 FFmpeg 30개, 릴리스 빌드가 통과했다. 기존 `.lfe.json`은 호환 입력으로 유지하며 Save는 `.lep` 사본을 만든다. 네이티브 복구·이동 수집까지 아래 범위의 end-to-end 검증을 마쳤다. 고유 형식의 기본 단계와 이어 재개한 같은 경로 박스 선택/Ctrl+A의 검증을 마쳤다. E04 Contents의 형제 항목 다중 선택·같은 부모 안의 묶음 순서 편집과 저장 포커스 회귀까지 검증을 마쳤다. 이어서 F03/D01의 레이어 전체 Text Fill/Stroke RGB와 Stroke Width 7개 스칼라 애니메이션을 연결하고 최종 네이티브 검증을 마쳤다. 문자별 스타일·Source Text animation·Text Animator는 별도 범위다. E02 단일 정점 숫자 모달과 F02 실제 fallback face/미해결 glyph 진단도 구현·자동/네이티브 검증을 마쳤다. D03 단일 채널 endpoint velocity 세로 변형도 검증했다. D03 다중 channel Graph의 pinned lane·교차 선택/시간 편집·lane-local 값/속도·VIEW metadata와 native Save/reopen도 검증했다. E02 선택 정점의 숫자 이동/회전/scale/pivot 변형은 기본920+FFmpeg30과 최적화 빌드, 고정 release의 bounded native12case 검증을 마쳤다. C09의 Reset Scale & Rotation/Flip/Fit/Center Anchor와 native rapid-Undo에서 발견한 Linux image lifetime 문제도 기본965+FFmpeg30, optimized release와 bounded native8case를 검증했다. F03 layer-wide Font Size·Tracking·Leading 세 scalar와 renderer·caret/paragraph geometry·font diagnostics의 현재 frame 평가도 기본 1010 + FFmpeg 30, 일반 optimized release 및 bounded native 10-case를 검증했다. E05 Trim Paths와 사용자 요청의 자동 About 빌드 번호는 기본 1102 + FFmpeg 31, optimized release, 실제 About A/B와 bounded Trim native 10-case 검증을 마쳤다. geometry-before-paint 순서, 원래 paint scope, contour/fragment identity와 수치·작업량 한도는 아래에 명시했다.
+
+현재는 **2D 모션 편집·합성 기반을 구현한 단계**다. AE 동등 수준이나 전체 백로그 완료 상태는 아니다. 기능군마다 규모가 달라 단순 항목 수를 완성률로 표시하지 않는다.
+
+- **구현·검증됨:** 다중 컴포지션/프리컴포지션, 공유 자산·폴더·썸네일·다중 파일/이미지 시퀀스 가져오기·FPS/알파 해석, 저장·복구·미디어 수집/재연결, 유리수 FPS, Null/Solid/Adjustment, 레이어 복사·마커·스냅·다중 정렬/분배·부모 Pick Whip, 변형/효과 키 편집, 영상·프리컴포지션 Time Remap, 순서 있는 효과 스택, 5종 블렌딩·4종 Track Matte, Curves/Gradient 등 기본 효과, 배경색 MP4·알파 MOV/PNG, 뷰 상태 저장·눈금자/가이드/채널/픽셀 정보, 스냅샷 기반 렌더 큐·다중 출력·재시도·출력 크기/FPS/채널/인코딩 설정, 독립/영상 오디오 메타데이터·파형·중첩 믹싱·AAC/PCM 영상 출력, 좌우 레벨·팬·페이드 애니메이션·오디오 스위치·구간 미터, Windows 기본 장치 재생·100ms 스크럽·장치 시계 기반 플레이헤드·재생 블록 미터, 지속 영상 디코더·제한된 순차 프리페치·비동기 합성과 오래된 요청 취소. 상세 제약은 아래 표에 남긴다.
+- **다음 핵심 개발(2026-10-02 사용자 우선순위 변경):** 실제 AE 첫 작업 화면을 기준으로 편집 도구·효과·텍스트·마스크와 관련 UI를 우선한다. J02 디스크 캐시/J03 증분 평가, 고급 출력·GPU·HDR·장치/코덱 확장은 뒤로 미룬다.
+- **정교한 편집에 남은 기능:** D02/D03 공간 보간·혼합 채널 수직/Speed corner 변형, E02/E03 경로 토폴로지·교차 layer/mask 선택·custom pivot/skew·world-space 전체 pose 편집, E04 부모 간 guarded drag의 native 검증·compound Colors same-paint marquee/time scaling·Graph·cross-paint bulk·cross-composition/project Contents clipboard, G01 가변 Feather·로토베지어, F01–F05 실제 IME 검증·문자별 스타일·Text Animator·경로 위 텍스트/인스턴스 컨트롤, B01/B05/B07 배치 회귀·단축키/접근성. 스칼라 양방향 시간 보간·Speed Graph, Contents·도형 속성 애니메이션, 직접 텍스트 편집과 B06 공통 색 선택기는 아래 이력의 범위로 이미 구현됐다.
+- **후속 고급 기능:** 패널 도킹·소스 뷰어·최근 프로젝트, 타임라인 고급 시간 편집/검색/가상화, 공간 경로·프리셋·표현식, Shape 연산/SVG·Text Animator, 추가 효과·모션 블러, 고정밀 색/HDR·Proxy/GPU, 템플릿, 설치/업데이트·한글화와 UI 회귀 자동화.
+- **별도 대형 단계:** 3D/카메라/라이트·모델, 추적·로토/Puppet, 플러그인/교환 포맷 연구, 웹/API 제품 범위. AEP/MOGRT 호환은 구현되지 않았다.
+
+### B08 recent projects menu — 2026-10-05 implementation checkpoint
+
+- File → Open recent now has bounded local LEP history, exact-path dirty-project routing and Clear; integrated settings/problems/history remains separate scope.
+- Model `25b2dd9` and desktop `6d48cac`: 71 lightweight models pass; canonical all-target check passes. Seven desktop regressions compile only. Native acceptance joins the compact Project-controls batch; see [STATUS.md](STATUS.md).
+
+### E04 compound Colors pointer gestures — 2026-10-05 qualified continuation
+
+- Added same-paint group press/click/Shift selection, horizontal threshold, local ghosts, frozen receipts/mapping and one atomic MoveKeys release. Outside capture, common bounds, deterministic snap, collision/no-op/Redo and pending/stale/lock/focus/modifier guards retain full snapshots/modes and shortcut ownership. No schema/dependency changes.
+- Final 4010607, build 20261005.015007-b0495381d51ed0b2, passes 1,818 default +32 media and all 12 gates. Independent tests make 1,300 exact RGBA pairs. Eight actual native saves pass full source/VIEW and 520 pairs. Generated/native CLI makes 1,352 renders/1,040 exact pairs; 467 generated files stay immutable.
+- The uncompiled c9402a0 disk pause ended after approval, but `/workspace/shared` was already missing before cleanup; this task deleted nothing. Repository/full history survived. The still-open SVG project and old binary were recovered hash-exact; official tooling and new evidence now live in the persistent task workspace. Earlier missing QA archives are not claimed restored.
+- Native covers group overlap and noncontiguous outside release, Undo/Redo, vertical/away-back no-ops, collision/pending/locked rejection, repeated Delete isolation and actual reopen. First paint needed a resize/expose; Xfce intercepted Alt+drag, so Alt bypass remains headless-qualified and held-pointer interruption remains natively unqualified. Exact pins and limitations: [GRADIENT_POINTER_ACCEPTANCE.md](GRADIENT_POINTER_ACCEPTANCE.md).
+- E04 remains Partial. Complete the verified full-history bundle before same-paint marquee selection or one bounded advanced Text Animator selector. Keep compound Graph/scaling/cross-paint/topology and earlier native/platform/IME gaps separate. No push/deploy/user-desktop or next-feature work.
+
+### E06 bounded static SVG import — 2026-10-04 current continuation
+
+- Added one-file static SVG → editable Contents import at composition origin with integer viewport mask, fresh identities, source-preserving atomic history and guarded File/Search chooser receipts. Common primitives/paths, groups/transforms and solid paint/stroke semantics are bounded; unsupported CSS/resources/text/gradients/filters/masks/animation reject the whole file. XML/grammar/node/path/depth/file budgets are explicit; no source/script/resource execution or new schema.
+- Cubic normalization is disclosed in UI/help. Independent authored cubic SVG references give exact route/codec results, while unchanged raw-source SVG edge deltas are separately measured without masks. The zero-handle-line dash failure was corrected with linear controls; fractional viewport clipping rejects instead of rounding or accumulating wrong alpha.
+- Final `e078b4f`, build `20261004.214034-604994e339acebef`, passes all 12 gates: 1,781 default + 32 media tests, vendor/font/check/format and normal optimized release. Independent tests make 198 exact RGBA pairs; generated CLI 132 renders /165 pairs. All 69 generated files remain immutable.
+- All 8 actual final-build native saves pass exact source/VIEW and 120 five-route pairs across 3 frames. File import, one menu Undo, unsupported/fractional rejection, chooser Cancel, preserved one keyboard Redo, unfiltered Search-list activation and actual New→Open→SaveAs are qualified. Native CLI 48 renders /48 pairs; combined CLI 180 renders /213 pairs /8,179,200 pixels. Actual byte identity groups are01/05/06,02/03/04,07/08. App is clean on `08-final-reopened.lep`, frame 0; prior 3native projects remain hash-exact. See [SVG_IMPORT_ACCEPTANCE.md](SVG_IMPORT_ACCEPTANCE.md) for exact attribution and limits.
+- E06 and the 77-ID inventory remain Partial. Suggested next bounded slice is strict inline declarations for existing solid-paint/stroke/opacity fields, with explicit precedence/inheritance/token/resource contracts; no stylesheet or general CSS support. No next feature/push/deploy/user-desktop work started. Earlier native/platform/IME gaps remain distinct.
+
+### E04 compound Gradient Colors multi-key editing — 2026-10-04 previous checkpoint
+
+- Same-paint click/Shift-click selection, earliest-frame rigid group Move, atomic group Delete/modes and internal Copy/Paste retain complete snapshots, ordered stop IDs, mode metadata and relative timing. Selected-old-frame overlap is allowed; unselected collisions reject. Deleting all keys bakes the explicit playhead sample; exact duplicate paste preserves Redo.
+- Clipboard/source/selection/action/transport and Shell-modal receipts prevent source-ABA reuse, pending-blur edits and repeated-delete layer fallthrough. Source-neutral navigation/repeated paste remain supported; schema54/57, LEP/VIEW/address and topology Hold policy are unchanged.
+- Final `e8a159a` passes all 12 gates: 1,733 default + 32 media tests, vendor/font/check/format and normal release. Independent tests make 2,080 exact RGBA pairs; final generated CLI makes 780 renders/624 pairs, including 312 previous/current-release pairs. The 353 generated files remain immutable. Build `20261004.203455-f5679af4662cfe8a` matched About.
+- Initial `a4bc33f` native selection exposed intrinsic help width stretching the lane relative to its ruler. No saves were made there. The narrow three-file layout correction was fully regated and actual final selection kept markers aligned. All ten actual saves are attributed to `e8a159a` and pass full source/VIEW plus 13-frame checks (650 exact RGBA pairs/62,400,000 pixels). Native covers group Move/history/guards, repeated paste/no-op Redo, subset/all-key Delete/bake/isolation, About/Search retirement and actual New→Open/resave. Files 04/10 preserve all 6,726 bytes; app is clean on `10-final-reopened90.lep`, frame 90. Final native CLI makes 390 renders/260 exact RGBA pairs/24,960,000 pixels; see [GRADIENT_MULTIKEY_ACCEPTANCE.md](GRADIENT_MULTIKEY_ACCEPTANCE.md).
+- E04 and the 77-ID inventory remain Partial. Pointer group drag/selection gestures, marquee/time scaling, compound Graph, Bezier/velocity, topology reconciliation, cross-paint bulk and cross-project Contents clipboard remain. Earlier native E02/E04, real IME/adversarial/held-input/platform/DPI/device gaps stay distinct. A verified full-history bundle will follow this documentation checkpoint before bounded pointer gestures or one advanced Text Animator selector; no next feature/push/deploy/user-desktop work started.
+
+### E04 compound Gradient Colors interpolation/Timeline — 2026-10-04 continuation
+
+- Added sparse outgoing Hold (default), Linear and Smoothstep modes with explicit ordered paint-local stop identity. Both independent rows must match; added/removed/reordered IDs hold until the next key with visible status. Signed-zero ties and exact endpoints stay intact. Non-Hold metadata requires schema 57; legacy Hold 54, LEP/VIEW/address contracts remain.
+- Dedicated Timeline lanes provide exact key selection/navigation, Move frame, Delete and modes. Source/action/transport/IME/pending guards and shared selection ownership prevent stale edits or whole-layer shortcut fallthrough. Properties modes/status wrap in narrow sidebars. Move Enter/Escape returns Timeline focus.
+- Final `0bad9d1` passes 1,690 default + 32 media tests, full vendor/check/format and normal release. Independent tests: 1,330 exact RGBA pairs; final generated CLI: 432 renders/288 pairs. Twelve actual saves pass full source/VIEW and nine-frame verification; final native CLI: 216 renders / 108 pairs. Initial `b0f6851` interactions and final narrow-focus rerun are attributed separately.
+- Build `20261004.194304-fb65ebd14f0ff145` matches About; actual New→Open/resave preserves all 4,514 bytes. App remains clean on `12-final-reopened.lep` at frame 30, old Text Animator save and GitHub preserved. See [GRADIENT_INTERPOLATION_ACCEPTANCE.md](GRADIENT_INTERPOLATION_ACCEPTANCE.md).
+- E04 remains Partial: compound multi-key/drag/clipboard/Graph, Bezier/velocity, topology reconciliation, bulk/cross-project and previous native/IME/platform/DPI/device gaps remain. No push/deploy or next feature started.
+
+### F03 paragraph indents and spacing — 2026-10-04 continuation
+
+- Added five layer-wide static values: left/right/first-line indents and space before/after. Shared flow covers renderer/output, caret/hit geometry, Fit and conversion without changing font shaping. Zero values stay sparse; nonzero source needs schema55, with LEP/VIEW unchanged.
+- Core source-preserving commands, guarded precise typed fields, one-use pending receipts and independent pixel/source/codec/caret tests are separate local commits. Exact no-op preserves Redo and all animated Source Text/typography/paint data.
+- Final f9e6e1b passed1590default +32media tests and all release gates. Nine actual native saves cover fields, history/no-op, invalid/valid pending-button input, Fit and real Open/resave. Explicit expected workspace references account only for opening Paragraph/closing Properties; complete source/VIEW remain exact.
+- See [PARAGRAPH_STYLE_ACCEPTANCE.md](PARAGRAPH_STYLE_ACCEPTANCE.md) for build identity, initial failure, pixel counts and native boundaries. F03 remains Partial; per-character/per-paragraph styles, justification and Text Animator remain. No push/deploy occurred.
+
+### E02 교차 경로 선택과 캔버스 affine — 2026-10-04 후속
+
+- 같은 layer의 enabled Bezier Contents 경로에 Shift-click/marquee/Ctrl+A와 현재 frame의 composition-axis move/scale/rotate를 연결했다. 고정 center pivot·corner handle·Shift 균등 scale/15도 rotation을 제공하며 기존 box-off 단일 path local 편집은 유지한다.
+- core`ba54bc3`는 sampled pose·다른 key·base/dormant/unused pose·unselected vertex·schema/assets와 no-op Redo를 보존하는 원자적 command다. disabled/locked/singular/범위·storage·metadata 한도를 검사한다. core14개, UI10개, 독립 guard9개와 source/render/codec7개 회귀를 추가했다.
+- UI`7c3e946`, 독립`14973a1`/`b5edb9e`, help-only`e5bad8c`/`8f3cc72`를 별도 로컬 커밋했다. source/view/action/transport receipts, transient preview 취소와 한 번의 post-dispatch selection 복원을 검증했다.
+- 전체1550개+media32 및 독립324 exact RGBA쌍(31,104,000pixel)을 검증했다. native 이동/균등 scale/90도 회전, Undo/Redo, no-op과 실제 Save/Open을 실행했다. 이동/scale의 실제 pointer 정밀도 차이는 literal 기대값을 바꾸지 않고 별도의 제한된 공통 affine 검증으로 기록한다. 회전/no-op/reopen은 전체 source/VIEW가 정확히 일치했다.
+- 최종 build pin·help ON/OFF/save smoke 및 정확한 native attribution은 [CROSS_PATH_ACCEPTANCE.md](CROSS_PATH_ACCEPTANCE.md)를 따른다. E02는 Partial이며 기존 all-stored-pose native, 실제 marked IME와 다른 OS/DPI/device 검증을 닫지 않는다. push/deploy는 하지 않았다.
+
+### E04 Contents sibling clipboard — 2026-10-04 후속
+
+- core `a70d6b8`는 같은 composition/FPS 안의 Contents 형제 snapshot Copy/Cut/Paste를 구현했다. 전체 subtree·keys/handles·미사용 path poses·Hold Colors와 local gradient IDs를 보존하며, Paste마다 destination layer-local node ID를 새로 할당한다. Cut/Paste는 하나의 atomic Undo이고 원본/최종 schema·metadata·lock·duration·ID/depth/node/key 한도를 검증한다.
+- UI `a0c3fa0`는 Group 내부 끝/마지막 선택 형제 뒤/root 끝 및 다른 Contents layer를 지원한다. local transform과 paint scope가 적용되므로 pixel 보존 이동은 아니다. clipboard는 session-local이며 key/layer payload와 상호 배타적이다. New/Open/Recovery에서 지운다.
+- 정확한 field/action/transport receipt, stale/IME/playback/held-key guard, text clipboard 및 mouse menu→Find command의 소유권을 보강했다. 취소된 pointer/menu receipt는 다음 정상 입력을 막지 않는다.
+- 독립 테스트 `851657d`는 source/history/VIEW/LEP와 13개 nine-frame scenario의 351 exact RGBA pair/33,696,000 pixels를 검증했다. 생성 fixture는 19 project/38 JSON+LEP이며 실제 native save와 구분한다. 최종 aggregate/release/native 범위와 build identity는 [CONTENTS_CLIPBOARD_ACCEPTANCE.md](CONTENTS_CLIPBOARD_ACCEPTANCE.md)를 따른다.
+- E04 전체는 Partial이다. Cross-composition/FPS conversion·OS/project clipboard·implicit legacy Shape conversion·cross-parent source selection, compound interpolation/Timeline lanes 및 bulk Colors는 별도 범위다. 이전 native47case 및 IME/platform/DPI gaps를 이 단계로 닫지 않는다.
+
+### E04 Hold Colors와 일괄 animation — 2026-10-04 후속
+
+- core `df4eded`는 색/불투명도 stop 전체를 Hold snapshot으로 저장한다. key마다 개수·순서를 바꿀 수 있으며 다른 key/endpoint는 유지한다. 기존 scalar stop animation은 명시적으로 거부해 손실 변환하지 않는다. 실제 representation만 schema54를 요구하고 LEP1/VIEW1·2/address1은 그대로다.
+- core `fa5585b`와 UI `0e67882`는 공통 numeric channel의 Enable/Disable/Add key/Remove key를 명시적으로 적용한다. mixed 선택의 반대 방향 toggle은 없고 각 member의 sample·다른 keys/handles를 보존한다. Disable은 전체 keys 제거를 알리고 final key 제거는 해당 member의 현재 값만 static으로 유지한다.
+- 새 Colors modal은 원본과 분리된 현재 sample을 편집한 뒤 한 Set/Undo로 제출한다. scalar full precision, stop 선택 generation/IME guard, fractional RGB의 displayed-value 복귀 no-op 및 signed-zero tie-order를 다룬다. source/selection/frame/action/transport와 성공한 pending-field receipt를 검사한다.
+- 최종 기본1470(Core498/Desktop966/helper6), 명시적 media32, fmt/all-target와 vendor debug/release/no-std가 통과했다. release/About `20261004.140046-f635623df359cd3b`와352개 source hash가 일치한다. 독립338 exact RGBA 쌍(32,448,000pixel), CLI 생성78render/48쌍 및 실제 native42render/21쌍이 통과했다. 실제 저장7개가 전체 source/VIEW와9frame 비교를 통과했고 compound Open/resave는 byte-identical이다. 네 일괄 action과 한 compound Fill modal/topology/Undo/Redo 범위를 native에서 검증했다.14case 전체 통과가 아니라 부분 qualification이다.
+- 최종 자동·릴리스·native 결과와 빌드 식별은 [CONTENTS_ANIMATION_ACCEPTANCE.md](CONTENTS_ANIMATION_ACCEPTANCE.md)에 기록한다. 기존47개 native backlog 및 실제 Korean marked IME/Windows/macOS/DPI 검증은 별개다. E04는 Partial이며 보간·Timeline compound lane·native retiming·bulk Colors·Contents clipboard는 남는다.
+
+### E04 공통 숫자 속성과 CI 안정화 — 2026-10-04 재개
+
+- 사용자 요청에 따라 기존 `codex/ae-workspace` 이력을 보존하고 분야별 로컬 커밋을 남겼다: CI oracle `4c38913`, 원자적 core `e1004ce`, 독립 render/codec 검증 `8ea6de4`, guarded UI `56ef417`. 새 커밋은 push하지 않았다.
+- 여러 Contents 형제 항목의 typed scalar 교집합을 정확한 공통 값 또는 Mixed로 표시한다. 표시 frame의 유한·범위 내 절대값을 한 Undo로 적용하며 static은 static, animated 변경은 현재 key만 갱신한다. 이미 같은 sample인 member, dormant 값/keys/handles, schema/assets와 전체 no-op Redo를 보존한다. 원본·최종 project/metadata, parent/ID/lock/범위/10,000-key 한도를 원자적으로 검증한다.
+- gradient stop ID는 대응 관계로 사용하지 않는다. 공통 endpoint, 모두 radial일 때 highlight, 모두 존재하는 Dash/Gap만 허용한다. compound Colors, bulk animation toggle, scrubbing, delta/world alignment와 recursive Group 편집은 포함하지 않았다. 기존 LEP1/VIEW1·2/address1/schema는 그대로다.
+- immutable source, selection serial, frame, transport, editor-action generation으로 stale/ABA/중복 callback을 거부한다. invalid 입력은 source text로 복원한다. 독립 리뷰에서 앞 필드 blur 후 다음 필드의 전체 선택이 caret으로 바뀌어 70→7080이 될 수 있음을 찾아, pending/marked text가 없고 source display가 같은 경우에만 selection을 보존하도록 고쳤다. 실제 IME와 native event는 별도 gate다.
+- 최종 headless 기본 **1407개(Core472/Desktop929/helper6)**, 명시적 media32, fmt/all-target check를 통과했다. grid debug/release 각각 unit215+doc43(ignored doc2), no-std check도 통과했다. 독립 literal tracks/공식 LEP codec/15frame의45 exact RGBA 쌍(4,320,000pixel), 실제 EditorState Graph pin/range 보존을 검증했다. 첫 신규 test fixture의 source-order/signed-zero·화면 밖 geometry 준비 오류만 수정했고 assertion을 줄이지 않았다.
+- 이전 Windows CI의 frame30 전체 로그에서 path 좌표15곳만1–2ULP 차이를 확인했다. immutable oracle는 그대로 두고 path d 숫자에만2ULP를 허용하며 다른 모든 byte와 같은 runtime의 no-op Trim identity는 정확히 유지한다. renderer와 pixel assertion은 바꾸지 않았다. 새 Windows CI 통과를 의미하지 않는다.
+- 일반 release 빌드 `20261004.124444-7f1ec73f65e6e1c8`와 실행 중 About을 확인했다. CLI는 생성 fixture60render/30exact쌍(2,880,000pixel) 및 실제 native 저장파일30render/15exact쌍(1,440,000pixel)이 통과했다. native paste+Enter/blur·Mixed·연속 field·empty/Escape/no-op/Redo·lock/playback read-only와 실제 Save/Open/resave를 검증했다. 세 native 저장파일의 전체 source가 독립 기대 문서와 일치했고 다시 열어 저장한 LEP 전체 byte도 같았다. 직접 문자 입력/real Korean IME·tree-blur/hierarchy·paint/gradient 전용UI·일부 invalid/stale/modal·Windows/DPI는 미검증이다. 원래8case 계획은 부분 qualification이며 이전47개 native backlog는 그대로다. 상세 matrix는 BULK_FIELDS_ACCEPTANCE.md를 따른다. E04 전체를 완료로 바꾸지 않는다.
+
+### E04 교차 부모 Contents 드래그 — 2026-10-04, headless 검증 완료·native 대기
+
+- label 위/아래 edge의 Before/After, Group 중앙 Into, 별도 root append target을 추가했다. hover와 최종 release가 같은 semantic target/geometry/planner를 사용하며 source 순서, 같은 부모 Reorder와 교차 부모 MoveSiblings의 한 번 transaction을 유지한다. local 값은 보존하고 목적지 transform/paint scope를 적용한다. core/renderer/schema/LEP/VIEW 변경은 없다.
+- clipped full-label band와 subtree-end marker, 부모 indentation, root landing의 고정 공간을 검사한다. leaf 중앙·eye/disclosure·빈 공간은 target이 아니다. scroll/layout/focus/window/source 변경과 Escape/new press는 취소한다. 정확히 한 번 사용하는 mouse-down receipt로 pending field와 marked IME를 blur 전에 검증하고 최종 release에서 button/modifier/source/transport/geometry를 재검사한다. auto-scroll/hover expansion/cross-layer 이동은 포함하지 않는다.
+- 집중 61개, 전체 기본 1359개(Core 450 + Desktop 903 + helper 6), media 32개, fmt/all-target check와 일반 optimized release가 통과했다. 새 이름 test 34개에서 obsolete same-parent 전용 2개를 교체해 순증 32개다. 독립 검토 2건에서 blocker는 없었지만 planner/core test가 실제 ContentsControls 이벤트 전달·reveal을 증명하지 않는 한계를 명시했다.
+- 빌드 20261004.110504-c2a6fb77abcf9417와 frozen source 341개가 일치했다. 새 CLI 2sample/12 exact RGBA 비교(460,800 pixel), 이전 교차 부모 40쌍과 text/reference31,940,800 pixel, Trim21/Luma18/opacity46, all-pose28비교25,804,800 pixel, Source Text28render/21비교/12보존거부가 통과했다. 복구 중 발견한 중복 테스트 실행은 중단하고 원래 실행의 terminal 성공 결과를 별도 보존했다.
+- 실제 화면 연결은 복구되지 않았고 새 native6case와 이전41개는 미실행이다. E04는 Partial이다. 다음 bounded 검토는 공통 scalar의 multi-item 편집이며 compound Colors animation과 bulk stopwatch는 별도 범위다.
+
+### E04 부모 간 형제 묶음 이동 stage1 — 2026-10-04, headless 검증 완료·native 대기
+
+- 단일/다중 형제 선택의 Move Into/Out와 트리 소유 Ctrl+Right/Left를 연결했다. Into는 가장 앞선 선택 항목 바로 위의 비선택 Group 끝에, Out은 grandparent에서 기존 parent 바로 뒤에 넣는다. 비연속 선택도 클릭/ID가 아닌 원본 형제 순서로 옮기며 빈 원본 Group을 유지한다. 기존 같은 부모 drag/Reorder는 그대로이고 cross-parent drag는 다음 stage다.
+- 원자적 MoveSiblings command는 subtree 전체 ID·local geometry/transform·모든 key/unused pose·paint/Trim·enabled·next_id를 보존한다. 새 parent의 transform/paint scope/isolation을 따르므로 화면 배치와 색은 바뀔 수 있다. inverse/좌표 보상/baking은 없고 reflected/zero-scale parent도 구조적으로 유효하다. 저장 형식 버전 변화가 없다.
+- source/destination/중복·누락 ID/순환/오래된 index/잠금과 실제 256 node·8-group 한도를 검사한다. 원본 및 최종 metadata budget을 검증하며 중간 comma 증가 후 정확히 원복하는 batch는 허용한다. 새 pure move(+Contents Reorder) 경로만 역사적 schema/assets/no-op/Redo를 보존하고 기존 singleton Move 및 mixed/empty 정책을 바꾸지 않는다.
+- 현재 source/context를 재검증한 후 성공할 때만 destination ancestor를 펼치고 선택 ID/유효 anchor/cursor를 유지한다. singleton Pen/Gradient와 numeric Graph의 stable ID/pin/range를 유지하며 Undo/Redo의 기존 key-selection 초기화는 그대로다. 이전 Pen/Gradient gesture는 취소되고 overlay는 새 ancestry에서 계산한다. 리뷰에서 발견한 marked IME capture-order 문제는 hierarchy 버튼에만 opt-in 사전 거부를 넣어 수정했다. 실제 IME/native event 검증으로 주장하지 않는다.
+- 신규 core 16 + desktop 18개, 전체 기본 1327개(Core450/Desktop871/helper6), media32, fmt/all-target check와 일반 optimized release가 통과했다. 최초 실패는 imported layer index·16MiB history 준비의1byte 증가·Group Add prepend 순서를 잘못 가정한 fixture여서 준비 데이터만 고쳤다. 첫 formatter gate는 module 선언 순서만 수정했다. 빌드 20261004.103158-c32f11f49609c815와 source339개를 대조했다.
+- 고정 release CLI는 독립 literal tree/baked geometry와 기존 renderer를 사용한8sample/40 exact RGBA 비교(1,536,000 pixel)를 통과했다. 애니메이션/반사/0배율 조상, paint scope, child Multiply isolation·parent Trim 및 공식 codec을 검사했다. 이전 text/reference31,940,800 pixel, Trim21/Luma18/opacity46, all-pose28비교25,804,800 pixel와 Source Text28render/21비교/12출력보존 거부도 유지됐다.
+- 10:23:57 UTC의 지원된 화면 상태 확인은 같은 native pipe missing 오류였다. 새 native8case와 이전33개는 모두 미실행이다. 재부팅/대체 제어를 하지 않았다. E04는 Partial이며 다음 stage는 Before/After/Into/Root의 명확한 target과 clipping/source/focus/최종 release 검증을 갖춘 교차 부모 drag다. Compound Colors/bulk field는 별도 남은 범위다.
+
+### E02 base + 모든 stored pose 정점 변형 — 2026-10-04, headless 검증 완료·native 대기
+
+- 기존 Transform Vertices에 This frame(default) / Base + all stored poses의 transient scope를 추가했다. 같은 선택 index와 고정 opening local pivot을 base와 모든 pose slot에 적용하며 unused/dormant slot도 포함한다. singleton 절대 좌표 6-field는 그대로다. key별 EditPath 반복·pose interning/deduplication·새 현재 key를 하지 않고 timing/참조/순서/토폴로지/비선택 데이터·paint/ID/부모 transform을 유지한다.
+- 검증된 기존 7-value 수치 helper를 core로 공유해 identity/cardinal/collapse/미세 변형의 계산 분기를 유지한다. 모든 source/selection/유한 입력과 결과, 원본·후보 project 및 metadata budget을 검증하고 전부 준비한 뒤 대입한다. pure nonempty batch는 별도 no-migration 경로로 schema/assets/history를 보존하며 mixed/empty batch의 기존 정책은 바꾸지 않는다. 저장 형식 버전 증가는 없다.
+- 현재 보이는 path가 같아도 base/다른/unused pose가 달라질 수 있어 전체 draft/target으로 no-op를 판단한다. overlay는 완성된 draft를 같은 frame에서 평가하며 float 연산 순서의 bit-level 가환성을 가정하지 않는다. 저장 pose 범위와 opening sample은 검사하지만 모든 overshoot frame을 무한 순회하거나 보장하지 않는다.
+- scope 전환은 pending text와 새 scope를 함께 stage하여 실패 시 이전 accepted scope/values/draft를 보존한다. 성공하면 serial을 교체하고 오래된 callback을 막는다. Reset은 scope를 유지한 채 원본·pivot·identity를 복구한다. 실제 pointer/IME/focus 검증과 model/helper 증거를 구분한다.
+- 새 core 23개(수학 8 + 모든 pose 13 + budget 2)와 desktop 17개(scope 7 + view/preview 4 + render 6)를 추가했다. 최초 작성 추정 18은 실제 test 수 17로 정정했으며 기존 test를 삭제하지 않았다. 집중 vertex 107개와 whole-pose 8개(Preview 2개 중복 포함), 전체 기본 1293개(Core 434 + Desktop 853 + helper 6), media 32개, fmt/all-target check 및 일반 optimized release가 통과했다. exact-budget fixture가 true→false의 1 byte 증가로 먼저 실패하여 fixture history setup만 고쳤다.
+- 빌드 번호 20261004.094224-dd4e7ca30e13def0와 source input 336개를 확인했다. 실제 core command/official codec으로 Python 입력 8개를 검증했고, 7개 전체 출력은 독립 Decimal geometry 문서와 같았으며 hidden-pose overflow는 source/Redo를 보존했다. 고정 release CLI의 28 RGBA 비교(25,804,800 pixel)와 독립 baked midpoint가 통과했다. 이전 text/reference 31,940,800 pixel, Trim 21 frame, Luma 18 frame, opacity 46 render 및 Source Text 28 render/21비교/12거부 gate도 유지됐다.
+- 사용자 요청의 cloud 복구 조사 중 지원된 host 재부팅 경로가 없어 재부팅하지 않았다. 직전 정상 commit 전체 이력, 당시 WIP 9개, QA 입력과 정확한 Linux release를 hash/readback 검증한 snapshot으로 보존한 후 재개했다. native pipe는 계속 차단이고 새 9-case는 이전 24개와 별도로 미실행이다. E02는 Partial이다. 다음 E04는 cross-parent sibling block의 원자적 command와 explicit Move Into/Out·keyboard를 먼저 구현하고, guarded drag target은 다음 별도 acceptance stage로 진행한다.
+
+### F05 레이어 전체 Source Text Hold animation — 2026-10-04, headless 검증 완료·native 대기
+
+- 전체 UTF-8 문자열을 Hold key로 바꾸는 독립 Source Text 채널을 추가했다. Timeline Text의 첫 행에 watch/key/이전·다음/현재 문자열 canvas 편집을 두고 Properties도 현재 sample을 편집한다. 숫자 값·Value/Speed Graph·F9/비-Hold/temporal/velocity 편집은 전체 선택에 대해 거부한다. 시간 선택·drag·copy/paste·delete는 지원하고 core의 time-only scaling에는 새 Graph UI를 만들지 않았다.
+- 첫 key 전에는 첫 문자열, key 사이/뒤에는 최근 문자열을 유지하며 빈 문자열도 유효하다. animation이 꺼져 있으면 static baseline을, 켜져 있으면 현재 frame의 Hold key를 편집한다. 동일 문자열은 key/history를 만들지 않는다. off/마지막 key 제거는 명시한 fallback을 baseline에 굳히고 pool/timing을 비운다. 기존 정적 글꼴·typography·paint·opacity 값과 트랙은 유지한다.
+- sparse source_text_animation의 interned string pool과 opaque timing은 존재할 때 schema 53을 요구한다. 16,384 UTF-8 byte/string, 10,000 key/string, layer당 1 MiB pool 및 기존 16 MiB escaped metadata 한도를 검증한다. live slot을 한 번에 표시하고 dead slot을 재사용/필요분만 비워 full/fragmented pool에서도 live index를 보존한다. 실패는 storage/Undo/Redo까지 원자적이다. clipboard는 index가 아니라 실제 문자열을 옮긴다.
+- renderer/effect bounds, caret/hit/selection, wrapping/overflow/Fit, text session과 glyph 진단이 같은 현재 문자열을 사용한다. Paragraph→Point는 같은 sample의 범위를 잘라 현재 문자열과 global paragraph mode를 한 transaction으로 바꾸고 다른 keyed string은 보존한다. glyph 진단은 active checked frame/inactive 0 및 기존 4 KiB/128-line 범위이며 전체 animation glyph 보장이 아니다. LEP 1, VIEW 1/2, 숫자 Graph address 1과 TextStyle은 그대로다.
+- 새 core 26개와 desktop 26개를 추가했다. 집중 core 26개, desktop 27개(기존 1개 포함)가 통과했고 전체 기본 1253개(Core 411 + Desktop 836 + helper 6), media 32개, fmt/all-target check와 일반 optimized release가 통과했다. 빌드 번호 20261004.085447-3ba71bfa99d1ccdb와 source input 331개를 대조했다. 기존 임시 test debug=0/strip 외 repository/release profile 변경은 없다.
+- 실제 CLI는 Hold 경계 7개 sample의 28 render/21 exact RGBA 비교, 미래·하향 선언·잘못된 pool/비-Hold·구형 reader의 12개 거부/기존 출력 보존을 통과했다. 정적 문자열은 독립 지정했지만 같은 renderer의 일관성 비교라는 한계를 남긴다. 이전 text/reference 31,940,800 RGBA pixel, Trim 21 frame, Luma 18 frame, opacity 46 render가 정확히 유지됐다. 예전 opacity future53 거부 fixture는 역사 기록이며 현재 schema53 reader에 잘못 재적용하지 않았다.
+- Source Text 8-case native 계획은 미실행이며 Luma 8개·opacity 8개와 별도다. 09:00 UTC 지원 read-only 재시도도 native pipe 부재로 실패했고 화면/app 상태를 보거나 바꾸지 않았다. F05는 Partial이다. rich text/Text Animator/경로 위 텍스트/재사용 instance control을 완료했다고 주장하지 않는다. 다음 bounded E02 항목은 기존 정점 변형에 base+모든 stored pose 범위를 추가하는 작업이며 기존 renderer를 바꾸지 않는다.
+
+### F03 / D01 독립 Text Fill·Stroke Opacity — 2026-10-04, headless 검증 완료·native 대기
+
+- Fill Opacity와 Stroke Opacity를 기존 10개 Text scalar 뒤에 추가해 총 12개로 확장했다. 각각 0–100%이며 sparse entry가 없으면 100%다. Character/Properties의 정밀 숫자·독립 stopwatch, Timeline, % 및 %/s Graph와 typed pin을 연결했다. RGB watch는 여전히 RGB 세 채널만 바꾸고 Transform Opacity는 별도다.
+- 실제 Text swatch는 전용 picker target을 사용한다. 6자리 HEX는 RGB만, 8자리 HEX·alpha·recent/sample은 해당 paint만 바꾸며 RGB+alpha는 한 Undo다. no-op/Cancel/edit-away-back은 source/history/Redo를 보존한다. 모든 picker의 stale serial/source/frame/hidden callback 방어도 보강했고 generic target의 alpha 및 selection/playback 정책은 유지했다. helper 검증과 실제 native event 증거를 구분한다.
+- 각 fill/stroke 전체 pass에 float opacity를 한 번만 적용한다. 정확한 100%는 기존 SVG를 그대로 사용하고 0%도 편집·layout·glyph 진단·활성 geometry의 effect allocation을 보존한다. 기존 TextStyle, LEP 1, VIEW 1/2, address 1은 그대로다. 새 entry는 keyless 100%, disabled paint, inactive composition에도 schema 52를 요구한다. 이전 RGB/Width는 48, typography는 49이며 untouched legacy는 sparse 상태와 버전을 보존한다.
+- 초기 oversized-filter pixel oracle은 기존 renderer의 tight filter edge 동작 때문에 실패했다. 고정된 이전 release에서도 width 확장 시 같은 edge 차이를 재현했다. per-pixel 예외는 제거했고 opaque legacy filter surface를 유지한 독립 paint-group reference로 integration을 비교한다. 별도 float 산술 test는 모든 pixel을 정확히 확인하고, geometry·filter rectangle은 allocation 불변성을 확인한다. tolerance나 production workaround는 없으며 일반적인 모든 방향 no-clipping 증명이라고 주장하지 않는다.
+- 집중 opacity 24개, 전체 기본 1201개(Core 385 + Desktop 810 + helper 6), explicit media 32개, fmt/all-target check와 일반 optimized release가 통과했다. 새 core 18개와 desktop 33개는 이 합계에 포함된다. 빌드 번호 20261004.082259-052c0f12653666f8과 watched source 327개의 fingerprint를 검증했다. 테스트에만 기존 임시 desktop debug=0/strip 설정을 사용했고 release/repository profile은 바꾸지 않았다.
+- 실제 고정 release CLI에서 이전 text/reference 31,940,800 RGBA pixel, Trim 21 frame, Luma 18 frame이 정확히 유지됐다. 새 fixture gate는 46 render의 25개 exact RGBA 비교와 독립 layer opacity, 미래·하향 선언·container·이전 reader의 11개 거부/출력 보존을 포함한 48개 검사를 통과했다. 정적 sample 비교는 같은 renderer의 evaluation/serialization 일관성 증거이며 별도 pixel 산술 oracle과 구별한다. Python 생성 LEP를 실제 UI Save로 표현하지 않는다.
+- 08:26 UTC 지원 CUA 재확인도 native pipe 부재로 실패했다. Text opacity 8-case와 앞선 Luma 8-case는 실제 화면 검증 전이며 우회 제어·다른 컴퓨터 사용은 하지 않았다. 자동화 gate가 끝난 local checkpoint와 native 미완료를 분리한다. 다음 bounded 편집 항목은 F05 레이어 전체 Source Text의 Hold animation이며 rich text/Text Animator 전체 완료를 뜻하지 않는다.
+
+### A05 미래 project version 진단 보강 — 2026-10-04
+
+- JSON/native metadata가 숫자로 선언한 미래 project version을 asset/model decoding 전에 확인하고 “Unsupported project version {version}; this build supports up to version {maximum}”으로 거부한다. u64::MAX도 모델의 좁은 version 타입으로 변환하지 않고 명확히 보고한다. schema/serialization/migration/rendering/UI control은 바꾸지 않았다.
+- 기존 missing/invalid version, 구형 image-version 요구, native container/CRC/JSON 크기/중복 chunk/strict JSON/storage kind/inline image 검사 순서는 유지했다. 새 회귀 4개와 기존 future test 1개가 집중 통과했고, 전체 기본 1150(Core367+Desktop777+helper6), media32, fmt/all-target check와 일반 optimized release가 통과했다.
+- 실제 CLI before/after 16개에서 미래 버전 8개의 진단만 개선됐다. 나머지 lower/invalid/container/CRC 6개는 같은 오류를 냈고, 거부된 14개 모두 기존 출력·원본을 보존하고 임시 파일을 남기지 않았다. 정상 JSON/native의 216,000 RGBA reference pixel은 정확히 같다. 빌드 번호20261004.073702-8b8e23ce8527ad09와 전체 source input325개 fingerprint를 확인했다.
+- CUA native pipe는 이전에 동작하던 Trim session에서도 지원된 read-only 재확인에 실패했다. 이 fix는 headless 안정성 체크포인트이며 Luma native 8-case를 닫거나 새 UI 검증을 했다고 주장하지 않는다.
+
+### G06 Luma Key — 2026-10-04, headless 검증 완료·native 대기
+
+- 다음 bounded 효과로 Luma Key를 구현했다. 0–255 Threshold/Softness 두 scalar(default128/0)와 static Keep Brighter/Darker, 독립 animation/key/Timeline/Graph 및 mode를 보존하는 preset4를 연결한다. Audio/Null, 잘못된 mode/kind 및 LinearRgb는 거부하며 존재 자체가 bypass/identity/inactive 상태에서도 schema51을 요구한다. 기존 effect/preset serialization, LEP1과 VIEW/address version은 유지한다.
+- 앞 단계의 8-bit premultiplied source를 pinned renderer가 straight byte로 복원하고 explicit f32 0.2126/0.7152/0.0722 matrix가 luma를 byte로 truncate한다. ideal 원본 luminance/nearest rounding이라고 주장하지 않는다. Softness0은 q>=Threshold, 나머지는 centered full-width linear coverage이며 rounded byte의 정확한 complement가 Darker다. 원래 premultiplied RGBA에 한 번만 적용하고 all-pass identity는 stage를 생략해 기존 linear grouping도 보존한다.
+- 새 UI는 full-precision 값과 field별 InputTarget, 기존 pointer-before-blur receipt를 사용한다. source/document/composition/layer/effect/frame을 확인하고 새 선택에 draft를 retarget하지 않는다. 정확히 Undo로 복원한 source는 기존 InputTarget 계약대로 다시 허용한다. normal blur와 지연 stale callback 거부의 실제 검증은 구별한다.
+- Core363(신규15), production typecheck, 집중 desktop30(신규29+기존 matte1)과 새 explicit FFmpeg1이 통과했다. 독립 raw pixel, all256gray/선택 alpha, anti-alpha-square, identity/order/bounds, mask/text/interpretation/remap/matte/Adjustment와 model/VIEW/preset 보존을 검사한다. 최초 feather 이후 opacity assertion은 byte128과 기존 float50% group opacity를 혼동했다. 별도 all256alpha legacy proof와 f32 nearest-even reference로 고쳤고 production/tolerance는 바꾸지 않았다. 새 video 검사는 exact source anchor와 기존 codec-specific 오차 경계를 분리한다.
+- 기본 debug metadata test typecheck는 source error 없이 SIGKILL(199.9초)로 끝났다. desktop package만 command-line debug=0으로 바꾼 재시도가 통과했다. assertions/features/optimization/release profile과 저장소 설정은 그대로이며 실제 종료 원인이나 통제된 성능 개선을 단정하지 않는다.
+- aggregate 기본1146(Core363+Desktop777+build-helper6), explicit media32, fmt와 all-target typecheck가 통과했다. 일반 optimized release도 161.7초에 통과했다. 빌드 번호20261004.071022-e9c96a05a1f8e6d7은 전체 watched input325개의 독립 fingerprint와 일치한다. native는 정확히8-case 계획이며 candidate-v2 LEP6개가 공식 codec을 통과했다. 최초 수동 fixture의 asset ID 누락은 거부 bytes/log를 남기고 sample metadata만 고쳤다. cloud native pipe 연결이 QA와 parent 양쪽 및 fresh supported reset에서 실패해 실제 Luma 화면 검증은 아직 실행하지 못했다. 기존 정상 Trim save는 변경/강제 종료하지 않았다. G06 전체는 Partial이며 나머지 keying/정리/변위/왜곡/noise/전환/style은 별도 범위다.
+
+- 최종 고정 release CLI에서 기존 text/reference31,940,800 RGBA pixel과 Trim21frame이 정확히 같았다. 준비된 Luma fixture18render가 성공했고 frame30은 Luma 없는 독립 baked-image reference와216,000 RGBA pixel이 일치한다. 이 결과는 native-created save나 실제 UI PNG export의 증거가 아니다. 모든 원본 hash를 보존했다. 기존 schema50 reader는 image-bearing schema51을 output 변경 전에 거부했지만 기존7..50 guard의 “Image assets require project version 7” 진단을 냈다. 첫 assertion의 unknown-kind 기대가 틀렸으며 old source를 확인하고 그 사실을 기록했다. 더 명확한 미래 버전 진단은 위 후속 A05 안정성 체크포인트에서 보강했다. 07:20의 supported CUA 재확인도 pipe 부재로 실패했고 우회 제어/다른 컴퓨터 사용은 하지 않았다.
+
+### E05 Trim Paths 및 자동 About 빌드 번호 — 2026-10-04
+
+- Contents의 Trim Paths에 Start/End(0–100%)와 Offset(±1,000,000°), 독립 animation/watch, Timeline 및 Value/Speed Graph와 저장된 pin을 연결했다. 선택한 Group 끝에 추가하며 기존 다른 Add 규칙은 유지한다. 각 원래 contour에 적용하고 Start/End는 작은 값부터 정규화한다. 같으면 비우고 정확한 0–100%는 Offset과 관계없이 원래 geometry를 유지한다.
+- 같은 Group에서 operator를 먼저 순서대로 평가하되 원래 paths-above membership은 각 paint/operator마다 고정한다. child의 자체 paint는 parent Trim과 분리된다. 자식 transform이 반영된 operator-local arc length를 쓰며 원본 path/pose는 바꾸지 않는다. 뒤의 Trim은 gap을 제외한 원래 contour의 살아 있는 fragment를 합쳐 측정한다. 열린 wrap은 분리하고 실제 닫힌 seam만 연결한다. 부분 path는 Stroke용 Z를 만들지 않으며 Fill의 implicit closure와 구별한다.
+- outward-rounded binary64 bound, bounded subdivision/inversion과 endpoint rounding allocation을 사용한다. cut 목표는 local 1/1024 unit과 retained/removed 중 작은 arc의 1/8 중 작은 값이다. source measurement 65,536 node, Contents layer 1,048,576 work, frame 4,194,304 work와 64 MiB 최종 SVG 한도를 유지한다. 표현할 수 없는 tiny feature/한도 초과는 명시적인 오류이며 Preview/CLI/still/video/queue가 실패를 전파하고 기존 destination을 보존한다. 이 수치 bound는 후속 transform에 무관한 최종 pixel 보장이 아니다.
+- Trim 존재 자체가 disabled/default/inactive/nested 상태에서도 Project schema 50을 요구한다. LEP v1, 기존 VIEW/address version은 그대로다. Value의 실제 no-op는 layer/type/lock/frame/범위를 먼저 검증한 뒤 key/history/Redo/schema/assets를 보존하며 nested Batch와 generic track 경로도 검사한다. explicit key/watch와 Offset 0→360은 의도한 편집이다.
+- 독립 reference의 23 fixture/154 cut, 80/120-digit quadrature와 별도 100-digit cross-check를 저장했다. directed binary64 hull은 저장한 reference decimal을 감싸며 empirical quadrature uncertainty를 formal proof로 주장하지 않는다. 147 inverse cut, stricter half/combined budget allocation, 119 full Trim tuple과 1024-segment/repeated-operator stress가 통과했다. 초기 1024 case의 work 초과는 한도 완화 없이 interval Boole bound로 해결했다. 초기 UI fixture 11개는 legacy rectangle 대신 명시적 shape를 생성하도록 수정했고 raster/effect bbox oracle은 문서화한 local cut bound에서 도출한 analytic capsule/endpoint 검사로 고쳤다. pixel을 생략하거나 임의 RGBA tolerance를 적용하지 않았다.
+- Help → About Libre Effects에 version, UTC build number/time, source revision/state, FNV-1a source fingerprint, target/profile을 표시한다. build.rs는 관련 source/assets/config의 실제 bytes를 읽어 compile-time metadata만 만들며 source tree에 counter를 쓰거나 실행 중 Git을 읽지 않는다. uncommitted source 변경도 새 번호를 만들고 cached Cargo invocation은 번호를 유지한다. FNV는 change identifier이며 보안 서명이 아니다. archive/Git 부재도 명시적으로 표시한다.
+- 최종 B source의 fmt, workspace/all-target check, Core 348 + Desktop 748 + build-helper 6 (기본 1102), explicit FFmpeg 31이 통과했다. desktop test에만 기존 임시 debuginfo strip override를 유지하며 repository profile/optimization/assertion은 그대로다. build/link의 process-local one-CPU affinity로 thread 수를 제한하고 test 실행은 일반 affinity를 사용했다. About A의 여섯 값과 Escape/Close는 실제 native에서 일치했고 unchanged Cargo 재호출은 binary/번호를 그대로 유지했다. 실제 test-source 수정 후 같은 Git HEAD에서 B release(2분 14초)가 통과했고 embedded number/fingerprint가 모두 변경됐다. B 실제 About 화면의 여섯 값과 A→B 변경도 확인했다. 최종 B CLI는 legacy/text 31,940,800 RGBA pixel과 기존 Trim fixture 21 frame을 정확히 보존했고 precision 오류의 기존 output/temp 보호가 통과했다. 기존 schema49 reader는 version 진단보다 먼저 unknown TrimPaths로 안전하게 거부한다. 원래 bounded native Trim 10-case도 모두 통과했다. 실제 저장한 animation은 Trim을 제거한 독립 analytic line reference와 216,000 RGBA pixel이 정확히 같았다.
+- 실제 화면에서 Add/default와 한 Undo, End/Offset 0/30/60 sample, Timeline 값 수정, Value/Speed 단위와 pin, 열린 wrap의 분리·닫힌 seam의 Stroke/Fill 차이, paint 전/후 위치 변경, 자식/부모 local 길이 차이와 child paint 분리, 두 Trim의 surviving fragment 합산을 확인했다. Pen은 제거된 구간까지 원래 source를 표시하고 한 좌표 수정/Undo가 나머지 data를 보존했다. same-value spelling은 key/history를 만들지 않고 Redo를 보존했으며 Escape/duplicate/delete/lock도 통과했다. selection-switch의 정상 blur는 새 Path가 아니라 여전히 유효한 이전 Trim에만 commit했고 Undo가 정확했다. 이 흐름을 지연된 stale callback 거부의 native 증명으로 보지 않으며 해당 보장은 automated coverage다.
+- native-created animation과 active/inactive composition pin 파일의 실제 Open/resave가 byte-identical이고 VIEW 2/address 1, frame 및 Graph mode를 복원했다. Precision 실패는 composition/layer/frame/Trim/source context를 표시하고 이전 Preview를 지웠다. About A/B는 표시된 여섯 값이 각 고정 binary와 같고, B의 전체 watched input 322개(22,278,369 byte)를 별도로 해시한 결과도 embedded fingerprint와 일치했다. 실제 저장 21개가 독립 CRC와 공식 codec 왕복 검사를 통과했고 원본 screenshot 39개를 SHA로 확인했다. admitted base 8개와 이전 B01 fixture는 그대로이며 마지막 앱은 정상 project의 clean 상태로 실행 중이다. 실제 IME, Windows/macOS, 다른 DPI, held-pointer 중간 frame과 모든 async event 조합은 이 bounded native session에서 검증한 범위가 아니다.
+- Repeater, Merge/Offset Paths, compound/distributed trim mode, mask 입력, canvas trim handle, topology-changing interpolation과 Adobe 동등성은 별도 범위이며 E05 전체는 Partial이다.
+
+### B01 Project 목록 긴 이름 표시 — 2026-10-04
+
+- 좁은 Project 패널에서 긴 이름이 고정 높이 행을 넘어 줄바꿈되던 표시를 수정했다. 이름은 한 줄의 ellipsis로 줄어들며 hover는 원문 전체를 보여준다. type label과 행 action은 줄바꿈/축소하지 않는다. 원본 이름·ID·검색·기존 callback은 바꾸지 않았다.
+- 실제 GPUI helper style을 검사하는 회귀 1개를 추가했다. fmt, test typecheck, Core 294 + Desktop 717 (기본 1011), explicit FFmpeg 30이 통과했다. 첫 일반 release build는 14분 42초 후 rustc SIGKILL로 종료했으며 source diagnostic은 없었다. 원인은 확정하지 않았다. 이전 clean editor를 정상 종료한 뒤 동일 optimized profile의 Cargo -j 1 재시도는 2분 7초에 통과했다. 저장소 profile/toolchain은 변경하지 않았다.
+- 고정된 B01 release에서 기존 32 text frame의 28,440,800 RGBA pixel과 typography 5 sample의 3,500,000 RGBA pixel을 별도 report로 다시 비교했고 모두 정확히 일치했다.
+- 초기 native에서 행 겹침은 해결됐지만 ellipsis 대신 hard clipping이 보이는 GPUI 0.2.2 nowrap measurement-cache 문제를 발견했다. width-sensitive text shaping과 명시적 one-line clamp로 수정한 최종 source에서도 기본 1011 + FFmpeg 30, fmt/check와 일반 optimized release(2분 5초)가 다시 통과했다. GPUI dependency나 다른 패널은 바꾸지 않았다.
+- 최종 고정 release의 실제 네 가지 bounded 검사(좁은/일반 폭에서 보이는 ellipsis와 겹침 없음, composition/folder full-name hover, 전체 이름 suffix 검색/선택, composition Add→one Undo→Save/reopen)가 통과했다. Add는 원래 이름의 정확한 composition을 참조했고 Undo는 원본 PROJ를 복원했다. baseline/Undo/reopen 파일의 bytes와 PROJ·VIEW가 같으며 최종 5개 fixture/save 파일이 공식 codec 왕복 검사를 통과했다. 최종 release에서도 위 두 CLI pixel report를 별도 재검증했다. B01 전체 DPI/배치 기준·접근성 완료를 의미하지 않는다.
+
+### F03 레이어 전체 Typography 애니메이션 — 2026-10-04
+
+- Font Size 1–2048 px, Tracking −1000–10000 (1/1000 em), Leading 0.1–10 (font-size ratio)의 세 sparse scalar를 추가했다. Character와 Properties는 현재 frame을 표시하고, 독립 stopwatch와 Timeline/Text의 총 10개 channel, Value/Speed Graph의 px·1/1000 em·ratio 및 초당 단위를 연결한다. Leading은 명시적인 배율이며 Auto 또는 절대 px 간격이 아니다.
+- 해당 typography track이 없으면 숫자 편집은 기존 static base를 수정한다. track이 있으면 현재 frame의 실제 바뀐 값만 수정하고 static fallback, 다른 channel, 기존 easing을 보존한다. unchanged/format-only 입력은 key나 history를 만들지 않는다. explicit key/stopwatch는 track을 만들고, animation off는 제한된 현재 sample을 keyless override로 남긴다. frame 범위를 모르는 Layer planner의 static 편집은 호출자가 유효한 frame을 보장하며, UI는 고정 InputTarget과 검증된 playhead를 사용한다. 실제 EditText는 core에서 frame/type/lock/range를 다시 검사한다.
+- renderer와 effect bounds, point-text hit, caret/selection/IME 위치 계산 및 paragraph flow가 같은 typography sample을 쓴다. Source Text 편집은 평가된 font size를 static 값으로 굳히지 않는다. Fit box height와 Paragraph→Point는 현재 frame의 조판을 사용하며 후자는 보이는 line을 Source Text로 반영하므로 전체 animation의 문자열에 영향을 준다. typography base/track은 그대로다.
+- glyph 검사는 active composition의 현재 local frame과 inactive composition의 frame 0을 snapshot에 고정하고 결과마다 표시한다. frame/composition/source/epoch/font 변경은 결과를 무효화한다. 기존 한 worker, cooperative cancellation, glyph/source 한도와 실제 fallback face 구분을 유지한다. whole-animation coverage나 실제 IME/OS 동등성을 주장하지 않는다.
+- materialized typography track은 key가 없거나 inactive composition에 있어도 Project schema 49를 요구한다. paint-only map은 48이며 단순 조회/희소 Graph focus/no-op는 version이나 track을 만들지 않는다. native LEP v1, VIEW v1/v2 및 typed address v1은 그대로다. 기존 reader가 schema 49를 읽을 수 있다는 forward-compatibility 주장은 하지 않는다.
+- 독립 리뷰에서 pending field/canvas Source Text의 outside mouse-down commit이 button의 오래된 on_click guard보다 먼저 실행될 수 있음을 확인했다. 새 버튼에만 적용하는 Shell-root capture가 이전 target을 검증한 뒤 입력을 commit하고, 정확한 post-commit snapshot을 같은 click에 연결한다. masked hitbox, redraw, drag-out, epoch/context 변경 및 창 비활성화/실제 종료의 정리를 검사하며 전역 TextField/Preview 정책은 바꾸지 않았다.
+- 초기 focused 실행은 28 pass/2 fail이었다. 하나는 animation off가 keyless track을 남긴다는 계약을 놓친 테스트였으며 다른 channel의 정확한 보존 비교로 고쳤다. 다른 하나는 identity filter와 unfiltered의 내부 antialias 한 pixel 차이였다. 이전 C09 pin의 static fixture, zero-offset filter 및 확장 filter bounds에서도 재현됐으며 clipping/새 typography 회귀가 아니었다. production은 유지하고 oversized same-filter의 정확한 RGBA 및 unfiltered의 정확한 alpha-support/extents로 검사했다. 수치 tolerance는 추가하지 않았다. 나머지 V1 desktop 714개도 별도 실행에서 통과했다.
+- 최종 fmt/check, Core 294 + Desktop 716 (기본 1010), explicit FFmpeg 30, 일반 optimized release가 통과했다. 신규 45개는 core 10과 desktop 35이며 focused 30을 중복 합산하지 않는다. desktop 구성은 render 10, session/geometry 4, diagnostic/lifecycle 9, control/unit 7, VIEW 2, pointer 3이다. 기존 text 32 frame의 28,440,800 RGBA pixel과 독립 typography 5 frame의 3,500,000 RGBA pixel이 이전 static/current static/current native 사이에서 정확히 일치한다.
+- 최초 debug test build는 30m18s가 걸렸고 진행 중 allocated executable bytes 증가를 확인했다. 이후 desktop test에만 임시 `strip="debuginfo"` command-line override를 사용했다. 두 테스트만 고친 rebuild는 40.66s, focused 실행은 17.58s, 측정한 최대 child RSS는 약 1.25 GiB였다. 서로 다른 test/profile/cache 상태의 관찰이며 통제한 성능 보장은 아니다. 최적화·assertion·feature나 repository profile은 바꾸지 않았고 일반 release에는 override가 없다. 디버거/일부 backtrace의 file-line 정보가 줄어드는 점을 README에 남겼다.
+- native static fixture의 실제 44 px / tracking 80 / leading 1.4 편집은 track을 만들지 않고 다른 데이터를 정확히 보존했지만 declared schema 47이 34가 됐다. 직전 C09 commit의 core를 별도 디렉터리에서 빌드해 같은 기존 SetContent/SetTextStyle 명령을 실행한 결과 전체 Project가 현재 native 파일과 정확히 같았다. 이는 기존 changed-edit feature-version 재계산이며 새 회귀가 아니다. untouched load/save와 새 field planner의 no-op는 47을 보존한다. 초기 실패 기대값을 남기고 이 특정 편집 결과의 기대 schema만 34로 기록하며 포괄적인 version mask를 쓰지 않는다.
+- 첫 고정 release의 bounded native 10-case 검증이 통과했다. Character의 point/paragraph 0/30/60 sample, Properties Inspector의 30-frame 48 px, 중간 Font Size key 하나와 unchanged/Undo/Redo, Tracking 독립 off, pending 숫자→stopwatch의 field/toggle 두 history와 drag-out, Timeline 10 channel 및 세 단위의 Value/Speed pin을 확인했다. point/paragraph Source 편집은 기존 newline과 모든 typography base/track을 보존했고 Cancel/Undo/Redo도 정확했다. Fit은 48 px에서 height 130→276만 바꿨고 pending 52 px→Fit은 새 sample로 height 377을 계산했다. Point 변환은 미리 관찰한 visible line만 남기며 다른 geometry/track을 보존했고 Undo가 정확했다.
+- glyph 진단은 close/seek/recheck로 active frame 30/60과 inactive 0을 표시했고 paragraph overflow를 incomplete로 보고했다. 이 흐름을 live modal worker 중 frame invalidation의 별도 native 증거로 보지 않는다. locked read-only, field Ctrl+A/Backspace/paste/Escape 격리와 마지막 실제 Open/resave의 PROJ·VIEW 일치가 통과했다. saved-data report 20개와 CRC/공식 codec container 26개(실제 저장한 working copy 20개), 원본 CUA 62개(F03 60·이전 C09 2)를 보존했다. 초기 잘못 이름 붙인 Inspector 화면은 Character로 재분류했고 마지막 독립 Properties 관찰로 원래 항목을 닫았다. 이 read-only 관찰은 이미 끝난 persisted VIEW 비교를 대체하지 않는다. File chooser 뒤 global Undo에는 timeline 재포커스가 필요했다. static no-op, native curve overshoot, 임의의 Unicode/caret/실제 IME·DPI·Windows/macOS는 이 세션이 독립 증명한 범위가 아니다. per-character style, Source Text animation, Text Animator, Auto/absolute leading, kerning mode와 font identity/weight animation은 별도 범위이며 F03 전체는 Partial이다.
+
+### C09 기본 layer transform 명령과 Linux image lifetime — 2026-10-03–04
+
+- Layer menu와 공통 search에 Reset Scale & Rotation, Flip Horizontal/Vertical, Fit Layer Inside Composition, Center Anchor in Source Bounds를 연결했다. Reset은 scale 100/100과 rotation 0만 변경하며 position/anchor/opacity는 유지한다. Flip은 현재 local anchor 기준 부호 반전이다. Fit은 각 선택 root의 변환된 source rectangle을 비율 유지하여 composition 안에 맞추고 중앙 정렬한다. 효과 확장·mask trimming·text ink·자손 bounds는 포함하지 않는다. Center는 source width/height 절반의 anchor와 local position 보정으로 현재 pose를 보존한다.
+- 모든 명시적 선택 ID/lock/type/frame을 먼저 검증하고 실패는 전체 거부한다. Reset/Flip/Fit은 선택 root만, Center는 보정으로 각각의 pose가 유지되므로 모든 선택 layer에 적용한다. Audio는 모두 불가, Null은 Fit/Center 불가다. static base 또는 현재 frame의 실제 바뀐 scalar만 수정하며 기존 key interpolation/handle을 유지한다. no-op/0-scale Flip/repeated Fit은 key·Redo·source bytes·schema/assets를 보존한다. 전체 animation 보정이나 baking은 없다.
+- Fit은 translated corner 차 대신 world linear extents를 사용하고 position-space inverse로 목표를 직접 계산한다. hierarchy level을 포함한 n=32×(levels+1), gamma=n×EPSILON/(1−n×EPSILON)을 scale/center의 반올림 오차 한도로만 쓴다. center 한도는 composition 치수 기준이며 큰 parent translation으로 확대하지 않는다. candidate도 같은 기준으로 검증하고 실패하면 clamp 없이 거부한다. normalized rank 검사로 실제 collapse와 tiny uniform scale을 구분한다. unchanged finite sample을 먼저 비교하여 합법적인 animation overshoot가 무관한 scalar 수정/no-op를 막지 않는다.
+- C09 최초 source의 focused Core15/Desktop17이 통과했고, 정밀도 리뷰 뒤 Core17과 전체 Core284+Desktop671(기본955), FFmpeg30, fmt/check/release가 통과했다. Desktop 신규18개는 routing/menu12와 독립 render6이다. 이 counts에 focused 결과를 중복 합산하지 않는다. 최종 v3는 Linux retirement10개를 포함하여 Core284+Desktop681(기본965), FFmpeg30, fmt/check/release가 통과한다. 기존 text32frame의 28,440,800 RGBA pixel도 각 고정 pin에서 정확히 일치한다.
+- 초기 native pin9375c4e6은 Reset/Flip/Fit, Undo/Redo/no-op와 source 보존을 확인했지만 빠른 Undo 두 번 뒤 GPUI BladeAtlas queued-upload lookup에서 종료됐다. 저장한 QA 파일은 그대로였으며 crash log와 해당 pin의 증거를 별도로 보존했다. app의 즉시 image drop 경로가 아직 queued/in-flight인 atlas slot을 제거할 수 있어, Linux에서만 retirement queue를 세 callback generation으로 지연하고 두 번의 full refresh/presentation 뒤 제거하도록 고쳤다. GPUI의 callback-before-present와 이전 GPU submission wait 순서를 실제 pinned source로 확인했다. Preview/channel/thumbnail 다섯 call site를 공통 helper로 교체했으며 registry/dependency는 수정하지 않았다. 다른 OS의 기존 정책은 유지한다.
+- retirement의 pending upload·cached sprite·초기 present 없는 draw·같은 frame 중복·slot 재사용·지속 교체·idle restart·창 종료를 deterministic model10개와 독립 source review로 검사했다. 수정 pin e90e013b는 동일한 빠른 Undo 두 번, 추가 Undo/Redo 네 cycle, preview/thumbnail 변경과 Red→Alpha→RGB 전환을 실제 앱에서 통과했다. panic/종료 없이 startup log가 깨끗하며 저장 LEP가 baseline bytes와 정확히 같다. 나머지 bounded C09 native 검증도 완료했다. static/animated Center, root-only Reset/Fit와 기존 eased key 보존, 정확한 Undo/Redo, field/modal routing, locked/Audio/Null availability, zero no-op·collapsed/singular Fit 원자 거부와 singular parent Center를 확인했다. 마지막 animated native 파일을 frame60에서 실제 Open/resave한 전체 LEP bytes가 같다. 통합 assertion73개(전체 project 비교19, 독립 affine/fit5, bytes 쌍22 포함)와 CRC/공식 codec 파일45개가 통과했다. 원본 CUA117개는 final pin80·초기 pin35(실패 포함)·직전 milestone 종료2개로 구분한다. Vertical Flip 단독 native 결과는 초기 pin에 속하며 C09 feature source9개가 final과 같다는 이유로 재실행했다고 주장하지 않는다. 실제 IME·DPI·held-pointer·Windows/macOS는 미검증이다. 모델을 실제 driver 또는 Windows/macOS 검증으로 대신 주장하지 않는다. Auto Orient/layer Skew, 전체 Transform Reset 및 고급 Fit 변형은 별도다.
+
+### E02 선택 vertex 숫자 변형 — 2026-10-03
+
+- 하나의 명시적 Pen path에서 두 점 이상을 선택하면 toolbar/Shift+V가 Transform Vertices를 연다. 기존 한 점의 6개 anchor/tangent field는 유지하며 다중 선택에는 DX/DY·Rotation·Scale X/Y%·Pivot X/Y의 7개 full-precision field를 쓴다. 시작 pivot은 선택 anchor의 local bounding box 중심이며 직접 바꾸기 전에는 고정이다. local scale→rotate→translate를 원래 평가된 pose에 매번 적용하고 tangent는 vector로 처리한다. 선택 밖 vertex·순서/개수·닫힘·ID·paint는 그대로다.
+- 음수/0 scale을 허용하며 입력은 finite, 결과 geometry는 기존 ±1,000,000 범위와 document budget을 검증한다. static은 static, animation은 현재 frame만 수정하고 기존 interpolation/pose를 보존한다. 원본과 draft/history/Save를 분리하고 OK는 한 Undo, no-op/Cancel/Reset은 원본·legacy schema·Redo를 보존한다. 정상 종료는 검증된 전체 선택을 한 번만 복구한다. 새 core command/project schema/LEP version은 없다.
+- Reset은 pending field가 blur로 다시 제출되지 않도록 press를 먼저 포착하되 release가 버튼 안일 때만 실행한다. session serial을 먼저 교체하고 모든 field를 다시 묶으며 drag-out은 draft·pending text를 유지한다. Cancel과 기존 modal mouse-up 전달 경로는 유지했다. 일반 Pen context/Seek/Edit의 transport 처리 순서는 바꾸지 않았다.
+- 정밀도 리뷰에서 decimal pivot의 0-scale 잔여값, 미세한 nonzero scale과 cardinal swap의 cancellation, cardinal fixed-point no-op를 고쳤다. 정확한 collapse/signed-axis와 near-identity/direct 계산을 구분하며 epsilon으로 작은 값을 0으로 만들지 않는다. 최초 focused run은 90 pass/2 fixture fail이었다. undoable fixture loading의 history와 API가 허용하지 않는 새 mask ID 생성 방식을 수정했고 실제 assertion/production 제약은 완화하지 않았다.
+- 최종 frozen source의 fmt/direct locked check, focused96, Core267+Desktop653(기본920), 명시적 FFmpeg30이 통과했다. 신규46개는 session/math19·Pen12·Preview6·UI4·독립 render5이며 기존 I/O4개는 single/multi mode 모두 실행한다. render는 parented Shape·nested/reflected/skewed Contents·Add/Subtract mask의 static/mid/eased frame, 독립 quarter-turn/reflection/collapse geometry, preview/commit/native roundtrip, no-op/reset pixels를 검사한다. optimized release와 native12case도 통과했다. 실제 singleton/multi 진입·7field·fractional pivot·마우스 OK/Cancel·전체 선택 복구·Undo/Redo·no-op/Reset/오류/Escape·Reset drag-out·reflection/zero collapse를 확인했다. nested/reflected Contents와 stable Add/Subtract Mask의 전체 PROJ가 독립 reference와 오차 없이 일치하고, frame30 새 Linear key/평가 pose 및 eased60의 기존 Bezier·나머지 pose/key 보존을 확인했다. 다른 파일을 연 뒤 native reopen/resave한 마지막 LEP 전체 bytes(PROJ/VIEW 포함)가 정확히 같았다. 최종 release의 기존 text32frame 28,440,800 RGBA pixel도 그대로다. 통합 사후 assertion47개, 공식 codec/CRC native파일30개와 원본 CUA화면86개를 보존했다. 이번 native 선택은 Shift-click이며 marquee 재실행·수동 field away/back·임의 각도 조작은 포함하지 않았다. 실제 IME·Windows/DPI·held-input 중간 관찰과 모든 비동기/context 조합은 native 통과로 주장하지 않는다. Cross-path·전체 stored pose 변형·topology·linked tangent·canvas affine handle은 별도 범위다.
+
+### D03 다중 channel Graph와 view metadata — 2026-10-03
+
+- 명시적 pin(컴포지션당 최대 16개)과 active unpinned transient 하나를 단위별 lane에 표시하고 시간축은 공유한다. layer/property/full KeyRef로 식별하여 같은 frame의 서로 다른 track key를 합치지 않는다. stable item/effect/mask ID와 full label, raw unit을 표시하며 Effect Amount는 종류에 따라 %/ratio를 구분한다. 기존 scalar track만 사용하고 geometry Path timing은 숫자 lane으로 만들지 않는다.
+- 교차 lane 선택/marquee/Ctrl+A, offscreen 포함 선택, lane별 추가 Select all을 연결했다. 여러 channel 선택은 시간 이동/양수 배율만 허용하며 하나의 channel에서는 기존 값/속도 도구를 유지한다. 충돌은 track별로 검사하고 선택 원래 frame으로 이동하는 경우도 허용한다. lock/stale/source/범위 실패는 전체 원자 거부다. numeric Active frame/value/velocity는 active key만, Offset frames/Time%는 전체 포함 선택에 적용한다. 같은 시간만 선택한 경우 이동은 되지만 scale span은 없다.
+- grouped interpolation/mode/Ease/Delete, included-only Copy/Cut와 대상 scope를 사전 확인하는 Paste를 연결했다. single-source Paste는 active Graph layer, multi-source는 원래 ID를 사용하되 모든 대상이 포함된 scalar channel이어야 한다. 숨은 대상/없는 track/잘못된 effect/lock/점유 frame은 거부하고 기존 core의 no-overwrite 정책을 바꾸지 않는다. Clipboard layer fallback이나 mixed-unit 값 전파는 없다. Graph 소유 단축키는 busy/descendant 상태에서도 layer nudge/duplicate/delete로 새지 않으며 text field 입력은 유지한다.
+- source Project·full key/active identity·포함 channel·ranges/view/bounds·transport/tool/modal을 고정한다. release는 최종 pointer/modifier를 한 번 다시 계산하고 한 번 commit한다. handle off-center/return-to-start와 숫자 재표기 no-op는 원래 mode/schema/assets/Redo를 보존한다. pre-click playhead snap, Alt 우회, per-track occupancy 및 invalid-snap fallback을 검사했다. lane render는 전역 Editor alias를 임시 변경하거나 Project 전체를 lane마다 복제하지 않는다.
+- ordinary legacy Timeline/property focus와 pan/zoom/fit은 원래 VIEW v1을 유지한다. pin/active/range state가 필요한 저장만 desktop VIEW v2를 쓰며 LEP container/chunk v1과 project schema는 바뀌지 않는다. typed address schema1, counts/duplicates/future/unknown-field 검증, inactive composition version 선택, copied-save pruning과 live unavailable pin의 Undo 복원, 명시적 unpin, ID 재사용 안전성을 검사한다. selected keys/drag/input은 저장하지 않는다. 오래된 desktop v1 view reader는 새 v2 metadata 파일을 열지 못한다.
+- 자동 통합에서 기존 viewport 회귀 6개를 발견하여 테스트 기대값을 바꾸는 대신 legacy range 저장 경로를 복구했다. 초기 pin(e8b1784)은 기본 871+FFmpeg30을 통과했으나 새 static Text paint row가 track 없이 존재하는 경우 label focus를 거부하는 추가 회귀를 찾았다. editor_view helper만 좁게 수정하고 7개 parameter/graph-open/primary-selection/legacy-explicit 조합을 추가했다. 수정 pin(3f10fd81)은 Core267+Desktop607(기본874), 명시적 FFmpeg30, fmt/locked check/release가 통과한다. 신규 desktop53개는 이 집계에 포함하며 focused Graph100/Timeline8과 state isolated harness를 다시 합산하지 않는다.
+- 초기 Run-launched pin은 title만 있고 body가 그려지지 않았지만 source 원인은 확정하지 않았다. 수정 pin은 로그를 남기는 native terminal 실행에서 정상적으로 그려지며 startup log에 오류가 없다. 초기 pin에는 native feature 통과를 부여하지 않는다. 수정 pin의 기존 text32frame 28,440,800 RGBA pixel 및 20channel fixture의 독립 static 기준3frame 960,000 pixel은 정확히 일치한다. 최종 수정 pin의 실제 native 20개 bounded case가 모두 통과했다. 교차 lane 시간 drag/box/numeric·Undo/Redo·충돌/잠긴 member 원자 거부·active-only 값/속도·group Ease/Delete·offscreen Ctrl+A·lane Select all·16pin+17th transient 한도·effect/mask/Contents stable label·단위·lane range/shared time·delete→Save→Undo·제외된 clipboard 대상 거부와 frame64 실제 삽입·컴포지션별 view·정적 Text focus·native Open/resave PROJ/VIEW 정확 일치를 확인했다. 통합 assertion54개, 공식 codec/CRC 검증 native파일38개, 원본 CUA화면44개를 보존했다. 3개 hardcoded scalar sample과 10개 계획된 retiming reference, 총13frame 4,160,000 RGBA pixel이 정확히 일치한다. held-input interruption·실제 IME·Windows/DPI·desktop이 가로챈 Alt-wheel·선택적 ID 재사용 UI·이번 pin에서 이전 single-channel vertical Speed workflow 재실행은 native 통과로 주장하지 않는다. 이전 검증의 build 귀속을 유지한다.
+
+### D03 Speed Graph endpoint velocity 세로 변형 — 2026-10-03
+
+- 단일 scalar channel의 선택 key 둘 이상에서 Transform box 위/아래 handle을 추가했다. key time/base/value는 고정하고 실제 incoming/outgoing endpoint slope만 `pivot + factor × (slope − pivot)`로 변형한다. 반대쪽 velocity 경계가 기본 pivot이며 Alt는 시작 midpoint다. 음수 factor는 signed velocity 반사, 0은 pivot에 모으기다. 고정된 시간/값이 중간 curve를 제약하므로 전체 derivative curve를 같은 배율로 변형하는 기능으로 설명하지 않는다. 기존 가로 time handle 경로는 유지하며 corner는 추가하지 않았다.
+- Core의 별도 KeyVelocityScale/ScaleKeyVelocities와 공통 key_velocity_handles로 실제 인접 side·Hold·표현 가능성을 검사한다. Independent는 해당 side만 바꾸고 Continuous는 linked slope를 함께 유지한다. 실제 바뀐 Auto는 원래 slope/influence를 고정하여 Continuous로 전환하며 변하지 않은 Auto는 유지한다. interpolation tag와 influence, 다른 key/track은 보존한다. Hold/정의되지 않은·singular·범위 밖 side가 있으면 전체 세로 작업을 거부하고, 이웃 없는 endpoint side는 없다. 평평한 endpoint range는 세로 handle을 만들지 않는다.
+- 같은 원본 track에서 모든 side를 계산해 순차 setter의 coupling/Hold 변경을 피한다. identity/affine fixed point/no-net-change는 handle·legacy schema/assets·Redo/Undo를 보존한다. Linear/diagonal Bezier의 absolute control 반올림에서 생긴 가짜 미세 편집은 새 연산 내부의 normalized slope 계산으로 수정했다. 실제 편집은 기존 temporal schema 35/36 최소치만 적용하고 더 높은 버전을 보존한다. 새로운 project 또는 LEP 버전은 없다. wholly empty Batch의 기존 migration 정책은 유지한다.
+- 세로 gesture는 source Project·composition/FPS·선택·도구/모드·view/bounds·transport generation을 고정한다. 최종 release의 좌표/modifier로 다시 계산하며 stale/focus/modal/context/transport 변경은 취소한다. Snap은 현재 채널의 unselected endpoint 속도만 쓰고 frame/second 변환을 분리한다. Ctrl은 Snap을 반전하고 Alt는 pivot만 바꾼다. 움직이지 않은 축은 snap하지 않으며 core-invalid snap 후보는 건너뛴다. 작은 plot에서는 key glyph를 가리는 handle을 억지로 배치하지 않는다.
+- 최종 자동 검증은 Core 267 + Desktop 554(기본 821), 명시적 FFmpeg 30, fmt/direct locked Cargo check/release가 통과했다. 신규 29개(Core 16, vertical UI/transaction 12, invalid-snap 1)는 이 집계에 포함한다. 독립 core math/transaction과 UI lifecycle/snapping 리뷰에 차단 문제가 없다. 최종 pin 네이티브 top-handle snap은 30000/1001 FPS에서 예상 factor 11/8·pivot −2·slope −2/4.875/9와 고정 time/value/interpolation/influence, Auto→Continuous를 확인했다. bottom reflection은 pivot 6·factor −3/8·slope 9/7.125/6이며 pivot 위의 Auto key는 원래대로다. Ctrl snap 반전, click-only/가로-only/return-to-start 뒤 한 Undo와 Redo, native reopen/resave PROJ·VIEW 정확 일치가 통과했다. Hold/flat/singular는 세로 거부와 source 불변을 확인했고 main/Hold/flat 가로 time 변형·Undo는 그대로다.
+- 새 curve는 keyframe 4개 픽셀 불변 및 독립 cubic/static reference 9개 frame, 총 4,160,000 RGBA 픽셀이 정확히 일치한다. 기존 text 회귀 32 frame의 28,440,800 픽셀도 최종 pin에서 그대로다. 실제 CUA 화면 24개를 보존했으며 통합 사후 assertion 107개와 native 파일 24개의 공식 codec 왕복이 모두 통과했다. Alt는 Linux window manager가 가로채어 창을 옮겼고 source는 그대로였으므로 midpoint의 네이티브 통과로 표시하지 않는다. exact zero collapse·held-pointer Escape/playback start-stop·실제 IME·Windows/DPI는 네이티브 미검증이다.
+- 다중 channel/축·Speed corner·공간 속도/roving 및 AE 수치 동등성은 별도 범위다.
+
+### F02 실제 glyph·fallback face 진단 — 2026-10-03
+
+- Manage project fonts의 선택한 source group에서 Check glyphs를 명시적으로 시작한다. 모든 컴포지션의 stable ID와 원래 Layer snapshot을 고정하고 레이어별 background 작업으로 검사한다. 열기/매 redraw는 전체 text shaping을 실행하지 않는다. 창 닫기·그룹/문서/원본 변경은 결과를 무효화하며 serial과 단일 worker slot으로 늦은 응답과 겹친 검사를 막는다. Cancel은 현재 레이어 사이에서 협력적으로 멈추며 기존 Undo/Redo나 .lep 내용은 바꾸지 않는다.
+- renderer의 실제 composed text geometry를 단일 opaque paint로 검사한다. 요청한 family/face, primary matched face와 최종 positioned glyph ID가 참조하는 tree-local fontdb face를 구분한다. cmap 지원 여부를 실제 fallback으로 추정하지 않으며 supported prefix까지 whole-run fallback이 될 수 있다. glyph ID 0은 미해결로 집계하고 bounded cluster text/code point를 표시한다. 동일 표시 이름의 서로 다른 font ID도 primary/fallback 판정에서 합치지 않는다.
+- hidden/locked/paint-disabled layer도 검사하며 paragraph overflow는 별도 표시한다. empty, parser에서 사라진 node, 누락된 metadata, 처리 한도는 incomplete 등으로 명시한다. glyph 0이 없다는 것만으로 미완료 문서의 전체 문자 지원을 선언하지 않는다. grapheme/caret 범위, semantic emoji·color/bitmap glyph painting, 실제 다른 PC 출력 동등성은 이 진단의 보증 범위가 아니다.
+- 검사당 256 layer, 레이어당 4096 source bytes·128 source/composed lines·8192 glyphs·16 faces·8 sample(각 24문자) 한도를 사용한다. 보고하지 않은 layer와 truncation은 UI에 남긴다. 선택 그룹 전체의 source snapshot은 stale 검증을 위해 유지하므로 전체 프로세스/메모리 상한으로 표현하지 않는다.
+- 기존 Replace는 명시적 family 선택 때만 Project origin을 고정하고 style 선택 동안 유지한다. glyph 진행 갱신은 replacement 선택을 지우지 않으며 Apply의 원본/revision guard, locked skip, 한 Undo 명령을 유지한다. fonts resolver/layout/paint, core schema·LEP v1, strict export의 missing family/substituted primary 정책은 변경하지 않았다.
+- 최종 자동 검증은 Core 251 + Desktop 541(기본 792), 명시적 FFmpeg 30, fmt/direct pinned Cargo check/release가 통과했다. 신규 25개는 backend 9와 lifecycle 16이며 전체 집계에 포함한다. deterministic ASCII test font는 bundled Wanted Sans를 OFL 조건에 따라 renamed subset한 것으로 runtime catalog에 넣지 않는다. fixture 재생성은 byte-identical이며 독립 glyph truthfulness/fixture 및 lifecycle/replacement 리뷰에 차단 문제가 없다. 기존 text 27 frame와 수동 static 기준 5 frame의 28,440,800 RGBA 픽셀도 최종 pin에서 정확히 일치한다.
+- 최종 pin 네이티브에서 DejaVu Sans A가의 실제 whole-run Noto Sans CJK JP fallback, U+0378 glyph 0 sample, empty/4097-byte incomplete/paragraph overflow를 확인했다. Check/Close/Save의 원본 PROJ 불변, missing family의 unlocked 두 reference만 교체하고 locked/source/paint/track 보존, 이후 재검사 뒤 한 Undo 원본 복원, Redo 및 실제 reopen의 replacement PROJ 일치가 통과했다. 258-layer 검사에서 Cancel 후 71개 report/187개 unexamined 경고를 확인했고 재시작 직후 group switch는 stale report를 지웠으며 새 group의 1개 결과만 남았다. 실제 CUA 화면 31개와 최종 pin/hash를 보존하며 22개 사후 assertion, 8개 CRC 검증 native 파일의 공식 codec 왕복이 모두 통과했다. reopened PROJ와 VIEW도 정확히 일치한다. Windows/DPI·실제 IME·모든 async 순서 조합은 네이티브 미검증이다.
+- F02 전체는 variable axes, 실행 중 catalog refresh, cross-machine qualification 등 잔여 범위를 유지한다.
+
+### E02 단일 정점 숫자 편집 트랜잭션 — 2026-10-03
+
+- idle Pen에서 명시적으로 선택한 정점 하나를 Edit Vertex 버튼 또는 canvas 전용 Shift+V로 연다. Shape/활성 Contents Path/벡터 Mask의 local anchor X/Y와 상대 incoming/outgoing X/Y 여섯 값을 독립 입력한다. 그룹/레이어/부모 변형 전 좌표이며 tangent mirroring·corner 변환·topology 변경을 하지 않는다. 정밀도를 잃는 두 자리 scrub 대신 round-trip 가능한 숫자 입력을 사용한다.
+- 원본 Project/context를 고정하고 매 입력 후보를 원래 source의 격리 Editor에서 하나의 EditPath로 재구성한다. preview/overlay만 초안을 보며 Save/autosave/export/history에는 원본만 전달한다. unchanged/away-back/Cancel은 중간 프레임 키나 히스토리를 만들지 않고 OK는 한 Undo다. 기존 키 보간과 다른 키/참조 pose는 보존하며 새 키는 기존 Linear 정책을 따른다. 유효한 Path key에는 별도 scalar TemporalHandles를 허용하지 않는 기존 정책을 바꾸지 않았다.
+- field 오류·범위/pose 한도 실패는 마지막 정상 초안을 보존하고 OK를 막는다. serial/context/선택/프레임/도구/transport/교체/창 비활성화·pending save-and-close 경계를 검사한다. 정상 OK/Cancel만 검증한 one-shot 선택을 복구한다. 늦은 Open은 살아 있는 모달을 덮지 않고, 이전 Save 완료는 나중에 승인한 geometry를 dirty 상태로 유지한다.
+- 자동 검증: 코어 251 + 데스크톱 516(기본 767), 명시적 FFmpeg 30, fmt/direct check/릴리스 통과. 신규 41개는 session 14, Pen/Preview 14, UI/routing 4, I/O 4, tree 1, render 4다. 두 독립 영역 리뷰와 pointer 수정 재리뷰에 차단 문제가 없다. parented/reflected Shape, rotated/skewed/reflected Contents, Add/Subtract Mask와 static/중간/기존 eased key를 독립 geometry·native 왕복·픽셀로 검사했다. v2 CLI의 기존 text 32 frame case 28,440,800 RGBA 픽셀도 그대로다.
+- 네이티브 v1은 키보드 승인으로 여섯 field/preview, no-op/away-back/Cancel/invalid Escape, Undo/Redo, nested/mask 및 애니메이션 키, save/reopen 데이터가 통과했다(29 assertion, 22 native 파일, 37 CUA 화면). 단, 실제 OK/Cancel 마우스 클릭은 focus만 이동했다. occluded Preview의 outside mouse-up capture가 release를 삼킨 원인을 수정하고 canvas gesture 정리는 유지했다. v2 자동 회귀와 최종 실제 마우스 검증이 통과했다. standalone Cancel/OK, 밖으로 drag-out한 클릭 취소, invalid OK/field Escape, Undo/Redo·정확한 reopen, 창 비활성화 뒤 Redo 보존, 공통 Gradient의 Add/Cancel/OK와 한 Undo를 확인했다. v2의 17 assertion·12 codec 검증 파일·20 CUA 화면을 별도 보존한다. v1의 더 넓은 target/animation 결과를 v2에서 전부 재실행한 것으로 재표기하지 않는다. 실제 IME·직접 digit 입력·held 중간 상태·Windows/DPI·전체 stale/lock/modal 조합은 미검증이다.
+- Project/LEP 버전과 core 명령은 그대로다. 교차 경로, 여러 정점의 숫자 변형, linked tangent 및 topology animation은 남는다. 다음 제안 P1 단계는 F02의 실제 렌더러가 선택한 glyph/font 진단이며 기존 layout/출력 정책은 유지한다.
+
+### F03/D01 레이어 전체 Text paint 애니메이션 — 2026-10-03
+
+- Fill RGB·Stroke RGB·Stroke Width의 7개 sparse track을 공통 속성/키 모델에 연결했다. Character·Properties·picker는 현재 프레임의 색/두께를 표시·편집하고 RGB 그룹 스톱워치, Timeline Text 채널, Value/Speed Graph를 제공한다. RGB는 0–255, 두께는 0–1000 px이며 평가 시 Bezier overshoot를 제한한다. 색 선택기의 alpha는 기존 전체 레이어 Opacity이며 독립 Fill alpha로 표시하지 않는다.
+- 기존 static base와 typography/source를 그대로 두고 독립 paint map을 사용한다. map이 필요한 문서만 Project schema 48을 요구하며 native LEP 컨테이너는 v1이다. 기존 비어 있는 map은 저장하지 않고, base와 같은 direct/generic/nested text Value no-op도 기존 schema·Redo·히스토리를 보존한다. lock/type/frame 검증은 생략하지 않는다.
+- 미완료 field draft는 해당 source Project·revision·layer·frame 및 Graph key selection에 고정한다. 일반 편집도 검사하며 hidden field는 다시 표시·sync할 때까지 자체 context를 유지한다. 변하지 않은 redraw와 frame/selection-only 변화는 immutable source를 재사용해 매번 전체 Project를 복제하지 않는다. format-only HEX, unchanged picker OK와 Cancel은 중간 프레임 키를 만들지 않는다.
+- renderer는 평가한 색/두께를 text paint와 effect bounds 양쪽에 재사용한다. 테스트 중 드러난 기존 fractional text filter 경계의 antialias 1픽셀 잘림은 text extents를 바깥 정수 좌표로 반올림해 수정했다. Shape bounds와 glyph advance/caret/wrapping 계산은 바꾸지 않았다. Source 편집·복구 draft·Point/Paragraph 변환·실제 font replacement는 paint key/handle을 보존한다.
+- 최종 자동 검증은 코어 251 + 데스크톱 475(기본 726), 명시적 FFmpeg 30, fmt/direct Cargo check/릴리스가 통과했다. 신규 36개(Core 13, controls 14, render 6, session 3)는 이 집계에 포함한다. Core/UI 독립 리뷰와 수정 재리뷰에 차단 문제가 없다. Moon wrapper는 proto 준비 단계 및 no-actions plugin 경로에서 실패했으므로 통과로 기록하지 않고 같은 pinned Cargo 작업을 직접 검증했다. 네이티브 확인은 아래 범위로 별도 기록한다.
+- 최종 pinned 앱의 실제 화면에서 0/30/60프레임 샘플, Character/Inspector 현재 프레임 RGB, Stroke picker, unchanged OK/changed Cancel 뒤 한 Undo, Fill 그룹 애니메이션 해제와 한 Undo, Timeline 7개 채널, RGB/width Value·Speed 단위와 대표 endpoint 드래그, 30프레임 Source 편집 후 모든 paint track 보존, native Save/reopen PROJ·VIEW 일치를 확인했다. 10개 bounded 사례와 25개 사후 assertion, 13개 파일 CRC/공식 codec 왕복, 24개 CUA 화면을 보존했다. 원본 fixture와 release 해시는 유지됐다. hidden stale draft·실제 IME·전체 temporal/lock/modal 조합·held 중간 화면·Windows/DPI는 네이티브 미검증이며 자동 회귀/CLI 픽셀 결과와 구분한다.
+- 문자별 paint, Source Text·타이포그래피 애니메이션, 독립 fill/stroke alpha, switch/order 애니메이션과 Text Animator는 구현하지 않았다. F03/D01 전체는 Partial이며 다음 제안 단계는 E02의 명시적으로 선택한 정점 하나에 대한 local anchor/tangent 숫자 편집 모달이다.
+- 최종 pinned CLI는 기존 text 예제 9개의 0/30/60프레임(27개)을 이전 릴리스와 정확히 일치시켰다. 새 native 애니메이션의 0/15/30/45/60프레임은 수동으로 독립 구성한 static 문서를 양쪽 릴리스로 출력한 결과와 같다. 32개 frame case의 28,440,800 RGBA 픽셀이 일치했고 원본 fixture/source 해시는 유지됐다. 의도적으로 복원한 fractional filter-edge 픽셀은 별도 identity-effect unit 회귀로 검증한다.
+
+### E04 Contents 형제 선택·묶음 순서와 키보드 경계 — 2026-10-03
+
+- label의 plain/Ctrl/Shift 및 Ctrl+Shift 선택은 하나의 부모 안에서 동작한다. Group은 subtree 전체를 한 항목으로 선택하며 다른 부모의 자식을 누르면 새 선택을 시작한다. Ctrl+A는 active sibling 목록, 일반 위/아래는 보이는 행, Shift+위/아래는 형제 범위, 좌/우는 단일 Group 접기/펼치기다. eye/disclosure와 이름 입력은 별도 포커스다. 다중 선택에서는 Add·복제/삭제·들여쓰기/내어쓰기·숫자/paint 필드를 비활성화하고 Pen/gradient에 임의의 singleton 대상을 전달하지 않는다.
+- 선택한 label 드래그는 원래 순서를 유지하는 형제 block을 같은 부모의 before/after gap으로 옮긴다. Group 뒤 marker는 subtree 뒤에 표시한다. Core의 완전 순열 명령은 누락/중복/외부/descendant ID, 잘못된 부모·콘텐츠·잠금을 원자적으로 거부한다. 전체 node payload, ID/next_id, transform, key/pose/reference, gradient/dash 설정을 그대로 옮기고 기존 schema/assets를 재작성하지 않는다. 단일/중첩 비어 있지 않은 reorder-only Batch만 좁게 보존 경로를 사용한다. 페인트가 받는 geometry와 overlap은 순서에 따라 의도적으로 바뀔 수 있다.
+- hover/선택/collapse와 원래 gap/no-op/취소는 source·Undo/Redo를 바꾸지 않는다. 실제 release 좌표로 다시 계획하며 Project 자체와 revision/comp/layer/frame/선택/잠금/가시 행을 검사해 오래된 드래그를 거부한다. 일반 편집은 document_revision을 바꾸지 않으므로 revision만 검사하지 않는다.
+- 리뷰에서 재생 중 키가 레이어로 새는 문제와 지원하지 않는 Contents clipboard/precompose/trim/time-remap 키의 전파를 수정했다. 트리 소유 editing/navigation 키는 blocked 상태에서도 소비하며 실제 modal Escape와 Undo/Redo, 전역 project/tool/view/time 동작은 구분한다. 필드/IME 포커스의 입력을 가로채지 않는다. 이 단계는 Contents clipboard나 cross-parent block reparent를 구현하지 않는다.
+- 실제 UI에서 일반 native Ctrl+S가 tree focus를 잃은 뒤 Undo/Delete가 전체 레이어를 지우는 회귀도 발견해 수정했다. 동일한 save_path 판정을 공유해 기존 native 파일로의 저장과 진행 중 저장 no-op은 포커스를 유지하고, 진짜 chooser 경로는 기존 Enter key-up 방지 blur를 유지한다. TextField 자체 submit/blur는 바꾸지 않는다. retained 선택은 활성 blue/비활성 gray와 focused/inactive 문구로 구분하며 Pen의 singleton Group 대상은 보존한다.
+- 최종 자동 검증: 코어 238개 + 데스크톱 452개(기본 690개), 명시적 FFmpeg 30개, fmt/check/diff/릴리스 통과. 신규 29개는 Core 11, 트리 13, 렌더 2, 저장 포커스 3이며 기본 집계에 포함한다. 렌더 검사는 0/30/60프레임의 의도된 scope/overlap 변화, preview/output 및 native LEP 왕복을 검사한다. 두 독립 영역 리뷰와 수정 재리뷰에 차단 문제가 없다.
+- 네이티브 v2는 루트/중첩의 noncontiguous block, 숫자 ID와 반대인 visual order, expanded/collapsed subtree, cross-parent/outside/no-op 거부, 한 Undo/Redo, 이름 필드·clipboard/trim 키, 단일/다중 Pen 대상과 Save/reopen을 확인했다. 17개 기록 사례에는 당시 발견한 save-focus 문제도 포함하므로 전부 성공 사례로 합산하지 않는다. 26개 사후 파일 assertion과 36개 원본 CUA 화면을 별도 보존했다. 최종 v3는 row→duplicate→직접 Save→Undo→Delete가 Group만 지우고 레이어 하나를 유지함을 확인했고, Save As의 inactive 표시·명시적 재포커스, 실제 재생 중 Delete/방향키/Ctrl+D 차단과 진행하는 프레임을 검증했다. 정지 후 source와 저장/재열기 PROJ 및 frame2466이 정확히 유지됐다. 빌드별 검사 범위를 구분하며 held 중간 화면, 실제 IME, Windows/DPI와 더 넓은 interruption/gradient 조합은 미검증으로 남긴다.
+
+### 고유 LEP 프로젝트 컨테이너 — 2026-10-03
+
+- `.lep` (Libre Effects Project) v1은 32바이트 서명/버전/길이 헤더와 제한된 PROJ/VIEW/IMAG 청크를 사용한다. 메타데이터·선택적 뷰·공유 내장 PNG를 분리하고 파일/청크 CRC32로 손상을 검사한다. 단순 JSON 확장자 변경이나 ZIP 추출 방식이 아니다. CRC32는 오류 검출이며 인증·암호화를 제공하지 않는다. [바이트 명세](../../docs/lep-format-v1.md)를 공개하고 기존 Project schema 47과 컨테이너 버전을 분리한다.
+- 파일 256 MiB, compact 메타데이터/뷰 각각 16 MiB와 기존 이미지 개수/12 MiB 개별·128 MiB 총 encoded 예산을 유지한다. 길이/카운트 오버플로, 중복·미참조 자산, 알 수 없는 버전/청크, 잘린 파일과 checksum 오류를 live 문서 설치 전에 거부한다. 기존 JSON 입력은 내용으로 판별하고 원본을 바꾸지 않는다. native VIEW는 v1 구조를 엄격히 검사하며 legacy editor_view의 기존 관대한 호환 동작은 유지한다.
+- Save/Save As는 `.lep` 이름과 원자적 교체를 사용하고 기존 legacy 문서는 새 사본으로 저장한다. 정규화로 다른 기존 파일명이 생기면 명시적 선택을 요구한다. 가져온 원본의 경로/별칭 보호는 Save As·PNG/video 출력·영속 큐 v5까지 이어지고 큐 v1–v4는 이전 폰트/오디오 정책을 보존해 이행한다. 큐 snapshot·preset JSON은 프로젝트 포맷 변경 대상이 아니다. 늦게 완료된 Open/Save가 새 문서/편집·원본 경로를 덮어쓰지 않도록 세대 검사를 추가했다.
+- 새 자동 저장은 `.lep` current/previous 쌍이며 legacy JSON 및 previous-only 슬롯도 찾는다. 새 checkpoint를 전체 검증한 뒤 교체하고 손상된 current가 정상 previous를 밀어내지 않는다. Restore는 현재 슬롯에 먼저 내구성 있게 저장한 뒤 오래된 슬롯을 정리하며, 정리 실패는 경고로 남겨 복구된 문서를 보존한다. 복구 뷰는 기존 정책대로 기본값이다.
+- 외부 영상/오디오/시퀀스는 링크로 유지한다. Collect Files는 `project.lep`와 `Media` 폴더를 만들며 경로 재배치/전체 폴더 이동을 지원한다. 폰트·FFmpeg·모든 원본을 단일 파일에 넣는 패키지는 아니다.
+- 자동 검증: 코어 227개 + 데스크톱 399개(기본 총 626개), 명시적 미디어 30개, fmt/check/릴리스 통과. 동일 project의 native/legacy 입력을 최종 CLI로 0/30/60프레임에 출력해 총 691,200 RGBA 픽셀이 일치했고, 미래 버전·이미지 손상·잘림은 종료 코드 1과 기존 출력 바이트 보존을 확인했다. 반복 생성 가능한 `native-project-study.lep`은 공유 PNG 1개·두 이미지 레이어·회전 키·30프레임 뷰를 포함한다.
+- 네이티브 최종 검증: 기본 `.lep` 이름, legacy 사본 저장과 원본 해시 보존, 내장 이미지/저장 뷰, 편집·저장·재열기, 실패 Open 뒤 현재 문서/뷰/Undo/Redo 보존, 정규화 충돌 및 가져온 원본 PNG 출력 차단을 확인했다. 실제 5초 autosave·legacy JSON 슬롯·손상 current 대신 정상 previous의 세 경로 모두 재실행→Restore→Save/재열기 후 원래 PROJ/IMAG와 일치했다. Collect Files가 만든 폴더 전체를 이동한 뒤 새 `project.lep`의 1프레임/100% 뷰와 영상을 복원했고 Project Media는 새 Media 경로를 Online, missing 0으로 표시했다. 이동 전후 CLI의 57,600 RGBA 픽셀도 일치했다. 이로써 고유 형식 기본 단계는 완료했다. 큐 재시작/영상 export 원본 보호는 자동 회귀 검증 범위이며 이번 네이티브 세션에서 별도 조작하지 않았다. Windows 파일 연결·네이티브 CI, 고 DPI/IME와 AE 비교 결과를 뜻하지 않는다.
+
+### E02 같은 경로 박스 선택·전체 정점 선택 — 2026-10-03
+
+- `.lep` 단계 완료 뒤 보류 코드를 복원해 Shift 빈 캔버스 드래그의 같은 경로 additive 박스와 Pen 캔버스 전용 Ctrl+A를 연결했다. 정점/탄젠트 hit가 우선이며 기존 경로를 대상으로 잡은 뒤 그 경로의 anchor 중심만 선택한다. 더 큰 축 기준 4 logical pixel 이상 이동하면 활성화하고 양방향·경계 포함 박스를 사용한다. 작은 빈 클릭은 기존 선택을 유지한다. 정점 0개인 알려진 대상도 재선택할 수 있지만 layer/Group만 보고 임의 경로를 선택하지 않는다.
+- 선택/취소/no-op은 source·키·히스토리를 수정하지 않는다. 최종 mouse-up 좌표를 반영하고, held 상태에서 origin/zoom/fit 등 뷰가 바뀌면 새 좌표를 변환하기 전에 초안을 취소한다. held 생성 중 뷰 변경은 미확정 경로 전체를 버리지만 점 사이의 idle zoom은 허용한다. 다른 편집 도구/눈금자에서 두 번째 down을 받았을 때 예전 box/삽입 인덱스가 남는 경계도 방어한다. 포커스·IME·modifier·반복 입력과 stale context는 기존 단축키/레이어 조작에 잘못 전파하지 않는다.
+- 자동 검증: Pen 89개·Preview 3개 집중 통과, 그중 신규 35개. 최종 코어 227개 + 데스크톱 434개(기본 661개), 명시적 FFmpeg 30개, fmt/check/diff/릴리스가 통과했고 독립 리뷰에 차단 문제가 없었다. 정적/열린/중첩/마스크/애니메이션, 변환 후 composition 공간 membership, 빈 문서/빈 대상, 선택만 한 뒤 Undo/Redo, 삽입·드래그·뷰 변경과 최종 좌표를 검사한다. 별도 고정 릴리스의 실제 화면에서도 정적 additive 박스·Ctrl+A 전체 이동, rotated/skewed Contents와 빈 대상에서 다시 선택한 mask 박스, 한 Undo/Redo와 정적 `.lep` 재열기를 확인했다. 선택한 정점만 같은 local delta로 이동하고 비선택 정점/탄젠트/메타데이터는 그대로였다. 애니메이션 30프레임의 박스/Ctrl+A 선택은 전체 pose와 원래 timing key를 보존하고 새 키를 만들지 않았다. 첫 빠른 selection/save/drag 입력 묶음은 정점 하나만 움직여 Undo한 뒤 개별 관찰한 제스처로 재검증했다. 이를 Save가 항상 선택을 지운다는 일반 보장이나 코드 결함으로 단정하지 않으며 held/focus/IME/Windows/DPI 조합은 실제 검증과 구분한다.
+- 남은 경계: 교차 경로 선택, 숫자 정점 편집, topology 변경 애니메이션은 별도 E02 범위다. 새 core 명령이나 schema/LEP 버전 변경은 없다. 입력 도구가 drag를 원자적으로 실행해 마우스를 누른 중간 박스 관찰·중간 Escape 등은 실제 화면 검증과 구분한다.
+
+### 중단 작업 재개·초기 체크포인트 검증 — 2026-10-03
+
+- E04/B05: Gradient 색상바의 스톱/중간점 드래그 초안을 이제 Composition에도 실시간 반영한다. 렌더 요청을 합치고 마지막 유효 프레임을 유지하며 취소/문서·프레임·선택 변경 뒤 오래된 결과를 버린다. 초안은 원본·자동 저장·출력·히스토리를 변경하지 않고 놓을 때 한 Undo로 확정한다. Contents Gradient Fill/Stroke의 Composition Start/End 손잡이는 중첩 그룹/레이어 변환을 따른다. 아래 최초 색상바 구현의 “놓은 뒤 갱신/실시간 반영·끝점 손잡이 남음”은 이 단계로 대체됐다. 모달 Gradient Editor·단일 복합 Colors/토폴로지 애니메이션은 남아 있다.
+- A05: 공유 이미지/시퀀스 참조와 JSON 이스케이프를 반영하는 제한된 스트리밍 카운터로 편집 후보의 저장 예산을 히스토리 반영 전에 검사한다. 일반 편집·Batch·복제·비활성 컴포지션·문서 교체에서 한도를 넘으면 원래 문서/선택/Undo/Redo를 유지한다. 16 MiB 메타데이터·128 MiB 내장 이미지·256 MiB 파일 한도는 유지한다. 외부 패키지와 전체 프로세스/Undo 메모리 예산은 별도 범위다.
+- I01/L01: 없는 출력 파일의 부모를 정규화한 경로 별칭 비교와 오프라인 소스 회귀 검사를 추가해 이전 `52ab32d` Windows CI의 경로 테스트 실패를 수정했다. 이번 요청은 로컬 커밋만이며 push/PR을 하지 않으므로 새 원격 Windows CI는 미실행이다. 이후 I01 사전 점검 UI와 E04 모달 작업은 별도 이정표이며 이 초기 체크포인트의 완료 범위에 포함하지 않는다.
+- 검증: 추가 리뷰 수정까지 포함한 고정 체크포인트에서 Linux 코어 197개 + 데스크톱 258개(총 455개), 명시적 FFmpeg 미디어 29개, check/fmt/릴리스 빌드가 통과했다. Gradient 오버슈트 집중 20개는 데스크톱 집계에 포함된다. Open/Recover가 긴 절대 경로 확장·잘못된 복구 후보를 거부할 때 기존 문서·저장 경로·선택·Undo/Redo·두 복구 파일을 보존하는 회귀 4개도 포함한다. 네이티브 QA는 그 직전 릴리스에서 수행했으며 추가 경계 수정은 이 최종 자동 검사로 검증했다. Windows 전용 장치 테스트와 새 원격 CI는 실행하지 않았다.
+- 의존성: GPUI/Taffy 호환을 위해 grid 0.18에 upstream의 차원 산술 검사를 backport했다. debug/release 각각 unit 215개 + doc 43개 통과. 버전만 검사하는 도구는 계속 경고할 수 있으며 전체 advisory를 숨기지 않는다. 출처/제거 조건은 `vendor/grid/README.libreeffects.md`에 기록한다.
+- Moon의 `web:build`, `web:test`, `api:build` 로컬 검증이 통과했다(웹 테스트 3개). API는 dry run이며 배포하지 않았다. 이 결과는 웹 편집기 완성을 뜻하지 않는다.
+- 네이티브 Linux에서 앱 실행, 컴포지션·사각형·Contents 생성, 실제 Save 대화상자를 통한 7,937바이트 프로젝트 저장을 확인했다. 최종 릴리스는 이전 편집기를 교체하고 작업 창 하나를 유지했다. Vulkan/Mesa와 D-Bus 세션의 `xdg-desktop-portal`/GTK 백엔드가 필요했으며 없으면 열기/저장이 대화상자 없이 취소될 수 있다. 재현 가능한 표준 의존성은 README의 Development에 기록한다.
+- 새 `examples/gradient-study.lfe.json`은 `crates/core/examples/make_gradient_study.rs`로 생성했고 해당 릴리스 CLI의 640×360 PNG 출력도 성공했다. 생성 샘플은 네이티브 저장본과 구분한다.
+- 네이티브 Gradient QA에서 실제 끝점 드래그·한 Undo 복원, 색 선택기 Cancel 복원·OK 적용·한 Undo, 변경된 끝점의 Save/재열기 유지를 확인했다. 실제 저장본은 12,346바이트이며 1364×1024 화면 캡처를 남겼다. 입력 도구가 드래그를 원자적으로 실행해 **마우스를 누른 중간 프레임 관찰·진행 중 드래그의 Escape 취소는 미검증**이다. 전체 스톱/중간점·키보드 조작까지 통과한 것으로 확대하지 않는다.
+
+### E02 전체 애니메이션 경로 방향·첫 정점 — 2026-10-03
+
+- Shape·Contents·Mask의 Path 행에서 Reverse Direction, Pen 캔버스의 같은 경로 선택에서 Shift+R을 제공한다. 닫힌 경로의 정점 하나를 선택하고 Shift+F로 첫 정점을 정하며, 선택 색과 별개인 바깥 사각형으로 첫 점을 표시한다. 열린 경로는 첫 점 순환을 거부하고 Reverse로 양 끝을 바꾼다. 닫힌 Reverse는 현재 첫 점을 유지한다.
+- 전용 전체-track 명령은 base와 사용하지 않는 슬롯을 포함한 모든 저장 pose에 같은 순열/접선 교환을 적용한다. timing·불투명 pose 참조·키/보간·안정 ID·페인트/변환을 유지하며 현재 프레임 키 하나로 대체하지 않는다. 편집한 정점의 선택 인덱스도 같은 기하 점을 가리키도록 바꾼다. 초안/삽입/진행 중 드래그·오래된 문맥·잠금·텍스트/IME 포커스·다른 modifier·키 반복은 캔버스 순서 명령을 실행하지 않는다.
+- 리뷰에서 경로 전용 Batch가 기존 버전/자산 이행을 거쳐 no-op 히스토리를 바꾸는 경계를 수정했다. 중첩된 비어 있지 않은 reorder-only Batch도 직접 명령과 같은 후보 validate/budget/원자적 history 경로를 사용한다. 혼합/빈 Batch의 기존 동작은 바꾸지 않았다.
+- 최종 검증: 코어 210개 + 데스크톱 369개(총 579개), 명시적 FFmpeg 30개, fmt/check/diff/릴리스 빌드 통과. 신규 검사는 코어 11개·Pen 14개·렌더 5개(총 30개)이며 기본 집계에 포함한다. 비대칭 탄젠트, 정적/애니메이션 세 대상, 전체 pose/timing·선택·Undo/Redo·저장 왕복, 실패 원자성, 반사/중첩 변환과 마스크 렌더를 검사했다. 최종 수정 소스 리뷰도 통과했다. 고정 릴리스의 실제 조작에서도 First/Reverse의 기하/탄젠트·첫 점 표시·index0 no-op·한 Undo/Redo·재매핑된 두 점 드래그·전체 애니메이션 포즈/키 보존·Properties 버튼·60프레임 재열기·중첩/Mask 경로와 잘못된 선택/미완성 초안 거부를 확인했다. 사후 검사 25개와 원본 화면 16장을 남겼으며 4개 원본 fixture 해시는 변하지 않았다. 파일 형식 우선순위 변경으로 열린 경로·잠금/오래된 문맥·modifier/IME·마우스 누름 중 조합의 네이티브 추가 검증은 중단했고 자동 검사 범위와 구분한다.
+- 경계: 곡선의 기하를 보존해도 Reverse는 winding을 바꿔 Non-Zero 복합 Fill의 구멍을 바꿀 수 있고, 두 순서 동작은 dash 위치를 바꿀 수 있다. 해당 의도된 변화와 단일 solid/Even-Odd mask 보존을 렌더 검사로 구분했다. 점선 설정은 자동 보정하지 않는다. 새 파일 형식, Trim Paths/경로 텍스트 또는 AE 동등성을 뜻하지 않는다. E02의 marquee/교차 경로·숫자 정점 편집과 토폴로지 애니메이션은 남아 있다.
+
+### E04 선택 그룹 Pen 생성·D03 Speed Graph 시간 박스 — 2026-10-03
+
+- 명시적으로 선택한 Contents Group의 빈 캔버스에 Pen 경로를 생성한다. 빈/중첩 그룹의 자체·조상 변환과 레이어 부모 변환을 현재 프레임에서 합성해 점/탄젠트를 역변환하며, 기존 페인트/순서를 바꾸지 않고 새 Path를 앞에 추가한다. 그룹 선택을 유지해 반복 생성할 수 있다. 기존 경로 hit 우선, Ctrl-mask, 그룹 미선택 standalone 동작은 유지한다. 비활성/없는 그룹·특이 변환·모델 한계는 새 레이어로 우회하지 않고 거부한다. 페인트가 없으면 편집 윤곽만 보이고 출력되지 않는다. 기존 hidden/out-of-range 레이어 편집 정책을 유지한다.
+- Speed Graph의 Transform box에 시간 좌/우 손잡이만 연결했다. 반대 시간 경계/Alt 중앙 피벗으로 양수 시간 배율을 적용하며, 수직 이동과 값 스냅은 사용하지 않는다. 전체 선택(화면 밖 포함)의 값/보간/모드/영향도를 보존하고 기존 Core 규칙대로 명시적 slope를 배율로 나누며 Auto를 다시 평가한다. Hold는 바꾸지 않는다. 무효 배율·충돌·범위·slope 한계는 원자적으로 거부한다. 화면 밖 실제 경계의 손잡이 누출, 도구 변경 뒤 잔류 초안, frozen view와 곡선 샘플 범위 불일치를 리뷰에서 수정했다.
+- 검증: 집중 Speed box 17개와 Pen 전체 41개(새 그룹 생성 14개), Core 그룹 공간 2개가 통과했다. 최종 코어 199개 + 데스크톱 350개(총 549개), 명시적 FFmpeg 30개, fmt/check/diff/릴리스 빌드도 통과했다. 두 독립 리뷰의 차단 문제가 남지 않았다. 고정 릴리스의 네이티브 QA에서 중첩 닫힌/열린 곡선·반복 그룹 생성·취소·한 Undo/Redo·재열기·Ctrl-mask/standalone을 통과했다. 기존 경로/페인트는 JSON 그대로이며 독립 변환 계산은 실제 클릭과 축별 최대 0.223px 이내였다. Speed는 두 좌우 손잡이·수직 무변경·가로 배율·원점 복귀 no-op·한 Undo/Redo·재열기와 0프레임 inset 손잡이 조작을 통과했다. 26개 사후 데이터 검사와 15장 네이티브 캡처를 남겼다. Alt 중앙/차별적 Ctrl 스냅, 마우스를 누른 중간/중단, 매우 작은 그래프·전체 DPI는 네이티브 미검증이다.
+- 한계: 새 경로는 기존 페인트를 상속하고 자동 Stroke를 만들지 않는다. 기존 파일 형식을 유지한다. Speed 세로/코너 변형·다중 채널 그래프는 남아 있으며, 프레임 반올림/부분 선택은 전체 곡선의 정확한 affine 변형을 보장하지 않는다. 극도로 낮은 그래프는 키와 겹치지 않는 손잡이 위치가 없어 생략될 수 있으므로 패널을 늘려야 한다. 실제 AE 동등성, Windows/DPI/IME 검증은 주장하지 않는다.
+
+### E04 모달 Gradient Editor·E02/G01 다중 정점 — 2026-10-03
+
+- Gradient Fill/Stroke의 `Edit Gradient…`에서 색/불투명도 stop 추가·삭제·위치·midpoint·HEX/RGB·opacity를 임시 문서에서 편집한다. Composition 초안은 갱신하되 원본·자동 저장·출력·히스토리는 OK 전까지 유지한다. 여러 변경을 한 Undo로 적용하며 Cancel은 원본을 유지한다. 잘못된 입력은 승인을 막고, 필드의 Escape는 그 필드만 되돌린다. 변경 후 원래 값으로 복귀하거나 stop을 추가 후 제거하면 키/Undo를 만들지 않는다.
+- Pen은 한 경로에서 Shift-click 다중 정점 선택과 공통 로컬 이동을 지원한다. Shape·Mask·중첩 Contents의 변환, 탄젠트 오프셋과 선택하지 않은 점을 보존한다. 정적 다중 Delete는 열린 경로 2점/닫힌 경로 3점 하한을 지키며 애니메이션 토폴로지 변경은 원자적으로 거부한다. 삽입 중 Delete/연속 pointer-down, 놓는 위치와 Alt/Shift, Settings 뒤 캔버스 키 처리 문제를 리뷰에서 발견해 회귀 검사와 함께 수정했다.
+- 자동 검증: 코어 197개 + 데스크톱 319개(총 516개), 명시적 FFmpeg 30개, check/fmt/diff/릴리스 빌드 통과. 모달 16개·Pen 27개(기존 4개 + 신규 23개)·Shell focus 3개는 데스크톱 집계에 포함된다. 두 독립 리뷰의 필수 수정도 반영됐다.
+- 초기 debug 앱에서 색/불투명도 stop 추가·stop/midpoint 이동·RGB/opacity scrub 후 Cancel, HEX 입력/오류 차단·필드 Escape, 여러 변경 OK와 정확한 한 Undo/Redo, 변경 후 원복의 no-op 히스토리를 실제 조작했다. 최종 release에서 저장본 재열기를 확인했고 CLI 출력의 2,244개 내부 픽셀이 독립 색/불투명도 midpoint 수식과 RGB 최대 1.47/255 이내였다.
+- 최종 release의 실제 Pen 조작에서 Shape·회전/Skew 중첩 Contents·Mask의 두 점 이동을 확인했다. 저장 JSON은 공통 로컬 이동량과 나머지 점/모든 탄젠트 보존을 입증했다. 선택만 한 no-op, 정적 6→4점 삭제, 닫힌 경로 4→2점 거부, 애니메이션 토폴로지 거부와 기존 두 키 보존, 한 Undo/Redo·정적 저장 재열기가 통과했다. Ctrl+K/Ctrl+N 뒤 Delete는 캔버스를 변경하지 않았고 Settings 필드 입력/두 단계 Escape도 통과했다. Save 등 파일 동작은 기존 포커스 정책으로 임시 Pen 선택을 지운다. 원자적 입력 도구의 한계상 마우스를 누른 중간 프레임은 미검증이며 실제 AE 비교는 수행하지 않았다.
+- 남음: 복합 Colors/토폴로지 애니메이션, 모달 내부 HSV/eyedropper·drag-away 삭제, Contents 트리 drag/다중 선택·선택 그룹 Pen 생성, marquee/교차 경로 선택·숫자 정점 편집·경로 방향/첫 정점, 가변 Feather/RotoBezier. 기존 파일 모델을 사용하며 실제 AE UI/픽셀 동등성을 주장하지 않는다. 원격 push/PR 없이 `codex/ae-workspace`의 로컬 커밋으로만 보존한다.
+
+### I01 공통 출력 사전 점검 — 2026-10-03
+
+- CLI·네이티브 PNG/영상 출력·렌더 큐에서 설정/범위, 연결 소스, 원본/프로젝트 경로 보호, 출력 폴더와 글꼴을 같은 진단 모델로 검사한다. 목적지 옆 임시 파일의 생성·쓰기·동기화로 권한을 확인하고 기존 출력은 바꾸지 않는다.
+- 영상마다 실제 선택 코덱·픽셀 형식·컨테이너·오디오 옵션으로 작은 FFmpeg 인코딩을 한 번 검사한다. 시간/로그/결과 크기 제한과 취소·자식 프로세스 회수를 제공한다. 프로젝트 프레임은 사전 점검 후 렌더한다.
+- Fonts fallback/strict와 CLI `--fonts fallback|strict`를 추가했다. 이전 설정은 fallback으로 읽으며 실제 대체 family/face/style을 경고한다. strict는 폰트 대체가 필요한 출력을 시작 전에 거부한다. 큐의 정책/진단은 재시작 후 유지하며 CLI 경고는 stderr로 보낸다. 저장 버전을 4로 올려 구버전 앱이 strict 정책을 조용히 무시하지 못하게 하고, v1–v3은 명시된 정책을 보존하며 없는 정책만 fallback으로 이행한다.
+- 큐 v4 보강까지 포함해 코어 197개 + 데스크톱 276개(총473개), 명시적 FFmpeg30개, check/fmt/릴리스 빌드가 새 독립 빌드 경로에서 통과했다. 사전 점검 중 취소와 기존 목적지/하드링크/원본 보존, 폰트 정책, 중첩/매트 글꼴, 인코더 실패를 검사했다. 실제 CLI에서 strict 실패 시 기존 PNG 바이트 유지, fallback PNG 생성/대체 경고와 없는 출력 폴더 거부를 확인했다.
+- 네이티브 Linux에서 strict 실패 시 기존 출력 해시 유지, 재시작 후 정책/진단 복원, fallback의 H.264 320×180·24fps·2프레임 출력과 대체 경고, 출력 폴더가 사라진 경우의 진단/출력 미생성을 확인했다. 이 UI 검사는 초기 I01 빌드에서 수행했고 이후 v4 호환성 보호는 최종 자동 검사로 확인했다. 여유 디스크 용량이나 사전 점검 이후 파일시스템 상태는 보장하지 않으며 문자별 누락 글리프 검사는 포함하지 않는다. 네이티브 PNG 시퀀스의 기존 부분 출력/manifest 정책과 큐의 완성 폴더 게시 정책을 유지한다. 새 원격 Windows CI는 로컬 커밋 전용 범위에 따라 실행하지 않았다.
+
+### Gradient 색상바 직접 편집 — 2026-10-03
+
+- E04/B05: Properties의 색상바 위에 불투명도 스톱, 아래에 색상 스톱과 구간별 중간점 다이아몬드를 추가했다. 스톱/중간점을 드래그하면 임시 색상바가 갱신되고 놓을 때 현재 프레임의 트랙에 한 Undo로 반영한다. Composition은 놓은 뒤 갱신한다. Escape·포커스/창 전환·문서/프레임/레이어/항목 변경은 드래그 초안을 취소한다.
+- 빈 스톱 행 클릭으로 해당 위치에 현재 색/불투명도를 샘플링해 추가한다. Up/Down 선택, Left/Right 1% 이동(Shift 10%), Home/End 경계 이동, Delete 삭제를 제공한다. 기존 숫자 필드·색 선택기·최소 2/최대 32스톱 제한을 유지한다. 중간점은 공간상 다음 스톱과의 상대 위치이며 겹친 스톱의 길이 0 구간에는 표시하지 않는다. [Adobe Shape Gradient 설명](https://helpx.adobe.com/in/after-effects/desktop/drawing-painting-and-paths/shapes-and-shape-attributes/shape-attributes-paint-operations-path.html)을 참고했다.
+- 자동 검사: 드래프트가 원본/키/히스토리를 변경하지 않는지, 범위 제한·잘못된 값, 서로 다른 행의 선택, 겹침/교차 시 안정된 ID와 중간점 소유자, 120/216/300px 좌표, 키 한 번 생성·Undo/Redo·저장 왕복과 오래된 프레임/선택 거부를 검증했다. 기존 Gradient Preview/출력 수식 테스트를 포함한 전체 435개(코어 189 + 데스크톱 246) 통과, 외부 장치/미디어 30개 제외.
+- **네이티브 드래그·키보드·추가/삭제·저장 재열기 검증은 미완료:** Windows 컴퓨터 사용 도구가 `failed to activate captured window`를 반환했고 창을 재선택한 복구 시도도 실패했다. 실제 AE에서는 기존 작업 화면과 Fill Options를 열어 확인했지만 Gradient Editor 화면은 아직 대조하지 못했다. 실제 사용자 조작까지 완료로 표시하지 않는다.
+- 남음: 네이티브 조작 검증, AE형 모달 Gradient Editor, 편집 중 Composition 실시간 반영, Composition 끝점 손잡이, Colors 단일 복합 트랙/토폴로지 애니메이션. 이번 색상바는 현재 파일 형식을 유지하며 E04 전체는 진행 중이다.
+- **사용자 요청으로 일시 중지:** 최종 소스의 Cargo check/fmt 및 전체 435개 테스트는 통과했다. 마지막 키보드 입력 시 드래그 취소 수정 전 릴리스 빌드는 성공했지만, 해당 수정 후의 최종 릴리스 재빌드는 중지 요청에 따라 중단했다. 재개 시 릴리스 빌드와 네이티브 조작 검증부터 이어간다. 저장된 QA 편집기 프로세스는 빌드 파일 잠금 해제를 위해 종료했으며 사용자 보존 원본 SHA256은 변하지 않았다. 실제 AE에는 비교용 Fill Options 대화상자가 열린 상태일 수 있다.
+
+### 페인트 Blend Mode와 드롭다운 정리 — 2026-10-03
+
+- E04/B05: 단색/Gradient Fill·Stroke에 Normal·Darken·Multiply·Color Burn·Lighten·Screen·Color Dodge·Overlay·Soft Light·Hard Light·Difference·Exclusion·Hue·Saturation·Color·Luminosity를 연결했다. Composite가 정한 합성 순서에서 같은 그룹의 뒤쪽 페인트와 섞고, 그룹을 분리해 바깥 페인트가 내부 블렌딩에 유입되지 않게 한다. 그룹 불투명도와 레이어 마스크/효과는 이후 적용한다.
+- [W3C 블렌딩 수식](https://www.w3.org/TR/compositing-1/#blending)과 현재 벡터 렌더러의 sRGB 구현을 사용한다. Normal만 있는 그룹은 기존 SVG 경로를 유지한다. 비기본 모드를 사용한 문서만 v47이며, 이전 문서는 Normal로 읽고 기본 필드는 저장에서 생략한다. 명령은 잠금·잘못된 대상·구버전 위장을 거부하며 Undo/Redo·복제·JSON을 지원한다.
+- Properties의 Blend Mode와 Composite를 드롭다운으로 통일했다. Up/Down·Home/End·Enter/Space·Escape, 바깥 클릭·포커스/창 전환 닫기를 연결하고 문서/선택 변경 시 오래된 메뉴를 무효화한다. 기본 패널 배치와 글꼴/아이콘은 유지한다.
+- 자동 검증에서 16모드 × 4페인트 × 2합성 순서 × 3프레임의 Preview/출력이 독립 색상표·알파 합성과 일치했다(색 2.5/255, 알파 1/255 이내). 투명 영역, 그룹 분리와 그룹 불투명도 결합, 저장 왕복·버전·잠금·Undo/Redo를 검사했다. 코어 188개 + 데스크톱 244개(총 432개) 통과, 외부 미디어/장치 30개 제외. Cargo check/fmt/test/release 통과(Moon/proto 미설치, 기존 릴리스 경고 17개).
+- 실제 Windows에서 Fill의 Multiply 선택·Undo/Redo, End/Enter로 Luminosity 선택·Undo, Home/Escape 취소, 저장 후 재열기를 확인했다. 저장본 `target/qa/paint-blend-native.lfe.json`의 0/15/30/45/60프레임 출력 27,225개 샘플이 독립 Multiply/알파 계산과 2/255 이내로 일치했다(`verify_paint_blend_native.py`). 1920/1442px 창에서 메뉴 항목을 확인했으며, 버튼 아래에 빈 행이 생기던 팝업 기준점을 수정했다. 다른 페인트 종류·나머지 모드·중첩 그룹은 자동 검증 범위이며 네이티브 조작은 별도 미검증이다.
+- 최종 릴리스에서 저장본 재열기, 버튼 바로 아래의 메뉴 위치와 바깥 클릭 닫기를 확인했다. 실제 작업 창은 1개이며 사용자 보존 원본 SHA256은 유지됐다. git diff --check 통과.
+- 남음: Add 등 나머지 AE 모드, 그룹 Blend Mode·모드 애니메이션, AE 색 공간/픽셀 동등성, 경로 연산자·Gradient Editor/Composition 손잡이. 기존 레이어 블렌딩은 별도의 5모드이며 이번 변경으로 확장하지 않았다. E04 전체 완료로 표시하지 않는다.
+
+### 페인트 Composite 앞/뒤 합성 — 2026-10-03
+
+- E04: 단색/Gradient Fill·Stroke의 Properties에 Composite의 Below Previous/Above Previous를 추가했다. 같은 그룹에서 앞서 처리한 결과의 뒤/앞에 현재 페인트를 합성하며, Contents 항목 순서·사용하는 경로·기존 속성 키는 그대로 유지한다. 중첩 그룹은 독립 합성 범위를 유지한다. [Adobe의 Composite 설명](https://helpx.adobe.com/after-effects/desktop/drawing-painting-and-paths/shapes-and-shape-attributes/shape-attributes-paint-operations-path.html)을 참고하고 실제 AE Fill의 기본값 Below Previous in Same Group 표시를 확인했다.
+- 기존 문서는 Below Previous로 읽고 기본 필드는 저장에서 생략한다. Above Previous 사용 문서만 v46을 요구한다. 잠금·사라진 항목·경로/그룹 대상으로 명령을 실행하면 원자적으로 거부하며, v45 이하로 위장한 새 합성 값도 거부한다. 한 Undo/Redo와 복제·저장 왕복으로 값을 유지한다.
+- 자동 검증: 코어 187개 + 데스크톱 243개(총 430개) 통과, 외부 미디어/장치 30개 제외. 네 종류 페인트의 0/30/60프레임 반투명 겹침을 독립 합성식과 비교하고 Preview/출력 일치·중첩 그룹 범위·경로/키 순서 유지·히스토리·잠금·버전·JSON을 검사했다. Cargo check/fmt/test/release 및 git diff --check 통과(Moon/proto 미설치, 기존 릴리스 경고 17개).
+- 실제 Windows에서 기존 Gradient 위의 Fill을 Above Previous로 전환·Undo/Redo하고 Fill Opacity 50%로 저장한 뒤 재열어 값과 미리보기 유지를 확인했다. 실제 저장본 `target/qa/composite-native.lfe.json`의 0/15/30/45/60프레임 출력 27,225개 샘플이 독립 source-over 계산과 2/255 이내로 일치했다(`verify_composite_native.py`). 1442/1920px 창 배치, 실제 작업 창 1개, 사용자 보존 원본 SHA256 불변을 확인했다. 다른 페인트 종류와 중첩 그룹은 자동 테스트 범위이며 네이티브 조작은 별도 미검증이다.
+- 이 옵션은 정적 합성 순서다. 페인트별 Blend Mode는 위 후속 단계에서 16종을 구현했다. 경로 연산자와 Gradient Editor/Composition 손잡이는 남아 있으며 E04 전체 완료로 표시하지 않는다.
+
+### Gradient Fill·Gradient Stroke와 독립 색/불투명도 스톱 — 2026-10-03
+
+- E04/D01: Contents Add에 Gradient Fill/Gradient Stroke를 추가했다. Linear/Radial, Start/End, Highlight Length/Angle, 색/불투명도 스톱 각각의 위치·중간점·RGB/불투명도를 Properties에서 편집하고 스톱워치·Timeline·Graph에 연결한다. 각 종류 2–32개 스톱을 지원하며 안정된 ID로 키를 유지한다. 추가는 현재 프레임의 50% 색/불투명도를 샘플링하고 제거 Undo는 키까지 복원한다. Gradient Stroke는 Cap/Join/Dash를 함께 사용한다.
+- [Adobe Shape 페인트 설명](https://helpx.adobe.com/in/after-effects/desktop/drawing-painting-and-paths/shapes-and-shape-attributes/shape-attributes-paint-operations-path.html)의 독립 색/불투명도 스톱과 방사형 Highlight 속성을 참고했다. 현재 구현은 sRGB의 거듭제곱 중간점 보간과 적응형 SVG 샘플링을 사용한다. 스톱이 같은 위치에 있으면 경계를 유지하고, 공간 순서가 교차해도 트랙 ID는 유지한다. 레이어별 SVG 정의를 분리해 서로 다른 그라디언트가 충돌하지 않게 했다. 그라디언트 사용 파일만 v45이며 기존 Contents는 v44를 유지한다.
+- 자동 검증: 코어 186개 + 데스크톱 242개(총 428개) 통과, 외부 미디어/장치 30개 제외. 스톱 추가/제거·최대/최소·잠금·잘못된 입력·Undo/Redo·JSON·버전·키 복사/시간 이동·색 초안 격리, 색/알파 중간점·겹친 스톱·레이어 간 정의 격리·점선·방사형 초점·길이 0을 검사했다. 독립 수식과 Preview/출력 일치를 검사했으며 8-bit premultiplied 채널 허용 오차는 2/255다. Cargo check/fmt/test/release 및 git diff --check 통과(Moon/proto 미설치, 기존 경고 17개).
+- 실제 Windows에서 Gradient Fill 추가, HEX FF8000 편집과 Undo/Redo, 색 스톱 추가·제거·Undo, End X의 0/60프레임 600→300 키, 30프레임 450 보간·Value Graph·저장·최신 빌드 재열기를 확인했다. 실제 저장본 `target/qa/gradient-native.lfe.json`의 0/15/30/45/60프레임에서 독립 색 계산 27,225개 샘플이 통과했다(`verify_gradient_native.py`). Linear→Radial 전환과 Undo, 색 선택기 안내, 색상바 이음선 수정도 실제 창에서 확인했다. 실제 작업 창 1개, 사용자 보존 원본 SHA256 불변을 확인했다.
+- 남음: 드래그 가능한 Gradient Editor·중간점/스톱, Composition 끝점 손잡이, AE의 단일 Colors 속성/토폴로지 애니메이션. 현재 스톱 추가/제거는 정적 구조 변경이며 다른 프레임의 결과를 바꿀 수 있다. Gradient Stroke·Opacity 스톱·Highlight 수치의 네이티브 조작과 좁은 창의 전체 필드 검증은 남아 있다. AE 색 공간/픽셀 동등성을 주장하지 않으며 E04 전체 완료로 표시하지 않는다.
+
+### 그룹 Skew·Skew Axis와 변형 속성 순서 — 2026-10-03
+
+- E04/D01: Contents 그룹에 Skew(−89°–89°)·Skew Axis와 스톱워치를 추가했다. Properties와 Timeline의 그룹 속성 순서를 Anchor → Position → Scale → Skew → Skew Axis → Rotation → Opacity로 통일했다. 실제 After Effects 2026에서 이 순서와 Skew 45°/Axis 0°일 때 위쪽 변이 오른쪽으로 움직이는 방향을 확인했다. AE의 전체 수치 범위나 픽셀 동등성을 주장하지 않는다.
+- 그룹은 Anchor 차감 → Scale → 축 방향 Skew → Rotation → Position 순서로 적용한다. 중첩 그룹 렌더와 기존 Bezier Pen 편집은 같은 누적 행렬/역행렬을 사용한다. 키 생성/복사/시간 이동·Graph·Undo/Redo·JSON에 공통 트랙으로 연결한다. Skew 보간 오버슈트는 ±89°로 제한하며 현재 값으로 키를 추가하거나 애니메이션을 끌 때 보이는 값을 유지한다.
+- v43 Contents를 읽을 때 기존 버전 스키마를 먼저 검증하고, 모든 컴포지션의 그룹에 기본값 0인 두 속성을 추가해 v44로 변환한다. 기존 기하·페인트·키는 보존한다. v44에서 속성이 빠졌거나 새 속성을 v43으로 위장한 문서는 거부한다. 다른 모델의 구버전 파일은 이 마이그레이션으로 변경하지 않는다.
+- 자동 검증: 코어 183개 + 데스크톱 238개(총 421개) 통과, 외부 미디어/장치 30개 제외. 축 0/45/90°의 독립 좌표, Anchor/Scale/Rotation 순서, 중첩 그룹과 Pen 역변환, 키 복사/시간 이동/Undo/Redo/저장, 잘못된 수치·오버슈트·버전 마이그레이션을 검사했다. 5프레임 Rectangle Preview/출력 RGBA가 독립 기하 계산과 일치했다. Cargo check/fmt/test/release 및 git diff --check 통과(Moon/proto 미설치, 기존 빌드 경고 17개).
+- CLI 검증: 생성한 `target/qa/skew-generated.lfe.json`의 0/15/30/45/60프레임 출력 RGBA 155,517개 샘플이 독립 계산과 일치했다(`verify_skew_fixture.py`). 기존 실제 v43 저장본 `contents-paint-native.lfe.json`도 새 빌드로 읽어 내부/외부 15,951개와 점선/간격 600개 샘플을 다시 통과했다. 생성한 Skew 파일은 네이티브 UI 저장본이 아니다.
+- 후속 네이티브 검증: 창 활성화 오류가 복구된 뒤 실제 v43 사본을 열어 Skew 45° 입력·Undo/Redo, 45/60프레임 45→30° 키와 Graph, Axis 90° 정적 입력·v44 저장을 확인했다. `target/qa/skew-native.lfe.json`은 이제 실제 편집 저장본이며 0/30/45/50/60프레임의 독립 기하/색 계산 66,059개 샘플이 통과했다(`verify_skew_native.py`). 1442px 창에서 조작했으며 새 실행 시 이전 편집기가 닫히고 작업 창 하나를 유지했다. 사용자 보존 원본 SHA256 불변. **Skew 저장본의 네이티브 재열기·Axis 스톱워치·기울어진 경로의 실제 Pen 드래그는 아직 미검증**이다.
+- 다음: 남은 네이티브 검증과 페인트 Blend·경로 연산자, 트리 드래그/다중 선택과 선택 그룹으로 새 Pen 경로 삽입을 개발한다. Gradient 페인트와 Composite는 위 후속 단계에서 구현했다. E04 및 전체 백로그는 계속 진행 중이다.
+
+### Contents 트리·다중 경로/페인트·그룹 변형 — 2026-10-03
+
+- E04/D01: 기존 Shape의 `Create Contents Group`이 경로·Stroke·Fill을 별도 항목으로 분리한다. 기하·경로·색·불투명도·점선 키를 유지하고 한 Undo로 원래 모델을 복원한다. 새 모델은 프로젝트 v43이며 기존 파일은 명시적으로 전환할 때까지 유지한다. 레이어별 안정된 항목 ID를 사용하고 복제 시 하위 항목까지 새 ID를 부여한다. 최대 256항목/8단계 중첩을 검증한다.
+- Properties에 그룹 접기, 항목 추가/이름/가시성/복제/삭제/순서 변경, 그룹 안팎 이동, 선택 항목의 수치와 스톱워치를 연결했다. 그룹 Position/Anchor/Scale/Rotation/Opacity, 경로 Width/Height/Position·기하, Fill/Stroke 수치 트랙이 공통 Timeline/Graph·키 복사·시간 이동을 사용한다. 기존 Contents Bezier 경로는 누적 그룹/레이어 좌표 변환으로 Pen 편집한다.
+- [Adobe의 페인트 순서](https://helpx.adobe.com/after-effects/desktop/drawing-painting-and-paths/shapes-and-shape-attributes/shape-attributes-paint-operations-path.html)를 참고했다. 각 페인트는 같은 그룹에서 자신보다 위에 있는 경로·하위 그룹 경로를 사용하며, 먼저 나오는 페인트/그룹을 앞에 합성한다. Fill은 여러 경로를 하나의 복합 경로로 채우므로 겹친 부분의 페인트 알파를 중복 적용하지 않는다. Non-Zero/Even-Odd 규칙과 그룹 합성 후 불투명도를 지원한다. 곡선 기본 도형은 cubic 근사이다.
+- 자동 검증: 코어 178개 + 데스크톱 235개(총 413개) 통과, 외부 미디어/장치 30개 제외. 전환/재정렬/부모 이동/복제/삭제의 원자성·잠금·버전·Undo/Redo·JSON·키 이동, 기존 5종 도형의 애니메이션 렌더 보존, 페인트 순서·복합 알파·Even-Odd·중첩 그룹 변형/불투명도·Preview/출력 일치를 검사했다. Cargo check/fmt/test와 git diff --check 통과(Moon/proto 미설치).
+- 실제 Windows에서 기존 Star의 Contents 전환 Undo/Redo, Fill 복제·색/불투명도 편집·페인트 순서 Undo/Redo, 그룹 Position X의 30/60프레임 0→200 키와 45프레임 100 보간, U 필터·Value Graph·저장 재열기를 확인했다. 1920/1442px 창 배치, 실제 작업 창 1개와 보존 원본 SHA256 불변을 확인했다. Release build도 통과했다(기존 경고 17개).
+- 실제 저장본 `target/qa/contents-native.lfe.json`과 순서 비교본의 0/15/30/45/60프레임 출력에서 독립 기하·페인트 합성 계산의 RGBA 45,567개 샘플이 일치했다(`target/qa/verify_contents_native.py`). 중첩 그룹/복합 경로는 자동 검사 범위이며 네이티브 조작을 별도 검증하지 않았다.
+- 후속 연결: Fill/Stroke 색 스와치에서 공통 HEX/RGB/HSV·불투명도·최근 색·뷰어 샘플링 대화상자를 연다. 취소는 문서를 변경하지 않고 승인은 현재 프레임에서 바뀐 채널만 한 Undo로 적용한다. Stroke의 Cap/Join 선택과 마지막 Dash/Gap 추가·삭제를 연결했다. 다른 트랙은 보존하고 Undo로 제거한 점선 키를 복원하며 행 변경 시 수치·스톱워치도 갱신한다.
+- 후속 검증: 코어 179개 + 데스크톱 237개(416개) 통과, 30개 제외. 색 초안/채널 격리·다른 페인트 보존·시간 보간·잠금·오래된 초안·Undo/Redo·JSON, 점선 한계/행 삭제/키 복원, 같은 Bezier 경로의 9가지 Cap/Join 조합에서 기존 Shape와 Contents의 전체 RGBA 및 Preview/출력 일치를 검사했다. Cargo check/fmt/test/release와 git diff --check 통과, 기존 경고 17개. 기본 다각형과 cubic 표현의 점선 경계 래스터 차이는 픽셀 동등성 범위에서 제외한다.
+- 실제 Windows에서 Fill 색 선택기 취소/HEX 변경/Undo/Redo, Projecting Cap·Bevel Join, Stroke Width 24·Dash 10·Gap 50, Gap 스톱워치 활성화·행 제거 후 Undo·저장 재열기와 작은 창 배치를 확인했다. `target/qa/contents-paint-native.lfe.json`의 0/30/45/60프레임 출력에서 내부/외부 15,951개 및 점선/간격 600개 RGBA 샘플이 독립 계산과 일치했다(`target/qa/verify_contents_paint_native.py`). 작업 창 1개와 보존 원본 SHA256 불변을 확인했다. 이번 네이티브 검사는 Fill HEX 중심이며 Stroke 색 입력·뷰어 샘플링은 별도 조작하지 않았다.
+- 그룹 Skew·Gradient 페인트·Composite·16종 페인트 Blend는 위 후속 단계에서 구현했다. 남음: 경로 연산자, 트리 드래그/다중 선택과 새 Pen 경로의 선택 그룹 삽입. AE의 그룹 좌표/페인트 합성 픽셀 동등성을 검증한 것은 아니며 E04 전체 완료로 표시하지 않는다.
+
+### 기본 도형 → Bezier 경로 전환 — 2026-10-03
+
+- E02/E03: Properties의 `Convert To Bezier Path`로 Rectangle·Rounded Rectangle·Ellipse·Polygon·Star를 현재 프레임의 닫힌 경로로 전환한다. Points·Inner Radius·Roundness 트랙은 평가된 정적 기하로 대체하고 페인트 트랙·레이어 변형·마스크·효과는 유지한다. 툴팁에서 이 동작을 설명한다. 한 Undo로 원래 도형과 키를 복원하며, 전환 후 기존 Path 스톱워치와 Pen 편집으로 경로 애니메이션을 만들 수 있다. 잠금·없는 레이어·비도형·이미 전환된 경로·잘못된 시간은 원자적으로 거부한다.
+- [Adobe의 경로 전환 흐름](https://helpx.adobe.com/after-effects/desktop/animate-in-after-effects/animate-shape-paths-and-masks/animating-shape-paths-masks.html)을 참고했다. Libre Effects는 기존 레이어 좌표의 경로를 생성하고 현재 파일 형식을 사용한다. 원과 둥근 모서리는 4개의 cubic 원호로 근사한다. AE Contents의 그룹 좌표/변환이나 픽셀 동등성까지 구현한 것은 아니다.
+- 검증: 코어 175개 + 데스크톱 232개(총 407개) 통과, 외부 미디어/장치 30개 제외. 5종 도형·Fill/Stroke·페인트 애니메이션의 Preview/출력, 전환/경로 키의 Undo/Redo·저장 왕복을 검사했다. Cargo check/fmt/test/release build와 git diff --check 통과(Moon/proto 미설치), 기존 경고 17개.
+- 실제 Windows에서 30프레임의 Star를 14정점 경로로 전환하고 Undo/Redo를 확인했다. Path 애니메이션 활성화 후 60프레임의 윗꼭짓점을 드래그했으며, 드래그 Undo/Redo·45프레임 보간·저장 후 재열기·U 필터를 확인했다. 1920/1442px 창 배치와 실제 작업 창 1개, 사용자 보존 원본 SHA256 불변을 확인했다.
+- 실제 저장본 `target/qa/path-conversion-native.lfe.json`의 0/30/45/60/90프레임 출력에서 독립 다각형 계산의 내부/외부 RGBA 22,155개 샘플이 일치했다(`target/qa/verify_path_conversion.py`). 전환 직후 별의 출력은 경계 48픽셀에만 알파 최대 16/255의 차이가 있었고, 적분 알파 차이는 3.004px였다. 정적 전환본의 30/90프레임은 전체 RGBA가 동일하다. 곡선 도형과 페인트 애니메이션의 네이티브 조작은 별도 미검증이다.
+- 남음: Contents 그룹·다중 경로/페인트·도형 연산자, 여러 정점 선택·경로 방향/첫 정점 편집. E02/E03 전체 완료로 표시하지 않는다.
+
+### Polygon·Star Points 애니메이션 — 2026-10-03
+
+- E03/D01: Polygon·Star의 Points를 3–128 범위의 소수 속성으로 편집하고 스톱워치·Timeline·Graph·공통 키 편집에 연결했다. Polygon은 평가 값의 정수 부분으로 꼭짓점을 만들고 Star는 소수 부분에 따라 부분 꼭짓점이 자란다. 기존 정수 도형 좌표와 선의 시작점은 유지한다. Bezier 경로나 다른 종류의 도형에는 Points 트랙을 붙여넣을 수 없다.
+- 정수 기본 필드의 이전 JSON 형식은 유지하고 Points 트랙을 사용한 파일만 v42로 올린다. 애니메이션 해제는 현재 소수 값을 보존한다. 코어 검사는 정수 형상 보존·소수 경계·면적 연속성·키 이동/복사·Hold·Undo/Redo·저장 왕복·잘못된 값/대상/버전의 원자적 거부를 포함한다. Preview/출력 일치와 독립 면적식도 검사했다.
+- 검증: 코어 173개 + 데스크톱 231개(총 404개) 통과, 외부 미디어/장치 30개 제외. Cargo check/fmt/test/release build와 git diff --check 통과(Moon/proto 미설치), 기존 경고 17개.
+- 실제 Windows에서 Star Points 5.25→8.75를 0/60프레임 키로 입력했다. Undo/Redo, 30프레임 Points 7의 별, U 필터·Value Graph, 실제 저장본 `target/qa/points-native.lfe.json` 재열기를 확인했다. 0/15/30/45/60프레임 PNG의 19,358개 내부/외부 RGBA 샘플이 독립 기하 계산과 일치하며 적분 알파 면적 오차는 3.36px 미만이다(`target/qa/verify_points_native.py`). 1920/1442px 창 배치를 확인했다. 실제 작업 창은 1개이며 사용자 보존 원본 SHA256은 유지됐다.
+- 남음: Contents 그룹·다중 Fill/Stroke·Gradient 페인트·연산자, 독립 경로 회전/반지름·안팎 Roundness와 AE 픽셀 동등성. Polygon의 네이티브 입력 조작은 별도 미검증이며 모델·출력 자동 검사로 확인했다. E03 전체 완료로 표시하지 않는다.
+
+### 도형 곡선의 한계값 유지 — 2026-10-03
+
+- D01/E03: 유효한 Bezier 곡선의 중간 값이 속성 한계를 넘을 때, 키 추가·애니메이션 해제가 `Invalid shape property or keyframe`으로 거부되는 문제를 회귀 테스트로 재현하고 수정했다. 이 두 조작은 현재 렌더에서 평가한 한계값을 저장하며, 직접 입력한 범위 밖 수치는 계속 거부한다. 기존 키/핸들·다른 속성은 보존하고 한 번의 Undo/Redo로 복원한다. Timeline 숫자 필드와 잠긴 행도 공통 속성 평가 값을 사용한다. Graph 곡선은 조절 가능한 원래 보간 곡선을 유지한다.
+- 코어 회귀 검사는 Width·Miter·Offset·Fill/Stroke Opacity·RGB의 상·하한 오버슈트, 두 조작, 이전 키 보존, Undo/Redo·JSON과 잘못된 시간의 원자적 거부를 포함한다. 실제 Windows에서는 Fill Red가 286.875로 오버슈트하는 프레임에 RGB 키를 추가하여 255로 저장했고, 키 추가 및 스톱워치 해제 각각 Undo/Redo를 확인했다.
+- 실제 저장본 `target/qa/shape-bounds-native.lfe.json`의 Fill RGB는 255/159.5/191.5로 고정된다. 0/15/30/45/60프레임 출력 6,300개 샘플이 기대 색/알파와 2단계 이내로 일치하며, 30프레임 전체 RGBA는 해제 전후 정확히 동일하다(`target/qa/verify_shape_bounds_native.py`). 모델로 만든 원래 곡선 사본과 실제 UI에서 편집·저장한 사본을 구분해 보존했다.
+- 최종 검증: 코어 170개 + 데스크톱 230개(총 400개) 통과, 외부 미디어/장치 30개 제외. Cargo check/fmt/test/release build와 git diff --check 통과(Moon/proto 미설치), 기존 경고 17개. 최종 릴리스에서 원래 곡선의 Timeline R 표시 255.00을 확인했고, 실제 편집 저장본 재열기 후 Fill FFA0C0·꺼진 색상 스톱워치·미리보기 유지를 확인했다. 실제 작업 창 1개와 사용자 보존 원본 SHA256 불변을 확인했다.
+
+### 도형 Fill·Stroke 색상 애니메이션 — 2026-10-03
+
+- E03/D01: Properties의 Fill/Stroke 색상 스톱워치가 RGB 세 채널을 함께 켜고 끈다. 다른 프레임의 HEX 입력·색 선택기는 RGB 키를 한 Undo로 편집한다. Timeline의 Fill Color/Stroke Color 그룹과 R/G/B별 Graph 선택, 공통 키 복사·시간 편집·보간을 연결했다. 일부 채널만 붙여넣은 경우 색상 편집 시 나머지 채널의 기본색을 최초 색상 키 시점에 보존한다.
+- 도형 색 선택기의 알파는 해당 Fill/Stroke 불투명도를 편집하며 레이어 Transform Opacity는 유지한다. RGB와 알파의 동시 변경도 한 Undo이고, 확정 전 임시 편집은 문서를 바꾸지 않는다. 프로젝트 v41은 색상 트랙을 사용할 때만 필요하며 이전 정적 색상은 유지한다. 보간은 0–255 인코딩 RGB 기준이며 표시/출력에서 8비트로 제한·반올림한다.
+- 검증: 코어 169개 + 데스크톱 230개(총 399개) 통과, 외부 미디어/장치 30개 제외. 부분 채널 붙여넣기, 색상/알파 Undo/Redo, 입력 원자성·잠금·버전·JSON·키 이동, Preview/출력 RGBA를 검사했다. Cargo check/fmt/test/release build와 git diff --check 통과(Moon/proto 미설치), 기존 경고 17개.
+- 실제 Windows에서 0/60프레임 Fill FFFFFF→204080, Stroke FFFFFF→C08020을 입력했다. Fill 선택기의 알파 40% 동시 편집과 한 번의 Undo/Redo, 30프레임 Fill 90A0C0/70%, Stroke E0C090/80%, U 필터의 색상 그룹과 Green Value Graph 159.5를 확인했다. 실제 저장 v41 `target/qa/shape-color-native.lfe.json`을 재열어 값과 미리보기를 확인했다. CLI PNG 0/15/30/45/60프레임에서 채움·선·겹침·외부 9,100개 RGBA 샘플이 독립 계산과 2단계 이내로 일치했다(`target/qa/verify_shape_color_native.py`). 1920/1442px 창의 타임라인 그룹·Properties 스크롤 표시를 확인했다.
+- 남음: Points 애니메이션, Contents 그룹·다중 Fill/Stroke, Gradient Fill/Stroke와 도형 연산자. RGB 수치 보간은 구현했지만 AE 색 공간/픽셀 동등성을 뜻하지 않으며 E03 전체 완료로 표시하지 않는다.
+
+### 도형 Fill·Stroke 불투명도 — 2026-10-03
+
+- E03: Properties에 Fill opacity와 Stroke opacity를 별도로 추가했다. 각각 0–100%와 스톱워치를 제공하고 기존 Contents · Shape/Timeline/Graph, 키 편집, Undo/Redo에 연결한다. [Adobe Shape paint 속성](https://helpx.adobe.com/in/after-effects/desktop/drawing-painting-and-paths/shapes-and-shape-attributes/shape-attributes-paint-operations-path.html)을 참고했다. Fill/Stroke는 겹치는 영역에서 합성한 뒤 레이어 Transform Opacity를 적용한다. Fill 비활성·Stroke Width 0은 기존처럼 해당 페인트를 숨긴다.
+- 이전 파일은 두 값 모두 100%이며 기본 필드는 생략한다. 비기본 정적 값 또는 새 트랙을 사용하면 프로젝트 v40으로 올린다. 구버전으로 위장한 새 데이터, 범위 밖/비유한 값, 잠긴 레이어의 편집은 거부한다. 애니메이션 해제는 현재 평가 값을 유지하며 기존 색상·경로·폭·다른 트랙은 보존한다.
+- 검증: 코어 166개 + 데스크톱 229개(총 395개) 통과, 외부 미디어/장치 30개 제외. 독립 보간·정적 값/트랙 버전 검증·이전 파일 기본값·입력 원자성·Undo/Redo·JSON·애니메이션 해제·Fill/Stroke 겹침과 레이어 Opacity 50% 결합·Preview/출력 픽셀을 검사했다. Cargo check/fmt/test/release build와 git diff --check 통과(Moon/proto 미설치), 기존 경고 17개.
+- 실제 Windows에서 0/60프레임 Fill 100→20%, Stroke 100→60% 키 입력, Stroke Undo/Redo, 30프레임 60%/80%, U 필터와 Fill Value Graph를 확인했다. 실제 저장본 `target/qa/paint-opacity-native.lfe.json`을 재열어 값/미리보기 유지를 확인했다. CLI PNG 0/15/30/45/60프레임에서 9,100개 채움·선·겹침·외부 샘플이 독립 계산과 알파 1단계 이내로 일치했다(`target/qa/verify_paint_opacity_native.py`). 1920/1442px 창의 Properties 배치, 실제 작업 창 1개를 확인했다. 열려 있는 AE 첫 화면은 읽기만 했고 기존 왼쪽 Project/중앙 Composition/하단 Timeline/오른쪽 패널 배치를 유지했다.
+- 남음: Fill/Stroke 색상·Points 애니메이션, 다중 Fill/Stroke·Contents 그룹, Gradient Fill/Stroke와 도형 연산자. 실제 AE와 페인트 합성의 수치/픽셀 동등성은 별도 검증 과제이며 E03 전체 완료로 표시하지 않는다.
+
+### 점선 길이·간격 애니메이션 — 2026-10-03
+
+- 후속 네이티브 검증(2026-10-03): 창 입력이 복구된 뒤 v39에서 Dash 80→120, Gap 80→60, Width 32→64를 0/60프레임 키로 입력했다. Width Undo/Redo, 30프레임의 100/70/48과 Offset 100, U 필터의 Contents · Shape, Dash 1 Value Graph를 확인했다. 실제 저장본 `target/qa/dash-animation-native.lfe.json`을 재열어 값과 미리보기 유지를 확인했다. CLI 0/15/30/45/60프레임 PNG의 선 내부·외부·점선 간격 15,922개 샘플이 독립 계산과 일치했다(`target/qa/verify_dash_animation_native.py`). 1442px 창에서 조작했고 작업 창 1개 및 사용자 보존 원본 SHA256 불변을 확인했다. 아래의 입력 차단 기록은 당시 상황이며 현재는 해소됐다. Dash/Gap 제거·재추가의 네이티브 조작 및 1920px 애니메이션 배치 비교는 별도 미검증이다.
+
+- E03/D02: 최대 16개의 개별 Dash/Gap 행에 스톱워치를 연결했다. 행의 값은 현재 프레임의 트랙을 평가하며 공통 Timeline/Graph·키 편집·Undo/Redo를 사용한다. 마지막 행 제거는 그 행의 트랙/키도 같은 변경으로 제거한다. Undo는 모두 복원하고 다시 추가한 행은 10px·키 없음으로 시작한다. 앞선 행과 Cap/Join 편집의 기존 트랙은 유지한다.
+- 점선 트랙은 프로젝트 v39의 `DashLength0`…`DashLength15` 주소를 사용한다. 이전 v38의 스칼라 주소 직렬화는 유지하며 잘못된 주소, 존재하지 않는 행의 편집/붙여넣기, 행 없이 남은 트랙, v38 이하의 점선 트랙을 거부한다. 홀수 길이 목록 반복·전부 0인 실선·Round cap의 길이 0 점도 매 프레임 평가 결과에 적용된다.
+- 검증: 코어 164개 + 데스크톱 228개(총 392개) 통과, 외부 미디어/장치 30개 제외. 주소 왕복/구버전 호환, 보간, 항목 제거/Undo/Redo/재추가, 기존 트랙 보존, 잘못된 값/주소/붙여넣기의 원자적 거부, Preview/출력 픽셀을 검사했다. Cargo check/fmt/test와 릴리스 컴파일 및 git diff --check 통과(Moon/proto 미설치). 실행 중인 이전 바이너리를 덮어쓰지 않도록 `cargo rustc --release -p libre-effects-desktop --bin libre-effects -- -o …/target/qa/libre-effects-dash-animation.exe`로 빌드했다. 코드의 기존 경고 17개 외 출력 경로 옵션 안내 2개가 있다.
+- 생성한 모델 QA의 0/15/30/45/60프레임 CLI PNG에서 Dash 40→100, Gap 100→60의 445개 점선/투명 간격 샘플이 독립 계산과 일치했다(`target/qa/verify_dash_animation_model.py`). UI로 저장한 파일이 아니며 네이티브 조작 검증을 대신하지 않는다. 기본 `target/release/libre-effects.exe`도 새 바이너리와 같은 SHA256으로 갱신했다. 이전 실행 이미지는 `libre-effects-v38-running.exe`에 보존했고 기존 QA 창 PID 43264의 응답과 미저장 프로젝트가 유지됨을 확인했다. 다음 실행부터 v39가 적용된다.
+- 실제 UI 검증은 남아 있다. 기존 v38 QA 창의 화면 캡처는 복구됐으나 입력 활성화는 같은 `failed to activate captured window` 오류로 실패했다. 60프레임 Offset 180 입력이 아직 편집 필드에 남아 있으므로 입력 확정·Undo/Redo·저장/재열기를 먼저 마친 뒤 새 v39 빌드의 Dash/Gap 조작·Graph·좁은 창 배치를 확인해야 한다. 사용자 보존 원본 SHA256은 변하지 않았다. 색상·Points 애니메이션과 Contents 그룹/연산자 등 전체 E03 잔여 범위도 유지한다.
+
+### 도형 스칼라 속성 애니메이션 — 2026-10-03
+
+- 후속 네이티브 검증(2026-10-03): Offset 180 입력 확정, Undo/Redo, 30프레임 값 100, Timeline/Graph 선택 및 60프레임 키 F9→Undo를 확인했다. 실제 저장 v38 `target/qa/shape-animation-native.lfe.json`을 v39에서 재열어 값/미리보기 유지와 하위 호환을 확인했다. CLI 5프레임의 Offset 20/60/100/140/180 점선 샘플 448개가 독립 계산과 일치했다(`target/qa/verify_shape_animation_native.py`). Width 실제 입력/저장/재열기/출력은 위 Dash/Gap 후속 기록에 포함된다. Roundness·Inner Radius·Miter Limit 각각의 네이티브 조작은 미검증이다. 아래 입력 차단 기록은 현재 해소됐다.
+
+- E03/D02: Stroke Width, Roundness, Inner Radius %, Miter Limit, Dash Offset에 Properties 스톱워치를 연결했다. 켠 뒤 재생 헤드를 이동해 값을 바꾸면 해당 프레임에 키를 만든다. 처음 편집한 속성은 Timeline → Contents · Shape에 나타나며 공통 키 복사/붙여넣기·이동·삭제·시간/값 배율·보간·Graph에 연결된다. 스톱워치를 끄면 현재 프레임의 평가 값을 유지한다. 렌더 시 범위를 벗어나는 보간 오버슈트는 속성 한계로 제한한다.
+- 선택적 `Shape.parameters`는 사용한 속성만 저장하고 기존 정적 값은 해당 트랙이 없는 경우의 기본값으로 유지한다. 프로젝트 v38을 사용하며 v37 이하의 기존 도형 모습은 그대로다. 레이어 이동/복사 등 공통 시간 작업에도 도형 트랙을 포함했다. 스타일의 Cap/Join 변경은 애니메이션 트랙을 보존한다.
+- 검증: 코어 163개 + 데스크톱 226개(총 389개) 통과, 외부 미디어/장치 30개 제외. 다섯 속성의 보간·Undo/Redo·JSON 왕복·이전 버전 거부, 정적 경로/변형 보존, Hold·키 복사/시간 이동/배율/삭제·애니메이션 해제 값 유지·잠금/잘못된 값의 원자적 거부를 검사했다. 5프레임의 선 두께/점선 Offset 픽셀을 독립 계산하고 Preview/출력 일치를 검사했다. Cargo check/fmt/test/release build 및 git diff --check 통과(Moon/proto 미설치), 기존 릴리스 경고 17개.
+- 실제 Windows에서 v37 QA 사본을 열어 Offset 스톱워치 활성화, Timeline의 Contents · Shape/키 생성, 60프레임 이동과 값 180 입력까지 확인했다. 입력 확정 확인 시 컴퓨터 제어 도구의 `failed to activate captured window` 오류가 복구 시도에서도 반복됐다. 따라서 **이번 애니메이션의 실제 UI 입력 확정·Undo/Redo·저장/재열기·Graph 조작은 미완 검증**이다. 자동 테스트와 구분하며 이후 같은 QA 사본에서 이어서 확인한다. 이번 턴에 실제 AE 초기 패널 배치를 다시 읽어 대조했고 문서를 수정하지 않았다.
+- 별도 생성한 모델 QA 파일의 0/15/30/45/60프레임 릴리스 CLI PNG에서 Width 16→64, Offset 20→180의 17,472개 내부/외부/점선 픽셀이 독립 계산과 일치했다(`target/qa/verify_shape_animation_model.py`). 이 파일은 UI 저장 결과가 아니다. 기존 실제 v37 QA의 264개 샘플도 새 릴리스에서 통과했다. 실제 편집기 1개와 사용자 보존 원본 SHA256 불변을 확인했다.
+- 남음: 개별 Dash/Gap 길이·색상·Points 애니메이션, 다중 Fill/Stroke·Contents 그룹과 연산자. 전체 E03 완료로 표시하지 않는다.
+
+### 도형 선 끝·모서리·점선 — 2026-10-03
+
+- E03: 기존 Properties의 Stroke 아래에 Butt/Round/Projecting 끝 모양, Miter/Round/Bevel 모서리, Miter Limit, Dash Offset, Dash/Gap 길이와 추가/제거 버튼을 연결했다. 기본 도형과 Pen 경로에 공통 적용하며 패널 배치는 유지한다. 조작 항목은 [Adobe Shape 속성 설명](https://helpx.adobe.com/in/after-effects/desktop/drawing-painting-and-paths/shapes-and-shape-attributes/shape-attributes-paint-operations-path.html)을 참고했다. 홀수 길이 목록 반복과 전부 0인 목록의 실선 처리는 [SVG 페인팅 규칙](https://www.w3.org/TR/SVG2/painting.html)을 따른다.
+- Miter Limit 1–1024, Dash/Gap 각각 0–8192px 최대 16개, Offset ±32768px를 지원한다. 음수 길이·비유한 값·잠긴 레이어·사라진 항목은 변경을 거부한다. 메뉴는 위/아래·Enter·Escape와 포커스/창 전환 닫기를 지원한다. 메뉴 행을 클릭할 때 포커스가 먼저 빠져 선택이 취소되던 문제를 실제 창에서 찾아 수정했다. 편집은 각각 한 Undo이며 경로·키·변형은 유지한다. 비기본 스타일은 프로젝트 v37을 사용하고 기존 파일의 Butt/Round/실선 결과를 보존한다.
+- 검증: 코어 160개 + 데스크톱 225개(총 385개) 통과, 외부 미디어/장치 30개 제외. 끝 모양·모서리 기하, Miter 제한, 홀수 점선 주기·Offset·길이 0의 둥근 점·전부 0인 실선, 입력 한계와 원자성, Undo/Redo·JSON·반투명 Preview/출력 일치를 검사했다. Cargo check/fmt/test/release build 및 git diff --check 통과(Moon/proto 미설치), 기존 릴리스 경고 17개.
+- 실제 Windows에서 Projecting 클릭, 키보드 Miter 선택, Dash 80/Gap 80/Offset 20 입력, Offset Undo/Redo와 저장·재열기를 확인했다. 실제 저장 파일 `target/qa/shape-stroke-native.lfe.json`의 0/30/60프레임 960×540 PNG에서 점선·빈 간격 264개 샘플이 독립 계산과 일치했고 프레임 사이 정확한 40px 이동도 확인했다(`target/qa/verify_shape_stroke_native.py`). 1920/1442 폭의 속성·메뉴 배치, 실제 작업 창 1개, 사용자 보존 원본 SHA256 불변을 확인했다.
+- 이번 선 스타일은 정적 값이다. Stroke 속성 애니메이션, 다중 Fill/Stroke·Contents 그룹, Gradient Fill/Stroke, 연산자는 남아 있다. E03 전체 완료나 AE 픽셀 동등성으로 표시하지 않는다.
+
+### Composition 그라디언트 끝점 편집 — 2026-10-03
+
+- G05: Linear/Radial Gradient의 Effect Controls → Edit gradient in Composition에서 시작점·끝점을 직접 편집한다. 선택한 효과 인스턴스의 레이어 좌표를 부모 변형·회전·반전·뷰 확대/이동에 맞춰 표시하고 기존 효과 트랙으로 저장한다. 시작점은 십자, 끝점은 사각형이며 연결선을 표시한다. Shift-drag는 레이어 축 제한, Alt-drag는 양 끝점 이동이다. Composition 포커스에서 Tab으로 끝점을 선택하고 방향키 1px·Shift 10px·Alt 양 끝점 이동을 지원한다.
+- 드래그는 임시 프로젝트로 미리 보고 놓을 때 한 Undo로 확정한다. 실제로 바뀐 좌표만 갱신하여 고정 축에 불필요한 키를 만들지 않는다. Escape는 드래그 취소, 다음 Escape는 컨트롤 닫기다. 문서·시간·선택·도구·뷰 변경과 포커스 이탈/창 비활성화는 미확정 드래그를 취소한다. 잠금·우회·비활성·역변환 불가 레이어에는 편집 손잡이를 표시하지 않는다. 기존 ±32768 좌표 범위 밖 편집은 거부하고 컨트롤 자체는 저장/출력에서 제외한다. 프로젝트 스키마 변경은 없다.
+- 검증: 코어 158개 + 데스크톱 221개(총 379개) 통과, 외부 미디어/장치 30개 제외. 부모 회전/반전·8px 히트 범위·초기 포인터 오프셋·반복 이동의 비누적성·Shift/Alt·키/핸들 보존·원자적 Undo/Redo·JSON·상태 변경 취소·범위 제한·Linear/Radial의 독립 색상 계산·Preview/출력 일치를 검사했다. Cargo check/fmt/test/release build 및 git diff --check 통과(Moon/proto 미설치), 기존 릴리스 경고 17개.
+- 실제 Windows에서 30프레임 끝점 (700,400)을 드래그해 (551.034488,298.206900)으로 변경하고 한 번의 Undo/Redo를 확인했다. Tab→Shift+Right로 시작 X를 110으로, Alt+Shift+Down으로 시작 Y를 110·끝 Y를 308.206900으로 바꿨다. 저장/재열기 후 값과 미리보기가 유지됐다. `target/qa/gradient-points-native.lfe.json`의 0/15/30/45/60프레임 960×540 PNG에서 각 198개, 총 990개 색상 샘플이 독립 선형 그라디언트 계산과 정확히 일치했으며 알파 경계와 레이어 변형 불변도 확인했다. 1920/1442 폭의 패널·손잡이 표시, 실제 작업 창 1개, 사용자 보존 원본 SHA256 불변을 확인했다.
+- 실제 UI의 Shift/Alt를 누른 포인터 드래그 및 드래그 도중 Escape/창 전환은 입력 도구 제약으로 미검증이다. 관련 계산/취소 상태는 자동 테스트 범위로 구분한다. 그라디언트 Scatter/디더링, 캔버스에서 색상 편집·스냅과 다른 효과의 공간 컨트롤은 남아 있다. G05 전체 완료나 AE 픽셀 동등성으로 표시하지 않는다.
+
+### 타임라인 보간 모양·키프레임 메뉴 — 2026-10-03
+
+- D02/B05: 타임라인 키의 왼쪽/오른쪽 절반으로 incoming/outgoing 상태를 구분한다. Linear는 다이아몬드, Hold는 사각형, Auto Bezier는 원형, 수동/Continuous Bezier는 안쪽으로 들어간 모양이다. 인접 키가 없거나 이전 Hold가 incoming을 억제하면 어둡게 표시한다. 결합 행의 채널 상태가 다르면 표시가 있는 다이아몬드와 채널별 툴팁을 제공한다. 선택 윤곽은 유지하며 프로젝트 데이터는 변경하지 않는다. [Adobe 보간 표시 설명](https://helpx.adobe.com/after-effects/desktop/animate-in-after-effects/animation-keyframes/keyframe-interpolation.html)을 참고했다.
+- 키 우클릭 또는 타임라인 포커스의 Shift+F10으로 Easy Ease/In/Out, Auto/Continuous/Independent Bezier, Linear/Hold outgoing segment, Graph 열기, 삭제를 실행한다. 선택된 키의 우클릭은 기존 그룹을 유지한다. 위/아래·Home/End·Enter·Escape로 조작하며 비활성 항목을 건너뛴다. 문서/선택 변경·포커스 이탈·창 비활성화·바깥 클릭은 메뉴를 닫는다. 편집은 전체 선택을 검증한 한 Undo이며 잠금·경로 키의 미지원 명령을 비활성화한다.
+- 검증: 코어 158개 + 데스크톱 215개(총 373개) 통과, 외부 미디어/장치 30개 제외. 모양 분류·결합 행·끝점·Hold·선택 유지·메뉴 무효화·명령 원자성·Undo/Redo·JSON·Preview/출력 회귀를 검사했다. Cargo check/fmt/test/release build 및 git diff --check 통과(Moon/proto 미설치), 기존 경고 17개.
+- 실제 Windows에서 우클릭 Auto Bezier/Hold 적용, 한 번의 Undo/Redo, Shift+F10→키보드 Graph 열기와 포커스, 저장·재열기를 확인했다. 최종 빌드에서 8개 키 선택 유지·End 단일 강조·Escape 취소, 1920/1442 폭의 메뉴 배치를 확인했다. QA 사본 `target/qa/key-menu-native.lfe.json`의 30/45/60/67/75/83/90프레임 PNG 중심은 독립 계산 720/1095/1320/1119.644444/720/720/1320px와 출력 해상도 1px 이내로 일치했다. 재열기 후 83프레임 Position X 720 미리보기를 확인했다. 실제 작업 창 1개와 사용자 보존 원본 SHA256 불변을 확인했다.
+- 남음: AE 공간 보간·다차원 속도, 경로 Ease In/Out, 배율별 접근성/화면 회귀. Graph는 현재 스칼라 채널을 편집하며 메뉴 Linear/Hold는 outgoing 구간을 바꾼다. AE와 픽셀 단위 UI 또는 수치 동등성은 검증하지 않았다. D02/B05 전체 완료로 표시하지 않는다.
+
+### 타임라인·그래프 Easy Ease 단축키 — 2026-10-03
+
+- B05/D02의 F9(Easy Ease), Shift+F9(Ease In), Ctrl+Shift+F9(Ease Out)을 구분했다. 그래프가 모든 F9 조합을 양방향 Ease로 처리하던 문제를 수정하고, 타임라인에도 같은 명령을 연결했다. 그래프는 현재 표시한 스칼라 채널, 타임라인은 레이어/속성에 걸친 선택 스칼라 키에 한 번의 Undo로 적용한다. [Adobe 공식 단축키 표](https://helpx.adobe.com/fi/after-effects/desktop/get-started/keyboard-shortcuts/keyboard-shortcuts-reference.html)를 기준으로 하며 내부 수치 보간의 AE 동등성을 뜻하지 않는다.
+- 패널 자체에 포커스가 있고 드래그 중이 아닐 때 적용한다. 키 반복과 Ctrl+F9/Alt 조합은 무시하고 입력 필드는 자체 키 입력을 유지한다. 빈 선택·해당 방향의 인접 구간이 없는 키는 편집하지 않는다. 잠금·사라진 키·경로 포즈가 섞이면 전체 작업을 거부하고 상태 메시지로 알린다. 그래프 버튼 툴팁·도움말·README도 실제 동작과 맞췄다.
+- 검증: 코어 158개 + 데스크톱 206개(총 364개) 통과, 외부 미디어/장치 30개 제외. 여러 레이어·채널의 방향별 핸들, 반대쪽 곡선/시간/값 유지, 원자적 거부, Undo/Redo·JSON·Preview/출력 일치를 검사했다. Cargo check/fmt/test/release build 통과(Moon/proto 미설치), 기존 경고 17개.
+- 실제 Windows에서 그래프 Shift+F9는 60프레임 incoming만, Ctrl+Shift+F9는 outgoing만 0 속도·1/3 영향도로 바꿨다. 원상복원 후 타임라인 키 선택→F9로 양방향 적용, 한 번의 Undo/Redo, 저장·재열기를 확인했다. `target/qa/ease-in-native.lfe.json`, `ease-out-native.lfe.json`, `ease-both-native.lfe.json`의 각 6프레임(총 18개) CLI PNG 중심이 독립 Hermite 계산과 출력 해상도 1px 이내로 일치했다. 최종 사본 재열기 후 67프레임 Position X 1119.64와 미리보기를 확인했다.
+- 경로 포즈의 Ease In/Out, AE 공간 속도·다차원 보간, 타임라인 키 모양의 보간별 구분은 후속 범위다. D02/B05 전체 완료로 표시하지 않는다.
+
+### 선택 변형 스냅·숫자 입력 포커스 — 2026-10-03
+
+- D03 Value Graph 변형 박스의 움직이는 시간/값 경계에 8 논리 픽셀 스냅을 연결했다. 고정 경계 또는 Alt 중앙 기준점을 유지하며 시간 후보는 선택 키 전체의 반올림 충돌·미선택 키 충돌·컴포지션 범위를 검사한다. 값은 현재 채널의 미선택 키 값에 맞추고 주황색 안내선을 표시한다. Ctrl은 Snap 설정을 반전한다. 박스에서 Alt는 중앙 기준 조절이며, 일반 키 이동의 Alt 스냅 해제와 구분한다.
+- 그래프 숫자 입력의 Enter 확정·Escape 취소 후 포커스를 그래프로 돌려준다. 추가 클릭 없이 Undo와 그래프 단축키를 사용하고 다음 Escape로 팝업을 닫을 수 있다. 다른 패널의 기존 입력 종료 동작은 유지한다.
+- 검증: 코어 158개 + 데스크톱 203개(총 361개) 통과, 외부 미디어/장치 30개 제외. 스냅 화면 거리·축 제한·고정/중앙 기준·반사·시간 후보 충돌·미리보기/확정·Undo·저장 왕복·출력 일치를 검사했다. Cargo check/fmt/test/release build 통과(Moon/proto 미설치), 기존 경고 17개.
+- 실제 Windows에서 같은 모서리 드래그를 비교했다. Snap 해제 시 선택 키가 30/59/74프레임·720/1300.5/720, 활성 시 30/60/75프레임·720/1320/720으로 변경되며 미선택 90프레임·1320은 유지됐다. 한 번의 Undo/Redo와 저장 후 재열기, 60프레임 Position X 1320 미리보기를 확인했다. QA 사본 `target/qa/graph-box-snap-native.lfe.json`의 30/45/60/67/75/83/90프레임 CLI 출력 중심은 독립 선형 계산 720/1020/1320/1040/720/1040/1320px와 일치했다.
+- 실제 입력에서 1320→1200→Enter 후 마우스 조작 없이 Ctrl+Z로 1320 복원, Escape로 팝업 닫기를 확인했다. 1400 임시 입력→Escape 취소→다음 Escape 닫기도 확인했다. 실제 작업 창 1개와 사용자 보존 원본 SHA256 불변을 확인했다.
+- Ctrl/Alt를 누른 채 드래그하는 네이티브 조합은 입력 도구 제약으로 미검증이며 관련 계산은 자동 테스트로 확인했다. Speed Graph 변형 박스·사용자 기준점·기울이기·시간 역전·다중 채널은 남아 있으며 D03 전체 완료로 표시하지 않는다.
+
+### Value Graph 선택 변형 박스 — 2026-10-03
+
+- D03의 선택 변형 박스를 그래프 하단 사각형(Gravity Icons) 버튼으로 켠다. 둘 이상 선택한 스칼라 Value Graph 키의 좌우 핸들은 시간, 위아래는 값, 모서리는 두 축을 반대쪽 경계 기준으로 조절한다. Alt는 선택 중앙을 기준으로 조절한다. 같은 값의 키에는 시간 핸들만 표시한다. 키 자체를 드래그하는 기존 그룹 이동도 유지한다.
+- 드래그 시작 화면과 포인터 차이를 고정하고 코어와 공유하는 계산으로 곡선을 미리 표시한다. 확정 전에는 문서를 바꾸지 않으며 놓을 때 한 번의 Undo로 저장한다. 그래프 밖 릴리스 좌표도 처리한다. Escape·포커스 이탈·문서/채널 변경은 미확정 편집을 취소한다. 시간 역전/범위 이탈/반올림 충돌은 거부하고 해당 미리보기 박스를 빨간색으로 표시한다. 속성별 값 범위는 확정 시 검사한다.
+- 검증: 코어 158개 + 데스크톱 199개(총 357개) 통과, 외부 미디어/장치 30개 제외. 반대 경계/중앙 기준, 축 제한·초기 포인터 오프셋·절대 드래그, 충돌/잠금/Speed 모드, 값 반사·평탄 선택, 미리보기와 확정 곡선 일치, Undo/Redo·JSON·Preview/출력 픽셀을 검사했다. Cargo check/fmt/test/release build 통과(Moon/proto 미설치), 기존 경고 17개.
+- 실제 Windows에서 오른쪽 핸들로 30/50/60프레임을 30/60/75로 늘리고 값 720/1020/720 유지를 확인했다. 이어 모서리로 30/67/85프레임·720/958.8/720으로 변경하고 한 번의 Undo/Redo 및 저장을 확인했다. QA 사본은 `target/qa/graph-box-time-native.lfe.json`, `target/qa/graph-box-native.lfe.json`이다. 최종 사본의 30/45/67/76/85프레임 CLI 출력 중심은 독립 선형 계산 720/816.810811/958.8/839.4/720px와 출력 해상도 1px 이내로 일치했다.
+- 최종 빌드에서 사본을 재열어 67프레임 Position X 958.80과 미리보기를 확인했다. 1920/1442 폭에서 변형 박스를 확인하고, 1442 폭에서 Keyframe 버튼이 잘리지 않도록 하단 간격을 보정했다. 실제 작업 창 1개와 사용자 보존 원본 SHA256 불변을 확인했다.
+- 남음: Speed Graph 변형 박스·변형 스냅·사용자 기준점 이동·기울이기·시간 역전·다중 채널. Alt를 누른 채 드래그, 드래그 중 Escape, 바깥 릴리스의 네이티브 조작은 도구 입력 제약 때문에 별도 미검증이며 관련 계산과 취소 모델은 자동 테스트로 확인했다. D03 전체 완료로 표시하지 않는다.
+
+### 선택 키의 시간·값 배율 — 2026-10-03
+
+- Graph → Keyframe...에서 현재 스칼라 채널의 키를 둘 이상 선택하면 Time % / Value %를 조절한다. 시간은 첫 선택 키, 값은 선택 키의 최솟값을 기준으로 확대·축소한다. 시간 배율은 양수이며 값 배율은 0과 음수도 허용한다. Speed Graph에서도 Value %는 속성이 가진 값을 변경한다.
+- 시간은 정수 프레임으로 반올림한다. 키 충돌·컴포지션 이탈·속성 범위 초과·잠긴 레이어는 전체 변경을 거부한다. 수동 속도는 값 배율/시간 배율로 보정하고 영향도·보간 모드를 보존한다. 한 번의 적용은 한 Undo이며 적용 후 선택 키와 활성 키가 새 시간으로 이동한다. 기존 프로젝트 스키마를 사용한다.
+- 검증: 코어 158개 + 데스크톱 195개(총 353개) 통과, 외부 미디어/장치 30개 제외. 자동/연속/독립 보간의 곡선, 충돌의 원자성, 잠금·범위·반사·동일 배율, Undo/Redo·JSON 복원·미리보기/출력 일치를 검사했다. Cargo check/fmt/test/release build 통과(Moon/proto 미설치), 기존 경고 17개.
+- 실제 Windows에서 30/50/60프레임의 720/1020/720 키를 Time 150%, Value 200%로 바꾸어 30/60/75프레임의 720/1320/720으로 저장했다. Undo 두 번/Redo 두 번, 재열기 후 60프레임 미리보기 1320을 확인했다. QA 사본 `target/qa/key-scale-native.lfe.json`의 30/45/60/67/75프레임 CLI 출력 중심은 독립 계산 720/1020/1320/1040/720px와 일치했다. 작업 창 1개와 사용자 보존 원본 SHA256 불변을 확인했다.
+- 남음: 포인터 변형 박스·사용자 기준점·시간 역전·다중 채널 편집. 정수 반올림 또는 일부 키만 선택한 경우 인접 곡선 전체의 정확한 상사 변환은 보장하지 않는다. 숫자 입력 종료 후 팝업 Escape 포커스 복귀도 보정할 예정이다. D03 전체 완료로 표시하지 않는다.
+
+### 그래프 Space 임시 손 도구 — 2026-10-03
+
+- 그래프 자체에 키보드 포커스가 있을 때 Space를 누른 채 드래그하면 선택한 툴바 도구를 유지하면서 Hand로 이동한다. 드래그에 사용한 Space 해제는 재생을 시작하지 않으며, 드래그 없이 눌렀다 놓으면 키 해제 시 Preview를 전환한다. 기존 H/중간 버튼의 이동 계산과 높이·시간 경계·문서 불변 규칙을 공유한다.
+- 키 반복은 추가 재생을 만들지 않는다. Escape, 포커스 이탈, 창 비활성화는 임시 손 도구 상태를 해제하고 미확정 그래프 이동·확대를 취소한다. 기존 키 드래그 도중 누른 Space나 다른 단축키와 함께 쓴 Space도 해제 시 재생하지 않는다. 숫자 입력 필드는 자체 입력을 유지한다. 현재 범위는 그래프 포커스이며 Composition 등 다른 패널의 임시 Space 도구 통합은 남아 있다.
+- 검증: 코어 154개 + 데스크톱 194개(총 348개) 통과, 외부 미디어/장치 30개 제외. Space 탭/드래그/키 반복/취소/포커스 복귀 상태 전이를 검사했고 기존 패닝·확대의 Undo/Redo·저장/출력 회귀도 통과했다. Cargo check/fmt/test/release build 통과(Moon/proto 미설치), 기존 릴리스 경고 17개.
+- 실제 Windows에서 그래프 Space 탭 재생·정지와 해제 후 키 선택 복귀를 확인했다. 확대 QA 사본 재열기와 실제 저장 파일의 출력 4프레임도 확인했다. Space를 누른 채 포인터 드래그, 드래그 도중 Escape 및 포커스 이탈은 자동 입력 도구의 조합 입력 제약으로 네이티브 미검증이다. 이 조합들을 실제 검증 완료로 표시하지 않는다. 작업 창 1개와 사용자 보존 원본 SHA256 불변을 확인했다.
+
+### 그래프 확대 도구 — 2026-10-03
+
+- D03 그래프에 기존 Z 확대 도구를 연결했다. 클릭은 2배 확대, Alt-click은 1/2 축소하며 시작 포인터의 시간·값을 기준으로 한다. 일반 드래그는 사각형 영역을 확대하고, 폭/높이가 3px 미만인 축은 유지한다. Alt-drag는 오른쪽/위쪽으로 각각 시간/값을 확대하고 반대 방향은 축소한다. Auto Zoom Height가 켜진 상태에서는 모든 제스처의 세로 확대를 제한한다. 조작 기준은 [Adobe Graph Editor 문서](https://helpx.adobe.com/au/after-effects/desktop/animate-in-after-effects/animation-basics/animation-basics.html)를 참고했다.
+- 확대는 키 위와 잠긴 레이어에서도 키·선택·현재 프레임·Undo 기록을 바꾸지 않는다. 일반 영역 확대는 릴리스 시 적용하고 Alt-drag는 시작 위치에서 계산해 누적 오차를 방지한다. Escape는 시작 화면으로 복원한다. 그래프 밖 릴리스 위치를 처리하며 영역은 그래프 경계에 제한한다. 시간 확대는 기존 1–64×와 정수 시작 프레임을 사용하므로 포인터 시간 보존에는 최대 0.5프레임 반올림 오차가 있다. 컴포지션 경계에서는 시작 범위가 추가로 제한된다.
+- 자동 검증: 코어 154개 + 데스크톱 193개(총 347개) 통과, 외부 미디어/장치 30개 제외. 클릭/Alt-click의 포인터 기준점, 양방향 영역 드래그·단일 축·경계, 자동 높이 제한, Alt-drag 반복 이벤트·취소·최대 배율, 잠금·선택·Undo/Redo 보존, 저장 왕복과 Preview/출력 픽셀을 검사했다. Cargo check/fmt/test/release build 통과(Moon/proto 미설치), 릴리스 기존 경고 17개.
+- 릴리스 CLI에서 수동 확대/자동 높이의 화면 메타데이터를 가진 두 QA 사본을 열어 30/40/50/55프레임 PNG 총 8개가 기존 출력과 동일함을 확인했다(`target/qa/verify_graph_zoom.py`). 이는 메타데이터 출력 회귀이며 실제 확대 제스처 검증을 대신하지 않는다. 사용자 보존 원본 SHA256 불변과 실제 편집기 프로세스 한 개를 확인했다.
+- 후속 네이티브 검증: 이전 창 활성화 도구 오류가 해소되어 1442px 폭 실제 창에서 키 위 클릭 확대(30–66 → 40–58프레임), F 전체 맞춤, 영역 확대(34–57프레임), 키 선택/값 보존, V 복귀·F9 편집·Undo·저장을 확인했다. `target/qa/graph-zoom-native.lfe.json`에 배율 6.7708335와 높이 −1002.9661016949153…552.9661016949153을 저장했고 새 릴리스의 1920px 창에서 재열기·50프레임 Position X=1020을 확인했다. 해당 실제 파일의 30/40/50/55프레임 출력 PNG는 이전 QA와 동일하다(`target/qa/verify_graph_zoom_native.py`). Alt 조합 클릭/드래그, 자동 높이 상태 확대, 드래그 도중 Escape의 네이티브 검증은 남아 있다. 다중 채널·선택 변형 박스·시간 배율·공간 속도 등 D03 잔여 범위를 유지한다.
+
+### 그래프 손 도구·중간 버튼 이동 — 2026-10-03
+
+- D03 그래프에서 H 손 도구 드래그 또는 도구에 관계없는 중간 버튼 드래그로 화면을 이동한다. 고정 높이에서는 시간·높이 두 축, Auto Zoom Height에서는 시간만 이동한다. 키 위에서 시작하거나 레이어가 잠겨 있어도 선택·키 값·현재 프레임을 바꾸지 않는다. 기존 패널 배치와 아이콘을 유지한다.
+- 시작 위치 기준의 절대 이동량을 사용해 반복 이벤트에서 누적 오차가 생기지 않으며 시간 범위를 컴포지션 경계로 제한한다. 시작한 버튼을 놓아야 종료하고, 그래프 바깥에서 놓은 최종 위치도 반영한다. Escape는 시작 전 화면 범위를 복원한다. 화면 이동은 문서·Undo 기록·렌더 결과를 바꾸지 않는다.
+- 검증: 코어 154개 + 데스크톱 190개(총 344개) 통과, 외부 미디어/장치 30개 제외. 두 버튼·자동/수동 높이, 잠긴 레이어·선택·문서·Undo/Redo 보존, 반복 이동·취소·시간 경계, 화면 메타데이터 저장 및 Preview/출력 픽셀을 검사했다. Cargo check/fmt/test/release build 통과(Moon/proto 미설치), 기존 경고 17개.
+- 실제 Windows에서 키 위 손 도구 드래그로 27–63 → 30–66프레임 이동과 키 선택·값 보존, 자동 높이에서 세로 드래그 무시를 확인했다. 그래프 바깥 릴리스의 마지막 이동 누락을 수정하고 27–63 → 8–44프레임으로 이동되는 것을 확인했다. V 복귀·F 전체 맞춤·F9 편집·Undo가 정상 동작한다. `target/qa/graph-pan-native.lfe.json`에 30–66프레임과 높이 −798.75…1037.25를 저장·재열기했고, 30/40/50/55프레임 CLI PNG는 기존 QA와 픽셀이 동일하다. 사용자 보존 원본 SHA256 불변 및 작업 창 1개를 확인했다.
+- 네이티브 중간 버튼 드래그와 드래그 도중 Escape는 자동 입력 도구 제약으로 미검증이며 관련 상태 계산은 단위 테스트로 확인했다. Space 임시 손 도구·Zoom 도구·다중 채널·선택 변형 박스·시간 배율·공간 속도는 남아 있다. D03 전체 완료로 표시하지 않는다.
+
+### 그래프 화면 맞춤·이동·확대 — 2026-10-03
+
+- 사용자 재개 요청에 따라 D03의 Auto Zoom Height, Fit Selection, Fit All을 그래프 하단 Gravity 아이콘에 연결했다. 선택 맞춤은 선택 키와 그 사이 곡선·방향 핸들의 세로 범위 및 키 시간 범위를 맞추고, 전체 맞춤은 표시 채널의 모든 키를 포함한다. 그래프 포커스에서 F/Shift+F로 전체/선택 맞춤을 실행한다. 키가 없는 전체 맞춤은 컴포지션 범위, 단일 키는 유효한 시간 폭을 사용하며 기존 타임라인 64× 제한을 따른다.
+- 맞춤 후 높이는 고정된다. 휠은 세로 이동, Ctrl+휠은 포인터 기준 세로 확대, Shift+휠/가로 휠은 시간 이동, Alt+휠은 포인터 기준 시간 확대를 제공한다. Auto Zoom Height는 세로 이동·확대를 막고 현재 보이는 곡선을 다시 맞춘다. 키/핸들 드래그 중 휠은 무시한다. 범위 계산은 렌더와 키 히트 테스트가 공유한다. 동작 기준은 [Adobe의 Graph Editor 화면 조작](https://helpx.adobe.com/au/after-effects/desktop/animate-in-after-effects/animation-basics/animation-basics.html)을 참고했다.
+- 그래프 종류와 고정 높이는 컴포지션별 선택적 화면 메타데이터에 저장한다. 프로젝트 버전·렌더 문서·Undo 기록은 바꾸지 않는다. 이전 파일은 자동 높이를 기본값으로 사용하고, 잘못된 높이 범위는 자동 높이로 복구한다. 그래프 종류를 바꾸면 새로운 단위에 맞춰 자동 높이로 전환한다. 수동 높이는 채널 변경 시 유지되므로 새 값 범위는 Fit All/Auto Zoom Height로 맞출 수 있다.
+- 검증: 코어 154개 + 데스크톱 188개(342개) 통과, 외부 미디어/장치 30개 제외. 선택/전체/단일/빈 채널 맞춤, 음수 속도 양방향 끝점, 확대 포인터 보존·컴포지션 경계, 범위 유효성, 컴포지션 전환·Undo/Redo·저장 복원 및 문서 불변을 검사했다. Cargo check/fmt/test/release build 통과(Moon/proto 미설치), 기존 경고 17개.
+- 실제 Windows에서 Fit All 27–63프레임, 중간 키 선택 후 Shift+F 48–52프레임, F 복원, 세로 휠 이동·자동 높이 복원 및 세로 이동 제한, 가로 휠과 타임라인 동기화를 확인했다. 맞춤 화면에서 F9 편집·Undo/Redo도 확인했다. 1920/1442 폭에서 하단 도구를 확인했으며 패널 배치는 유지했다. QA 사본 `target/qa/graph-view-native.lfe.json`의 Speed 모드·고정 높이 −1143…693 저장·재열기를 확인했고, 30/40/50/55프레임 CLI PNG는 이전 원본과 픽셀이 동일했다.
+- 네이티브 Ctrl/Alt/Shift+휠 조합은 도구 입력 제약으로 미검증이며 계산은 자동 테스트로 확인했다. 다중 채널, Hand/중간 버튼 직접 패닝, 선택 변형 박스·시간 배율, 공간 속도 등 D03 잔여 작업은 계속 남아 있다. D03 전체 완료로 표시하지 않는다.
+
+### 그래프 시간·값 스냅 — 2026-10-03
+
+- D03 그래프의 Snap 버튼을 기존 작업 영역 Snapping 설정과 연결했다. 키 드래그 시작 전 재생 헤드, 컴포지션/작업 영역 경계, 레이어 In/Out, 마커 경계와 다른 키 시간에 8 논리 픽셀 이내로 맞춘다. 값은 현재 채널의 미선택 키 값에 맞추며 Speed Graph에서는 부호 있는 속도를 사용한다. 일치한 시간/값은 주황색 안내선으로 표시한다. 동작 기준은 [Adobe Graph Editor 설명](https://helpx.adobe.com/au/after-effects/desktop/animate-in-after-effects/animation-basics/animation-basics.html)을 참고했다.
+- 선택 그룹 전체에 같은 시간/값 차이를 적용하고 시간 충돌 후보를 건너뛴다. 움직이지 않은 축과 Shift로 고정한 축은 스냅하지 않는다. Ctrl은 드래그 중 설정을 반전하고 Alt는 스냅을 해제한다. 방향 핸들 조작에는 적용하지 않는다. 그래프의 Undo/Redo 후 포커스와 Keyframe 팝업 Escape 닫기도 보정했다.
+- 검증: 코어 154개 + 데스크톱 184개 통과, 외부 미디어/장치 30개 제외. 화면 거리/확대율, 경계·충돌, 음수 속도/FPS, 그룹 간격, Undo/Redo·JSON 복원·미리보기/출력 픽셀 일치를 검사했다. Cargo check/fmt/test/release build 통과(Moon/proto 미설치), 기존 경고 17개.
+- 실제 Windows에서 10/30프레임의 값 600/900인 두 키를 드래그하여 30/50프레임, 값 720/1020으로 맞췄다. Snap 해제 시에는 근처 값으로 붙지 않고 31프레임·733.83으로 이동했다. Undo/Redo, 팝업 Escape, 저장·재열기를 확인했다. QA 사본 `target/qa/graph-snap-native.lfe.json`의 30/40/50/55프레임 CLI PNG 중심은 독립 선형 계산 720/870/1020/870px와 일치한다. 사용자 보존 원본 SHA256 불변과 실제 작업 창 1개를 확인했다.
+- Ctrl/Alt/Shift를 누른 채 드래그하는 네이티브 동작과 드래그 도중 안내선 캡처는 도구 입력 제약으로 별도 검증하지 못했다. 관련 계산은 자동 테스트로 검사했다. 다중 채널·Fit Selection/All 등 D03 잔여 범위는 유지한다. 사용자 요청에 따라 이번 기능 마무리 후 개발을 일시 중지한다.
+
+### 그래프 방향 핸들 직접 편집 — 2026-10-03
+
+- D03의 선택 키에 incoming/outgoing 방향 핸들을 표시한다. Value Graph는 실제 시간 Bezier 제어점, Speed Graph는 영향도에 따른 수평 길이와 초당 부호 있는 속도를 나타낸다. 핸들은 속이 빈 마름모로 키의 사각형과 구분하고 기존 타임라인 그래프 영역을 사용한다. 드래그는 해당 키/방향을 편집하며 시간·속성값·다른 방향의 영향도를 유지한다.
+- Shift 드래그는 속도를 유지하며 영향도를 바꾸고, Alt는 Auto/Continuous 연결을 해제한 뒤 한쪽을 편집한다. 기본 드래그는 기존 연결 규칙을 따른다. 영향도는 0.1–100%이며 없는 끝점 구간과 Hold/수직 구형 접선에는 유한 핸들을 만들지 않는다. 숫자 필드로 초기화할 수 있다. Alt로 분리한 핸들의 자동 재결합과 여러 핸들 동시 조절은 남아 있다. 동작 기준은 [Adobe의 방향 핸들·속도 설명](https://helpx.adobe.com/after-effects/desktop/animate-in-after-effects/speed-between-keyframes/speed.html)을 참고했으며 AE의 내부 수치 보간과 동일하다는 의미는 아니다.
+- 드래그 중 실제 코어 보간으로 곡선을 미리 표시하고 릴리스 시 한 번의 Undo로 확정한다. Escape, 문서·레이어/채널·그래프 종류 변경은 미확정 드래그를 취소한다. 선택 핸들을 높이 범위에 포함하며 드래그 중 좌표계를 고정한다. 극단 영향도에서 핸들이 겹치는 경우 숫자 필드를 사용할 수 있다.
+- 검증: 코어 154개 + 데스크톱 181개(총 335개) 통과, 외부 미디어/장치 30개 제외. 양방향/Value·Speed 좌표 변환, Shift 속도 유지·영향도 경계, Auto/Continuous·Alt 분리·반대 영향도 보존, 드래그 미리보기와 확정 명령 일치, 잠금/유효하지 않은 값의 원자적 거부, Undo/Redo·저장 왕복·Preview/출력 픽셀을 검사했다. Cargo check/fmt/test/release build 통과(Moon/proto 미설치).
+- 실제 Windows에서 Value outgoing 드래그로 40프레임·값 960을 유지하며 outgoing 영향도 58.717957%, 양쪽 속도 10.381950/s로 변경하고 incoming 70% 유지·Undo/Redo를 확인했다. 이어 Speed incoming 드래그로 incoming 81.538462%·양쪽 속도 186.720729/s·outgoing 58.717957%를 확인했다. QA 사본은 `target/qa/tangent-value-native.lfe.json`, `target/qa/tangent-native.lfe.json`이다. 두 사본의 20/50프레임 CLI 출력 중심은 독립 계산값 887.683398/873.834300px 및 819.675999/903.898196px와 출력 해상도 1px 이내로 일치한다.
+- 최종 릴리스에서 `tangent-native`를 재열고 20/50프레임 미리보기 Position X 819.68/903.90과 저장된 그래프 복원을 확인했다. 실제 AE 창의 기본 Project/Composition/Timeline/우측 패널 구조도 대조했고 기존 배치는 변경하지 않았다. 작업 창 1개와 사용자 보존 원본 SHA256 불변을 확인했다.
+- 네이티브 Shift/Alt 조합 드래그와 드래그 도중 Escape 입력은 도구에서 분리 입력이 지원되지 않아 미검증이다. 조합의 계산·명령은 단위 테스트로 확인했다. Undo/Redo 후 그래프 포커스가 없어 팝업 Escape가 작동하지 않는 경우도 후속 보정 대상으로 남긴다(Close 버튼은 작동). D03 전체 완료가 아니며 다중 채널·그래프 스냅·선택 변형/시간 배율·공간 속도는 남아 있다.
+
+### 그래프의 다중 키프레임 편집 — 2026-10-02
+
+- D03에서 현재 채널의 여러 키를 선택하고 함께 편집할 수 있다. Shift/Ctrl-click 선택 토글, 빈 그래프 영역의 드래그 선택과 Shift/Ctrl 추가 선택, Ctrl+A 전체 채널 선택을 연결했다. 선택 수와 파란 키 표시를 기존 그래프 영역에 표시하며 AE형 패널 배치를 유지한다.
+- 선택한 키 하나를 드래그하면 시간 간격과 값 차이를 유지하며 전체가 움직인다. Shift는 우세한 축으로 제한한다. 컴포지션 양 끝에서는 그룹 전체를 제한하고, 선택한 원래 프레임끼리 겹치는 이동은 허용한다. 선택하지 않은 키와 충돌하거나 값이 유효하지 않으면 전체 명령을 취소한다. Escape와 문서 변경은 진행 중 드래그를 취소한다.
+- Speed Graph는 선택한 방향의 속도에 동일한 차이를 적용하고 영향도·키 값을 유지한다. 해당 방향 구간이 없는 끝점 키는 시간만 이동한다. 보간·Auto/Continuous·Ease 버튼과 Delete는 표시 채널의 선택 키 전체에 한 번의 Undo로 적용한다. 숫자 필드는 활성 키 하나를 편집하고 다른 선택을 유지한다. 다른 채널/레이어에 숨은 선택 키를 그래프 명령으로 변경하지 않는다.
+- 검증: 코어 154개 + 데스크톱 176개(총 330개) 통과, 외부 미디어/장치 30개 제외. 선택 토글·현재 채널 필터·역방향 영역 경계, 그룹 범위 제한·충돌·잠금/잘못된 값의 원자적 거부, 속도 차이·자동 보간 메타데이터·Undo/Redo·JSON 왕복, 그룹 편집 후 Preview/출력 픽셀을 검사했다. Speed Graph의 가로 이동만으로 Auto가 수동 보간으로 바뀌지 않도록 보정했다. Cargo check/fmt/test/release build 통과(Moon/proto 미설치).
+- 실제 Windows에서 드래그 영역 선택 → 두 키를 +10프레임/+76.358443 이동 → Undo/Redo, Ctrl+A → F9/삭제 → Undo, 활성 키 숫자 편집 시 나머지 선택 유지를 확인했다. Undo로 선택이 해제된 뒤 이전 키 숫자 필드가 남던 문제도 수정했다. Shift/Ctrl 마우스 조합은 단위 테스트로 확인했으며 네이티브 조합 입력 검증은 남아 있다.
+- 최종 릴리스에서 QA 사본 `target/qa/multikey-native.lfe.json`을 다시 열어 25/60프레임 Position X 1109.46/876.36을 확인했다. CLI 출력 도형 중심도 독립 계산값 1109.463643/876.358443px와 출력 해상도 1px 이내로 일치한다. Speed Graph의 그룹 outgoing 드래그는 시간·값·영향도를 유지하고 속도를 같은 차이만큼 변경하며 한 Undo로 복원한다. 속도 변경 사본은 `target/qa/multikey-speed-native.lfe.json`이다. 작업 창 1개와 사용자 보존 원본 SHA256 불변을 확인했다.
+- 남음: 여러 채널/레이어 그래프 동시 표시·편집, 그래프 전용 스냅·선택 변형 박스/시간 배율·영향도 포인터 핸들, 공간 속도와 AE 수치 보간 동등성. D03 전체 완료로 표시하지 않는다.
+
+### 자동·연속 시간 보간 — 2026-10-02
+
+- D02의 스칼라 Auto Bezier / Continuous / Independent 모드를 Graph → Keyframe...에 연결했다. Auto는 주변 키의 값·시간 변경 때 접선을 다시 계산한다. 수동 속도/영향도 편집은 Continuous로 전환하며, 양쪽 속도는 연결하고 각 영향도는 독립적으로 유지한다. Independent로 바꾸면 현재 자동 접선을 고정한다.
+- Auto 계산은 단조 구간의 가중 조화평균, 극값·평탄 접합점의 0 기울기, 끝점의 인접 할선, 영향도 1/3을 사용한다. AE의 내부 수치 알고리즘과 동일하다는 의미가 아니다. 동작 구분은 [Adobe의 키프레임 보간 설명](https://helpx.adobe.com/uk/after-effects/desktop/animate-in-after-effects/animation-keyframes/keyframe-interpolation.html)을 참조했다.
+- Continuous 선택 시 기존 양쪽 유한 기울기의 평균으로 연결한다. 키 이동/값 편집은 수동 기울기를 유지한다. Linear/Hold는 관련 두 끝점의 자동 접선을 고정한 뒤 선택 구간을 초기화하며, Ease/Ease In/Ease Out은 연결을 해제한 뒤 지정 방향만 적용한다. Speed Graph의 속도 드래그도 같은 명령을 사용한다.
+- 모드는 Undo/Redo·키/레이어 복사·저장·효과 프리셋에 보존한다. FPS 변환은 초당 수동 속도를 유지한다. 연결 모드는 프로젝트 v36 / 효과 프리셋 v3으로 보호하며, 기존 v35 독립 핸들과 구형 곡선은 그대로 읽는다.
+- 검증: 코어 154개 + 데스크톱 169개 통과, 외부 미디어/장치 30개 제외. 자동 접선의 이웃 재계산·단조/평탄/감소·끝점, Continuous 연동·독립 영향도, 저장/구버전 거부·잠금 원자성, FPS 환산, Speed Graph 드래그와 한 번의 Undo, Preview/출력/재열기 픽셀을 검사했다. Cargo check/fmt/test/release 사용(Moon/proto 미설치).
+- 실제 Windows에서 Auto 적용 → outgoing −300/s 입력 → Continuous 전환과 양쪽 −300/s → Undo/Redo → incoming 영향도 70% / outgoing 33.333333% 유지 → 별도 QA 저장을 확인했다. 긴 Auto 안내문이 닫기 버튼을 밀어내던 부분은 한 줄로 줄였다.
+- 최종 릴리스 재실행·재열기에서 모드/속도/영향도 복원을 확인했다. Ease In은 Independent로 바꾸고 incoming만 0/s로 만들며 outgoing −300/s를 유지한다. Auto 안내문과 닫기 버튼도 같은 팝업에 표시된다. QA 사본 `target/qa/modes-auto-native.lfe.json`, `target/qa/modes-native.lfe.json`의 20/50프레임 출력 중심은 독립 계산값(Auto 825/825px, Continuous 1016.422454/800px)과 출력 해상도 1px 이내로 일치했다. 실제 50프레임 미리보기도 Position X 800px다. 작업 창 하나와 사용자 보존 원본 SHA256 불변을 확인했다.
+- 남음: 다중 키/채널 그래프 편집, 영향도 포인터 핸들, 공간 경로와 다차원 속도, AE의 수치 보간 동등성. D02/D03 전체 완료로 표시하지 않는다.
+
+### Speed Graph와 속도 핸들 드래그 — 2026-10-02
+
+- D03의 단일 스칼라 Speed Graph를 구현했다. 기존 타임라인 그래프 영역에서 Value Graph / Speed Graph로 전환하며, 선택 채널의 실제 보간을 미분한 초당 부호 있는 속도를 표시한다. 별도 Position X/Y는 스칼라 채널이며 결합 공간 경로의 속력과 구분한다.
+- 키 경계의 앞·뒤 속도는 분리된 선과 왼쪽/오른쪽 마커로 표현한다. Hold 점프·수직 탄젠트는 유한한 스파이크를 그리지 않으며, 0 기준선과 자동 높이 맞춤을 유지한다. Linear/Smooth/기존 Bezier/독립 시간 핸들이 같은 속도 계산을 사용한다.
+- 속도 마커를 가로로 드래그하면 키 시간, 세로로 드래그하면 해당 방향 속도를 편집한다. 속성값과 영향도를 보존하며 충돌/잘못된 값은 전체 작업을 거부하고, 한 번의 Undo와 Escape 취소를 지원한다. 숫자 편집과 F9도 같은 그래프에서 사용할 수 있다. 그래프 종류 전환은 프로젝트를 수정하지 않는다.
+- 검증: 코어 148개 + 데스크톱 168개 통과, 외부 미디어/장치 30개 제외. 해석적 미분과 수치 차분/적분 대조, 좌우 극한·Hold 점프·수직/제거 가능한 특이점, 곡선 분리, 시간/속도 편집의 값 보존·충돌 원자성·Undo를 검사했다. Cargo check/fmt/test/release build 통과(Moon/proto 미설치).
+- 실제 Windows에서 Value/Speed 전환 후 중간 키를 30→40프레임으로 옮기며 outgoing을 −900→−507.919327 units/s로 변경했다. 원래 값 960과 incoming 영향도 70% 유지, Undo/Redo, 저장·재열기를 확인했다. incoming의 수직 드래그에서는 키 시간이 40으로 유지되고 해당 방향 속도만 변했다. QA 사본은 `target/qa/speed-native.lfe.json`이다. 저장된 20/50프레임을 CLI PNG로 렌더한 도형 중심은 독립 계산과 출력 1px 이내로 일치하며, 재열기 후 50프레임 미리보기 X=782.67도 계산값 782.673389와 일치했다.
+- 남음: 다중 채널·다중 키 편집, 결합 공간 속력, Auto/Continuous 탄젠트, 영향도 핸들 드래그, 그래프 종류 자동 선택·설정 영속화. 최종 합성 픽셀이나 효과 출력 제한의 미분이 아닌 원본 속성 트랙의 속도다. D02/D03 전체 완료로 표시하지 않는다.
+
+### 양방향 키프레임 속도와 영향도 — 2026-10-02
+
+- D02의 독립 incoming/outgoing 시간 핸들을 구현했다. Graph → Keyframe...에서 부호 있는 초당 속도와 영향도(0.1–100%)를 각 방향별로 입력한다. 마지막 키의 incoming과 양 끝값이 같은 구간의 오버슈트도 지원한다. Transform·효과·Time Remap·오디오·마스크 숫자 트랙이 같은 모델을 사용하며 경로 포즈 트랙은 제외한다.
+- F9/Ease는 선택한 키의 양쪽, Ease In은 incoming, Ease Out은 outgoing에 속도 0·영향도 1/3을 한 번의 Undo로 적용한다. Linear/Hold는 선택한 outgoing 구간의 두 끝 핸들만 초기화한다. 기존 파일의 Linear/Hold/Smooth/Bezier 샘플은 편집 전까지 그대로 유지하며, 독립 핸들을 사용한 구간은 다른 곡선을 보여줄 수 있는 기존 정규화 핸들 편집기를 숨긴다.
+- 키의 값 변경·이동·복사·Undo/Redo·저장 복원에 핸들을 포함한다. 레이어 붙여넣기와 효과 프리셋의 FPS 변환은 초당 속도를 보존한다. 프로젝트 v35/핸들이 있는 효과 프리셋 v2로 보호하며, 구버전 표기·잘못된 값·잠금/없는 구간 편집은 원자적으로 거부한다.
+- 실제 Windows에서 중간 키 F9 → Undo/Redo, incoming 영향도 70%, outgoing 속도 −900 입력·독립 그래프 변화·저장을 확인했다. QA 사본 `target/qa/temporal-native.lfe.json`을 CLI로 렌더하여 15/45프레임 도형 중심이 독립 계산값(891.989583/712.5px)과 출력 해상도 1px 이내로 일치함을 확인했다.
+- 검증: 코어 146개 + 데스크톱 165개 통과, 외부 미디어/장치 30개 제외. 기존 보간의 정확한 샘플, 평탄 구간 오버슈트·끝점 미분, 저장 버전·잠금 원자성, 편집·복사·FPS 환산, Preview/출력/저장 복원 픽셀을 검사했다. Cargo check/fmt/test/release build 통과(Moon/proto 미설치). 사용자 보존 원본 SHA256 불변을 확인했다.
+- 최종 릴리스 재실행·재열기 뒤 그래프 곡선과 incoming 70%/outgoing −900 값을 실제 창에서 확인했다. 미리보기의 15/45프레임 Position X도 891.99/712.50으로 출력 계산과 일치했다. 후속 실행 시 이전 작업 창이 닫히고 작업 창은 하나만 남는다.
+- 남음: Auto/Continuous 연결, Speed Graph·다중 키/채널 편집, 독립 핸들 포인터 드래그, 경로 시간 핸들, AE의 다차원 속도·전체 Easy Ease 호환성. D02/D03 전체 완료로 표시하지 않는다. 속도·영향도 기준은 [Adobe 문서](https://helpx.adobe.com/after-effects/desktop/animate-in-after-effects/speed-between-keyframes/speed.html)를 참조한다.
+
+### 명령 검색과 실행 — 2026-10-02
+
+- Ctrl+Shift+P 또는 Help → Find command로 명령 검색을 연다. 메뉴·명령 이름·표시 단축키의 대소문자 구분 없는 단어 검색, 편집 도구/Shape/기본 Preview 명령, 비활성 결과 표시, 상하 선택·Ctrl+Home/End·Enter 실행·Escape/바깥 클릭 취소를 제공한다. 기존 패널 배치를 바꾸지 않는다.
+- 결과 행에 저장한 예전 Action을 실행하지 않고 메뉴/명령 식별자로 현재 문서와 선택에서 다시 찾는다. 레이어 선택 변경과 잠금으로 오래된 효과 대상이 실행되지 않도록 검사했다. 검색 입력은 문서 이동/재생/저장 단축키와 분리하며 IME marked 범위가 있는 동안 Enter/방향키를 검색 실행으로 처리하지 않는다.
+- 검증: 코어 140개 + 데스크톱 164개 통과, 외부 미디어/장치 30개 제외. 단어·분류·단축키 검색, 결과 식별자 중복 없음, 비활성 결과 건너뛰기, 선택/잠금 변경 시 재해석, 검색한 효과 명령의 Undo/Redo·JSON 왕복·Preview/출력 픽셀 일치를 검사했다. Cargo check/fmt/test/release build 사용(Moon/proto 미설치).
+- 실제 Windows에서 검색 열기·입력·사각형 생성·Gaussian Blur 추가·Undo/Redo와 별도 파일 저장을 확인했다. 검색 결과의 빈 버튼 자식 때문에 명령 이름이 가운데로 밀리던 문제와 정지한 포인터의 hover가 키보드 선택을 바꾸던 문제를 수정했다. QA 사본은 `target/qa/command-search-native.lfe.json`에 보관한다.
+- 최종 릴리스에서 재열기 후 Gaussian Blur 10px를 확인하고, 검색 결과 왼쪽 정렬·Down 선택·Ctrl+End 자동 스크롤·Escape 취소 및 문서 불변을 확인했다. 이전 메뉴 검증의 누락 범위 중 F10 → Left(Help 순환) → Down → Enter(도움말 실행) → Escape도 실제 창에서 확인했다. CLI 960×540 PNG는 저장된 Blur를 반영하며, 효과를 제거한 QA 사본과 비교해 부드러운 알파 경계 13,288개가 생긴다. 작업 창 1개와 사용자 보존 원본 불변을 확인했다.
+- 남음: 단축키 사용자 설정·다국어 명령 별칭·최근 명령·패널 내부의 모든 컨텍스트 명령 등록, 실제 IME 후보 창/화면 읽기/DPI 회귀. 검색 범위는 등록된 작업 명령이며 모든 AE 명령을 포함한다는 의미가 아니다. B05/B07 전체 완료로 표시하지 않는다.
+
+### 상단 메뉴 키보드 조작 — 2026-10-02
+
+- B05의 메뉴 탐색을 구현했다. F10 진입, 좌우 메뉴 전환, 상하 비활성 항목 건너뛰기/순환, Home/End, 첫 글자 반복 탐색, Enter/Space 실행, Escape/F10/Tab 닫기와 이전 포커스 복원을 연결했다. 긴 메뉴는 창 높이에 맞춰 스크롤하고 선택 항목을 보여준다.
+- 마우스·키보드가 같은 메뉴 항목/실행 경로를 사용한다. Composition의 생성·복제·삭제·설정, Window 초기화, Help도 같은 모델에 포함했다. File은 New/Open/Save부터 시작하고 출력 항목은 뒤에 둔다. 기존 AE형 패널 배치·Wanted Sans·Gravity Icons를 유지한다.
+- 메뉴가 열린 동안 방향키·Delete·문서 단축키가 편집기로 전달되지 않도록 캡처한다. 입력 필드와 직접 텍스트의 IME marked 범위가 있는 동안 F10 진입을 막고, 모달에서도 진입하지 않는다. 일반 입력 초안은 메뉴를 열 때 기존 편집 경로로 확정한다.
+- 검증: 코어 140개 + 데스크톱 162개 통과, 외부 미디어/장치 30개 제외. 메뉴 순환·비활성 건너뛰기·첫 글자 검색·잠금/선택에 따른 효과 메뉴·특수 명령 연결·메뉴 편집 명령의 저장 왕복과 Undo/Redo를 검사했다. Cargo check/fmt/test/release build를 사용한다.
+- 네이티브 검증은 부분 완료: 실제 Windows에서 F10으로 메뉴가 열리고 첫 항목이 강조되는 것을 확인했다. 다음 입력에서 Computer Use가 `failed to activate captured window`를 반환했고 새 창 재선택/재활성화도 실패했다. 따라서 방향키/Enter 실행·입력 포커스 복원·실제 IME·DPI/스크롤 회귀는 검증된 것으로 표시하지 않는다. B05/B07 전체 완료가 아니며 명령 검색·단축키 설정·화면 읽기 의미 정보도 남아 있다.
+- 최종 릴리스의 두 컴포지션 CLI 출력은 기존 폰트 교체 QA와 픽셀이 동일했다. 실제 작업 창 프로세스 1개와 사용자 보존 원본 SHA-256 불변을 확인했다.
+
+### 프로젝트 글꼴 진단과 일괄 교체 — 2026-10-02
+
+- File → Manage project fonts에서 모든 컴포지션의 글꼴/실제 스타일/굵기/기울임 조합을 모아 사용 레이어·잠금 상태·누락 여부·주 대체 face를 표시한다. 누락된 글꼴/스타일이 있는 문서를 열면 상태 표시줄에서 안내한다.
+- 설치된 글꼴 검색과 실제 스타일 선택 후 일치하는 잠금 해제 레이어를 한 번에 교체한다. 잠긴 레이어와 원래 누락 글꼴 이름을 보존하며, 다른 컴포지션 변경까지 한 Undo/Redo로 복원한다. 텍스트·크기·간격·채우기/윤곽선·문단 박스·애니메이션 속성은 보존한다. 글리프 폭과 줄바꿈은 선택한 글꼴에 따라 달라질 수 있다.
+- 이전 문서/변경된 문서에 대한 교체 계획을 거부한다. 문서 전환 번호만으로 목록을 갱신해 일반 편집 직후 목록이 오래된 상태로 남던 문제를 네이티브 검사에서 찾아 프로젝트 내용 비교로 수정했다. 저장 스키마는 v34를 유지한다.
+- 검증: 코어 140개 + 데스크톱 159개 통과, 외부 미디어/장치 30개 제외. Cargo check/fmt/test/release build 통과(Moon/proto 미설치). 다중 컴포지션·잠금·실패 원자성·Undo/Redo·저장 왕복·대체 출력 픽셀 보존을 검사했다.
+- 실제 Windows에서 누락 그룹 검색/교체, 두 컴포지션의 잠금 해제 레이어 2개 변경과 잠긴 레이어 1개 보존, Undo/Redo·저장·재열기를 확인했다. 최종 릴리스에서 Bold → Regular 교체 직후 목록/Character 갱신과 한 Undo 복원을 확인했다. 릴리스 CLI로 두 컴포지션의 교체 전후 960×540 PNG가 모든 픽셀에서 동일함을 확인했다(누락 Bold → 실제 Wanted Sans Bold).
+- 최종 편집기 작업 창 1개와 사용자 보존 원본 SHA-256 불변을 확인했다. QA 문서는 `target/qa/project-fonts-native.lfe.json`에 별도로 저장한다.
+- 남음: 글리프별 대체/문자 누락 진단, 가변 글꼴 축, 실행 중 글꼴 카탈로그 갱신, 문자별 스타일, 다른 PC/OS 간 실제 이식성 검증. 글꼴 파일을 내장하거나 수집하지 않는다. F02 전체 완료로 표시하지 않는다.
+
+### 텍스트 채우기와 윤곽선 — 2026-10-02
+
+- Character에 Fill/Stroke 스위치, Stroke 색상(HEX/공통 색 선택기), 0–1000px 두께, Miter/Round/Bevel 모서리, 전체 채우기/전체 윤곽선 겹침 순서를 연결했다. 순서·모서리 버튼은 클릭 또는 Enter/Space로 순환한다. Wanted Sans와 기존 패널 경계를 유지한다.
+- 윤곽선은 글리프 경로 중앙 기준이며 커서 위치·글자 간격·문단 줄바꿈을 바꾸지 않는다. 문단 경계의 클리핑과 Point text 효과 영역의 윤곽선 확장을 반영한다. v34 저장 왕복, 잠금/잘못된 값 거부, Undo/Redo를 지원한다.
+- 검증: 코어 139개 + 데스크톱 157개 통과, 외부 미디어/장치 30개 제외. Cargo check/fmt/test/release build 통과. 겹치는 글자/행의 두 합성 순서를 별도 이미지 합성과 대조했고, 채우기 없음·모두 끄기·0px·모서리별 픽셀 차이·문단 밖 알파 0·커서/줄바꿈 불변을 검사했다. 릴리스 CLI 세 변형 PNG와 기존 Point text 픽셀 동일성도 확인했다.
+- 실제 Windows에서 Stroke 파일 열기, Fill 끄기, 14→4px 입력, 모서리 클릭/Enter 변경, 공통 색 선택기 HEX 적용, 색상 Undo/Redo, 저장·재열기를 확인했다. 저장된 4px/주황색/Miter/채우기 없음과 화면이 일치한다. 작업 창 프로세스 1개와 보호 원본 불변을 확인했다.
+- 남음: 문자별 서식/윤곽선, 속성 애니메이션, 문자별 합성 순서, 조절 가능한 Miter limit, 컬러/비트맵 글꼴의 윤곽선 동등성, 전체 키보드/접근성 검증. F03 전체 완료로 표시하지 않는다.
+
+### Paragraph 영역 텍스트 — 2026-10-02
+
+- Text 도구의 드래그로 Paragraph 박스, Alt-드래그로 중심 기준 박스를 만든다. 편집 진입 전 Shift-클릭은 기존 글자 위에도 새 레이어를 만든다. 편집 중 오른쪽 아래 핸들 또는 Paragraph의 폭·높이 필드로 박스를 바꾸면 글자 크기를 유지하며 재배치한다.
+- Unicode 줄바꿈 기회와 grapheme 경계를 사용한다. 긴 단어도 조합 문자/이모지를 분리하지 않으며, Enter와 Shift+Enter는 각각 문단/강제 줄바꿈을 입력한다. 자동 줄바꿈과 크기 변경은 원문을 바꾸지 않는다. 실제 렌더러의 대체 글꼴과 자간으로 각 줄 폭을 확인한다.
+- 박스에 완전히 들어가는 줄만 출력하며 넘친 내용은 보관한다. 넘침 표시, 높이 맞춤, 시각적 줄 단위 Home/End와 줄바꿈 경계의 커서 위치를 연결했다. 편집 확정은 생성/크기 변경을 포함해 한 Undo, Escape는 초안 취소다. Point/Paragraph와 크기는 v33에 저장하며 기존 문서는 Point를 기본값으로 읽는다.
+- Paragraph → Point는 보이는 줄마다 실제 개행을 추가하고 박스 밖 내용은 제거한다. 한 Undo로 원문/박스를 복원한다. [Adobe 변환 규칙](https://helpx.adobe.com/after-effects/desktop/add-text/create-and-edit-text-layers/creating-editing-text-layers.html)을 따르는 동작이므로 숨은 내용까지 유지하려면 먼저 박스를 확대한다.
+- 검증: 코어 138개 + 데스크톱 154개 통과, 외부 미디어/장치 30개 제외. Unicode 재배치·강제 줄바꿈·좁은 박스·넘침 변환·원문 복구, 역방향/중심 드래그, 크기 변경 Undo/Redo, 저장 왕복·하위 스키마 거부·잠금/잘못된 크기, Preview/출력 픽셀·박스 밖 알파 0·명시적 줄바꿈과 픽셀 일치를 검사했다. Cargo check/fmt/test/release build 사용.
+- 릴리스 CLI로 폭/높이가 다른 세 파일을 960×540 PNG로 출력해 재배치와 박스 밖 알파 0을 확인했다. 기존 Point text 출력은 이전 픽셀과 동일하다. 실제 Windows 창에서 파일 열기, Text 도구 진입, 오른쪽 아래 핸들 축소와 재배치, 전체 선택·한글/영문 입력, Ctrl+Enter, 문서 Undo/Redo, 저장된 v33·크기·원문을 확인했다. 현재 AE 창의 좌측 Project/중앙 Composition/우측 접이식 패널/하단 Timeline 구조도 대조했다. 픽셀 단위 UI 일치를 의미하지 않는다.
+- 교체 실행 후 작업 창 프로세스 1개와 보호 원본 SHA256 불변을 확인했다. 실제 IME 조합/후보 창, 새 박스 생성과 Alt/Shift 제스처의 네이티브 검사, 전체 포커스/키보드 회귀는 남아 있다. 고급 문단 들여쓰기/문단별 스타일/양쪽 맞춤, 세로쓰기, 글꼴별 첫 기준선 옵션, 8방향 박스 핸들과 AE 텍스트 엔진의 모든 줄 배치 규칙도 남아 있다. F01–F03 전체 완료로 표시하지 않는다.
+
+### 텍스트 선택 영역과 렌더 배치 일치 — 2026-10-02
+
+- 커서 전용 글꼴 폭 계산을 렌더러가 실제 배치한 글리프 위치와 대체 글꼴을 읽는 방식으로 바꿨다. 출력 뒤에 없는 마지막 자간을 커서 폭에 추가하던 문제, 가운데/오른쪽 정렬의 끝 위치 오차, 선택 글꼴에 없는 한글·다른 문자로 생기던 폭 차이를 보정한다.
+- 동일한 렌더 옵션과 SVG 텍스트 생성기를 사용한다. usvg가 공개하지 않는 원문 byte 위치만 실제 사용된 face의 shaping 메타데이터로 복원한다. 음수 자간으로 사라진 반복 글자도 실제 남은 문자의 인덱스에 대응시킨다. 조합 문자·ZWJ 이모지는 하나의 선택 단위로 묶는다.
+- 마지막 배치를 한 항목의 캐시로 보관해 포인터 이동/선택 다시 그리기에서 재분석하지 않는다. 편집 중 더블클릭 단어/세 번 클릭 줄 선택, 짧은 줄을 지나도 가로 위치를 유지하는 위아래 이동을 추가했다. 패널 배치·문서 스키마·출력 규칙은 바꾸지 않는다.
+- 검증: 코어 137개 + 데스크톱 149개 통과, 외부 미디어/장치 30개 제외. Wanted Sans/Arial, 3가지 자간, 한글·CJK·아랍어·히브리어·Devanagari·조합 문자·이모지·탭·bidi 제어 문자의 54개 조합에서 줄 끝이 실제 렌더 폭과 일치한다. 음수 반복 글자, 자간 정렬, 캐시 무효화, 단어/줄 선택과 세로 이동도 검사했다. Cargo check/fmt/test/release build로 검증한다.
+- Windows 창 제어는 세션 재초기화와 새 창 정보 재선택 후에도 활성화 오류가 반복됐다. 실제 포인터/IME/포커스 조작은 여전히 미검증이다. 글꼴의 GDEF ligature 내부 caret 위치, bidi 경계 affinity, 커서 깜빡임, Paragraph 박스와 문자별 스타일/Text Animator는 남아 있다. 전체 F01–F03 완료를 의미하지 않는다.
+- 최종 릴리스 검증: Arial 요청에 한글/CJK/이모지/히브리어를 섞고 자간 150·가운데 정렬을 사용한 `target/qa/text-metrics-cli.lfe.json`을 960×540 RGBA PNG로 출력했다. 이전/이후 릴리스의 모든 픽셀이 일치했다(`text-metrics-before.png`, `text-metrics-after.png`). 릴리스 교체 후 편집기 프로세스 1개와 사용자 보존 원본의 SHA-256 불변을 확인했다.
+
+### Composition 직접 텍스트 편집 — 2026-10-02
+
+- Ctrl+T/Text 도구로 클릭해 포인트 텍스트를 만들거나 기존 글자를 편집한다. Selection 도구의 더블클릭과 Layer → New text도 연결했다. 여러 줄이 소스 사각형 밖으로 길어져도 글자 영역에서 편집을 시작할 수 있다.
+- 드래그/Shift 선택, 방향키·Home/End·문서/단어 이동, Unicode grapheme 단위 삭제, 복사/잘라내기/붙여넣기, 편집 중 로컬 Undo/Redo를 구현했다. Enter는 줄바꿈, Ctrl+Enter는 확정, Escape는 원래 내용 복원이다. 빈 새 초안은 레이어를 만들지 않는다.
+- 실제 문서와 분리된 초안을 같은 렌더러로 미리 보여준다. 확정은 생성까지 한 Undo로 기록하고 기존 글꼴·변형 키를 보존한다. 다른 패널 클릭/도구/저장/시간 이동은 먼저 확정한다. 자동 복구는 초안을 포함하며 편집기 교체/닫기도 확정 후 기존 보존 흐름을 따른다. 프로젝트 스키마는 v32를 유지한다.
+- 네이티브 입력 핸들러의 UTF-16 선택·조합 영역·후보 창 위치를 연결했다. 한글 조합 갱신, surrogate pair, 결합 문자·ZWJ 이모지, 16 KiB 제한의 원자성, 오래된 문서 거부를 모델 테스트로 검사했다.
+- 검증: 코어 137개 + 데스크톱 145개 통과, 외부 미디어/장치 30개 제외. 저장 왕복·한 번의 Undo/Redo·Preview/PNG 픽셀 일치·글꼴/애니메이션 보존·복구 초안 재열기·여러 줄/정렬/기본 RTL hit 영역을 검사했다. Cargo check/fmt/release build 사용(Moon/proto 미설치).
+- **네이티브 조작 검증은 미완료:** Computer Use의 창 활성화가 재선택/재시도 후에도 `failed to activate captured window`로 실패했다. 따라서 실제 IME·마우스 선택·포커스·키 입력·UI 저장/재열기는 검증됐다고 표시하지 않는다. 새 릴리스의 프로세스 교체와 편집기 프로세스 1개 유지는 별도 확인했다.
+- 최종 릴리스 CLI로 별도 3줄 한글/영문 QA 문서를 960×540 RGBA PNG로 출력하고 글자·줄 간격을 확인했다(`target/qa/text-edit-cli.lfe.json`, `target/qa/text-edit-cli.png`). CLI는 정상 종료했으며 사용자 보존 원본의 SHA-256은 바뀌지 않았다. 이 검사는 UI 입력 검증을 대신하지 않는다.
+- 남음: 대체 글리프/복잡한 양방향 문자/ligature의 커서 정밀도, 커서 깜빡임, 문자별 스타일, Paragraph 영역 텍스트, Text Animator. 현재 커서는 선택된 실제 face로 모양을 계산하여 렌더러의 글리프별 fallback과 차이가 날 수 있다. F01–F03 전체 완료가 아니다.
+
+### 텍스트 글꼴과 스타일 선택 — 2026-10-02
+
+- Character에 설치된 글꼴 검색·선택과 실제 스타일 메뉴를 추가했다. 목록은 떠 있는 메뉴로 열어 기존 오른쪽 패널 높이를 바꾸지 않는다. 앱 UI와 새 텍스트의 기본값은 Wanted Sans다.
+- Wanted Sans Regular/Medium/SemiBold/Bold/ExtraBold/Black/ExtraBlack 7개 정적 파일을 포함한다. Black과 ExtraBlack은 같은 숫자 굵기 900을 선언하므로 PostScript 스타일 식별자도 저장하고 실제 글꼴 파일을 구분해 렌더링한다.
+- 레이어 전체의 글꼴 이름·스타일 식별자·굵기·기울임을 v32에 저장하며 Undo/Redo와 이전 문서 기본값 변환을 지원한다. Preview·효과 경계 측정·PNG/영상 출력은 하나의 글꼴 카탈로그와 동일한 선택 로직을 사용한다.
+- 없는 글꼴/스타일은 Character에서 경고하고 원래 저장된 이름을 보존한다. 없는 글꼴은 Wanted Sans, 없는 스타일은 가장 가까운 실제 스타일로 표시한다. 설치된 글꼴은 실행마다 한 번 검색하며 외부 글꼴을 프로젝트에 내장·수집하지 않는다.
+- 검증: 코어 137개 + 데스크톱 139개 통과, 외부 미디어/장치 30개 제외. 7개 굵기의 서로 다른 한글/영문 픽셀, 없는 글꼴의 대체 결과, 저장/재열기·Undo/Redo·PNG와 Preview 일치, 잘못된 이름/굵기·잠금·하위 스키마 거부를 검사했다. Cargo check/fmt/release build로 검증하며 Moon/proto는 PATH에 없다.
+- 남음: 캔버스 직접 텍스트 입력·선택·IME, 문자별 스타일, 가변 글꼴 축·문자 누락 진단·프로젝트 전체 글꼴 대체, Paragraph 영역 텍스트와 Text Animator. F01–F03 전체 완료로 표시하지 않는다.
+- 네이티브 검증: ExtraBlack 선택·Undo/Redo 후 v32의 `WantedSans-ExtraBlack` 저장을 확인했다. 설치된 Arial을 검색해 Arial-ItalicMT로 변경·저장하고 릴리스 재시작/재열기 후 같은 스타일과 화면을 확인했다. 메뉴가 열려도 Project/Composition/Timeline/오른쪽 도크 경계는 유지된다.
+- CLI 960×540 PNG에서 Regular/Black/ExtraBlack/Arial Italic 4개의 서로 다른 글리프 픽셀을 확인했다. 없는 글꼴의 출력은 Wanted Sans Regular 대체 출력과 모든 픽셀이 일치했다. `target/qa/typography-*-native.lfe.json`과 대응 PNG를 QA 사본으로 보관한다.
+- 최종 릴리스에서 스타일 메뉴 및 검색창의 Escape 취소가 문서를 변경하지 않는 것을 확인했다. 실제 작업 창 1개를 유지한다.
+
+### 효과 프리셋 저장·적용 — 2026-10-02
+
+- D06 중 효과 애니메이션 재사용 범위를 구현했다. Effect Controls에서 전체 스택 또는 개별 인스턴스를 `.lfe-preset.json`으로 저장하고 Effects & Presets의 User Presets에서 검색·가져오기·새로고침·적용한다. 저장 시 사용자 라이브러리에도 등록하며 동일 파일을 다시 가져와도 중복 등록하지 않는다.
+- 효과 순서·이름·우회 상태·색 공간·기본값·키프레임·보간을 보존한다. 첫 키를 적용 시점에 맞추고 나머지 키는 원본 FPS의 경과 시간을 대상 FPS로 변환한다. 좌표·반경은 원래 픽셀 단위를 유지한다. 정적 효과는 레이어 전체 구간에 적용된다.
+- 기존 효과 뒤에 새 ID로 추가하며 선택한 여러 레이어의 적용을 한 번의 Undo/Redo로 처리한다. 잠금·Null·키 충돌·컴포지션 범위 초과·64개 효과 한도에 걸리면 전체 적용을 거부한다. 레거시 효과가 있는 전체 스택은 먼저 순서 있는 효과로 변환해야 저장된다.
+- 프리셋 파일 버전은 1이며 프로젝트 스키마는 바뀌지 않는다. 파일당 8 MiB·40,000키, 라이브러리 200개·32 MiB를 제한하고 잘못된 파일은 경고와 함께 건너뛴다. 프로필 디스크 처리는 백그라운드로 실행한다.
+- 아직 남음: Transform/Mask/Text 등 임의 속성 선택 프리셋과 선택 붙여넣기, 프리셋 폴더·이름 변경·삭제 UI, Adobe FFX 호환. D06 전체 완료로 표시하지 않는다.
+- 검증: 코어 136개 + 데스크톱 137개 통과, 외부 미디어/장치 30개 제외. 시간/FPS·키 보간·ID·색 공간 보존, 다중 레이어 적용 실패의 원자성, Undo/Redo·프로젝트/프리셋 JSON 왕복, 애니메이션 중간 프레임 PNG, 잘못된 파일·중복 가져오기를 검사했다. Cargo check/fmt/release build도 통과했다(Moon/proto 미설치).
+- 네이티브 검증: Gradient+Curves 2개 효과와 키 6개를 `target/qa/Warm curves.lfe-preset.json`으로 저장했다. 새 Solid의 30프레임에 적용해 0/45/89 키가 30/75/119로 이동했으며 U 표시와 한 번의 Undo/Redo를 확인했다. 네이티브 재가져오기는 한 항목을 유지했다. 적용 전 `target/qa/preset-before-native.lfe.json`의 0/15/45/89 PNG와 저장 후 `target/qa/preset-source-native.lfe.json`의 30/45/75/119 PNG는 각각 모든 픽셀이 일치했다.
+- 최종 릴리스 재시작·문서 재열기 후 30프레임의 화면과 효과 키를 확인했다. User Presets의 Warm curves가 복원되고 이름 검색에도 표시된다. 실제 작업 창은 1개이며 원본 보존 문서의 SHA-256은 바뀌지 않았다.
+
+### 공통 색 선택기 — 2026-10-02
+
+- B06 기본 편집 범위: Properties/Character Fill, 도형 Stroke, Composition Settings 배경색에서 같은 RGB/HEX 선택기를 연다. 채도·명도 영역과 색상 띠, 원래/새 색 견본, 방향키·Page Up/Down·Shift 조작, 최대 12개 최근 색상의 로컬 프로필 저장을 제공한다.
+- 레이어색의 RRGGBBAA/Opacity는 현재 프레임의 **레이어 전체 불투명도**를 바꾼다. 채우기만의 별도 알파 모델은 아니다. RGB와 불투명도는 한 Batch로 적용되어 한 번의 Undo/Redo로 복원된다. 도형 선과 배경은 RGB만 편집한다.
+- OK 전에는 문서에 쓰지 않는다. 잘못된 숫자/HEX, 다른 문서·프레임, 잠긴 대상은 거부한다. 배경색 선택은 바깥 Composition Settings의 임시 값으로 반환하므로 바깥 Cancel도 안전하다.
+- 스포이트는 현재 컴포지션 미리보기 해상도의 raw 8-bit straight RGBA를 읽으며, 격자·배경·채널 표시·선택선은 포함하지 않는다. 아직 OS 전체 화면 샘플, ICC/HDR 색 관리, 효과 RGB 매개변수 그룹의 공통 색 선택기 연결, 도형 도구 Fill/Stroke 기본값은 구현하지 않았다. 고급 색 관리는 사용자 요청대로 후속 단계다.
+- 테스트: 코어 133개 + 데스크톱 135개 통과, 외부 미디어/장치 30개 제외. RGB/HEX/알파 오류의 원자성, HSV 왕복, 애니메이션 불투명도 키 보존, 한 번의 Undo/Redo, 잠금/오래된 세션 거부, 도형 선 보존, 배경 임시 값, 최근 색상 경계·저장, JSON/PNG 픽셀 왕복을 검사했다. Moon/proto가 PATH에 없어 Cargo check/fmt/test/release build로 검증한다.
+- 네이티브: Solid에 #33669980을 입력해 50.20% 불투명도를 적용하고 Undo/Redo를 확인했다. 색상 영역 드래그 후 스포이트는 [52,102,153,128]을 읽었다(8-bit premultiply 반올림); Cancel로 원래 #336699를 유지했다. 최근 색상을 배경으로 선택한 뒤 바깥 설정 Cancel이 배경 0을 유지하는 것도 저장 파일로 확인했다. 테스트 문서는 target/qa/color-picker-native.lfe.json에 별도 보관한다. AE 실제 창과 첫 화면 패널 경계를 다시 비교했으며 기존 배치는 유지했다.
+
+최종 릴리스 재시작 후 같은 문서를 재열어 Fill #336699·Opacity 50.20%와 최근 색상 복원을 확인했다. 방향키 색상 변경과 Escape 취소 후 문서는 저장 상태를 유지한다. CLI 320×180 PNG 중앙 픽셀은 알파 출력 [52,102,153,128], 검정 배경 합성 출력 [26,51,77]이다. 실제 작업 창 1개와 원본 보존 파일의 SHA-256 불변도 확인했다.
+
+### 마스크 속성과 경로 애니메이션 — 2026-10-02
+
+- 마스크마다 Opacity(0–100%), Feather(0–256px), Expansion(−256–256px), Path 스톱워치·키 추가/제거를 제공한다. Properties의 각 마스크 아래에 연산/반전/순서와 속성을 모았다. 수치 속성은 타임라인과 값 그래프에서도 편집한다.
+- 마스크 고유 ID를 저장해 순서를 바꿔도 키프레임 대상이 유지된다. v29 정적 마스크는 읽을 때 한 번 변환한다. 속성은 v30, 경로 애니메이션은 v31에 저장한다.
+- 도형/마스크 경로의 꼭짓점과 입출력 핸들을 보간한다. Path 애니메이션을 켜고 다른 시간에서 Pen으로 이동하면 해당 프레임에 키가 생긴다. Linear/Hold/Smooth/Bezier 시간 보간, 타임라인 키 이동·복사/붙여넣기·삭제·레이어 이동·Undo/Redo, 중간 모양을 유지하며 애니메이션 끄기를 지원한다.
+- 경로 키 복사는 좌표와 핸들을 함께 복사한다. 다른 레이어의 같은 종류 경로로 붙여넣을 때 꼭짓점 수와 닫힘 상태가 일치해야 한다. 애니메이션 중 점 삽입/삭제와 닫힘 변경은 거부하고 안내한다. 경로는 숫자 값 그래프로 표시하지 않고 Composition의 Pen 편집으로 연결한다.
+- Preview와 PNG/영상 합성은 같은 평가 경로를 사용한다. Feather는 균일 Gaussian, Expansion은 SVG morphology 방식이다. AE의 가변 Feather·정교한 경계 오프셋과 수치적으로 동일한 구현은 아니다.
+- 이미지/시퀀스 자산 디코더의 버전 상한이 26에 고정되어 최신 편집 기능과 함께 저장한 프로젝트를 열지 못하던 문제를 수정했다. 지원되는 프로젝트 버전을 한 상수로 관리한다.
+- 아직 남음: 경로 토폴로지 변경의 전체 키 전파, 다중 점 선택·수치 편집, 로토베지어/가변 Feather, Contents 그룹/연산, 도형 파라미터 키프레임, 직접 텍스트 편집·글꼴/굵기·문자별 스타일, 실제 색 선택기, 효과 프리셋과 추가 효과. 전체 AE 동등 기능 완료로 취급하지 않는다.
+
+검증: 코어 133개 + 데스크톱 130개 테스트 통과, 외부 미디어/장치 테스트 30개 제외. 경로 중간 좌표/핸들·시간 보간·키 클립보드·저장·이력, Pen 한 제스처의 키 생성과 Undo, Shape/Mask 중간 프레임 픽셀, Feather/Expansion/Opacity와 순서 있는 마스크 합성, 최신 이미지·시퀀스 혼합 문서 재열기를 검사했다. 서로 다른 FPS로 레이어를 복사할 때 경로·마스크 수치 키가 함께 시간 변환되는 것도 검사했다. Cargo check/fmt/release build로 검증하며 Moon/proto가 PATH에 없어 Cargo를 직접 실행했다.
+
+네이티브 검증: 이전 v29 테스트 문서를 열고 Path/Feather 스톱워치를 켰다. 30프레임에서 Feather 60과 꼭짓점 이동으로 두 키를 만들고 15프레임에서 Feather 30과 중간 위치를 확인했다. Pen 드래그 Undo/Redo, 경로 키를 60프레임에 복사, Feather 그래프의 시간·값 이동과 Undo, U 필터, v31 별도 저장을 확인했다. `target/qa/mask-animation-native.lfe.json`에는 Path 0/30/60, Feather 0/30 키가 있다. CLI로 0/15/30프레임을 PNG 출력해 부드러운 알파 경계 변화와 Subtract 구멍의 알파 0을 확인했다. 실제 After Effects 2026 첫 화면과 대조한 Project/Composition/Timeline/오른쪽 도크 경계는 유지했다. 최종 릴리스 재시작/재열기 후에도 같은 키와 모양이 복원됐고, 타임라인은 마스크별 Path/수치 속성을 연속 배치한다. 실제 작업 창은 1개다.
+
+### Pen 경로와 다중 마스크 — 2026-10-02
+
+- G 펜 도구: 클릭으로 꼭짓점, 드래그로 베지어 핸들, 시작점 클릭으로 닫기, Enter로 완료, Escape 취소, 작성 중 Backspace로 마지막 점 취소.
+- 선택한 경로의 점/핸들 이동, 곡선 클릭으로 형태를 유지하며 점 삽입, 선택한 점 Delete, Alt로 모서리 전환/독립 핸들, Shift로 핸들 축 제한. 작성과 각 드래그는 한 Undo로 처리.
+- 레이어 미선택 시 도형 경로, 일반 레이어 선택 시 닫힌 마스크 생성. 도형 위에는 Ctrl+펜으로 마스크 생성. 기존 도형 경로/마스크는 점이나 선을 직접 클릭해 편집.
+- 여러 경로 마스크의 Add/Subtract/Intersect/None, 반전, 순서 변경, 제거. Properties 안에서 조작하며, 일반 레이어와 Adjustment가 같은 마스크 평가를 사용.
+- 프로젝트 v29 저장/읽기, 기존 사각형 마스크 호환, 부모 변환을 포함한 레이어 좌표 편집, 문서/시간/선택 변경 시 오래된 제스처 취소.
+- 당시 미구현(경로/마스크 키프레임과 Feather/Expansion/Opacity는 위 후속 단계에서 구현): 로토베지어, 점 다중 선택·수치 편집, 경로 도형의 자동 경계·피킹 정교화(현재 소스 크기는 컴포지션 크기), 도형 Contents 그룹·연산. 이 단계는 정적 경로 편집의 기반이며 E02/G01 전체 완료가 아님.
+
+검증: 코어 126개 + 데스크톱 127개 테스트 통과(외부 미디어/장치 테스트 30개 제외), Cargo check/fmt/release build 통과. Moon/proto가 PATH에 없어 Cargo로 직접 실행했다. 실제 창에서 G, 곡선 드래그·닫기·채우기, 점 이동 Undo/Redo, Solid 위 Enter 마스크 완료, 두 경로 Add/Subtract 조합·연산 Undo, v29 저장을 확인했다. 저장 파일의 CLI PNG 출력(1920×1080)에서 곡선 내부와 마스크 내부는 불투명, Subtract 구멍은 알파 0을 확인했다. 단일 편집기 교체 후 실행 창은 1개이며 원래 미저장 작업은 Desktop의 `editing-preserved-before-paths-20261002.lfe.json`에 보존했다.
+
+### 편집 작업 공간 우선 개발 — 2026-10-02
+
+실제 실행 중인 After Effects 2026의 기본 작업 공간을 확인했다. 상단은 편집 도구, 왼쪽은 Project/Effect Controls, 중앙은 Composition, 하단은 Timeline, 오른쪽은 접이식 Properties/Info/Audio/Preview/Effects & Presets/Character/Paragraph와 Align으로 정리한다. 고급 렌더링 확장은 보류한다.
+
+이번 구현 범위:
+- 선택/Hand/Zoom/회전/Anchor/도형/Text 도구 모음, 도형 선택 메뉴와 Q 순환, Snapping. Save/Undo/Redo/Render Queue는 기존 메뉴·단축키에서 접근.
+- 새 컴포지션 시작 카드, Ctrl+N 생성 설정, Ctrl+Alt+N 새 프로젝트, Ctrl+K 기존 컴포지션 설정. Footage 카드로 가져오기와 소스 기반 컴포지션을 한 이력으로 생성.
+- Rectangle/Rounded Rectangle/Ellipse/Polygon/Star 드래그 생성, Shift 비율 제한, Alt 중심 기준, Escape 취소, 채우기·선 색/두께·둥글기·꼭짓점/내부 반경. 한 드래그 = 한 Undo.
+- 12개 기존 효과의 검색·분류 폴더 및 적용 후 Effect Controls 표시. 사용자 효과 프리셋 저장은 아직 미구현.
+- Wanted Sans Character의 글자 크기·행간·자간·색, Paragraph의 좌/중앙/우 정렬. 도형은 프로젝트 v27, 단락/자간/행간은 v28에 저장. 직접 캔버스 텍스트 편집·여러 글꼴/굵기·문자별 스타일·Text Animator는 남음.
+- 타임라인 보조 작업을 아이콘으로 축소하고 중복 Snap 버튼을 제거.
+- 단일 편집기 정책은 테스트용이 아니라 앱 시작 시 항상 적용. 새 실행은 기존 창의 활성 필드를 확정하고 재생/진행 작업을 중단·정리한 뒤, 미저장 프로젝트를 복구 사본에 보존하고 기존 창을 닫는다. 후속 실행은 잠금 해제 후 작업 창을 연다. 동시 후속 실행은 하나만 대기하며, 60초 이내 종료하지 못하면 두 번째 창은 열지 않는다. CLI·FFmpeg 자식 작업은 제한 대상이 아니다.
+
+다음 편집 기능(완료로 취급하지 않음): 캔버스 텍스트 편집·글꼴/굵기와 텍스트 선택, 실제 색 선택기·도형 도구의 Fill/Stroke 기본값, 도형 크기/파라미터 키프레임·Contents 그룹/연산, 효과 프리셋·추가 기본 효과, 속도 그래프·공간 경로, 검색/키보드 탐색·패널 크기/DPI 회귀. Brush/Clone/Eraser/Puppet·Tracker·3D 도구는 별도 구현이 필요하며 작동하지 않는 버튼을 지원 기능으로 표시하지 않는다.
+
+검증: 코어 124개 + 데스크톱 122개 테스트 통과(미디어/오디오 외부 환경 테스트 30개는 이번 실행에서 제외), Cargo check/fmt/release build 통과. 네이티브에서 새 컴포지션, 드래그 사각형, 한 단계 Undo/Redo, Ctrl+T 텍스트, 색 입력·중앙 정렬, Gaussian Blur 적용/Effect Controls 자동 전환, 저장(v28)·PNG 출력, 960×540 푸티지 시작 카드의 단일 컴포지션 생성을 확인했다. 동일 실행 파일 재실행 및 다른 경로/이름 실행 모두 이전 PID 종료와 새 PID 하나만 남는 것을 확인했다. 미저장 도형과 아직 Enter를 누르지 않은 색상 FF8844도 새 세션에서 복구했다. 마지막 효과 패널 높이 조정 이후 UI 자동화의 `failed to activate captured window` 오류로 최종 패널의 화면 재검증은 완료하지 못했다. 전체 AE 동등 구현으로 판단하지 않는다.
+
+기존 문서 보존: 10월 1일 사본에 덮어쓰지 않고 현재 미저장 작업을 바탕 화면의 `lower-third-preserved-20261002-editing.lfe.json`에 별도로 저장했다.
+
+| 항목 | 구현한 범위 | 남은 범위 |
+| --- | --- | --- |
+| A01 | 안정적인 컴포지션 ID, 생성·복제·삭제·전환, Project 검색 목록과 뷰어 탭, 독립 편집·Undo/Redo·저장·CLI 출력, 참조 중 삭제 방지 | 최대 100개 컴포지션·전체 1,000 레이어 |
+| A02 | 공유 자산 ID·폴더 트리·이름/유형 검색과 정렬·실제 이미지/영상/컴포지션 썸네일·메타데이터/참조 수, 소스 이름/폴더 편집·재사용 레이어·공유 재연결·Undo/Redo·버전 22 저장·이전 파일 변환 | 미디어 1,000개·폴더 1,000개·32단계; 폴더 펼침/검색/정렬은 현재 세션 상태; 다중 선택/드래그 이동·키보드 트리 탐색은 후속 UX 작업 |
+| A03 | 연속 레이어의 모든 속성 이동 방식 Pre-compose, 소스 추가·열기, 중첩 렌더·알파·유리수 FPS 변환, 순환/누락 참조 거부, 저장·Undo/Redo; 인스턴스별 Time Remap은 D05 | 외부 부모 관계·불연속 선택은 보존을 위해 제한; 변환 축소·속성 남기기 모드 미구현 |
+| A04 | 인스턴스별 잠금 슬롯, 이전 체크포인트, 복구 선택·보류, 문서 전환 후 오래된 쓰기 차단 | 긴 기간의 버전별 백업 정책과 프로젝트별 복구 관리 화면 |
+| A05 | 이미지 자산을 파일에 한 번 저장, Undo/복제 간 메모리 공유, 파일 한도 확대, 고유 이미지 총량 제한 | 외부 자산 패키지와 모든 메타데이터 편집의 저장 크기 사전 점검 |
+| A06 | 프로젝트 폴더 내부 상대 경로·Save As 재기준화, Collect Files의 영상 중복 제거·취소·실패 정리, 누락/참조 수 목록·개별 및 폴더 일괄 재연결, 전체 컴포지션 공유 갱신·Undo/Redo·버전 15 | 폴더 밖 소스는 절대 경로, 수집 사본 전체를 이동; 검색 10,000개·16단계·동명은 수동 선택; 내장 이미지 한도 유지 |
+| A07 | 유리수 FPS·NTSC 입력·시작 NDF 타임코드, 초/프레임/타임코드 길이·HD/UHD/길이 프리셋, 32MP 설정 검사, 공통 중첩/복사/마커 시간 변환·버전 14 저장·MP4/MOV 정확한 시간 기준 | 1–240fps·24시간 길이; 시작은 표시 오프셋, FPS 변경은 프레임 번호 보존; 드롭 프레임 번호 미지원 |
+| A08 | Ctrl+I의 PNG/JPEG/영상 혼합 다중 가져오기·단일 Undo·실패 시 전체 거부, 소스 중복 제거·폴더 지정; 공유 소스 FPS/알파 해석·Straight/Ignore/Premultiplied 매트 색·반전·Reset, 소스 크기/FPS/길이 기반 컴포지션 생성; PNG/JPEG 번호 시퀀스·Error/Hold/Transparent·폴더/프레임 재연결·상대 경로/수집·공유 매니페스트·Undo/Redo·버전 24 저장 | 시퀀스 100,000프레임·경로 8MiB·이미지 축 4096px; TIFF/EXR·폴더 감시/범위 자동 확장·사용자 패턴 미구현; 영상 오디오는 H01–H04; 해석 변경은 기존 레이어 트림/키 시간 보존, 1–240fps·24시간·8비트 sRGB; 자동 추정·필드 순서·픽셀 종횡비·ICC 해석 미구현 |
+| H01 | 독립 오디오 자산·영상의 첫 오디오 스트림, 샘플레이트/채널/레이아웃/길이/시작 오프셋, 타임라인 파형·소스 썸네일, 트림/이동/분할/속도/Time Remap·공유 재연결·미디어 수집·버전 25 저장 | 첫 스트림만 선택; 8–384kHz·1–32채널·24시간, 파형은 최대 48kHz 디코딩·100 bins/s·10초 청크·40MiB 캐시·행당 60청크까지; 긴 구간은 확대 안내; 전체 길이 개요·스트림 선택 남음; Windows 장치 재생은 H02, 출력은 H04의 아래 범위 구현 |
+| H02 | Windows WASAPI 기본 공유 출력·48kHz 스테레오, 장치 시계 기반 플레이헤드·유리수 반복/구간 끝 정지, 취소/일시정지/탐색·75ms 디바운스 후 100ms 스크럽, 버퍼링·오류·재생 블록 Peak/RMS/클리핑 표시 | 장치 선택·기본 장치 변경 자동 복구·비Windows 백엔드·설정 기억 남음; 초기 0.5초 프리롤·100ms 장치 버퍼 요청, 디코더/합성/디스플레이 실제 지연 개선은 J01/J02; 미터는 완료한 최대 100ms 블록, True Peak/피크 홀드 미구현 |
+| H03 | 독립/영상/프리컴프 오디오 On/Off, 좌우 -192…+12dB·스테레오 Pan·Fade 공통 키프레임/값 그래프·0.5초 페이드 생성, 레이어 Solo 연계, 중첩 버스 행렬·부동소수점 합산·최종 클램프, 최대 100ms 믹스의 Peak/RMS/클리핑 측정, 버전 26 저장 | 팬은 반대 채널을 sin/cos로 이동하고 끝에서 합산하므로 위상 상쇄·상관 소스 증폭 가능; 페이드는 진폭 선형·겹치는 구간의 Fade 키 대체, 짧은 레이어에 맞춰 축소; 미터는 버튼으로 측정한 구간 결과, 재생 블록 미터·Windows 장치 연결은 H02에 구현; 피크 홀드 남음; 오디오 효과/EQ/컴프레서는 후속 범위 |
+| H04 | 48kHz 스테레오 공통 믹서·트림/분할/이동·역재생/정지·영상 시작 오프셋·중첩 Time Remap, AAC 192kbps MP4·24비트 PCM MOV, 출력 모듈/CLI Audio auto/off·큐 v3 무음 설정 변환, 취소/실패 원본 보존 | 속도에 따라 피치 변경; 정지/범위 밖·출력 FPS 올림 꼬리는 무음; 48kHz PCM 선형 보간으로 고속 재생 aliasing 가능, 가변 비율 대역 제한 리샘플러/피치 보존·채널/레이트 옵션 남음; Windows 장치 시계 검증은 H02; 실제 영상 표시 지연·타 플랫폼 장치 검증 남음 |
+| I01 | 원본·프로젝트 출력 경로 보호와 하드링크 검사, 누락 영상·출력 크기 사전 검사, 설정 크기 제한 | 설치된 인코더/글꼴을 한 화면에서 점검하는 UI와 디스크 여유 용량 안내 |
+| I02 | 타임라인 도크 Render Queue·Ctrl+M 스냅샷/워크 영역 등록, 작업 순서·활성화·범위·출력 경로·재시도, MP4/MOV/PNG 복수 출력 모듈·형식 묶음 프리셋, 순차 실행·Stop/Continue 실패 정책·취소·로컬 Undo/Redo·재시작 상태 복원 | 100작업·작업당 8출력·32프리셋·스냅샷 1GiB; 소스 파일 바이트는 외부 참조, 큐는 사용자 로컬 저장; 실행 시작 시 큐 편집 이력 초기화; AAC/PCM auto/off 연계 완료; 추가 영상/오디오 프로필은 I03 |
+| I03 | 출력 모듈별 크기·유리수 FPS·RGB/RGBA/Alpha 채널·H.264 CRF/목표 평균 비트레이트/속도, ProRes 4444·PNG 형식 선택, 설정 포함 프리셋·큐 버전 2 변환·Undo/Redo·CLI 공통 설정 | AAC/PCM auto/off 연계; 추가 오디오 레이트/채널과 코덱 프로필 남음; FPS 변환은 Hold 반복/생략, 마지막 프레임 올림; 8비트 sRGB·32MP·축 16384·1–240fps·명시 MP4 크기는 짝수, 크기 종횡비 변경은 Stretch; ABR은 목표치이며 CBR 보장 없음; 단일 File 빠른 출력은 기존 기본값 |
+| I04 | sRGB 전달 함수·BT.709 행렬/원색·제한 범위 출력 정책, MP4/MOV 태그·픽셀 왕복 검사 | ICC 입력·디스플레이 프로파일·HDR·선형 합성 |
+| J01 | 미리보기/출력 공통 지속 CFR 디코더·4세션 LRU·세션당 최대 2프레임/8MiB 프리페치와 단일 읽기 버퍼, 렌더러당 120프레임/32MiB PNG 캐시, 인접 32프레임 전진 재사용·파일 메타데이터 무효화·Refresh, 모든 미리보기의 비동기 합성·단일 작업·탐색/반복/문서/품질 세대 검사·취소/자식 종료 | 멀거나 캐시 없는 역방향 탐색은 재시작, VFR 미지원; PNG/SVG 경로 유지, 단일 SVG 파싱/래스터 패스는 중간 중단 불가; 전체 합성 RAM/디스크 캐시와 표시 지연은 J02/J03; FFmpeg 자체 메모리는 별도 |
+| J02 | 합성 RGBA RAM 캐시·64/256/512MiB/Off·4096프레임 한도·LRU, 작업 영역 사전 캐시/중단/초기화·상주 구간 초록색 표시·메모리/히트 통계, 편집/Undo/문서/품질/Refresh 무효화와 백그라운드 파일 size/mtime 감시 | RAM 부분 구현; 디스크 캐시·설정 영속화·실제 표시 지연/장시간 FPS 측정 남음; 메모리 한도는 RGBA 캐시만 적용, 같은 size/mtime 교체는 Refresh 필요 |
+| L01 | Moon desktop 테스트/format 태스크, Windows 전체 테스트·FFmpeg·릴리스 빌드 CI 정의 | 원격 CI 실제 실행 및 DPI/UI 자동화 커버리지 |
+| L02 | 사용자별 단일 작업 창·새 실행 시 기존 창 교체·미저장 복구 사본·동시 시작 게이트·충돌 후 잠금 해제 | 설치/업데이트·배포·진단 |
+| A09 | B/N 워크 영역과 별도 편집기 메타데이터, 컴포지션별 재생 위치·시간축/미리보기 줌·팬·품질·그래프, 패널 비율·열 너비·탭 저장/복원 | 화면 변경은 Undo/dirty에 포함하지 않고 명시적 Save로 보존; 복구 체크포인트는 기본 화면으로 시작 |
+| C01 | Null 변형 컨트롤러, 독립 Solid 크기·색·컴포지션 크기 복사, Adjustment의 아래 합성 결과·변형/마스크·불투명도·효과 순서/애니메이션, Undo/Redo·버전 16 | 소스 크기 편집은 원점·앵커·키 유지; 조정 경계는 8비트 sRGB 래스터, 프리컴프 시 하위 입력 전부 포함 |
+| C02 | Solo·Shy·Guide 스위치, Hide Shy 목록 필터, 미리보기/중첩/출력별 Guide 처리, 저장·Undo/Redo | 레이블 편집·품질 스위치; 블렌딩은 G03에서 구현 |
+| C03 | 레이어 Copy/Cut/Paste, 프로젝트 안 컴포지션 간 복사, 새 ID·부모 재연결·FPS 시간 변환, 충돌 시 원자적 거부 | 프로젝트 간/OS 클립보드, 플레이헤드 기준 레이어 붙여넣기 |
+| C04 | 컴포지션·레이어 마커의 이름·색·기간 편집, 이전/다음 탐색, 이동·분할·중첩·FPS 복사, Undo/Redo·버전 13 저장·재열기 | 한 소유자당 1,000개; 분할/FPS 변환 시 시작 시각 충돌이나 기간 소실은 원자적으로 거부 |
+| C05 | 재생 위치·워크 영역·레이어 경계·변형/효과 키·마커 시작/끝 스냅, 다중 선택 간격 보존, 8 논리 픽셀 허용거리, Alt 임시 해제·Snap 토글 | 구현 범위의 확대 배율·입력 회귀 검증 유지 |
+| C07 | 다중 선택 회전·스케일 드래그, Composition/Selection 6방향 정렬·6방향 분배, Pick Whip 부모 연결·현재 포즈 보존, 부모/자식 이중 변형 방지·Undo/Redo·저장 | 각 루트 앵커 기준; 소스 경계 사용·마스크/효과 확장 제외; 수치 필드/앵커 도구는 단일 레이어; 0 스케일 축은 퍼센트 포인트 증분 |
+| B09 | 눈금자·가이드 생성/이동/제거/잠금·그리드·8px 스냅·90/80% 안전 영역, RGB/개별 채널/알파 보기·좌표/RGBA/샘플 해상도 Info, 가이드 Undo/Redo·버전 20 및 컴포지션별 뷰 복원 | 가이드 최대 256개·±32768px; 그리드 메뉴 50/100/200px; 소스 경계·중심 이동 스냅; 사용자 눈금자 원점·가이드 프리셋 교환 미지원 |
+| B03 | 왼쪽 Effect Controls, 오른쪽 분류 폴더/검색·효과 적용 후 Controls 전환, Effect 메뉴와 선택 레이어 연결 | 사용자 프리셋 저장·검색, 드래그 적용·키보드 목록 탐색 |
+| E01/E03 | 5종 도형의 드래그 생성, Shift/Alt/Escape, 채우기·선 색/두께·둥글기·꼭짓점/별 반경, Undo/Redo·v27·공통 렌더 | 선/Pen, 도형 크기 직접 편집·그룹/연산, 도구 기본 스타일, 파라미터 애니메이션 |
+| F01/F03 | Ctrl+T 텍스트 생성, Wanted Sans 크기·행간·자간·색과 좌/중앙/우 정렬, Character/Paragraph 패널·v28·공통 렌더 | 캔버스 직접 편집, Point/Paragraph 유형·자동 줄바꿈, 글꼴/굵기·커닝·문자별 스타일·Stroke/Text Animator |
+| D01 | 변형/효과 공통 속성 주소, 기본값·범위·애니메이션 트랙·버전 12 저장·그래프 통합 | 색·마스크·경로·텍스트 속성 확장 |
+| D05 | 영상·이미지 시퀀스·프리컴포지션의 소스 초 트랙, 가속/감속·Hold·역재생·현재 프레임 정지, Timeline/Properties/값 그래프·공통 키 편집·Ctrl+Alt+T·Undo/Redo·버전 21 저장 | 활성화 시 첫/마지막 표시 프레임 키·기존 속도 보존, 키 범위 밖은 끝값 유지·소스 범위 밖은 투명; 해제하면 기존 기본 시간 복원; 오디오는 H01–H04, 프레임 블렌딩/Optical Flow는 G07에서 별도 개발 |
+| G02 | Alpha/Luma·각 반전, 순서 독립 소스·재사용·16단계 참조, 숨긴 소스 직접 변형, 타임라인/Properties 메뉴, 복제·붙여넣기·분할·프리컴프·Undo/Redo·버전 18 | 소스는 픽셀 레이어(Null/Adjustment/Audio 제외); Luma는 알파 포함 sRGB 가중값, 조정 대상은 효과 영역 제한; 참조 연결 전체 보존 정책 |
+| G03 | Normal/Multiply/Screen/Add/Overlay, 타임라인 Mode·Properties 메뉴·키보드 선택, 반투명 알파·Adjustment 합성, Undo/Redo·버전 17 | 8비트 sRGB 합성, Add는 색 채널 합산 후 제한; 프리컴프는 하위 입력 전체 포함 |
+| G04 | 효과 추가·삭제·복제·이름·순서·우회·Reset, 파라미터 키프레임·보간·탐색, 기존 효과 무손실 변환, 타임라인·그래프·일괄 키 선택/이동/복사/삭제 | 구현 범위의 추가 회귀 검증 유지 |
+| G05 | Fill/Tint·Levels·Hue/Saturation·Glow·Drop Shadow·Curves·Linear/Radial Gradient와 순차 합성, RGB/채널별 5점 곡선·그래프·파라미터 키·버전 19 | 곡선 자유 점/Pencil·ACV/AMP, Gradient 디더링·캔버스 끝점 핸들, 효과별 추가 고급 옵션 |
+
+현재 구현은 로컬에서 `cargo check --workspace`, `cargo fmt --all --check`, 기본 테스트 238개와 FFmpeg 통합 테스트 29개, 별도 Windows 오디오 장치 테스트 1개로 검증했다. 통합 테스트에는 단일/중첩 장면의 MP4·알파 MOV 왕복 검사가 포함된다. 기존 샘플의 프리컴포즈·분할·저장·재열기 후 렌더 픽셀 일치, 새 네이티브 앱의 생성·복제·소스 편집·부모 반영·저장도 확인했다. `examples/precomposition-study.lfe.json`은 중첩 타이틀 예제다. 이번 레이어 작업은 Null·스위치·클립보드·FPS 변환·저장 및 Guide 출력 제외 회귀 검사를 포함한다. 최종 릴리스로 `examples/layer-workflow.lfe.json`의 0/149프레임 PNG와 MP4를 출력하고, 부모 애니메이션·Guide 제외·MP4 배경색을 픽셀 값으로 확인했다. 네이티브 앱에서 Null 생성·속성 및 Guide 미리보기를 확인했고, 효과 스택 작업에서 키보드 Copy/Cut/Paste·다른 컴포지션 붙여넣기·Undo/Redo·저장도 검증했다. 효과 복제 시 파라미터 키 두 개가 함께 복제되며, 저장된 두 컴포지션에서 효과와 키가 유지되는 것을 확인했다. `examples/effect-study.lfe.json`은 Blur·Drop Shadow·Glow를 사용하는 애니메이션 예제이며 최종 릴리스로 MP4와 PNG를 출력했다. 기존 효과 변환은 마스크와 넓은 Blur에서도 픽셀 일치 검사를 통과했다. 공통 키 경로는 변형/효과 혼합 이동·복사·삭제·저장, 그래프 값/시간·범위 거부, 효과 삭제 후 선택 정리 회귀 검사로 검증했다. 네이티브 타임라인에서 효과 키를 30→45프레임으로 드래그하고 그래프에서 60프레임·20.19 값으로 편집한 뒤 저장된 JSON의 값을 확인했다. 그래프 이동 후 Copy가 레이어 복사로 바뀌지 않도록 키 선택도 새 주소로 유지한다. 마커 추가·변경·이동·분할·중첩·FPS 변환·잠금·범위 오류·Undo/Redo·파일 왕복과 미리보기/출력 픽셀 불변을 검사했다. 스냅은 확대 시 반올림 전 포인터 거리로 판단하며, 네이티브 최종 빌드에서 같은 위치의 드래그가 ON일 때 마커 45프레임, OFF일 때 46프레임으로 도달함을 확인했다. 네이티브 마커 이름 편집·레이어 마커 생성·저장·재열기 및 저장 파일의 PNG 출력도 확인했다. 화면 상태는 컴포지션 전환·삭제 Undo/Redo·저장/재열기·범위 축소·기존/손상/미래 메타데이터 검사로 검증했다. 네이티브 앱에서 60프레임·시간축 2배·미리보기 100%·팬 (73, 36)·프로젝트 패널 비율 0.25537을 저장하고 New 이후 다시 열어 복원했다. 메타데이터 포함 파일의 60프레임 CLI PNG는 변경 전 출력과 SHA-256이 일치했다. 유리수 FPS는 시간 경계·반올림·음수 소스 시작·마커/키 복사·중첩 샘플·기존 파일·Undo/Redo·범위 거부로 검증했다. 24000/1001·30000/1001 MP4/MOV 각각의 프레임 수·시간 기준·타임코드·합성 픽셀을 FFprobe/FFmpeg로 확인했다. 네이티브 앱에서 29.97fps·10초·시작 01:00:00:00 입력, Undo/Redo·저장·재열기를 확인했고, 저장 파일의 CLI 출력은 30프레임·1.001초·01:00:00:02 타임코드였다. 미디어 경로는 상대 저장·Save As·한글 폴더 이동·누락 상태 열기·공유 소스 재연결·실패 원자성·복사 취소·동명 검색 거부로 검증했다. 통합 검사에서는 원본 영상을 제거하고 수집 폴더를 옮긴 후 중첩 PNG 픽셀 일치와 MP4 출력을 확인했다. 네이티브 앱에서도 두 컴포지션의 누락 소스 하나를 폴더 검색으로 연결하고 Undo/Redo·상대 경로 저장·Collect Files를 실행했다. 수집 폴더 이동 후 재열기와 미리보기, 원본/수집본의 PNG SHA-256 일치, 30000/1001fps MP4 출력도 확인했다. Solid 복제 간 독립 크기·색 편집, 잠금·범위 거부·Undo/Redo·버전 16 왕복을 검사했다. Adjustment는 반투명 알파 유지·효과 순서·블러·마스크/반전·변형·시간 범위·애니메이션·상위 레이어 제외·중첩 및 PNG/MP4/MOV 픽셀 검사를 통과했다. 네이티브 Ctrl+Y/Ctrl+Alt+Y 생성, 640→480px Solid 편집, Grayscale·마스크 적용, Undo/Redo·저장·재열기를 확인했다. 저장한 프로젝트의 CLI PNG는 마스크 밖 [255,0,0,128], 안쪽 [54,54,54,128]이며 투명도는 유지된다. `examples/adjustment-study.lfe.json`의 0/45프레임 PNG와 30프레임 MP4를 최종 릴리스로 출력했다. 블렌딩 다섯 모드는 불투명/반투명 기준 픽셀·투명 경계·마스크·시간 범위·조정 레이어 알파·프리컴프 일치·저장 왕복 및 MP4/MOV 픽셀 검사로 검증했다. 네이티브 Mode 메뉴의 마우스 변경·Undo/Redo·Screen 저장 복원·방향키/Enter/Space/Escape 조작과 Add 저장을 확인했다. `examples/blend-modes-study.lfe.json`의 PNG 0/45프레임과 MP4 30프레임을 출력했다. Track Matte는 네 가지 모드의 기준 픽셀·마스크·블러/Fill·시간 범위·불투명도 애니메이션·중첩/공유·부모 변형·Adjustment 영역과 숨긴 오프라인 영상 사전 검사, MP4/MOV 왕복 검사를 통과했다. 네이티브 소스 지정·자동 숨김·키보드 Luma 반전·숨긴 소스 드래그·Undo/Redo·타임라인 열 정렬·저장/재열기를 확인했다. 저장된 소스 위치는 (568.0435, 314.0217)이며 CLI PNG 알파는 매트 밖 204, 안쪽 153이다. `examples/track-matte-study.lfe.json`의 0/45/89프레임 PNG와 30프레임 MP4를 릴리스로 출력했다. Curves는 전체 256단계 입력의 identity/반전·마스터와 채널 순서·알파, Gradient는 선형/방사형 위치·원본 혼합·축소 반경·애니메이션·마스크·Adjustment·중첩 및 PNG/MP4/MOV 왕복을 검사했다. 네이티브 곡선 드래그·Shift 방향키·Undo/Redo·채널 전환·0/45프레임 키, Gradient 끝점 (640, 360)·원본 혼합 50% 편집·버전 19 저장/재열기를 확인했다. 재열기 후 CLI PNG 중심은 0프레임 [96,161,159,255], 45프레임 [96,115,160,255]이며 바깥 알파는 0이다. `examples/tonal-color-study.lfe.json`의 PNG 0/45/89프레임과 960×540·30fps·30프레임 MP4를 릴리스로 출력했다. 다중 변형은 부모/자식 선택·음수/0 스케일·애니메이션 키·회전된 부모 좌표·잠금/범위 오류 원자성·Undo/Redo·저장 왕복을 검사했다. 네이티브에서 중심 X=(200,460,720), Y=290으로 분배/정렬하고 세 레이어를 함께 88.78668° 회전, (151.11605%,148.89301%) 스케일로 편집했다. Pick Whip 연결·Undo/Redo·재열기 후 부모 관계와 Align Selection 설정이 유지됐으며, 연결 전후 PNG SHA-256이 일치했다. 저장 파일의 960×540·30fps·30프레임 MP4에서 배경색과 세 레이어 색을 픽셀 값으로 확인했다. 뷰어 도구는 가이드 버전·범위·Undo/Redo·컴포지션 복제/신규, 채널별 RGBA 변환·샘플 좌표, 줌별 스냅/Alt 해제, 눈금자를 제외한 Fit 및 PNG/미리보기 픽셀 불변 검사를 통과했다. 네이티브에서 가이드 X=479/Y=271을 만들고 Undo/Redo·이동·제거·복원, 레이어 중심 X=479 스냅, 키보드 Alpha 선택과 재열기를 확인했다. 최종 릴리스의 Full/Half Info는 반투명 픽셀 [82,122,255,128]과 960×540/480×270 샘플 해상도를 표시했다. 가이드·그리드·Alpha 설정 저장 전후 PNG 해시가 일치하고 MP4의 가이드 좌표에는 배경색만 출력된다. 원격 CI 실행과 AE 전체 기능 동등성은 아직 검증하지 않았다.
+
+Time Remap은 영상의 소스 시작·음수 원점·속도/역재생/정지 보존, 24000/1001·30000/1001 FPS, 중첩·프리컴프·분할·이동·키 복사/FPS 변환, 잘못된 입력의 원자적 거부와 버전 21 왕복으로 검증했다. 변형·효과는 컴포지션 시간을 유지하고 소스만 다시 매핑한다. PNG/미리보기 픽셀, 리맵 영상과 중첩 소스의 60프레임 MP4·알파 MOV 색/투명도/배경 합성 검사를 통과했다. 네이티브에서 75프레임에 소스 시간 1.25초를 입력하고 Undo/Redo, 그래프에서 90프레임·2.070433333333초로 드래그, 리맵 해제/Undo와 현재 소스 프레임 정지를 확인했다. 저장·다른 문서 열기·재열기 후 값과 미리보기가 유지됐으며 저장 파일의 90프레임 CLI PNG도 출력했다. `examples/time-remap-study.lfe.json`은 하나의 소스를 원속도·가속/감속·Hold·역재생으로 재사용하는 예제이며, 릴리스에서 960×540·30fps·180프레임 MP4를 출력했다.
+
+2026년 10월 2일 자산 관리 검증: 공유 소스의 레이어 간 재사용·폴더 순환/누락 거부·미사용 자산 보존·이전 파일 변환·잘못된 가져오기 전체 취소·영상 재연결/수집·저장 왕복을 검사했다. FFmpeg 통합 테스트에서는 PNG/영상 혼합 가져오기, 두 컴포지션의 소스 재사용과 재연결, MP4/MOV의 색·알파·배경색을 확인했다. 네이티브에서 소스 이름 변경, 폴더 이동 Undo/Redo, 자산에서 레이어 추가, PNG/MP4 동시 가져오기와 단일 Undo/Redo, 접힌 폴더 내부 검색을 확인했다. 저장 파일을 다시 열어 자산 3개·폴더 2개·컴포지션 2개와 영상 미리보기가 복원됐고, 같은 파일의 PNG 및 1280×720·30fps·30프레임 MP4를 최종 릴리스로 출력했다. `examples/asset-library-study.lfe.json`은 두 컴포지션이 한 내장 이미지를 재사용하는 독립 실행 가능한 예제다. Project/Composition/Timeline/우측 도크의 기존 경계를 유지했다.
+
+2026년 10월 2일 소스 해석 검증: FPS 변경의 공유/잠금 인스턴스 갱신·트림/키 보존·재연결, 역재생/정지/Time Remap·컴포지션 간 복사, 유리수 FPS와 버전 23 저장을 검사했다. Straight/Ignore/Premultiplied의 검정/흰색 매트·반전·효과·축소·썸네일 및 실제 영상 디코딩/MP4/MOV 픽셀을 검증했다. 네이티브에서 30fps·6초 소스를 15fps·12초로 해석하고 960×540·180프레임 컴포지션 생성 Undo/Redo를 확인했다. 반투명 이미지의 Premultiplied 적용·Undo/Redo·저장·재열기도 확인했다. 저장 파일의 PNG 픽셀은 [199,100,50,128], 알파 MOV는 [199,100,50,129], 검정 배경 MP4는 [100,49,25,255]였고 두 영상은 15fps·15프레임이었다. 해석한 영상 컴포지션의 PNG와 960×540·15fps MP4도 출력했다. 기존 패널 경계를 유지했다. 이후 이미지 시퀀스 구현과 검증은 다음 단락에 기록한다.
+
+2026년 10월 2일 이미지 시퀀스 검증: 번호 정렬·누락 슬롯 보존·손상/크기 불일치의 전체 가져오기 거부, FPS/알파 해석·역재생/정지/Time Remap·분할/이동/컴포지션 간 복사, 공유 매니페스트·버전 24 저장을 검사했다. 폴더/개별 재연결·Undo/Redo·상대 경로·Save As·Collect Files의 누락 슬롯 보존·수집 폴더 이동·원본 경로 보호도 검증했다. 네이티브에서 0002번이 없는 PNG 시퀀스를 가져오고 Undo/Redo, 2fps·3프레임 컴포지션 생성, Error/Hold/Transparent 전환, 폴더 재연결 Undo/Redo와 저장/재열기를 확인했다. 저장한 프로젝트의 PNG는 첫 프레임 [0,199,100,128], 누락 프레임 [0,0,0,0], 마지막 프레임 [239,100,20,128]이었다. MP4와 알파 MOV 모두 320×180·2fps·3프레임·1.5초이며, MP4는 검정 배경 합성, MOV는 알파 보존을 확인했다. 같은 편집기 한 개로 검증했고 기존 사용자 문서는 변경하지 않았다.
+
+출력 사전 검사 보완: Time Remap이 있는 중첩 컴포지션은 실제로 샘플링되는 소스 프레임만 검사한다. 누락된 시퀀스 프레임을 건너뛰는 리맵은 통과하고 해당 프레임을 참조하면 실패하는 회귀 검사를 추가했다. 일반 중첩 FPS 변환의 검사는 여전히 연속 범위를 보수적으로 검사한다. 모든 메타데이터 편집의 저장 크기 사전 점검은 A05에 남아 있다.
+
+렌더 큐 검증: 스냅샷 격리·서로 다른 컴포지션의 순차 출력·순서 변경·다중 출력·형식 프리셋·범위·독립 Undo/Redo·재시작 복원, Stop/Continue 실패 정책·재시도·실행 중 취소·중단 상태 복원을 검사했다. 원본/하드링크/큐 저장소 경로 보호, 메타데이터 쓰기 실패, PNG 임시 디렉터리 정리도 검증했다. 최종 네이티브 앱에서 Ctrl+M 등록, MP4/MOV/PNG 출력 추가, Delivery QA 프리셋 저장·재시작 복원, 방향키/Enter 프리셋 선택, 범위 변경 Undo/Redo를 확인했다. 빈 프로젝트를 연 상태에서 저장된 스냅샷 작업을 실행해 세 출력이 모두 Done이 되었다. 영상은 320×180·2fps·3프레임·1.5초였고, 세 형식의 모든 디코딩 픽셀이 같은 프로젝트의 직접 출력과 일치했다. MP4는 배경 합성, MOV/PNG는 누락 프레임의 투명도와 반투명 소스 알파를 유지했다. 완료 후 다시 시작해 Done 상태와 프리셋 복원을 확인했으며, 원래 사용자 문서의 43프레임 화면으로 복귀했다. 편집기는 한 개이고 원래 파일의 SHA-256은 변경되지 않았다.
+
+출력 설정 검증: 유리수 FPS 변환의 프레임 수·구간 경계·속도 유지, 확대/축소와 채널별 픽셀, 잘못된 크기/FPS/코덱 조합의 사전 거부, 설정 프리셋·Undo/Redo·재시작 복원·버전 1 큐 변환, CLI 옵션과 실패 시 기존 파일 보존을 검사했다. FFmpeg에서 H.264/ProRes의 크기·FPS·길이·프레임 수·알파 유무와 픽셀을 검사했고, H.264 비트스트림의 CRF 30 및 목표 700kbps도 확인했다. 네이티브에서 160×90·4fps·CRF 28·fast 편집과 크기 Undo/Redo, MP4 RGBA 거부, Scaled delivery QA 프리셋 저장·재시작 선택·설정 복원·렌더를 확인했다. 생성 MP4는 6프레임·1.5초이며 동일 CLI 출력과 전체 디코딩 픽셀이 일치했다. CLI 알파 전용 PNG의 중심은 [128,128,128,255]였다. 최종 릴리스의 PNG는 실제 gray 8비트이며 MOV RGB/RGBA는 각각 yuv444p12le/yuva444p12le로 디코딩되어 채널 저장 방식도 구분된다. FPS 변환은 원본 프레임 Hold이며 연속 시간의 새 모션 샘플은 생성하지 않는다. 오디오는 이후 H04에서 연속 샘플 시간으로 추가했다. 원래 사용자 문서의 43프레임 화면으로 복귀했고 파일 해시는 동일하며 편집기는 한 개다.
+
+오디오 자산·파형 검증: 48kHz 스테레오 PCM의 반대 위상·무음·10초 청크 경계와 44.1kHz FLAC/MP3/AAC 디코딩, 영상보다 0.5초 늦은 오디오 시작을 검사했다. 트림/이동/분할·Undo/Redo·속도/역재생/연속 소스 시간·Time Remap·FPS 해석, 공유 재연결·잘못된 메타데이터의 원자적 거부, 이미지/시퀀스와 버전 25 저장·미디어 수집을 확인했다. 네이티브에서 WAV/MOV 동시 가져오기, 6초 오디오 컴포지션 생성, 2초 분할 Undo/Redo, 첫 구간 15프레임 이동 후 30–75프레임 트림, 두 인스턴스 공유 재연결 Undo/Redo·저장·재열기를 확인했다. 영상 파형은 독립 소스보다 0.5초 늦게 시작했다. 저장 파일의 CLI PNG는 오디오를 제거한 비교 프로젝트와 바이트 단위로 같았고 MP4는 320×180·30fps·30프레임·1초의 무음 영상이었다. 오디오를 영상용 Track Matte의 소스/대상으로 지정하는 명령은 문서를 변경하지 않고 거부한다. 이 H01 검증 당시 소리 재생/믹싱/출력은 미구현이었다. 이후 출력 믹서는 H04, 레벨·팬·페이드 편집은 H03, Windows 장치 재생은 H02에 추가했다. 원래 사용자 문서의 43프레임 화면으로 복귀했고 파일 해시는 유지했으며 편집기는 한 개다.
+
+오디오 믹싱·출력 검증: 블록 크기와 무관한 샘플 시간, 중첩 Time Remap·Guide/Solo·시각적 숨김, 분할·Undo/Redo·저장 왕복, 위상·클리핑·워크 영역 끝 무음과 비정수 FPS 샘플 수를 검사했다. 44.1kHz WAV/FLAC/MP3/AAC의 구간 디코딩을 연속 디코딩과 비교했고 영상 오디오의 0.5초 오프셋, 취소/누락 소스의 기존 출력 보존과 임시 파일 정리를 확인했다. 네이티브에서 Audio auto/off·Undo/Redo, 320×180·0–90프레임 설정과 Audio delivery QA 프리셋 저장·재시작 복원을 확인했다. 빈 프로젝트에서 저장된 큐 스냅샷을 실행해 Done에 도달했으며, 90프레임·3초 MP4의 디코딩된 영상과 오디오가 같은 CLI 출력과 바이트 단위로 일치했다. 48kHz 스테레오 오디오의 표시 길이는 144,000샘플이다. CLI MOV의 24비트 PCM과 독립 계산한 믹스의 최대 샘플 오차는 1.20e-7 이하였다. AAC는 손실 압축이며 해당 클리핑 테스트 믹스의 MSE는 0.000261, 상관계수는 0.999684였다. Audio off에는 오디오 스트림이 없다. 구형 큐의 무음 설정 변환과 잘못된 설정의 오류 반환·원본 보존도 검사했다. 이 검증 당시 장치 재생, 레벨 편집과 고품질 가변 비율 리샘플링은 미구현이었다. 이후 레벨 편집은 H03에 추가했다. 최종 빌드에서 원래 사용자 문서의 43프레임·Role 위치 (490, 942)로 복귀했다. 편집기 프로세스는 한 개이며 보존 파일의 SHA-256은 변경되지 않았다.
+
+오디오 컨트롤 검증: 좌우 dB·스테레오 행렬·중첩 버스·연속 시간 Fade·무음/클리핑/RMS, 공통 키 복사/이동/분할·FPS 변환·잠금/잘못된 값의 원자적 거부·버전 26 이미지/시퀀스 혼합 저장을 검사했다. 네이티브에서 왼쪽 -6.020599913279624dB와 Pan 50%, 양쪽 0.5초 페이드를 입력하고 첫 Fade 키를 15프레임/100%에서 18프레임/79.75%로 드래그했다. 값·그래프 Undo/Redo, 타임라인 음소거 시 무음 미터, 저장 후 재시작·재열기의 수치/키 복원을 확인했다. 18프레임부터 100ms 측정값은 L Peak/RMS -19.8/-22.9dBFS, R -14.6/-17.6dBFS로 독립 계산과 일치했고 클리핑은 0이었다. 저장 프로젝트의 320×180·30fps·6초 출력은 180프레임·288,000 스테레오 샘플이며 MOV PCM 최대 오차 1.19e-7, AAC MSE 1.24e-8·상관계수 0.99999894였다. PNG는 영상 전용이다. 장치 재생과 실시간 미터는 이 검증에 포함하지 않는다. 최종 빌드에서 원래 사용자 문서의 43프레임·Role 위치 (490, 942)로 복귀했고, 편집기 프로세스는 한 개이며 보존 파일 SHA-256은 변경되지 않았다.
+
+오디오 미리보기 검증: 기본 회귀에서 유리수 FPS 반복의 샘플 나머지·24시간/32비트 이후 시계, 프리롤·장치 소비 시계·버퍼 고갈/재개·유한 구간 배출·취소를 검사했다. FFmpeg PCM의 반복/100ms 스크럽을 독립 소스 샘플 계산과 비교했다. 별도 실제 WASAPI 장치 테스트는 62초 재생에서 장치/경과 시간 최대 차이 4.789ms·버퍼 고갈 0회였고, 중지 후 위치 고정·두 위치로 탐색/재시작·반복·48,000샘플 구간 종료를 통과했다. 이는 장치 시계 검증이며 스피커 음향/실제 디스플레이 지연 측정은 아니다. 최종 네이티브 앱에서 오디오와 이동 도형을 함께 재생하며 미터·버퍼 고갈 0 표시, 일시정지 136프레임 유지, 반복 해제 후 워크 영역 마지막 149프레임 정지, 90프레임 스크럽 후 위치 고정, Audio Off의 영상 전용 재생을 확인했다. 미리보기 스위치는 프로젝트 dirty/Undo/출력에 영향을 주지 않는 세션 설정이다. 최종 빌드에서 원래 사용자 문서의 43프레임·Role 위치 (490, 942)로 복귀했다. 편집기 프로세스는 한 개이며 보존 파일의 SHA-256은 변경되지 않았다.
+
+지속 디코더 검증: FFV1 30000/1001·B-frame H.264 24000/1001·알파 MOV의 순차/임의 탐색·Hold·역방향·반복·축소 결과가 연속 디코딩 기준 픽셀과 일치했다. 네 소스 600회 요청에서 프로세스 4개 유지·120프레임 LRU 퇴출, 파일 수정 시각 변경 시 재시작, 읽기 대기 취소·가득 찬 프리페치 종료를 검사했다. 기존 중첩/효과/마스크/알파/Time Remap/저장·출력 회귀도 통과했다. Ryzen 5 4600G·약 32GiB RAM·Windows·FFmpeg N-118651-g0e917389fe의 릴리스 측정에서 640×360 H.264 60프레임은 기존 8.843초/60프로세스에서 0.194초/1프로세스로 바뀌었다. 첫 프레임 80.806ms, 누적 pipe 대기 64.129ms·PNG/base64 46.916ms, PNG 캐시 7,824,448바이트였다. 소스 처리와 픽셀 검증 시간이며 전체 앱 FPS·표시/음향 지연·전체 메모리 측정은 아니다. 네이티브에서 영상·오디오 재생/반복·버퍼 고갈 0 표시, 166프레임 일시정지·30/90프레임 탐색, 영상 X=341.52173790341294 이동과 Undo/Redo·저장·재열기 후 위치/화면 복원을 확인했다. 저장 문서의 CLI PNG와 640×360·30fps·90프레임 MP4, 3프레임 알파 MOV를 출력했고 왼쪽 빈 영역은 PNG/MOV 알파 0, MP4 검정이며 AAC/PCM 오디오를 유지했다. 원래 사용자 문서의 43프레임·Role 위치 (490, 942)로 복귀했고 보존 파일 SHA-256은 변경되지 않았다. 편집기는 한 개이며 검증용 FFmpeg 자식 프로세스는 모두 종료됐다.
+
+
+2026년 10월 2일 RAM 프리뷰 검증: RGBA 공유·알파 보존·바이트/프레임 수 제한·LRU·작업 영역 채우기·배타적 구간 끝, 편집/Undo/해상도/Refresh 무효화, 연결 파일 생성/변경/삭제와 저장 후 합성 픽셀 일치 회귀 검사를 추가했다. 네이티브 릴리스에서 640×360·180프레임을 158.2MiB로 캐시하고 반복 재생 중 캐시 히트 증가와 오디오 underrun 0을 확인했다. 64MiB 제한에서는 72프레임·63.3MiB에서 중단하며, Half(320×180)에서는 180프레임·39.6MiB를 유지한다. 레이어 X 위치 341.5217→351.5217 이동·Undo/Redo·저장/재열기, 품질 변경·Clear·외부 소스 mtime 변경 시 캐시 구간 초기화를 확인했다. 캐시 예산 버튼의 Enter/Space 중복 실행을 수정했고 Preview 내용은 스크롤되어 Effects & Presets 헤더와 도크 경계를 유지한다. 캐시 예산과 내용은 프로젝트에 저장하지 않는다.
+
+RAM 프리뷰 검증 프로젝트의 최종 CLI 출력은 640×360 PNG, 30fps·60프레임 MP4(AAC 48kHz 스테레오), 3프레임 MOV(ProRes·PCM 24비트)이며 원래 해상도를 유지했다. 이동으로 생긴 빈 영역은 PNG/MOV 알파 0, MP4는 불투명 검정(손실 압축 샘플 [0,0,2,255])이다. 디스크 캐시·캐시 설정 영속화·장시간 프레임 지연 측정은 남아 있으므로 J02 전체 완료로 표시하지 않는다.
+
+
+## 최초 조사 시점의 구현 범위
+
+이 절부터 아래의 기능 제안·안정성 표·권장 순서는 **2026-10-01의 역사적 감사 자료**다. “현재”, “미구현”, “다음 착수”는 그 감사 시점을 가리킨다. 현재 기능 판정에는 위 재개 기록과 [STATUS.md](STATUS.md)를 사용한다.
+
+| 영역 | 확인된 구현 | 아직 제한되는 부분 | 코드 근거 |
+| --- | --- | --- | --- |
+| 프로젝트 | JSON 저장·열기, 원자적 파일 교체, 복구, 버전 1–6 읽기 | 단일 컴포지션, 16 MiB 파일 제한, 공용 복구 슬롯 하나 | `crates/core/src/lib.rs`의 `Project`, `src/project_io.rs`, `src/editor_io.rs` |
+| 컴포지션 | 크기·정수 FPS·길이·배경색 | 여러 컴포지션, 소수 프레임 레이트, 중첩 없음 | `Composition`, `ConfigureComposition` |
+| 레이어 | 사각형·텍스트·내장 이미지·링크 영상, 배경 Solid | Null·Adjustment·Precomp·Audio·정식 Shape 모델 없음 | `crates/core/src/editing.rs`의 `Content` |
+| 편집 | 선택·복제·분할·트림·부모 연결, 이동·회전·스케일·앵커 조작 | 레이어 복사 붙여넣기, Solo/Shy, 다중 변형 일부, 정렬·분배 확장 | `src/editor.rs`, `src/panels/transform_gesture.rs` |
+| 애니메이션 | 변형 8개 채널, 키 선택·이동·복사, 선형·Hold·Smooth·시간 Bezier | 다른 속성 애니메이션, 공간 경로, 속도 그래프, AE 방식 양방향 핸들 없음 | `Property`, `AnimatedProperty`, `src/panels/graph.rs` |
+| 텍스트 | Wanted Sans, 문자열·크기·단색, 명시적 줄바꿈 | 단락 상자·정렬·폰트 선택·문자별 스타일·텍스트 애니메이터 없음 | `Content::Text`, `src/rendering.rs` |
+| 마스크와 효과 | 사각형 마스크 하나와 반전, Blur·Brightness·Grayscale | 경로·다중 마스크·효과 순서·효과 키프레임 없음 | `Mask`, `Effects`, `Renderer::render` |
+| 영상 | FFprobe 가져오기, FFmpeg 프레임 읽기, 재연결, 속도·역재생·정지 | 오디오·연속 디코더·프록시·가변 속도 맵·프레임 블렌딩 없음 | `src/footage.rs`, `VideoPlayback` |
+| 출력 | 배경 합성 MP4, 알파 MOV, 알파/배경 PNG 및 시퀀스, 명령행 렌더 | 단일 활성 작업, 고정 프리셋, 무음, 색 관리 없음 | `src/video_export.rs`, `src/editor_io.rs`, `src/cli.rs` |
+| UI | Project·Composition·Timeline·우측 Properties/Info/Preview·Align, 분할 크기 조절 | 실제 자산 트리, 도킹·분리·워크스페이스 저장, 다양한 전문 패널 없음 | `src/shell.rs`, `src/panels/browser.rs`, `src/panels/sidebar.rs` |
+
+기본 기능이 존재한다는 사실과 AE와 동등하게 구현됐다는 판단은 다르다. 특히 현재 F9는 선택 키의 **나가는 구간**에 적용되는 Ease 프리셋이며 AE Easy Ease 전체 동작과 같지 않다. 배경 Solid도 별도 Solid 자산이 아니라 컴포지션 크기의 사각형 레이어다. 프로젝트 브라우저는 현재 컴포지션 한 항목만 표시한다.
+
+## 먼저 보강할 안정성과 정확성
+
+아래는 구조에서 확인된 제약과 재현이 필요한 잠재 문제를 구분한 것이다. 사용자 원본을 손상시키는 실험은 수행하지 않았다.
+
+| 항목 | 조사 결과와 상태 | 필요한 조치와 검증 |
+| --- | --- | --- |
+| 복구 슬롯 충돌 | 확인: 모든 앱 인스턴스가 같은 `recovery.lfe.json` 경로 사용. 실제 충돌 실험은 미실시 | 문서·세션별 슬롯, 소유권 관리, 두 인스턴스의 저장·종료·충돌 후 각 문서 복원 |
+| 저장 용량 초과 | 확인: 이미지 데이터는 레이어 JSON에 포함되며 저장 한도는 전체 16 MiB. 개별 가져오기 성공이 전체 저장 성공을 보장하지 않음 | 자산 중복 제거와 외부/패키지 저장, 총량 사전 검사, 한도 초과 시에도 작업 회수 경로 제공 |
+| 출력이 원본 영상을 덮는 경로 | 잠재 문제: `encode`는 성공 시 목적지를 교체하지만 링크 소스와 목적지의 동일성 검사가 보이지 않음 | 임시 파일로 재현 후 동일 경로·경로 별칭·가능한 파일 동일성 검사. 원본과 같은 목적지는 거부 |
+| 허용 크기와 출력 한도 불일치 | 확인: 모델은 각 축 16384까지 허용하지만 렌더러는 33,554,432 픽셀까지 | 설정 단계에서 납품 가능 여부 표시. 출력 불가 설정 차단 또는 타일 렌더 계획. 경계값 검사 |
+| 색상 메타데이터 | 확인: 출력 명령에 명시적인 색 원색·전달 함수·매트릭스·범위 정책 없음. 플레이어별 편차 정도는 미측정 | SDR 정책부터 정의하고 Rec.709/sRGB 변환·태그·레벨을 검증. 배경색 구현 완료와 색 관리 완료를 혼동하지 않기 |
+| Undo와 미리보기 메모리 | 확인: 편집 명령이 프로젝트 전체를 복제하고 Undo가 최대 100개 스냅샷 보관. 이미지 문자열도 모델에 포함 | 자산 공유 및 증분/구조 공유 스냅샷. 이미지 많은 프로젝트에서 최대 메모리와 입력 지연 측정 |
+| 영상 재생 비용 | 확인: 캐시 미스마다 FFmpeg를 새로 실행하고 PNG로 받아 다시 합성 | 지속 디코더와 순차 프리페치. 먼저 프로세스 실행·디코딩·PNG·SVG 파싱별 비용 계측 |
+| 자동화 검증 누락 | 확인: 기존 CI는 `moon ci`; core 테스트 태스크는 있으나 desktop 태스크는 dev/check/build만 정의 | desktop 단위 테스트·명시적 FFmpeg 통합 테스트·포맷 검사 태스크를 CI에 연결. 실제 CI 성공 여부는 이번 조사에서 미확인 |
+
+## 우선순위와 완료 판단
+
+- **P0**: 저장·복구·원본 보호·기본 출력 정확성. 실제 작업을 맡기기 전에 해결한다.
+- **P1**: 일반적인 2D 모션 작업을 완주하는 핵심 기능. 프로젝트 기반 확장 후 차례로 연결한다.
+- **P2**: 편집 속도와 고급 2D 표현을 개선하는 기능. P1과 공유되는 기반을 먼저 구축한다.
+- **P3**: 3D·추적·호환성 등 별도 대형 개발 축. 지원 범위를 따로 결정한다.
+
+이하 표의 개발 범위와 완료 기준은 제안이다. 현재 부분 구현은 각 영역 앞에 명시했다. 완료는 버튼이 생긴 시점이 아니라 **편집 → Undo/Redo → 저장·재열기 → 미리보기 → 출력**에서 결과가 일관되는 시점으로 판단한다.
+
+## 프로젝트와 자산
+
+현재 단일 컴포지션과 레이어에 직접 포함된 콘텐츠 구조를 확장해야 한다. AE는 다른 컴포지션을 레이어 소스로 사용하는 중첩 구조를 제공한다. [Adobe 프리컴포지션 문서](https://helpx.adobe.com/after-effects/desktop/work-with-compositions/precomposing-and-nesting/precomposing-nesting-pre-rendering.html)
+
+| ID | 우선순위 | 개발 범위 | 완료 기준 |
+| --- | --- | --- | --- |
+| A01 | P1 | `CompositionId`, 컴포지션 목록, 활성 컴포지션, 생성·복제·삭제·탭 | 한 프로젝트의 여러 컴포지션을 독립 편집하고 저장·복원; 참조 중 삭제 처리 |
+| A02 | P1 | 자산 ID, 폴더·검색·정렬·정보·썸네일, 자산에서 레이어 생성 | 같은 소스를 여러 레이어가 재사용하고 재연결 결과가 일관됨 |
+| A03 | P1 | Pre-compose와 중첩 렌더, 시작 시점·길이·프레임 레이트 변환 | 선택 레이어를 중첩해도 합의한 변환 정책에서 결과 유지; 순환 참조 거부 |
+| A04 | P0 | 문서·세션별 자동 저장, 백업 이력, 복구 목록 | 두 인스턴스가 서로의 복구 파일을 지우지 않으며 비정상 종료 후 복원 |
+| A05 | P0 | 이미지 중복 제거, 대형 프로젝트 저장 방식, 저장 전 용량 검사 | 현재 JSON 한도를 넘는 미디어 작업도 저장 가능하거나 가져오기 전 명확히 제한 |
+| A06 | P1 | 프로젝트 상대 경로, Collect Files, 미디어 누락 목록과 일괄 재연결 | 프로젝트 폴더를 다른 위치로 이동해도 렌더 가능; 미디어 복사 실패 보고 |
+| A07 | P1 | 유리수 FPS, 시작 타임코드, 길이 입력 단위·프리셋, 설정 시 출력 한도 검사 | 24000/1001·30000/1001에서 시간 계산과 인코딩 일치; 기존 파일 마이그레이션 |
+| A08 | P1 | 이미지 시퀀스·다중 파일 가져오기, 소스 해석, 소스 기반 컴포지션 생성 | 누락 프레임·FPS·알파 처리 명시; 잘못된 가져오기를 하나의 Undo로 취소 |
+| A09 | P1 | 워크 영역·컴포지션별 재생 위치·뷰 상태 저장 정책 | 현재 세션 상태인 B/N 범위를 재열기 후 복원; 출력 범위와 편집 편의 설정의 저장 위치 구분 |
+
+## UI와 작업 공간
+
+기존 기본 배치와 Wanted Sans·Gravity Icons를 유지하면서 기능을 제자리에 넣어야 한다. AE는 패널 이동·그룹화·분리·워크스페이스 저장을 제공한다. [Adobe 작업 공간 문서](https://helpx.adobe.com/after-effects/desktop/get-started/get-familiar-with-the-interface/workspaces-panels-viewers.html)
+
+| ID | 우선순위 | 개발 범위 | 완료 기준 |
+| --- | --- | --- | --- |
+| B01 | P1 | 기본 레이아웃 기준 이미지와 크기·간격·행 높이 규격 | 같은 화면 크기와 DPI에서 Project/Composition/Timeline/우측 도크 경계 비교; 기능 추가 후 배치 회귀 없음 |
+| B02 | P2 | 탭 도킹·패널 표시/숨김·분리 창·워크스페이스 저장/복원 | 재시작과 모니터 변경 뒤 패널을 잃지 않고 Default로 복구 |
+| B03 | P1 | Effect Controls와 Effects & Presets 패널 | 선택 레이어의 실제 효과 목록과 검색 결과 연결; 빈 장식 패널 금지 |
+| B04 | P2 | Footage/Layer 뷰어, 컴포지션 탭 잠금·탐색 이력 | 원본·레이어 공간·합성 결과를 구분하고 선택 변경에도 고정 뷰 유지 |
+| B05 | P1 | 메뉴 키보드 이동·활성 패널 강조·단축키 설정·검색 가능한 명령 | 텍스트 입력/IME/모달과 단축키 충돌 없음; 키보드만으로 주요 작업 가능 |
+| B06 | P1 | 색 선택기, RGB/HEX/알파, 스포이트, 최근 색상 | 배경색과 레이어색 필드에 재사용; 색 관리 정책과 일치 |
+| B07 | P1 | 화면 읽기 이름·역할, 포커스 순서, DPI·한글 입력 회귀 검증 | 100/125/150/200% 배율에서 입력·팝업 잘림 검사; IME 조합 중 단축키 오작동 없음 |
+| B08 | P2 | 최근 프로젝트, 설정, 알림·문제 목록, 작업 로그 | 저장/미디어/렌더 오류가 다음 상태 메시지에 묻히지 않고 다시 확인 가능 |
+| B09 | P1 | 눈금자·가이드·그리드·스냅·Title/Action Safe·RGB/알파 채널 보기·픽셀 정보 | 안내선은 출력 제외; 줌/팬과 좌표 일치; 실제 색/알파와 Info 표시 비교 |
+
+## 레이어와 타임라인
+
+다중 선택·분할·트림·키 이동·부모 연결은 이미 있다. 아래는 기존 편집의 확장이다.
+
+| ID | 우선순위 | 개발 범위 | 완료 기준 |
+| --- | --- | --- | --- |
+| C01 | P1 | Null, 독립 Solid 설정, Adjustment 레이어 | Null은 출력에 나타나지 않고 부모 역할 수행; Solid 크기·색 독립 편집; Adjustment는 정의된 아래 합성 결과에 적용 |
+| C02 | P1 | Solo·Shy·레이어 라벨·Guide·스위치/모드 열 | Solo와 가시성 관계 명시; Guide가 최종 출력에서 제외; 열 전환 시 시간축 정렬 유지 |
+| C03 | P1 | 레이어 Copy/Cut/Paste와 다른 컴포지션에 붙여넣기 | 자산·부모·키·마스크 참조를 안전하게 새 ID로 매핑; 잠긴 레이어 원자성 유지 |
+| C04 | P1 | 컴포지션·레이어 마커, 이름·색·기간, 마커 탐색 | 이동/분할/중첩 시 시간 기준 일관; 저장 후 복원 |
+| C05 | P1 | 시간축 스냅, 플레이헤드·키·레이어 경계·마커 정렬 | 줌 배율에 따른 스냅 허용거리와 해제 키 동작 일관 |
+| C06 | P2 | 시퀀스 레이어, 시간 스트레치, 키 시간 역전·비례 조정, Slip | 소스 시간·레이어 범위·키 시간을 구분; 충돌·음수 시간 처리와 Undo 검사 |
+| C07 | P1 | 다중 레이어 회전·스케일, 선택 기준 정렬·분배, Pick Whip 부모 연결 | 부모/자식 동시 선택의 이중 변형 방지; 회전·음수 스케일 포함 검증 |
+| C08 | P2 | 계층별 펼치기·수정 속성 표시·복합 검색·타임라인 행 가상화 | 수백 레이어에서 표시/선택/드래그 좌표 일치; 측정된 입력 지연 목표 충족 |
+| C09 | P2 | Transform Reset·Fit to Comp·반전·앵커 중앙 이동·Auto Orient·Skew | 정적/애니메이션/부모 연결별 적용 정책과 Undo 검증; 현재 포즈 보존과 전체 애니메이션 베이크를 구분 |
+
+## 속성과 애니메이션
+
+현재 키프레임 대상은 변형 8개 채널뿐이다. 먼저 색·벡터·문자열·경로·효과 파라미터를 다룰 공용 속성 모델이 필요하다. AE는 시간 보간과 공간 보간을 구분하므로, 현재 값 그래프를 확장하는 것만으로 위치 경로가 완성되지는 않는다. [Adobe 보간 문서](https://helpx.adobe.com/after-effects/desktop/animate-in-after-effects/animation-keyframes/keyframe-interpolation.html)
+
+| ID | 우선순위 | 개발 범위 | 완료 기준 |
+| --- | --- | --- | --- |
+| D01 | P1 | 타입이 있는 속성 경로·애니메이션 트랙·기본값·제약·수정 상태 | 효과·색·마스크도 같은 키 편집/저장/Undo 체계 사용; 스키마 마이그레이션 |
+| D02 | P1 | 독립 incoming/outgoing 시간 핸들, 속도·영향도, Auto/Continuous Bezier와 Easy Ease | 양쪽 구간 편집이 예상대로 반영; 기존 Bezier 파일의 재생 결과 보존 |
+| D03 | P1 | 다중 채널 값 그래프, Speed Graph, 키 일괄 선택·정렬·스케일 | 단위가 다른 채널의 표시 규칙 명시; 속도와 시간·값 그래프 관계 검증 |
+| D04 | P2 | 위치의 공간 Bezier, 모션 경로 점·탄젠트, 로빙 키 | 시간 보간과 경로 모양을 독립 편집하고 미리보기·출력이 동일 경로 사용 |
+| D05 | P1 | 애니메이션 가능한 Time Remap | 소스 시간 트랙으로 가속·감속·정지·역재생; 소스 밖·중첩·오디오 정책 명시 |
+| D06 | P2 | 애니메이션 프리셋·변형 복사·속성 선택 붙여넣기 | 여러 속성의 상대 시간과 보간을 다른 레이어에 재사용; 없는 속성 처리 |
+| D07 | P2 | 표현식 기초와 컨트롤러, 시간·참조·루프·난수 | 순환 참조·오류·평가 시간 제한, 미리보기와 출력의 결정적 결과; AE 언어 호환은 별도 명세 |
+
+## 도형과 경로
+
+현재 사각형은 단일 채움 도형이다. 일반 Shape 레이어와 Pen 편집은 신규 구현이다. [Adobe 도형과 Pen 도구 문서](https://helpx.adobe.com/after-effects/desktop/drawing-painting-and-paths/shapes-and-shape-attributes/creating-shapes-masks.html)
+
+| ID | 우선순위 | 개발 범위 | 완료 기준 |
+| --- | --- | --- | --- |
+| E01 | P1 | 타원·둥근 사각형·다각형·별·선, 드래그 생성 | 선택 상태에 따른 생성 대상 명확; 크기·비율·원점 편집과 Undo |
+| E02 | P1 | Pen, 열린/닫힌 Bezier, 점 추가·삭제·변환 | 줌/팬/부모 변형 아래에서 포인터와 경로 점 일치 |
+| E03 | P1 | Fill/Stroke·두께·캡·조인·Dash·선형/방사형 그라디언트 | 경계·투명도·그라디언트 변형이 저장 후 동일 |
+| E04 | P2 | Shape 그룹·그룹 변형·여러 Fill/Stroke와 연산 순서 | 그룹 중첩과 순서를 바꾸면 합의된 렌더 순서대로 결과 변화 |
+| E05 | P2 | Trim Paths·Repeater·Merge/Offset Paths와 경로 애니메이션 | 연산 순서/닫힌 경로/다른 점 수 보간 정책 정의 및 출력 검증 |
+| E06 | P2 | SVG 가져오기와 가능한 요소의 편집형 변환 | 지원 범위 보고; 지원하지 않는 요소를 조용히 누락하지 않음 |
+
+## 텍스트와 타이포그래피
+
+Wanted Sans는 앱 UI 기본 폰트로 유지한다. 콘텐츠 폰트 선택은 UI 폰트 변경과 별개의 기능이다.
+
+| ID | 우선순위 | 개발 범위 | 완료 기준 |
+| --- | --- | --- | --- |
+| F01 | P1 | 텍스트 도구, 캔버스 직접 편집, Point/Paragraph Text | 한글 IME·여러 줄·선택·붙여넣기·취소·Undo 동작 일관 |
+| F02 | P1 | 글꼴·굵기·스타일·대체 글꼴·누락 글꼴 관리 | 미리보기와 출력 동일 글꼴; 다른 PC에서 누락 상태와 대체 결과 명시 |
+| F03 | P1 | 정렬·행간·자간·커닝·자동 줄바꿈·문자별 스타일·Stroke | 박스 크기와 문자 경계가 실제 렌더와 일치; 저장 후 레이아웃 유지 |
+| F04 | P2 | Text Animator·Range Selector·문자/단어/줄 단위 변형 | 문자열 수정 후에도 범위 의미 유지; 한글 조합 문자 단위 분리 검사 |
+| F05 | P2 | 경로 위 텍스트·Source Text 애니메이션·재사용 텍스트 컨트롤 | 경로/텍스트 변경·중첩 인스턴스별 값·내보내기 결과 일치 |
+
+## 마스크와 합성 및 효과
+
+`Effects` 고정 구조를 순서 있는 효과 목록으로 바꾸고 렌더 순서를 명문화해야 한다. AE는 효과·애니메이션 프리셋을 재사용하며, Track Matte는 다른 레이어의 알파 또는 밝기를 참조한다. [Adobe 효과와 프리셋](https://helpx.adobe.com/after-effects/desktop/apply-effects-and-animation-presets/effects-and-animation-presets/effects-animation-presets-overview.html), [Adobe Track Matte](https://helpx.adobe.com/after-effects/desktop/work-with-transparency-and-compositing/work-with-track-mattes-and-traveling-mattes/track-mattes-and-traveling-mattes.html)
+
+| ID | 우선순위 | 개발 범위 | 완료 기준 |
+| --- | --- | --- | --- |
+| G01 | P1 | 다중 경로 마스크·Add/Subtract/Intersect·반전·Feather·Expansion·Opacity | 마스크 순서와 경계 동작 정의; 경로·수치 애니메이션 및 투명 경계 검사 |
+| G02 | P1 | Alpha/Luma와 반전 Track Matte·소스 선택·참조 재사용 | 레이어 순서와 독립된 참조, 순환 참조 거부, 이동·삭제·복제 시 일관성 |
+| G03 | P1 | Blend Modes와 조정 레이어 합성 규칙 | 우선 Normal/Multiply/Screen/Add/Overlay의 알파 포함 기준 이미지 비교 |
+| G04 | P1 | 효과 인스턴스 목록·추가·삭제·중복·순서·우회·Reset·키프레임 | 같은 효과 여러 개, 순서 변경, 저장/Undo; 기존 세 효과 결과 마이그레이션 |
+| G05 | P1 | 기본 실무 효과군: Fill/Tint·Levels/Curves·Hue/Saturation·Glow·Drop Shadow·Gradient | 각 효과의 파라미터 범위·좌표 공간·경계·투명도·출력 테스트 |
+| G06 | P2 | 키잉·매트 정리·변위·왜곡·노이즈·전환·레이어 스타일 | 효과군을 개별 작업으로 분해; 참조 레이어와 애니메이션 평가 순서 검증 |
+| G07 | P2 | 모션 블러·셔터·서브프레임 평가, 프레임 블렌딩 | 빠른 이동·회전·중첩·속도 변경에서 시간 샘플링 비교; 성능 예산 마련 |
+
+## 오디오
+
+최초 조사 당시 가져오기·미리보기·출력 모두 오디오를 다루지 않았다. 이후 H01 소스 메타데이터·파형과 H04 공통 믹서·AAC/PCM 영상 출력을 구현했다. H03 좌우 레벨·Pan·Fade 편집과 구간 미터를 추가했다. H02에 Windows 기본 장치 재생·스크럽·장치 시계 플레이헤드·재생 블록 미터를 추가했다. 영상 디코더/표시 지연 개선과 확장 장치 관리는 남아 있다. 출력 믹서는 선형 보간 기반으로 고속 리샘플링 품질 개선이 남아 있다.
+
+| ID | 우선순위 | 개발 범위 | 완료 기준 |
+| --- | --- | --- | --- |
+| H01 | P1 | 오디오 자산·영상 내 오디오·채널·샘플레이트·파형 | 독립 파일과 영상 소스를 읽고 트림·이동·분할 후 파형 시간 일치 |
+| H02 | P1 | 오디오 장치·재생/스크럽·A/V 동기화·캐시 재생 | 1분 이상 기준 클립에서 시간 드리프트 측정; Seek·Loop·Pause 후 동기 유지 |
+| H03 | P1 | 레벨·Mute/Solo·페이드·Pan·키프레임·기본 미터 | 클리핑·무음 구간·복수 트랙 혼합을 정의된 샘플 기준으로 검증 |
+| H04 | P1 | AAC/PCM 포함 출력, 워크 영역·중첩·속도 변경에 따른 오디오 처리 | 영상과 시작/끝 일치; 비정수 FPS의 샘플 수, 역재생·정지 정책 명시 |
+
+## 렌더링과 색 관리
+
+배경색과 알파 출력은 이미 구현했다. 아래는 납품 옵션과 일관성 확장이다. AE의 Render Queue는 여러 작업과 출력 모듈을 관리하고, 색 관리는 입력·작업·출력 공간을 연결한다. [Adobe 렌더 큐](https://helpx.adobe.com/after-effects/desktop/render-and-export/basics-of-rendering-and-exporting/basics-rendering-exporting.html), [Adobe 색 관리](https://helpx.adobe.com/after-effects/desktop/adjust-colors/color-management/color-management.html)
+
+| ID | 우선순위 | 개발 범위 | 완료 기준 |
+| --- | --- | --- | --- |
+| I01 | P0 | 출력 전 점검: 원본 경로 보호·해상도·누락 미디어·글꼴·인코더·쓰기 권한 | 실패 시 기존 목적지와 원본 유지; 오류 원인 및 수정 경로 표시 |
+| I02 | P1 | Render Queue·작업 스냅샷·순서·재시도·프리셋·여러 출력 모듈 | 여러 컴포지션/포맷 무인 렌더, 재시작 후 작업 상태 복원; 하나의 실패가 나머지 정책대로 처리 |
+| I03 | P1 | 해상도·FPS·범위·CRF/비트레이트·코덱·오디오·채널 옵션 | 선택값이 실제 스트림 메타데이터와 일치; 불가능한 조합 사전 거부 |
+| I04 | P0 | SDR 색 공간·전달 함수·YUV 매트릭스/범위·태그·알파 해석 정책 | 색 패치와 반투명 경계를 여러 디코더로 비교; MP4 허용 손실과 PNG 정확성 구분 |
+| I05 | P2 | 16/32비트·선형 합성·ICC/OCIO·HDR·EXR 등 고급 입출력 | 8비트 한계를 실제 렌더 버퍼부터 제거; HDR 메타데이터·톤 매핑·밴딩 검증 |
+| I06 | P2 | CLI 작업 명세·기계 판독 진행률·취소·오류 코드·시퀀스 재개 | 자동화에서 성공/실패/취소 구분; 재개 시 프로젝트/설정 일치 검사 |
+
+## 미리보기와 성능
+
+현재 CPU 기반 SVG/resvg 합성과 제한된 영상 PNG 캐시를 사용한다. 병목 측정 없이 전체 GPU 재작성부터 시작하지 않는다.
+
+| ID | 우선순위 | 개발 범위 | 완료 기준 |
+| --- | --- | --- | --- |
+| J01 | P1 | 지속 영상 디코더·순차 프리페치·빠른 탐색·오래된 요청 취소 | 순차 재생의 프로세스 재시작 제거; Seek 후 예전 프레임이 덮이지 않음 |
+| J02 | P1 | RAM 프리뷰·캐시 구간 표시·디스크 캐시·정리·예산 설정 | 캐시된 워크 영역의 안정 재생; 파일/효과/부모 변경 시 관련 캐시 무효화 |
+| J03 | P1 | 공유 자산·증분 평가·Undo 메모리 예산·렌더 성능 계측 | 이미지/영상/효과별 기준 프로젝트의 메모리·Seek 지연·프레임 시간 기록 |
+| J04 | P2 | Proxy·ROI·적응형 품질·멀티프레임 렌더·GPU 가속 | 측정 병목부터 개선; CPU 기준 출력과 비교하고 미리보기 품질이 최종 출력에 새지 않음 |
+
+## 고급 제작과 호환성
+
+이 영역은 기본 2D 작업 완성과 별도의 큰 개발 단계다. Adobe 고유 포맷/엔진/플러그인과 동일하게 동작한다고 전제하지 않는다. 분야 구분은 [Adobe 공식 사용 안내](https://helpx.adobe.com/after-effects/desktop.html)의 3D·추적·로토·표현식·자동화 범주를 참고했다.
+
+| ID | 우선순위 | 개발 범위 | 완료 기준 |
+| --- | --- | --- | --- |
+| K01 | P3 | 3D 변형·카메라·라이트·뷰·그림자·심도 | 좌표/합성 규칙과 렌더러 설계 후 기준 장면 비교; 2D와 연결 |
+| K02 | P3 | 3D 모델·재질·환경광·텍스트/도형 돌출 | 지원 포맷과 셰이딩 범위 명시; 외부 도구 의존성 및 이식성 검증 |
+| K03 | P3 | 2D/평면/카메라 추적·안정화·마스크 추적 | 추적 결과 편집/재사용, 실패 구간 표시, 실제 촬영 기준 데이터 검증 |
+| K04 | P3 | 로토·페인트·Puppet·콘텐츠 제거·시뮬레이션 | 각각 별도 명세와 성능/품질 데이터로 평가; 장식 UI로 완료 처리하지 않기 |
+| K05 | P2 | 재사용 템플릿·노출 컨트롤·CSV/JSON 기반 텍스트/수치 교체 | 중첩 인스턴스별 오버라이드, 데이터 누락 처리, 배치 렌더 |
+| K06 | P3 | 스크립트 API·플러그인·AEP/PSD/AI/MOGRT 등 교환 범위 연구 | 포맷별 가져올 정보/손실/미지원 항목 보고; 호환 테스트 파일 확보 후 지원 선언 |
+
+## 제품화와 검증 체계
+
+| ID | 우선순위 | 개발 범위 | 완료 기준 |
+| --- | --- | --- | --- |
+| L01 | P0 | desktop 테스트·FFmpeg 통합·fmt·스키마/렌더 회귀를 CI 태스크로 연결 | 실제 파이프라인에서 실행 사실과 결과 확인; ignored 테스트를 실행하지 않고 통과로 간주하지 않음 |
+| L02 | P1 | 안정적인 설치/업데이트·배포 경로·FFmpeg 탐지와 설정·진단 | 깨끗한 Windows 사용자 환경에서 열기→편집→저장→출력; 기존 프로젝트 보존 |
+| L03 | P1 | 재현 프로젝트·성능 기준·UI 조작 회귀·배율별 기준 화면 | 단일 프레임 비교에 더해 재생/드래그/모달/저장 실패/취소의 상태 전이 검사 |
+| L04 | P2 | 한국어 UI·도움말·샘플·단축키 문서·오류 안내·릴리스 노트 | 기능/메뉴/문서 일치; 기존 포맷과 마이그레이션의 사용자 안내 |
+| L05 | P3 | 웹/API 제품 범위와 데스크톱 모델 공유 여부 결정 | 현재 웹 `/editor`는 Coming soon, API는 health/echo 수준임을 기준으로 별도 일정 수립 |
+
+## 권장 구현 순서와 선행 조건
+
+1. **저장과 출력의 신뢰성**: A04/A05, I01/I04, L01. B01의 레이아웃 기준도 이때 고정한다. 원본 경로 문제는 복사된 테스트 파일로 재현한 뒤 수정한다.
+2. **확장 가능한 프로젝트 기반**: A01/A02/A07과 D01. 컴포지션·자산 ID와 타입 속성, 시간 표현, 저장 마이그레이션을 정한다. 기존 단일 컴포지션 예제의 출력이 유지돼야 한다.
+3. **실무 2D 작업 연결**: A03/A06/A08/A09, C01–C05/C07, G02–G05, B03/B09, I02/I03. 프리컴포지션·자산 재사용·매트·효과가 하나의 프로젝트에서 함께 동작하도록 만든다.
+4. **소리와 편집 응답성**: H01–H04, J01–J03. 시간 모델을 공통으로 사용하고 장시간 동기화·메모리를 검증한다.
+5. **표현과 편집 정교화**: E01–E03, G01, F01–F03, D02/D03/D05, B05–B07. 경로·텍스트·키프레임을 실제 UI에서 편집하고 출력까지 연결한다.
+6. **고급 2D 제작과 제품화**: 남은 P2와 L02–L04. 자주 쓰는 작업을 기준으로 프리셋·표현식·모션 블러·캐시·템플릿을 추가한다.
+7. **3D와 호환성**: K01–K04/K06, L05. 각 기능군의 별도 설계와 완료 기준을 확정한 뒤 진행한다.
+
+주요 의존 관계는 다음과 같다.
+
+| 선행 기반 | 그 기반을 사용하는 기능 |
+| --- | --- |
+| A01/A02 컴포지션·자산 ID | A03 프리컴포지션, A06 프로젝트 이동, C03 복사, I02 렌더 큐, K05 템플릿 |
+| A07 공통 시간 모델 | H02/H04 오디오 동기화, D05 Time Remap, G07 모션 블러, I03 FPS 출력 |
+| D01 타입 속성과 트랙 | G04 효과 애니메이션, G01 마스크 애니메이션, F04/F05 텍스트, D07 표현식 |
+| E02 경로 모델 | G01 경로 마스크, E05 경로 연산, F05 경로 텍스트 |
+| G04 순서 있는 효과 평가 | C01 Adjustment, G05/G06 효과군, J04 가속 |
+| I04 색과 알파 정책 | G03 블렌딩, I05 고정밀/HDR, J04 GPU 출력 비교 |
+| J01/J02 디코딩과 캐시 | H02 실시간 동기화, J04 Proxy/가속, 복잡한 중첩 미리보기 |
+
+이 순서는 작업 의존성을 표현하며 인력이나 기간 견적이 아니다. 특히 3D·로토·AE 호환성은 개별 기능 하나로 끝나는 작업이 아니다.
+
+## 실사용 가능 단계의 검증 시나리오
+
+아래는 향후 릴리스의 합격 기준 제안이며 현재 모두 통과했다는 뜻이 아니다.
+
+- 1080p 컴포지션 여러 개, 재사용 타이틀 프리컴포지션, 링크 영상·텍스트·도형·음악으로 60초 영상을 제작한다.
+- Track Matte와 두 개 이상의 순서 있는 효과를 적용하고 효과·마스크·오디오 레벨을 애니메이션한다.
+- 비정수 FPS 장면에서 워크 영역 MP4의 영상/소리 시작과 끝을 확인하고 MOV/PNG의 알파가 보존되는지 검사한다.
+- 저장 후 재시작, 폴더 이동, 누락 미디어 재연결, 복구, Undo/Redo를 거쳐 기준 프레임과 시간 정보를 비교한다.
+- 렌더 취소·인코더 실패·디스크 쓰기 실패·원본과 같은 출력 경로를 검사하고 원본/기존 출력 보존을 확인한다.
+- 타임라인/그래프/컴포지션을 오가며 편집하고, 100–200% DPI 및 한글 입력에서 패널 배치와 포커스가 유지되는지 확인한다.
+- 성능은 기준 PC와 프로젝트를 기록한 뒤 캐시된 재생 FPS, Seek 지연, 입력 지연, 메모리 상한으로 평가한다. 측정 전 실시간 성능을 보장하지 않는다.
+
+## 조사 근거와 후속 확인
+
+코드 기준은 `crates/core/src/lib.rs`, `crates/core/src/editing.rs`와 데스크톱의 `src/editor.rs`, `src/editor_io.rs`, `src/project_io.rs`, `src/footage.rs`, `src/rendering.rs`, `src/video_export.rs`, `src/cli.rs`, `src/shell.rs`, `src/panels/`다. CI 범위는 `.github/workflows/`, `apps/desktop/moon.yml`, `crates/core/moon.yml`을 확인했다. 웹/API는 편집기 진입 화면·매니페스트·API 진입점만 확인했으며 전체 웹 기능 감사는 하지 않았다.
+
+직전 구현 보고의 기본 테스트 70개 및 FFmpeg 통합 테스트 6개 통과는 배경색 기능까지의 검증 이력이다. 이 문서에 나열한 미구현 기능을 검증한 숫자가 아니며, 이번 문서 작업에서는 테스트를 다시 실행하지 않았다.
+
+최초 감사 당시의 착수 제안은 **A04 복구 슬롯 분리, A05 저장 용량/자산 중복 처리, I01 출력 원본 보호와 사전 점검**이었다. 이후 A01/A02/D01을 포함한 기반이 구현됐고 A05의 일반 편집 예산 검사도 추가됐다. 현재의 다음 개발은 [STATUS.md의 Next milestones](STATUS.md#next-milestones)를 따른다.

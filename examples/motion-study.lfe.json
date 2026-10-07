@@ -1,0 +1,212 @@
+{
+  "version": 1,
+  "next_layer_id": 4,
+  "composition": {
+    "name": "Motion Study",
+    "width": 1280,
+    "height": 720,
+    "fps": 30,
+    "duration": 180,
+    "layers": [
+      {
+        "id": 1,
+        "name": "Violet — position & scale",
+        "visible": true,
+        "locked": false,
+        "width": 360,
+        "height": 240,
+        "color": 9864693,
+        "properties": {
+          "PositionX": {
+            "value": 420,
+            "keys": {
+              "0": {
+                "value": 330,
+                "interpolation": "Smooth"
+              },
+              "60": {
+                "value": 470,
+                "interpolation": "Smooth"
+              },
+              "120": {
+                "value": 680,
+                "interpolation": "Smooth"
+              },
+              "179": {
+                "value": 330,
+                "interpolation": "Smooth"
+              }
+            }
+          },
+          "PositionY": {
+            "value": 360,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 180,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 120,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {
+              "0": {
+                "value": 80,
+                "interpolation": "Smooth"
+              },
+              "45": {
+                "value": 100,
+                "interpolation": "Smooth"
+              },
+              "135": {
+                "value": 100,
+                "interpolation": "Smooth"
+              },
+              "179": {
+                "value": 80,
+                "interpolation": "Smooth"
+              }
+            }
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {
+              "0": {
+                "value": 80,
+                "interpolation": "Smooth"
+              },
+              "45": {
+                "value": 100,
+                "interpolation": "Smooth"
+              },
+              "135": {
+                "value": 100,
+                "interpolation": "Smooth"
+              },
+              "179": {
+                "value": 80,
+                "interpolation": "Smooth"
+              }
+            }
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null
+      },
+      {
+        "id": 2,
+        "name": "Apricot — rotation",
+        "visible": true,
+        "locked": false,
+        "width": 160,
+        "height": 160,
+        "color": 15972213,
+        "properties": {
+          "PositionX": {
+            "value": 880,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 360,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 80,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 80,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {
+              "0": {
+                "value": 0,
+                "interpolation": "Smooth"
+              },
+              "90": {
+                "value": 90,
+                "interpolation": "Smooth"
+              },
+              "179": {
+                "value": 180,
+                "interpolation": "Smooth"
+              }
+            }
+          },
+          "Opacity": {
+            "value": 100,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null
+      },
+      {
+        "id": 3,
+        "name": "Background",
+        "visible": true,
+        "locked": true,
+        "width": 1280,
+        "height": 720,
+        "color": 1514540,
+        "properties": {
+          "PositionX": {
+            "value": 640,
+            "keys": {}
+          },
+          "PositionY": {
+            "value": 360,
+            "keys": {}
+          },
+          "AnchorX": {
+            "value": 640,
+            "keys": {}
+          },
+          "AnchorY": {
+            "value": 360,
+            "keys": {}
+          },
+          "ScaleX": {
+            "value": 100,
+            "keys": {}
+          },
+          "ScaleY": {
+            "value": 100,
+            "keys": {}
+          },
+          "Rotation": {
+            "value": 0,
+            "keys": {}
+          },
+          "Opacity": {
+            "value": 100,
+            "keys": {}
+          }
+        },
+        "in_frame": 0,
+        "out_frame": null
+      }
+    ]
+  }
+}

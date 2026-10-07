@@ -1,0 +1,1238 @@
+{
+  "items": [
+    {
+      "id": 1,
+      "name": "Legacy fixture 1",
+      "enabled": true,
+      "kind": {
+        "Group": [
+          {
+            "id": 2,
+            "name": "Legacy fixture 2",
+            "enabled": true,
+            "kind": {
+              "Parametric": "Rectangle"
+            },
+            "parameters": {
+              "Width": {
+                "value": 92,
+                "keys": {
+                  "0": {
+                    "value": 92,
+                    "interpolation": "Linear"
+                  },
+                  "60": {
+                    "value": 162,
+                    "interpolation": "Smooth"
+                  }
+                }
+              },
+              "Height": {
+                "value": 57,
+                "keys": {
+                  "0": {
+                    "value": 57,
+                    "interpolation": "Smooth"
+                  },
+                  "60": {
+                    "value": 107,
+                    "interpolation": "Linear"
+                  }
+                }
+              },
+              "Transform.PositionX": {
+                "value": 27.4,
+                "keys": {}
+              },
+              "Transform.PositionY": {
+                "value": -16.8,
+                "keys": {}
+              }
+            }
+          },
+          {
+            "id": 3,
+            "name": "Legacy fixture 3",
+            "enabled": true,
+            "kind": {
+              "Parametric": "Ellipse"
+            },
+            "parameters": {
+              "Width": {
+                "value": 93,
+                "keys": {
+                  "0": {
+                    "value": 93,
+                    "interpolation": "Linear"
+                  },
+                  "60": {
+                    "value": 163,
+                    "interpolation": "Smooth"
+                  }
+                }
+              },
+              "Height": {
+                "value": 58,
+                "keys": {
+                  "0": {
+                    "value": 58,
+                    "interpolation": "Smooth"
+                  },
+                  "60": {
+                    "value": 108,
+                    "interpolation": "Linear"
+                  }
+                }
+              },
+              "Transform.PositionX": {
+                "value": 41.099999999999994,
+                "keys": {}
+              },
+              "Transform.PositionY": {
+                "value": -25.200000000000003,
+                "keys": {}
+              }
+            }
+          },
+          {
+            "id": 4,
+            "name": "Legacy fixture 4",
+            "enabled": true,
+            "kind": {
+              "Parametric": "RoundedRectangle"
+            },
+            "parameters": {
+              "Width": {
+                "value": 94,
+                "keys": {
+                  "0": {
+                    "value": 94,
+                    "interpolation": "Linear"
+                  },
+                  "60": {
+                    "value": 164,
+                    "interpolation": "Smooth"
+                  }
+                }
+              },
+              "Height": {
+                "value": 59,
+                "keys": {
+                  "0": {
+                    "value": 59,
+                    "interpolation": "Smooth"
+                  },
+                  "60": {
+                    "value": 109,
+                    "interpolation": "Linear"
+                  }
+                }
+              },
+              "Transform.PositionX": {
+                "value": 54.8,
+                "keys": {}
+              },
+              "Transform.PositionY": {
+                "value": -33.6,
+                "keys": {}
+              },
+              "Shape.Roundness": {
+                "value": 12,
+                "keys": {
+                  "0": {
+                    "value": 12,
+                    "interpolation": "Linear"
+                  },
+                  "60": {
+                    "value": 30,
+                    "interpolation": "Linear"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": 5,
+            "name": "Legacy fixture 5",
+            "enabled": true,
+            "kind": {
+              "Parametric": "Polygon"
+            },
+            "parameters": {
+              "Width": {
+                "value": 95,
+                "keys": {
+                  "0": {
+                    "value": 95,
+                    "interpolation": "Linear"
+                  },
+                  "60": {
+                    "value": 165,
+                    "interpolation": "Smooth"
+                  }
+                }
+              },
+              "Height": {
+                "value": 60,
+                "keys": {
+                  "0": {
+                    "value": 60,
+                    "interpolation": "Smooth"
+                  },
+                  "60": {
+                    "value": 110,
+                    "interpolation": "Linear"
+                  }
+                }
+              },
+              "Transform.PositionX": {
+                "value": 68.5,
+                "keys": {}
+              },
+              "Transform.PositionY": {
+                "value": -42.0,
+                "keys": {}
+              },
+              "Shape.Points": {
+                "value": 5,
+                "keys": {
+                  "0": {
+                    "value": 5,
+                    "interpolation": "Linear"
+                  },
+                  "60": {
+                    "value": 8,
+                    "interpolation": "Linear"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": 6,
+            "name": "Legacy fixture 6",
+            "enabled": true,
+            "kind": {
+              "Parametric": "Star"
+            },
+            "parameters": {
+              "Width": {
+                "value": 96,
+                "keys": {
+                  "0": {
+                    "value": 96,
+                    "interpolation": "Linear"
+                  },
+                  "60": {
+                    "value": 166,
+                    "interpolation": "Smooth"
+                  }
+                }
+              },
+              "Height": {
+                "value": 61,
+                "keys": {
+                  "0": {
+                    "value": 61,
+                    "interpolation": "Smooth"
+                  },
+                  "60": {
+                    "value": 111,
+                    "interpolation": "Linear"
+                  }
+                }
+              },
+              "Transform.PositionX": {
+                "value": 82.19999999999999,
+                "keys": {}
+              },
+              "Transform.PositionY": {
+                "value": -50.400000000000006,
+                "keys": {}
+              },
+              "Shape.Points": {
+                "value": 5,
+                "keys": {
+                  "0": {
+                    "value": 5,
+                    "interpolation": "Linear"
+                  },
+                  "60": {
+                    "value": 8,
+                    "interpolation": "Linear"
+                  }
+                }
+              },
+              "Shape.InnerRadius": {
+                "value": 35,
+                "keys": {
+                  "0": {
+                    "value": 35,
+                    "interpolation": "Linear"
+                  },
+                  "60": {
+                    "value": 63,
+                    "interpolation": "Linear"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": 7,
+            "name": "Legacy fixture 7",
+            "enabled": true,
+            "kind": {
+              "Path": {
+                "path": {
+                  "vertices": [
+                    {
+                      "position": [
+                        3.125,
+                        4.875
+                      ],
+                      "incoming": [
+                        0,
+                        0
+                      ],
+                      "outgoing": [
+                        11.5,
+                        -21.25
+                      ]
+                    },
+                    {
+                      "position": [
+                        75.25,
+                        18.75
+                      ],
+                      "incoming": [
+                        -14.5,
+                        31.75
+                      ],
+                      "outgoing": [
+                        0,
+                        0
+                      ]
+                    }
+                  ],
+                  "closed": false
+                },
+                "animation": {
+                  "poses": [
+                    {
+                      "vertices": [
+                        {
+                          "position": [
+                            3.125,
+                            4.875
+                          ],
+                          "incoming": [
+                            0,
+                            0
+                          ],
+                          "outgoing": [
+                            11.5,
+                            -21.25
+                          ]
+                        },
+                        {
+                          "position": [
+                            75.25,
+                            18.75
+                          ],
+                          "incoming": [
+                            -14.5,
+                            31.75
+                          ],
+                          "outgoing": [
+                            0,
+                            0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    },
+                    {
+                      "vertices": [
+                        {
+                          "position": [
+                            9.5,
+                            -11.75
+                          ],
+                          "incoming": [
+                            0,
+                            0
+                          ],
+                          "outgoing": [
+                            42.75,
+                            -35.5
+                          ]
+                        },
+                        {
+                          "position": [
+                            151.75,
+                            29.125
+                          ],
+                          "incoming": [
+                            -17.125,
+                            51.5
+                          ],
+                          "outgoing": [
+                            0,
+                            0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ],
+                  "timing": {
+                    "value": 0,
+                    "keys": {
+                      "0": {
+                        "value": 0,
+                        "interpolation": "Smooth"
+                      },
+                      "60": {
+                        "value": 1,
+                        "interpolation": "Linear"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "parameters": {}
+          },
+          {
+            "id": 8,
+            "name": "Legacy fixture 8",
+            "enabled": true,
+            "kind": {
+              "Path": {
+                "path": {
+                  "vertices": [
+                    {
+                      "position": [
+                        -20.25,
+                        -30.5
+                      ],
+                      "incoming": [
+                        -8.5,
+                        -7.25
+                      ],
+                      "outgoing": [
+                        12.25,
+                        -16.5
+                      ]
+                    },
+                    {
+                      "position": [
+                        40.75,
+                        -12.25
+                      ],
+                      "incoming": [
+                        -10.5,
+                        14.75
+                      ],
+                      "outgoing": [
+                        25.125,
+                        9.25
+                      ]
+                    },
+                    {
+                      "position": [
+                        3.875,
+                        55.125
+                      ],
+                      "incoming": [
+                        17.25,
+                        -3.5
+                      ],
+                      "outgoing": [
+                        -9.75,
+                        -17.875
+                      ]
+                    }
+                  ],
+                  "closed": true
+                },
+                "animation": {
+                  "poses": [],
+                  "timing": {
+                    "value": 0,
+                    "keys": {}
+                  }
+                }
+              }
+            },
+            "parameters": {}
+          },
+          {
+            "id": 9,
+            "name": "Legacy fixture 9",
+            "enabled": true,
+            "kind": {
+              "Stroke": {
+                "cap": "Round",
+                "join": "Bevel",
+                "miter_limit": 7,
+                "dashes": [
+                  9,
+                  3,
+                  2
+                ],
+                "dash_offset": 4
+              }
+            },
+            "parameters": {
+              "Shape.StrokeRed": {
+                "value": 17,
+                "keys": {}
+              },
+              "Shape.StrokeGreen": {
+                "value": 125,
+                "keys": {}
+              },
+              "Shape.StrokeBlue": {
+                "value": 242,
+                "keys": {}
+              },
+              "Shape.StrokeOpacity": {
+                "value": 83,
+                "keys": {}
+              },
+              "Shape.StrokeWidth": {
+                "value": 6,
+                "keys": {}
+              },
+              "Shape.MiterLimit": {
+                "value": 7,
+                "keys": {}
+              },
+              "Shape.DashOffset": {
+                "value": 4,
+                "keys": {}
+              },
+              "Shape.DashLength0": {
+                "value": 9,
+                "keys": {}
+              },
+              "Shape.DashLength1": {
+                "value": 3,
+                "keys": {}
+              },
+              "Shape.DashLength2": {
+                "value": 2,
+                "keys": {}
+              }
+            }
+          },
+          {
+            "id": 10,
+            "name": "Legacy fixture 10",
+            "enabled": true,
+            "kind": {
+              "GradientFill": {
+                "even_odd": true,
+                "gradient": {
+                  "radial": false,
+                  "colors": [
+                    1,
+                    2
+                  ],
+                  "opacities": [
+                    3,
+                    4
+                  ],
+                  "next_stop": 5
+                }
+              }
+            },
+            "parameters": {
+              "Gradient.StartX": {
+                "value": -20,
+                "keys": {}
+              },
+              "Gradient.StartY": {
+                "value": -30,
+                "keys": {}
+              },
+              "Gradient.EndX": {
+                "value": 95,
+                "keys": {}
+              },
+              "Gradient.EndY": {
+                "value": 65,
+                "keys": {}
+              },
+              "Gradient.HighlightLength": {
+                "value": 25,
+                "keys": {}
+              },
+              "Gradient.HighlightAngle": {
+                "value": 42,
+                "keys": {}
+              },
+              "Shape.FillOpacity": {
+                "value": 71,
+                "keys": {}
+              },
+              "Gradient.ColorPosition(1)": {
+                "value": 0,
+                "keys": {}
+              },
+              "Gradient.Red(1)": {
+                "value": 20,
+                "keys": {}
+              },
+              "Gradient.Green(1)": {
+                "value": 140,
+                "keys": {}
+              },
+              "Gradient.Blue(1)": {
+                "value": 190,
+                "keys": {}
+              },
+              "Gradient.ColorMidpoint(1)": {
+                "value": 35,
+                "keys": {}
+              },
+              "Gradient.ColorPosition(2)": {
+                "value": 100,
+                "keys": {}
+              },
+              "Gradient.Red(2)": {
+                "value": 225,
+                "keys": {}
+              },
+              "Gradient.Green(2)": {
+                "value": 70,
+                "keys": {}
+              },
+              "Gradient.Blue(2)": {
+                "value": 20,
+                "keys": {}
+              },
+              "Gradient.ColorMidpoint(2)": {
+                "value": 35,
+                "keys": {}
+              },
+              "Gradient.OpacityPosition(3)": {
+                "value": 0,
+                "keys": {}
+              },
+              "Gradient.Opacity(3)": {
+                "value": 100,
+                "keys": {}
+              },
+              "Gradient.OpacityMidpoint(3)": {
+                "value": 65,
+                "keys": {}
+              },
+              "Gradient.OpacityPosition(4)": {
+                "value": 100,
+                "keys": {}
+              },
+              "Gradient.Opacity(4)": {
+                "value": 40,
+                "keys": {}
+              },
+              "Gradient.OpacityMidpoint(4)": {
+                "value": 65,
+                "keys": {}
+              }
+            },
+            "blend": "Multiply",
+            "composite": "AbovePrevious"
+          },
+          {
+            "id": 11,
+            "name": "Legacy fixture 11",
+            "enabled": true,
+            "kind": {
+              "Group": [
+                {
+                  "id": 12,
+                  "name": "Legacy fixture 12",
+                  "enabled": true,
+                  "kind": {
+                    "Path": {
+                      "path": {
+                        "vertices": [
+                          {
+                            "position": [
+                              3.125,
+                              4.875
+                            ],
+                            "incoming": [
+                              0,
+                              0
+                            ],
+                            "outgoing": [
+                              11.5,
+                              -21.25
+                            ]
+                          },
+                          {
+                            "position": [
+                              75.25,
+                              18.75
+                            ],
+                            "incoming": [
+                              -14.5,
+                              31.75
+                            ],
+                            "outgoing": [
+                              0,
+                              0
+                            ]
+                          }
+                        ],
+                        "closed": false
+                      },
+                      "animation": {
+                        "poses": [],
+                        "timing": {
+                          "value": 0,
+                          "keys": {}
+                        }
+                      }
+                    }
+                  },
+                  "parameters": {}
+                },
+                {
+                  "id": 13,
+                  "name": "Legacy fixture 13",
+                  "enabled": true,
+                  "kind": {
+                    "Stroke": {
+                      "cap": "Square",
+                      "join": "Miter",
+                      "miter_limit": 7,
+                      "dashes": [
+                        9,
+                        3,
+                        2
+                      ],
+                      "dash_offset": 4
+                    }
+                  },
+                  "parameters": {
+                    "Shape.StrokeRed": {
+                      "value": 17,
+                      "keys": {}
+                    },
+                    "Shape.StrokeGreen": {
+                      "value": 125,
+                      "keys": {}
+                    },
+                    "Shape.StrokeBlue": {
+                      "value": 242,
+                      "keys": {}
+                    },
+                    "Shape.StrokeOpacity": {
+                      "value": 83,
+                      "keys": {}
+                    },
+                    "Shape.StrokeWidth": {
+                      "value": 6,
+                      "keys": {}
+                    },
+                    "Shape.MiterLimit": {
+                      "value": 7,
+                      "keys": {}
+                    },
+                    "Shape.DashOffset": {
+                      "value": 4,
+                      "keys": {}
+                    },
+                    "Shape.DashLength0": {
+                      "value": 9,
+                      "keys": {}
+                    },
+                    "Shape.DashLength1": {
+                      "value": 3,
+                      "keys": {}
+                    },
+                    "Shape.DashLength2": {
+                      "value": 2,
+                      "keys": {}
+                    }
+                  }
+                }
+              ]
+            },
+            "parameters": {
+              "Transform.PositionX": {
+                "value": -17.5,
+                "keys": {}
+              },
+              "Transform.PositionY": {
+                "value": 0,
+                "keys": {}
+              },
+              "Transform.AnchorX": {
+                "value": 0,
+                "keys": {}
+              },
+              "Transform.AnchorY": {
+                "value": 0,
+                "keys": {}
+              },
+              "Transform.ScaleX": {
+                "value": 137.25,
+                "keys": {}
+              },
+              "Transform.ScaleY": {
+                "value": 63.75,
+                "keys": {}
+              },
+              "Transform.Rotation": {
+                "value": 0,
+                "keys": {}
+              },
+              "Transform.Opacity": {
+                "value": 0,
+                "keys": {}
+              },
+              "Skew": {
+                "value": 0,
+                "keys": {}
+              },
+              "SkewAxis": {
+                "value": 0,
+                "keys": {}
+              }
+            }
+          },
+          {
+            "id": 14,
+            "name": "Legacy fixture 14",
+            "enabled": true,
+            "kind": {
+              "Fill": {
+                "even_odd": true
+              }
+            },
+            "parameters": {
+              "Shape.FillRed": {
+                "value": 192,
+                "keys": {}
+              },
+              "Shape.FillGreen": {
+                "value": 37,
+                "keys": {}
+              },
+              "Shape.FillBlue": {
+                "value": 81,
+                "keys": {}
+              },
+              "Shape.FillOpacity": {
+                "value": 67,
+                "keys": {}
+              }
+            }
+          },
+          {
+            "id": 15,
+            "name": "Legacy fixture 15",
+            "enabled": true,
+            "kind": {
+              "Group": [
+                {
+                  "id": 16,
+                  "name": "Legacy fixture 16",
+                  "enabled": true,
+                  "kind": {
+                    "Path": {
+                      "path": {
+                        "vertices": [
+                          {
+                            "position": [
+                              -20.25,
+                              -30.5
+                            ],
+                            "incoming": [
+                              -8.5,
+                              -7.25
+                            ],
+                            "outgoing": [
+                              12.25,
+                              -16.5
+                            ]
+                          },
+                          {
+                            "position": [
+                              40.75,
+                              -12.25
+                            ],
+                            "incoming": [
+                              -10.5,
+                              14.75
+                            ],
+                            "outgoing": [
+                              25.125,
+                              9.25
+                            ]
+                          },
+                          {
+                            "position": [
+                              3.875,
+                              55.125
+                            ],
+                            "incoming": [
+                              17.25,
+                              -3.5
+                            ],
+                            "outgoing": [
+                              -9.75,
+                              -17.875
+                            ]
+                          }
+                        ],
+                        "closed": true
+                      },
+                      "animation": {
+                        "poses": [],
+                        "timing": {
+                          "value": 0,
+                          "keys": {}
+                        }
+                      }
+                    }
+                  },
+                  "parameters": {}
+                },
+                {
+                  "id": 17,
+                  "name": "Legacy fixture 17",
+                  "enabled": true,
+                  "kind": {
+                    "GradientFill": {
+                      "even_odd": true,
+                      "gradient": {
+                        "radial": true,
+                        "colors": [
+                          1,
+                          2
+                        ],
+                        "opacities": [
+                          3,
+                          4
+                        ],
+                        "next_stop": 5
+                      }
+                    }
+                  },
+                  "parameters": {
+                    "Gradient.StartX": {
+                      "value": -20,
+                      "keys": {}
+                    },
+                    "Gradient.StartY": {
+                      "value": -30,
+                      "keys": {}
+                    },
+                    "Gradient.EndX": {
+                      "value": 95,
+                      "keys": {}
+                    },
+                    "Gradient.EndY": {
+                      "value": 65,
+                      "keys": {}
+                    },
+                    "Gradient.HighlightLength": {
+                      "value": 25,
+                      "keys": {}
+                    },
+                    "Gradient.HighlightAngle": {
+                      "value": 42,
+                      "keys": {}
+                    },
+                    "Shape.FillOpacity": {
+                      "value": 71,
+                      "keys": {}
+                    },
+                    "Gradient.ColorPosition(1)": {
+                      "value": 0,
+                      "keys": {}
+                    },
+                    "Gradient.Red(1)": {
+                      "value": 20,
+                      "keys": {}
+                    },
+                    "Gradient.Green(1)": {
+                      "value": 140,
+                      "keys": {}
+                    },
+                    "Gradient.Blue(1)": {
+                      "value": 190,
+                      "keys": {}
+                    },
+                    "Gradient.ColorMidpoint(1)": {
+                      "value": 35,
+                      "keys": {}
+                    },
+                    "Gradient.ColorPosition(2)": {
+                      "value": 100,
+                      "keys": {}
+                    },
+                    "Gradient.Red(2)": {
+                      "value": 225,
+                      "keys": {}
+                    },
+                    "Gradient.Green(2)": {
+                      "value": 70,
+                      "keys": {}
+                    },
+                    "Gradient.Blue(2)": {
+                      "value": 20,
+                      "keys": {}
+                    },
+                    "Gradient.ColorMidpoint(2)": {
+                      "value": 35,
+                      "keys": {}
+                    },
+                    "Gradient.OpacityPosition(3)": {
+                      "value": 0,
+                      "keys": {}
+                    },
+                    "Gradient.Opacity(3)": {
+                      "value": 100,
+                      "keys": {}
+                    },
+                    "Gradient.OpacityMidpoint(3)": {
+                      "value": 65,
+                      "keys": {}
+                    },
+                    "Gradient.OpacityPosition(4)": {
+                      "value": 100,
+                      "keys": {}
+                    },
+                    "Gradient.Opacity(4)": {
+                      "value": 40,
+                      "keys": {}
+                    },
+                    "Gradient.OpacityMidpoint(4)": {
+                      "value": 65,
+                      "keys": {}
+                    }
+                  },
+                  "blend": "Multiply",
+                  "composite": "AbovePrevious"
+                },
+                {
+                  "id": 18,
+                  "name": "Legacy fixture 18",
+                  "enabled": true,
+                  "kind": {
+                    "Stroke": {
+                      "cap": "Butt",
+                      "join": "Round",
+                      "miter_limit": 7,
+                      "dashes": [
+                        9,
+                        3,
+                        2
+                      ],
+                      "dash_offset": 4
+                    }
+                  },
+                  "parameters": {
+                    "Shape.StrokeRed": {
+                      "value": 17,
+                      "keys": {}
+                    },
+                    "Shape.StrokeGreen": {
+                      "value": 125,
+                      "keys": {}
+                    },
+                    "Shape.StrokeBlue": {
+                      "value": 242,
+                      "keys": {}
+                    },
+                    "Shape.StrokeOpacity": {
+                      "value": 83,
+                      "keys": {}
+                    },
+                    "Shape.StrokeWidth": {
+                      "value": 6,
+                      "keys": {}
+                    },
+                    "Shape.MiterLimit": {
+                      "value": 7,
+                      "keys": {}
+                    },
+                    "Shape.DashOffset": {
+                      "value": 4,
+                      "keys": {}
+                    },
+                    "Shape.DashLength0": {
+                      "value": 9,
+                      "keys": {}
+                    },
+                    "Shape.DashLength1": {
+                      "value": 3,
+                      "keys": {}
+                    },
+                    "Shape.DashLength2": {
+                      "value": 2,
+                      "keys": {}
+                    }
+                  }
+                }
+              ]
+            },
+            "parameters": {
+              "Transform.PositionX": {
+                "value": 33.7,
+                "keys": {}
+              },
+              "Transform.PositionY": {
+                "value": -14.25,
+                "keys": {}
+              },
+              "Transform.AnchorX": {
+                "value": 4.1,
+                "keys": {}
+              },
+              "Transform.AnchorY": {
+                "value": -7.3,
+                "keys": {}
+              },
+              "Transform.ScaleX": {
+                "value": -127.25,
+                "keys": {}
+              },
+              "Transform.ScaleY": {
+                "value": 83.5,
+                "keys": {}
+              },
+              "Transform.Rotation": {
+                "value": 27.125,
+                "keys": {}
+              },
+              "Transform.Opacity": {
+                "value": 59,
+                "keys": {}
+              },
+              "Skew": {
+                "value": 13.75,
+                "keys": {}
+              },
+              "SkewAxis": {
+                "value": 31.125,
+                "keys": {}
+              }
+            }
+          }
+        ]
+      },
+      "parameters": {
+        "Transform.PositionX": {
+          "value": 0,
+          "keys": {}
+        },
+        "Transform.PositionY": {
+          "value": 0,
+          "keys": {}
+        },
+        "Transform.AnchorX": {
+          "value": 0,
+          "keys": {}
+        },
+        "Transform.AnchorY": {
+          "value": 0,
+          "keys": {}
+        },
+        "Transform.ScaleX": {
+          "value": 103.25,
+          "keys": {}
+        },
+        "Transform.ScaleY": {
+          "value": 97.75,
+          "keys": {}
+        },
+        "Transform.Rotation": {
+          "value": -11.5,
+          "keys": {}
+        },
+        "Transform.Opacity": {
+          "value": 100,
+          "keys": {}
+        },
+        "Skew": {
+          "value": -8.625,
+          "keys": {}
+        },
+        "SkewAxis": {
+          "value": 24.25,
+          "keys": {}
+        }
+      }
+    },
+    {
+      "id": 19,
+      "name": "Legacy fixture 19",
+      "enabled": true,
+      "kind": {
+        "Stroke": {
+          "cap": "Round",
+          "join": "Miter",
+          "miter_limit": 7,
+          "dashes": [
+            9,
+            3,
+            2
+          ],
+          "dash_offset": 4
+        }
+      },
+      "parameters": {
+        "Shape.StrokeRed": {
+          "value": 17,
+          "keys": {}
+        },
+        "Shape.StrokeGreen": {
+          "value": 125,
+          "keys": {}
+        },
+        "Shape.StrokeBlue": {
+          "value": 242,
+          "keys": {}
+        },
+        "Shape.StrokeOpacity": {
+          "value": 83,
+          "keys": {}
+        },
+        "Shape.StrokeWidth": {
+          "value": 6,
+          "keys": {}
+        },
+        "Shape.MiterLimit": {
+          "value": 7,
+          "keys": {}
+        },
+        "Shape.DashOffset": {
+          "value": 4,
+          "keys": {}
+        },
+        "Shape.DashLength0": {
+          "value": 9,
+          "keys": {}
+        },
+        "Shape.DashLength1": {
+          "value": 3,
+          "keys": {}
+        },
+        "Shape.DashLength2": {
+          "value": 2,
+          "keys": {}
+        }
+      }
+    }
+  ],
+  "next_id": 20
+}
