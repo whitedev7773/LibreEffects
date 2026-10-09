@@ -109,6 +109,7 @@ pub(crate) struct Preview {
     gradient_focus_target: Option<crate::color_edit::GradientTarget>,
     gradient_focus_watch: Option<[gpui::Subscription; 2]>,
     state: Entity<EditorState>,
+    resolution_choice: Entity<crate::components::Choice>,
     text_dragging: bool,
     text_was_active: bool,
     text_box_drag: Option<text_box::TextBoxDrag>,
@@ -280,6 +281,27 @@ impl Preview {
         Self::watch_media(cx);
         Self {
             gradient_drag: None,
+            resolution_choice: {
+                let edit = state.clone();
+                cx.new(|cx| {
+                    crate::components::Choice::new(
+                        "Resolution",
+                        ["Auto", "Full", "Half", "Quarter"].map(String::from),
+                        1,
+                        cx,
+                        move |i, window, cx| {
+                            edit.update(cx, |s, cx| {
+                                s.dispatch(
+                                    &Action::SetPreviewResolution([0, 1, 2, 4][i]),
+                                    window,
+                                    cx,
+                                )
+                            });
+                        },
+                    )
+                    .compact()
+                })
+            },
             gradient_point: 0,
             gradient_focus_target: None,
             gradient_focus_watch: None,
@@ -394,8 +416,7 @@ impl Preview {
     fn current_scene<'a>(&'a self, state: &EditorState) -> Option<&'a libre_effects_core::Project> {
         let (shown, evaluated) = self.displayed.as_ref()?;
         let comp = state.editor.project().composition();
-        let dimension =
-            (comp.width().max(comp.height()).min(1280) / state.preview_resolution).max(1);
+        let dimension = crate::preview_options::dimension(comp, state.preview_resolution);
         if shown.project != *state.editor.project()
             || shown.frame != state.frame
             || shown.dimension != dimension
@@ -1308,6 +1329,13 @@ impl Preview {
 }
 impl Render for Preview {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let resolution = self.state.read(cx).preview_resolution;
+        let index = [0, 1, 2, 4]
+            .iter()
+            .position(|v| *v == resolution)
+            .unwrap_or(1);
+        self.resolution_choice
+            .update(cx, |choice, _| choice.sync(index));
         if self.gradient_focus_watch.is_none() {
             self.gradient_focus_watch = Some([
                 cx.on_blur(&self.focus.clone(), window, |this, _, cx| {
@@ -1471,17 +1499,35 @@ impl Render for Preview {
         let core_generation = state.editor.context_generation();
         let playing = state.playing;
         let transport = state.transport_generation();
-        let max_dimension = (comp.width().max(comp.height()).min(1280) / resolution).max(1);
+        let max_dimension = crate::preview_options::dimension(&comp, resolution);
+        let preview_size = [
+            (comp.width() as f64 * max_dimension as f64 / comp.width().max(comp.height()) as f64)
+                .round() as u32,
+            (comp.height() as f64 * max_dimension as f64 / comp.width().max(comp.height()) as f64)
+                .round() as u32,
+        ];
         let hand = state.tool == Tool::Hand;
-        let active_composition = state.editor.project().active_composition_id();
-        let tabs: Vec<_> = state
-            .editor
-            .project()
-            .compositions()
-            .into_iter()
-            .map(|(id, comp)| (id, comp.name().to_string()))
-            .collect();
         let time = comp.timecode(frame);
+        let navigation_path = state
+            .composition_path()
+            .into_iter()
+            .filter_map(|id| {
+                state
+                    .editor
+                    .project()
+                    .composition_by_id(id)
+                    .map(|c| (id, c.name().to_string()))
+            })
+            .collect::<Vec<_>>();
+        let source_composition = state
+            .editor
+            .selected_layer()
+            .and_then(|l| match l.content() {
+                libre_effects_core::Content::Composition { composition, .. } => Some(*composition),
+                _ => None,
+            });
+        let can_back = state.history_target(-1).is_some();
+        let can_forward = state.history_target(1).is_some();
         let pan = point(px(state.preview_pan[0]), px(state.preview_pan[1]));
         let gesture = self.gesture.clone();
         let mut render_project = vertex_session(state)
@@ -1671,34 +1717,7 @@ impl Render for Preview {
             .min_w_0()
             .min_h_0()
             .bg(rgb(ui::BG))
-            .child(
-                div()
-                    .id("composition-tabs")
-                    .flex()
-                    .flex_none()
-                    .h(px(27.0))
-                    .overflow_x_scroll()
-                    .border_b_1()
-                    .border_color(rgb(ui::BORDER))
-                    .children(tabs.into_iter().map(|(id, name)| {
-                        let state = self.state.clone();
-                        ui::text_button(
-                            gpui::SharedString::from(format!("composition-tab-{id}")),
-                            format!("Composition   {name}"),
-                        )
-                        .flex_none()
-                        .text_size(px(11.0))
-                        .px_3()
-                        .when(id == active_composition, |s| {
-                            s.bg(rgb(0x343434)).border_b_1().border_color(rgb(ui::BLUE))
-                        })
-                        .on_click(move |_, window, cx| {
-                            state.update(cx, |s, cx| {
-                                s.dispatch(&Action::ActivateComposition(id), window, cx)
-                            })
-                        })
-                    })),
-            )
+            .child(ui::composition_tabs(&self.state, cx, true))
             .when_some(error, |s, error| {
                 s.child(
                     div()
@@ -1719,10 +1738,23 @@ impl Render for Preview {
                     .items_center()
                     .text_size(px(11.0))
                     .text_color(rgb(ui::MUTED))
+                    .child(ui::action_tool("composition-back", "arrow-left", "Previous composition (Alt+Left)", &self.state, Action::NavigateHistory(-1), false).size(px(22.0)).when(!can_back, |d| d.opacity(0.35)))
+                    .child(ui::action_tool("composition-forward", "arrow-right", "Next composition (Alt+Right)", &self.state, Action::NavigateHistory(1), false).size(px(22.0)).when(!can_forward, |d| d.opacity(0.35)))
+                    .children(navigation_path.into_iter().map(|(id, name)| {
+                        let state = self.state.clone();
+                        ui::text_button(gpui::SharedString::from(format!("composition-path-{id}")), format!("{name} ›")).h(px(22.0))
+                            .on_key_down(|e, _, cx| { if matches!(e.keystroke.key.as_str(), "enter" | "space") { cx.stop_propagation(); } })
+                            .on_click(move |_, window, cx| { state.update(cx, |s, cx| s.dispatch(&Action::ActivateComposition(id), window, cx)); cx.stop_propagation(); })
+                    }))
+                    .when_some(source_composition, |d, id| {
+                        let state = self.state.clone();
+                        d.child(ui::text_button("composition-open-source", "Open selected precomp ›").h(px(22.0))
+                            .on_click(move |_, window, cx| { state.update(cx, |s, cx| s.dispatch(&Action::ActivateComposition(id), window, cx)); cx.stop_propagation(); }))
+                    })
                     .child(format!(
-                        "{}  ›  Active Camera{}",
-                        comp.name(),
-                        if spatial_scene { "  ·  Spatial: selection only · Geometry edits through scripting" } else if expression_scene { "  ·  Expressions: selection only · Inspector edits authored values" } else if text_session.is_some() { if text_session.as_ref().is_some_and(|s| s.style.paragraph) { "  ·  Paragraph text: Ctrl+Enter finish · Esc cancel" } else { "  ·  Auto-size text: Ctrl+Enter finish · Esc cancel" } } else if self.state.read(cx).colors.picking() { "  ·  Pick composition color · click to sample · Esc to return" } else if gradient_active { if gradient_point == 0 { "  ·  Gradient Start: drag · Tab switch · arrows move · Alt both · Esc close" } else { "  ·  Gradient End: drag · Tab switch · arrows move · Alt both · Esc close" } } else if pen_active { "  ·  Pen: Shift-click / Shift-drag select · Ctrl+A Contents points · drag selected · Shift+T transform · Esc cancel" } else if self.state.read(cx).tool == Tool::Text {
+                        "Active Camera{}{}",
+                        { let hardware = libre_effects_gpu_render::status(); if hardware.disabled || hardware.accelerated_jobs == 0 { "" } else if hardware.backend == "CUDA" { "  ·  CUDA blur" } else { "  ·  Direct3D11 blur" } },
+                        if self.state.read(cx).preview_buffering() { "  ·  Waiting for rendered frame…" } else if spatial_scene { "  ·  Spatial: selection only · Geometry edits through scripting" } else if expression_scene { "  ·  Expressions: selection only · Inspector edits authored values" } else if text_session.is_some() { if text_session.as_ref().is_some_and(|s| s.style.paragraph) { "  ·  Paragraph text: Ctrl+Enter finish · Esc cancel" } else { "  ·  Auto-size text: Ctrl+Enter finish · Esc cancel" } } else if self.state.read(cx).colors.picking() { "  ·  Pick composition color · click to sample · Esc to return" } else if gradient_active { if gradient_point == 0 { "  ·  Gradient Start: drag · Tab switch · arrows move · Alt both · Esc close" } else { "  ·  Gradient End: drag · Tab switch · arrows move · Alt both · Esc close" } } else if pen_active { "  ·  Pen: Shift-click / Shift-drag select · Ctrl+A Contents points · drag selected · Shift+T transform · Esc cancel" } else if self.state.read(cx).tool == Tool::Text {
                             "  ·  Click: auto-size text · Drag: paragraph box"
                         } else if self.pending.is_some() {
                             "  ·  Rendering…"
@@ -2117,21 +2149,8 @@ impl Render for Preview {
                         Action::ZoomPreview(2.0),
                         false,
                     ))
-                    .child(
-                        ui::text_button(
-                            "preview-resolution",
-                            match resolution {
-                                2 => "Half ▾",
-                                4 => "Quarter ▾",
-                                _ => "Full ▾",
-                            },
-                        )
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.state.update(cx, |s, cx| {
-                                s.dispatch(&Action::CyclePreviewResolution, window, cx)
-                            })
-                        })),
-                    )
+                    .child(div().w(px(92.0)).child(self.resolution_choice.clone()))
+                    .child(format!("{}×{}", preview_size[0], preview_size[1]))
                     .child(ui::action_tool(
                         "transparency",
                         "square-dashed",

@@ -15,7 +15,13 @@ fn transform(matrix: Affine) -> String {
 }
 
 pub(crate) fn embedded(pixels: &Pixmap, width: u32, height: u32) -> Result<String, String> {
+    let _time = crate::gpu_render::time(crate::gpu_render::Stage::Embedded);
     let bytes = pixels.encode_png().map_err(|e| e.to_string())?;
+    if let Some(href) = crate::render_images::encoded(bytes.clone())? {
+        return Ok(format!(
+            "<image width='{width}' height='{height}' preserveAspectRatio='none' xlink:href='{href}'/>"
+        ));
+    }
     // Base64's checked expansion is known before allocating its output.
     let encoded_len = bytes
         .len()
@@ -60,11 +66,27 @@ impl Renderer {
         max_dimension: u32,
         domains: &[resvg::RepeatEdgeDomain],
     ) -> Result<Pixmap, String> {
+        let _time = crate::gpu_render::time(crate::gpu_render::Stage::Raster);
+        self.check_cancel()?;
         let scale = (f64::from(max_dimension) / f64::from(width.max(height))).min(1.0);
         let pw = (f64::from(width) * scale).round().max(1.0) as u32;
         let ph = (f64::from(height) * scale).round().max(1.0) as u32;
         if u64::from(pw) * u64::from(ph) > 33_554_432 {
             return Err("Adjustment rendering supports up to 32 megapixels".into());
+        }
+        let resources = crate::render_images::resources(svg);
+        let dimensions = [width, height, pw, ph];
+        if let Some(resources) = resources.as_ref() {
+            if let Some(pixels) = self
+                .raster_scenes
+                .lock()
+                .map_err(|_| "Intermediate cache is unavailable")?
+                .get(svg, dimensions, domains, resources)
+            {
+                crate::gpu_render::raster_cache_hit();
+                self.check_cancel()?;
+                return Ok(pixels);
+            }
         }
         let source = svg_document(svg, f64::from(width), f64::from(height))?;
         let tree =
@@ -79,6 +101,13 @@ impl Renderer {
             &mut pixels.as_mut(),
             domains,
         )?;
+        self.check_cancel()?;
+        if let Some(resources) = resources {
+            self.raster_scenes
+                .lock()
+                .map_err(|_| "Intermediate cache is unavailable")?
+                .insert(svg, dimensions, domains, resources, &pixels);
+        }
         Ok(pixels)
     }
 
@@ -230,6 +259,42 @@ impl Renderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cached_intermediate_composites_keep_exact_pixels_and_invalidate_changed_media() {
+        let renderer = Renderer::new();
+        let mut original = Pixmap::new(7, 5).unwrap();
+        original.fill(resvg::tiny_skia::Color::from_rgba8(150, 70, 20, 91));
+        let mut changed = Pixmap::new(7, 5).unwrap();
+        changed.fill(resvg::tiny_skia::Color::from_rgba8(10, 140, 90, 170));
+        let sources = std::sync::Arc::new(std::sync::Mutex::new(
+            crate::render_images::Sources::default(),
+        ));
+        let first;
+        {
+            let _frame = crate::render_images::begin(sources.clone());
+            let svg = embedded(&original, 14, 10).unwrap();
+            first = renderer.raster_canvas(&svg, 14, 10, 14).unwrap();
+            assert_eq!(
+                renderer.raster_canvas(&svg, 14, 10, 14).unwrap().data(),
+                first.data()
+            );
+        }
+        {
+            let _frame = crate::render_images::begin(sources);
+            // The short URI is reused for new pixels in the next frame.
+            let svg = embedded(&changed, 14, 10).unwrap();
+            let actual = renderer.raster_canvas(&svg, 14, 10, 14).unwrap();
+            assert_ne!(actual.data(), first.data());
+            let fresh = Renderer::new().raster_canvas(&svg, 14, 10, 14).unwrap();
+            assert_eq!(actual.data(), fresh.data());
+            renderer.clear_decoders();
+            assert_eq!(
+                renderer.raster_canvas(&svg, 14, 10, 14).unwrap().data(),
+                fresh.data()
+            );
+        }
+    }
     use libre_effects_core::{
         Command, Content, Editor, EffectEdit, EffectKind, EffectParam, Mask, Project,
     };

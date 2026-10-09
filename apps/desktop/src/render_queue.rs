@@ -744,27 +744,33 @@ pub(crate) fn execute_protected(
         .prefix(".libre-render-")
         .tempdir_in(output.path.parent().ok_or("Output needs a parent")?)
         .map_err(|e| e.to_string())?;
-    let renderer = crate::rendering::Renderer::with_cancel(cancel.clone());
-    for index in 0..plan.frames {
-        let frame = plan.source_frame(index);
-        if cancel.load(Ordering::Relaxed) {
-            return Err("Render canceled; sequence destination unchanged".into());
-        }
-        let mut pixels = renderer.render_output(project, frame, plan.width, plan.height)?;
-        output.spec.settings.apply_channels(
-            &mut pixels,
-            output.spec.format,
-            project.composition().background_color(),
-        );
-        std::fs::write(
-            staging
-                .path()
-                .join(format!("frame-{:06}.png", plan.sequence_first() + index)),
-            output.spec.settings.png_bytes(pixels, output.spec.format)?,
-        )
-        .map_err(|e| e.to_string())?;
-        progress.store(index as u32 + 1, Ordering::Relaxed);
-    }
+    let lanes = crate::render_pipeline::workers(plan.width, plan.height, plan.frames);
+    let renderers = crate::render_pipeline::renderers(lanes, cancel.clone());
+    crate::render_pipeline::ordered(
+        plan.frames,
+        lanes,
+        &cancel,
+        |lane, index| {
+            let frame = plan.source_frame(index);
+            renderers[lane].render_output(project, frame, plan.width, plan.height)
+        },
+        |index, mut pixels| {
+            output.spec.settings.apply_channels(
+                &mut pixels,
+                output.spec.format,
+                project.composition().background_color(),
+            );
+            std::fs::write(
+                staging
+                    .path()
+                    .join(format!("frame-{:06}.png", plan.sequence_first() + index)),
+                output.spec.settings.png_bytes(pixels, output.spec.format)?,
+            )
+            .map_err(|e| e.to_string())?;
+            progress.store(index as u32 + 1, Ordering::Relaxed);
+            Ok(())
+        },
+    )?;
     let manifest = serde_json::json!({"composition":project.composition().name(),"fps":plan.fps,"width":plan.width,"height":plan.height,"first_frame":plan.sequence_first(),"source_range":range,"rendered_frames":plan.frames,"complete":true,"alpha":output.spec.settings.channels(output.spec.format)==crate::output_settings::Channels::Rgba,"pattern":"frame-%06d.png"});
     crate::project_io::write_bytes(
         &staging.path().join("sequence.json"),

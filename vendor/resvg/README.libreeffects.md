@@ -68,6 +68,15 @@ SVG edgeMode or all AE GPU/kernel parity.
 
 ## Explicit fractional-box mask feather
 
+The optional `BoxBlurAccelerator` callback accelerates the existing ordinary
+Gaussian five-box kernel without changing radius calculation or byte output.
+`install_box_blur_accelerator` installs it on the current thread for a bounded
+scope; nested calls and unwinding restore the preceding callback. It does not
+propagate to other threads. A declined callback must leave pixels unchanged,
+after which the complete original CPU kernel runs. Both ordinary and checked
+repeat-edge box kernels use the hook. The vendored renderer still forbids unsafe
+code; platform FFI lives in the application's separate GPU crate.
+
 The private usvg profile selects three horizontal fractional-box passes followed
 by three vertical passes, with transparent borders and floor-to-byte quantization
 after each pass. Sliding integer channel sums make work linear in pixel count,
@@ -106,3 +115,20 @@ The fixture contains 405 literal independently captured AE byte cases; checked
 SVG rendering, opacity endpoints, negative division boundaries and preservation
 of unqualified partial-alpha pixels are tested. Diagnostic PNG and the official
 render queue's TIFF output were independently compared for the seven gray ramps.
+
+## Opt-in image and filter reuse
+
+`install_raster_image_cache` shares immutable decoded pixels and exact area
+reductions within a synchronous scope. Keys compare the image format, complete
+compressed bytes and the entire reduction sequence, including odd-size rounding.
+`install_filter_cache` retains complete filter results only when input pixels,
+dimensions, the full bounded filter description and transform match. Checked
+keys additionally include support domains, memory limits, live allocation and
+group-bounds mode. Filters containing `feImage` are excluded: summarized SVG
+tree diagnostics cannot identify their internal gradient/pattern paint. Failed
+filters are never stored. Both caches have caller-set
+byte ceilings (including retained source data), bounded entry counts, and guards
+that restore preceding thread-local scopes. The application creates a cache per
+renderer; ordinary unscoped resvg behavior remains unchanged. Regression tests
+compare cached/uncached checked and ordinary output, changed alpha/effect values,
+anisotropic reductions and allocation-limit failures.

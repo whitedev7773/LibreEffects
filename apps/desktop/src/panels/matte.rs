@@ -112,7 +112,7 @@ impl Render for MattePicker {
         let mut element = div()
             .relative()
             .w_full()
-            .h(px(23.0))
+            .h(px(21.0))
             .child(
                 ui::text_button("matte-picker", format!("{label} ▾"))
                     .track_focus(&self.focus)

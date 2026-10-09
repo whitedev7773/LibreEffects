@@ -9,12 +9,23 @@ license.workspace = true
 name = "libre-effects"
 path = "src/main.rs"
 
+[[bin]]
+name = "libre-effects-render"
+path = "src/render_main.rs"
+test = false
+bench = false
+required-features = ["render-cli"]
+
+[features]
+render-cli = []
+
 [dependencies]
 libre-effects-ae-expressions = { path = "../../crates/ae-expressions" }
 libre-effects-audio-spectrum = { path = "../../crates/audio-spectrum" }
 gpui = { workspace = true }
 libre-effects-core = { path = "../../crates/core" }
 libre-effects-editor-model = { path = "../../crates/editor-model" }
+libre-effects-gpu-render = { path = "../../crates/gpu-render" }
 tempfile = "3"
 anyhow = "1"
 resvg = "0.45.1"
@@ -38,4 +49,4 @@ libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 raw-window-handle = "0.6"
-windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_Media_Audio", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant"] }
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_Media_Audio", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_System_SystemInformation"] }

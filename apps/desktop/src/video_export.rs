@@ -821,19 +821,25 @@ fn encode_with_settings(
         }
     });
     let result = (|| {
-        let renderer = Renderer::with_cancel(cancel.clone());
-        for index in 0..plan.frames {
-            let frame = plan.source_frame(index);
-            if cancel.load(Ordering::Relaxed) {
-                return Err("Render canceled".into());
-            }
-            let mut pixels = renderer.render_output(project, frame, plan.width, plan.height)?;
-            settings.apply_channels(&mut pixels, format, comp.background_color());
-            input
-                .write_all(pixels.as_raw())
-                .map_err(|e| format!("Encoder input failed: {e}"))?;
-            progress.store(index as u32 + 1, Ordering::Relaxed);
-        }
+        let lanes = crate::render_pipeline::workers(plan.width, plan.height, plan.frames);
+        let renderers = crate::render_pipeline::renderers(lanes, cancel.clone());
+        crate::render_pipeline::ordered(
+            plan.frames,
+            lanes,
+            &cancel,
+            |lane, index| {
+                let frame = plan.source_frame(index);
+                renderers[lane].render_output(project, frame, plan.width, plan.height)
+            },
+            |index, mut pixels| {
+                settings.apply_channels(&mut pixels, format, comp.background_color());
+                input
+                    .write_all(pixels.as_raw())
+                    .map_err(|e| format!("Encoder input failed: {e}"))?;
+                progress.store(index as u32 + 1, Ordering::Relaxed);
+                Ok(())
+            },
+        )?;
         drop(input);
         loop {
             if let Some(status) = encoder

@@ -35,6 +35,8 @@ pub(crate) mod project_usage;
 pub(crate) mod queue;
 #[path = "editor_svg_import.rs"]
 mod svg_import;
+#[path = "editor_ux.rs"]
+mod ux;
 #[path = "editor_video.rs"]
 mod video;
 #[path = "editor_view.rs"]
@@ -87,6 +89,7 @@ pub(crate) enum Action {
     PreviewAudio,
     PreviewScrub,
     PreviewLoop,
+    CyclePreviewSpeed,
     CacheWorkArea,
     CycleCacheBudget,
     PurgePreviewCache,
@@ -145,6 +148,13 @@ pub(crate) enum Action {
     ZoomPreview(f32),
     FitPreview,
     CyclePreviewResolution,
+    SetPreviewResolution(u32),
+    SetPreviewSpeed(u8),
+    SetPreviewRange(crate::preview_options::PreviewRange),
+    PreviewFromStart,
+    PreviewCacheBefore,
+    SetCacheBudget(usize),
+    NavigateHistory(i32),
     Checkerboard,
     ViewerOption(crate::viewer_tools::ViewOption),
     PreviewChannel(crate::viewer_tools::Channel),
@@ -237,6 +247,11 @@ pub(crate) struct EditorState {
     composition_views:
         std::collections::BTreeMap<CompositionId, crate::view_state::CompositionView>,
     pub workspace: crate::view_state::WorkspaceView,
+    /// Visited viewer tabs are transient; closing one never deletes a composition.
+    pub(crate) composition_tabs: Vec<CompositionId>,
+    pub(crate) navigation_history: Vec<CompositionId>,
+    pub(crate) navigation_index: usize,
+    navigation_replay: bool,
     pub preview_pan: [f32; 2],
     pub snapping: bool,
     pub marker_selection: Option<(
@@ -285,7 +300,13 @@ pub(crate) struct EditorState {
     pub preview_audio: bool,
     pub preview_scrub: bool,
     pub preview_loop: bool,
+    pub preview_speed_quarters: u8,
     pub preview_caching: bool,
+    pub preview_range: crate::preview_options::PreviewRange,
+    pub preview_from_start: bool,
+    pub preview_cache_before: bool,
+    pub(crate) preview_play_after_cache: bool,
+    pub(crate) playback_range: Option<std::ops::Range<u32>>,
     pub preview_cache_limit: usize,
     pub preview_cache: crate::preview_cache::Summary,
     pub audio_status: crate::audio_playback::Status,
@@ -305,6 +326,7 @@ pub(crate) struct EditorState {
     pub work_start: Frame,
     pub work_end: Frame,
     pub expanded: bool,
+    pub(crate) layer_tree: Option<crate::view_state::LayerTree>,
     pub property_filter: Option<PropertyFilter>,
     pub graph_open: bool,
     pub graph_view: crate::view_state::GraphView,
@@ -323,7 +345,7 @@ pub(crate) struct EditorState {
     pub graph_property: PropertyPath,
     pub graph_key: Option<KeyRef>,
     pub graph_channels: crate::view_state::GraphChannels,
-    playback_origin: Option<(Instant, Frame)>,
+    playback_clock: playback::Clock,
     playback_generation: u64,
     input_context_generation: u64,
     colors_clipboard_generation: u64,
@@ -357,6 +379,10 @@ impl Default for EditorState {
             project_usage_reveal: None,
             composition_views: Default::default(),
             workspace: Default::default(),
+            composition_tabs: Vec::new(),
+            navigation_history: Vec::new(),
+            navigation_index: 0,
+            navigation_replay: false,
             preview_pan: [0.0; 2],
             snapping: true,
             marker_selection: None,
@@ -396,7 +422,13 @@ impl Default for EditorState {
             preview_audio: true,
             preview_scrub: false,
             preview_loop: true,
+            preview_speed_quarters: 4,
             preview_caching: false,
+            preview_range: Default::default(),
+            preview_from_start: false,
+            preview_cache_before: false,
+            preview_play_after_cache: false,
+            playback_range: None,
             preview_cache_limit: 256 * crate::preview_cache::MIB,
             preview_cache: Default::default(),
             audio_status: crate::audio_playback::Status {
@@ -408,7 +440,7 @@ impl Default for EditorState {
             timeline_zoom: 1.0,
             timeline_start: 0,
             preview_zoom: None,
-            preview_resolution: 1,
+            preview_resolution: 0,
             preview_revision: 0,
             document_revision: 0,
             importing_video: false,
@@ -418,7 +450,8 @@ impl Default for EditorState {
             tool: Tool::Select,
             work_start: 0,
             work_end: 150,
-            expanded: true,
+            expanded: false,
+            layer_tree: None,
             property_filter: None,
             graph_open: false,
             graph_view: Default::default(),
@@ -434,7 +467,7 @@ impl Default for EditorState {
             graph_property: Property::PositionX.into(),
             graph_key: None,
             graph_channels: Default::default(),
-            playback_origin: None,
+            playback_clock: Default::default(),
             playback_generation: 0,
             input_context_generation: 0,
             colors_clipboard_generation: 0,
@@ -443,6 +476,26 @@ impl Default for EditorState {
 }
 
 impl EditorState {
+    pub(crate) fn composition_tab_ids(&self) -> Vec<CompositionId> {
+        let project = self.editor.project();
+        let mut ids = Vec::new();
+        for id in self
+            .composition_tabs
+            .iter()
+            .copied()
+            .chain(std::iter::once(project.active_composition_id()))
+        {
+            if !ids.contains(&id)
+                && project
+                    .compositions()
+                    .into_iter()
+                    .any(|(candidate, _)| candidate == id)
+            {
+                ids.push(id);
+            }
+        }
+        ids
+    }
     pub(crate) fn finish_text(&mut self, commit: bool, cx: &mut Context<Self>) {
         let Some(session) = self.text_session.take() else {
             return;
@@ -569,6 +622,10 @@ impl EditorState {
             }
             Action::Select(id) => {
                 self.editor.select(*id);
+                self.expanded = self
+                    .layer_tree
+                    .as_ref()
+                    .is_some_and(|t| t.expanded.contains(id));
                 self.selected_layers = [*id].into();
             }
             Action::SetTool(tool) => self.tool = *tool,
@@ -733,11 +790,13 @@ impl EditorState {
     }
     fn stop(&mut self) {
         self.preview_caching = false;
+        self.preview_play_after_cache = false;
+        self.playback_range = None;
         self.audio_session = None;
         self.audio_status.phase = crate::audio_playback::Phase::Ended;
         self.audio_status.levels = Default::default();
         self.playing = false;
-        self.playback_origin = None;
+        self.playback_clock = Default::default();
         self.playback_generation = self.playback_generation.wrapping_add(1);
     }
 
@@ -774,6 +833,10 @@ impl EditorState {
     }
 
     fn composition_changed(&mut self) {
+        let active = self.editor.project().active_composition_id();
+        if !self.composition_tabs.contains(&active) {
+            self.composition_tabs.push(active);
+        }
         self.expression_editor = None;
         self.colors_key_owned.set(false);
         self.discard_vertex_editor();
@@ -1369,7 +1432,7 @@ impl EditorState {
                             self.tool = Tool::Pen;
                         }
                     }
-                    self.expanded = true;
+                    self.reveal_selected_layers();
                 }
             }
             Action::ToggleSelectedSwitch(switch) => {
@@ -1655,7 +1718,7 @@ impl EditorState {
                             self.graph_external_activation(id, PropertyPath::TimeRemap);
                         }
                         self.graph_key = None;
-                        self.expanded = true;
+                        self.reveal_selected_layers();
                         self.property_filter = None;
                     }
                 }
@@ -1746,10 +1809,16 @@ impl EditorState {
                 self.preview_pan = [0.0; 2];
             }
             Action::CyclePreviewResolution => {
-                self.preview_resolution = if self.preview_resolution == 4 {
-                    1
-                } else {
-                    self.preview_resolution * 2
+                let playing = self.playing;
+                self.stop();
+                self.preview_resolution = match self.preview_resolution {
+                    0 => 1,
+                    1 => 2,
+                    2 => 4,
+                    _ => 0,
+                };
+                if playing {
+                    self.start_playback(window, cx);
                 }
             }
             Action::Checkerboard => self.checkerboard = !self.checkerboard,
@@ -1781,10 +1850,14 @@ impl EditorState {
                     self.status = error;
                 }
             }
-            Action::ToggleExpanded => self.expanded = !self.expanded,
+            Action::ToggleExpanded => {
+                if let Some(id) = self.editor.selected() {
+                    self.toggle_layer_expanded(id);
+                }
+            }
             Action::Filter(filter) => {
                 self.property_filter = *filter;
-                self.expanded = true;
+                self.reveal_selected_layers();
             }
             Action::PreviousKey | Action::NextKey => {
                 let next = matches!(action, Action::NextKey);
@@ -1823,10 +1896,15 @@ impl EditorState {
             }
             Action::ActivateComposition(id) => {
                 if *id != self.editor.project().active_composition_id() {
+                    let previous = self.editor.project().active_composition_id();
+                    if !self.composition_tabs.contains(&previous) {
+                        self.composition_tabs.push(previous);
+                    }
                     self.remember_view();
                     match self.editor.activate_composition(*id) {
                         Ok(()) => {
                             self.composition_changed();
+                            self.record_navigation(previous);
                             self.status = format!(
                                 "Composition: {}",
                                 self.editor.project().composition().name()
@@ -1838,6 +1916,10 @@ impl EditorState {
             }
             Action::Select(id) => {
                 self.editor.select(*id);
+                self.expanded = self
+                    .layer_tree
+                    .as_ref()
+                    .is_some_and(|tree| tree.expanded.contains(id));
                 self.selected_layers.clear();
                 self.selected_layers.insert(*id);
                 self.selected_keys.clear();
@@ -1896,9 +1978,72 @@ impl EditorState {
                 self.preview_loop = !self.preview_loop;
             }
             Action::Play => {
-                if self.playing {
+                if self.playing || self.preview_play_after_cache {
                     self.stop();
                 } else {
+                    if self.preview_cache_before && self.preview_cache_limit > 0 {
+                        self.stop();
+                        let range = self.preview_frame_range();
+                        if self.preview_from_start || !range.contains(&self.frame) {
+                            self.frame = range.start;
+                        }
+                        self.playback_range = Some(range);
+                        self.preview_caching = true;
+                        self.preview_play_after_cache = true;
+                        self.status = "Caching preview range before playback…".into();
+                    } else {
+                        self.start_playback(window, cx);
+                    }
+                }
+            }
+            Action::NavigateHistory(delta) => self.navigate_history(*delta, window, cx),
+            Action::SetPreviewResolution(resolution) => {
+                if matches!(resolution, 0 | 1 | 2 | 4) {
+                    let playing = self.playing;
+                    self.stop();
+                    self.preview_resolution = *resolution;
+                    if playing {
+                        self.start_playback(window, cx);
+                    }
+                }
+            }
+            Action::SetPreviewSpeed(speed) => {
+                if matches!(speed, 1 | 2 | 4 | 6 | 8) {
+                    let playing = self.playing;
+                    self.stop();
+                    self.preview_speed_quarters = *speed;
+                    if playing {
+                        self.start_playback(window, cx);
+                    }
+                }
+            }
+            Action::SetPreviewRange(range) => {
+                self.stop();
+                self.preview_range = *range;
+            }
+            Action::PreviewFromStart => {
+                self.stop();
+                self.preview_from_start = !self.preview_from_start;
+            }
+            Action::PreviewCacheBefore => {
+                self.stop();
+                self.preview_cache_before = !self.preview_cache_before;
+            }
+            Action::SetCacheBudget(bytes) => {
+                self.stop();
+                self.preview_cache_limit = (*bytes).min(2048 * crate::preview_cache::MIB);
+            }
+            Action::CyclePreviewSpeed => {
+                let playing = self.playing;
+                self.stop();
+                self.preview_speed_quarters = match self.preview_speed_quarters {
+                    1 => 2,
+                    2 => 4,
+                    4 => 6,
+                    6 => 8,
+                    _ => 1,
+                };
+                if playing {
                     self.start_playback(window, cx);
                 }
             }
@@ -1943,26 +2088,27 @@ impl EditorState {
             {
                 return;
             }
+            let previous_frame = state.frame;
+            let was_playing = state.playing;
+            let previous_interval = state.playback_clock.intervals;
+            let had_audio = state.audio_session.is_some();
             if state.audio_session.is_some() {
                 state.poll_audio();
+            }
+            if state.playing {
+                state.tick_playback(Instant::now());
+            }
+            // Worker completion wakes the viewer while buffering. Avoid rebuilding
+            // the scene on every display refresh just to show the same waiting frame.
+            if state.frame != previous_frame
+                || state.playing != was_playing
+                || state.playback_clock.intervals != previous_interval
+                || state.audio_session.is_some() != had_audio
+                || (state.audio_session.is_some() && !state.preview_buffering())
+            {
                 cx.notify();
-                if state.playing || state.audio_session.is_some() {
-                    state.schedule_frame(generation, window, cx);
-                }
-            } else if let Some((start, first)) = state.playback_origin {
-                let comp = state.editor.project().composition();
-                let elapsed = (start.elapsed().as_secs_f64() * comp.fps().as_f64()) as u64;
-                let end = state.work_end.min(comp.duration());
-                let start = state.work_start.min(end - 1);
-                let position = u64::from(first.saturating_sub(start)) + elapsed;
-                if !state.preview_loop && position >= u64::from(end - start) {
-                    state.frame = end - 1;
-                    state.stop();
-                    cx.notify();
-                    return;
-                }
-                state.frame = start + (position % u64::from(end - start)) as Frame;
-                cx.notify();
+            }
+            if state.playing || state.audio_session.is_some() {
                 state.schedule_frame(generation, window, cx);
             }
         });

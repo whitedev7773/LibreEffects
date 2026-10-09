@@ -76,6 +76,12 @@ struct Measurement {
     shared_pixels: bool,
     matching_geometry: bool,
     evaluated_geometry: bool,
+    hardware: libre_effects_gpu_render::Status,
+    video_decoder: crate::video_decoder::Status,
+    stages: crate::gpu_render::Timings,
+    operations: Vec<(&'static str, u64, f64)>,
+    filter_cache_hits: u64,
+    path_cache_hits: u64,
 }
 
 pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
@@ -106,6 +112,8 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
         let fresh =
             crate::preview_frame::render(&renderer, &project, frame, options.dimension, None)?;
         let render_milliseconds = started.elapsed().as_secs_f64() * 1000.0;
+        let stages = crate::gpu_render::timings();
+        let operations = resvg::render_profile();
         cache.insert(frame, fresh.pixels.clone());
         let cached = cache
             .get(frame)
@@ -145,6 +153,12 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
             shared_pixels,
             matching_geometry,
             evaluated_geometry: hit.evaluated.is_some(),
+            hardware: libre_effects_gpu_render::status(),
+            video_decoder: renderer.decoder_status(),
+            stages,
+            operations,
+            filter_cache_hits: renderer.filter_cache_hits(),
+            path_cache_hits: renderer.path_cache_hits(),
         });
     }
     if before != libre_effects_core::project_file::encode(&project, None)? {

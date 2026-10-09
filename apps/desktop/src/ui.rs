@@ -176,9 +176,132 @@ pub fn panel_header(title: impl Into<SharedString>) -> impl IntoElement {
                 .flex()
                 .items_center()
                 .border_b_2()
-                .border_color(rgb(BLUE))
+                .border_color(rgb(TEXT))
                 .child(title.into()),
         )
+}
+
+/// Both docks share visited composition tabs and the same navigation actions.
+pub(crate) fn composition_tabs(
+    state: &Entity<EditorState>,
+    cx: &gpui::App,
+    viewer: bool,
+) -> Stateful<Div> {
+    let s = state.read(cx);
+    let active = s.editor.project().active_composition_id();
+    let ids = s.composition_tab_ids();
+    let tabs: Vec<_> = ids
+        .into_iter()
+        .filter_map(|id| {
+            s.editor
+                .project()
+                .compositions()
+                .into_iter()
+                .find(|(candidate, _)| *candidate == id)
+                .map(|(_, comp)| (id, comp.name().to_string()))
+        })
+        .collect();
+    let count = tabs.len();
+    let mut bar = div()
+        .id(if viewer {
+            "viewer-tabs"
+        } else {
+            "timeline-tabs"
+        })
+        .flex()
+        .flex_none()
+        .h(px(26.0))
+        .overflow_x_scroll()
+        .border_b_1()
+        .border_color(rgb(BORDER))
+        .bg(rgb(BG));
+    for (index, (id, name)) in tabs.iter().enumerate() {
+        let id = *id;
+        let neighbor = tabs
+            .get(if index > 0 { index - 1 } else { 1 })
+            .map(|(id, _)| *id);
+        let switch_state = state.clone();
+        let mut tab = div()
+            .flex()
+            .items_center()
+            .flex_none()
+            .when(id == active && (viewer || !s.queue_open), |d| {
+                d.border_b_2().border_color(rgb(TEXT))
+            })
+            .child(
+                text_button(
+                    SharedString::from(format!("composition-tab-{viewer}-{id}")),
+                    if viewer {
+                        format!("Composition  {name}")
+                    } else {
+                        name.clone()
+                    },
+                )
+                .max_w(px(260.0))
+                .whitespace_nowrap()
+                .overflow_hidden()
+                .text_size(px(11.0))
+                .on_click(move |_, window, cx| {
+                    cx.stop_propagation();
+                    switch_state.update(cx, |s, cx| {
+                        s.dispatch(&Action::ActivateComposition(id), window, cx);
+                        if !viewer && s.editor.project().active_composition_id() == id {
+                            s.dispatch(
+                                &Action::Queue(crate::editor::queue::QueueAction::Show(false)),
+                                window,
+                                cx,
+                            );
+                        }
+                    });
+                }),
+            );
+        if count > 1 {
+            let close_state = state.clone();
+            tab = tab.child(
+                tool(
+                    SharedString::from(format!("close-comp-{viewer}-{id}")),
+                    "xmark",
+                    "Close viewer tab (keeps the composition in Project)",
+                    false,
+                )
+                .size(px(18.0))
+                .on_click(move |_, window, cx| {
+                    cx.stop_propagation();
+                    close_state.update(cx, |s, cx| {
+                        if s.editor.project().active_composition_id() == id {
+                            if let Some(next) = neighbor {
+                                s.dispatch(&Action::ActivateComposition(next), window, cx);
+                            }
+                        }
+                        if s.editor.project().active_composition_id() != id {
+                            s.composition_tabs.retain(|candidate| *candidate != id);
+                            cx.notify();
+                        }
+                    });
+                }),
+            );
+        }
+        bar = bar.child(tab);
+    }
+    if !viewer {
+        let queue_state = state.clone();
+        bar = bar.child(
+            text_button("render-queue-tab", "Render Queue")
+                .text_size(px(11.0))
+                .flex_none()
+                .when(s.queue_open, |d| d.border_b_2().border_color(rgb(TEXT)))
+                .on_click(move |_, window, cx| {
+                    queue_state.update(cx, |s, cx| {
+                        s.dispatch(
+                            &Action::Queue(crate::editor::queue::QueueAction::Show(true)),
+                            window,
+                            cx,
+                        )
+                    })
+                }),
+        );
+    }
+    bar
 }
 
 pub fn text_button(

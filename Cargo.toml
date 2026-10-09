@@ -9,6 +9,7 @@ members = [
   'crates/spatial',
   'crates/temporal-scalar',
   'crates/audio-spectrum',
+  'crates/gpu-render',
 ]
 
 [workspace.package]

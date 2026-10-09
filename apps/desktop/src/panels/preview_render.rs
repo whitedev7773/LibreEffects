@@ -52,6 +52,7 @@ impl Preview {
         self.warming = None;
         self.state.update(cx, |s, cx| {
             s.preview_caching = false;
+            s.preview_play_after_cache = false;
             s.status = message.to_string();
             cx.notify();
         });
@@ -76,7 +77,10 @@ impl Preview {
         let state = self.state.read(cx);
         let limit = state.preview_cache_limit;
         let caching = state.preview_caching;
-        let work = state.work_start..state.work_end;
+        let work = state
+            .playback_range
+            .clone()
+            .unwrap_or_else(|| state.preview_frame_range());
         let changed =
             self.ram
                 .configure(&request.project, request.dimension, request.revision, limit);
@@ -117,12 +121,18 @@ impl Preview {
             self.warming = Some(request.clone());
         }
         if let Some(pending) = &self.pending {
-            let prefill = self.warming.is_some() && request.same_context(pending);
+            let prefill = (self.warming.is_some() || playing) && request.same_context(pending);
             if !prefill && !request.accepts(pending, playing) && !request.same_gradient(pending) {
                 self.cancel.store(true, Ordering::Release);
             }
         }
-        if let Some((ready, result)) = self.ready.take() {
+        // Keep one completed frame (including expression geometry) ahead of
+        // playback. It becomes visible only when its playback interval is due.
+        let ahead = playing
+            && self.ready.as_ref().is_some_and(|(ready, _)| {
+                request.same_context(ready) && ready.frame != request.frame
+            });
+        if let Some((ready, result)) = if ahead { None } else { self.ready.take() } {
             // A successful pixel render cannot erase a missing/stale geometry failure.
             let result = result.and_then(|rendered| {
                 ready.validate_evaluated_view(rendered.evaluated.as_deref())?;
@@ -175,7 +185,21 @@ impl Preview {
             }
         }
         self.publish_cache(cx);
-        if self.pending.is_some() {
+        if playing {
+            self.state.update(cx, |s, cx| {
+                s.preview_render_receipt(request.frame, request.transport, current);
+                if !current
+                    && self
+                        .failed
+                        .as_ref()
+                        .is_some_and(|(failed, _)| request.accepts(failed, false))
+                {
+                    s.dispatch(&Action::Play, window, cx);
+                    s.status = format!("Preview stopped: {}", self.failed.as_ref().unwrap().1);
+                }
+            });
+        }
+        if self.pending.is_some() || self.ready.is_some() {
             return;
         }
         let failed = self
@@ -185,9 +209,19 @@ impl Preview {
         let job = if !current && !failed {
             Some(request)
         } else if self.warming.is_some() {
-            match self.ram.next_missing(work) {
+            match self.ram.next_missing(work.clone()) {
                 None => {
-                    self.finish_warming("Work area cached in RAM", cx);
+                    let play = self.state.read(cx).preview_play_after_cache;
+                    let range = work.clone();
+                    self.finish_warming("Preview range cached in RAM", cx);
+                    if play {
+                        self.state.update(cx, |s, cx| {
+                            s.preview_play_after_cache = true;
+                            s.playback_range = Some(range);
+                            s.start_playback(window, cx);
+                        });
+                    }
+
                     None
                 }
                 Some(frame) => {
@@ -195,14 +229,25 @@ impl Preview {
                     if self.ram.can_prefill(bytes) {
                         Some(Request { frame, ..request })
                     } else {
+                        self.state
+                            .update(cx, |s, _| s.preview_play_after_cache = false);
                         self.finish_warming(
-                            "RAM cache full; reduce preview resolution or increase budget",
-                            cx,
+                            "RAM cache full; choose a shorter range, Auto/Half/Quarter, or a larger budget", cx,
                         );
                         None
                     }
                 }
             }
+        } else if playing && current {
+            let next = if request.frame + 1 < work.end {
+                Some(request.frame + 1)
+            } else if self.state.read(cx).preview_loop {
+                Some(work.start)
+            } else {
+                None
+            };
+            next.filter(|frame| *frame != request.frame)
+                .map(|frame| Request { frame, ..request })
         } else {
             None
         };
@@ -324,7 +369,7 @@ mod tests {
         };
         let mut ready = current.clone();
         ready.frame = 29;
-        assert!(current.accepts(&ready, true));
+        assert!(!current.accepts(&ready, true));
         assert!(!current.accepts(&ready, false));
         ready.transport -= 1;
         assert!(!current.accepts(&ready, true));

@@ -209,6 +209,7 @@ mod tests {
             graph_open: state.graph_open,
             graph_view: state.graph_view.clone(),
             expanded: state.expanded,
+            layer_tree: state.layer_tree.clone(),
             graph_channels: state.graph_channels.clone(),
         }
     }

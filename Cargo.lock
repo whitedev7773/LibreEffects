@@ -2988,6 +2988,7 @@ dependencies = [
  "libre-effects-audio-spectrum",
  "libre-effects-core",
  "libre-effects-editor-model",
+ "libre-effects-gpu-render",
  "raw-window-handle",
  "resvg",
  "roxmltree",
@@ -3019,6 +3020,15 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "unicode-segmentation",
+]
+
+[[package]]
+name = "libre-effects-gpu-render"
+version = "0.1.0"
+dependencies = [
+ "libloading",
+ "serde",
+ "windows 0.61.3",
 ]
 
 [[package]]

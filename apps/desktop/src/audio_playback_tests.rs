@@ -141,6 +141,7 @@ fn cancellation_and_worker_errors_are_explicit() {
         cancel: flag.clone(),
         status: Default::default(),
         range,
+        permitted: Arc::new(AtomicU64::new(u64::MAX)),
     };
     drop(session);
     assert!(flag.load(Ordering::Acquire));
@@ -154,6 +155,59 @@ fn cancellation_and_worker_errors_are_explicit() {
             .unwrap()
             .is_none()
     );
+}
+
+#[test]
+fn render_gate_freezes_audio_and_resumes_without_losing_or_repeating_samples() {
+    let device = Fake::default();
+    let mut transport = Transport::default();
+    transport.permitted = 0;
+    for _ in 0..5 {
+        transport.accept(block(0.1)).unwrap();
+    }
+    transport.tick(&device).unwrap();
+    assert_eq!(transport.status.submitted, 0);
+    for boundary in [800, 1600, 2400, 3200, 4000, 4800, 5600] {
+        transport.permitted = boundary;
+        transport.tick(&device).unwrap();
+        assert_eq!(transport.status.submitted, boundary);
+        device.advance(800);
+        transport.tick(&device).unwrap();
+        assert_eq!(transport.status.played, boundary);
+        assert_eq!(transport.status.phase, Phase::Buffering);
+        device.advance(48000);
+        transport.tick(&device).unwrap();
+        assert_eq!(transport.status.played, boundary);
+        assert_eq!(transport.status.underruns, 0);
+    }
+    assert_eq!(device.0.borrow().writes.len(), 5600);
+    assert!(
+        device
+            .0
+            .borrow()
+            .writes
+            .iter()
+            .all(|sample| *sample == [0.1, -0.1])
+    );
+}
+
+#[test]
+fn speed_and_fractional_frame_boundaries_keep_audio_inside_rendered_intervals() {
+    let fps = FrameRate::new(30000, 1001).unwrap();
+    for quarters in [1, 2, 4, 6, 8] {
+        let mut range = Range::new(fps, 3, 13, 8, true).unwrap();
+        range.speed_quarters = quarters;
+        for intervals in 1..1000 {
+            let sample = range.frame_boundary(intervals);
+            let exact = intervals as f64 * 48000.0 / fps.as_f64() * 4.0 / f64::from(quarters);
+            assert!(sample as f64 >= exact - 1e-8);
+            assert!((sample as f64) < exact + 1.0 + 1e-8);
+            let expected = 3.0
+                + ((5.0 + sample as f64 * fps.as_f64() / 48000.0 * f64::from(quarters) / 4.0)
+                    % 10.0);
+            assert!((range.seconds(sample) * fps.as_f64() - expected).abs() < 1e-8);
+        }
+    }
 }
 
 fn audio_project(seconds: u32, fps: FrameRate) -> (tempfile::TempDir, libre_effects_core::Editor) {
@@ -217,6 +271,70 @@ fn audio_project(seconds: u32, fps: FrameRate) -> (tempfile::TempDir, libre_effe
 }
 fn tone(sample: f64) -> f32 {
     (sample * 220.0 * std::f64::consts::TAU / 48000.0).sin() as f32 * 0.02
+}
+
+#[test]
+#[ignore = "Requires FFmpeg"]
+fn preview_speed_pcm_samples_match_source_time_at_every_speed() {
+    let fps = FrameRate::new(60, 1).unwrap();
+    let (_dir, editor) = audio_project(2, fps);
+    for quarters in [1, 2, 4, 6, 8] {
+        let mut range = Range::new(fps, 0, 120, 0, false).unwrap();
+        range.speed_quarters = quarters;
+        range.limit = Some(4800);
+        let (sender, receiver) = mpsc::sync_channel(4);
+        produce(
+            Mixer::new(editor.project(), true).unwrap(),
+            range,
+            &AtomicBool::new(false),
+            sender,
+        );
+        let Message::Block(block) = receiver.recv().unwrap() else {
+            panic!("missing audio");
+        };
+        assert_eq!(block.pcm.len(), 4800);
+        for (index, sample) in block.pcm.iter().enumerate() {
+            let source = index as f64 * f64::from(quarters) / 4.0;
+            let lo = source.floor();
+            let expected =
+                f64::from(tone(lo)) + f64::from(tone(lo + 1.0) - tone(lo)) * (source - lo);
+            assert!((f64::from(sample[0]) - expected).abs() < 1e-7);
+            assert!((f64::from(sample[1]) + expected * 0.5).abs() < 1e-7);
+        }
+        assert!(matches!(receiver.recv().unwrap(), Message::End));
+    }
+}
+
+#[cfg(windows)]
+#[test]
+#[ignore = "Requires default Windows audio output and FFmpeg; plays a short quiet tone"]
+fn wasapi_waits_for_rendered_frames_before_playing_and_during_stalls() {
+    let fps = FrameRate::new(60, 1).unwrap();
+    let (_dir, editor) = audio_project(2, fps);
+    let mut range = Range::new(fps, 0, 10, 0, false).unwrap();
+    range.render_gated = true;
+    let session = Session::start(editor.project(), range).unwrap().unwrap();
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(session.status().submitted, 0);
+    for intervals in 1..=10 {
+        session.permit_frames(intervals);
+        let boundary = range.frame_boundary(intervals);
+        let started = std::time::Instant::now();
+        loop {
+            let status = session.status();
+            assert!(!matches!(status.phase, Phase::Failed(_)), "{status:?}");
+            assert!(status.played <= boundary && status.submitted <= boundary);
+            if status.played == boundary {
+                break;
+            }
+            assert!(started.elapsed() < Duration::from_secs(5), "{status:?}");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        std::thread::sleep(Duration::from_millis(30));
+        assert_eq!(session.status().played, boundary);
+        assert_eq!(session.status().underruns, 0);
+    }
+    assert_eq!(session.status().phase, Phase::Ended);
 }
 
 #[test]

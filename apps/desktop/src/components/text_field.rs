@@ -28,6 +28,8 @@ pub(crate) struct TextField {
     blur: Option<Subscription>,
     commit: Commit,
     numeric: bool,
+    activate: Option<Rc<dyn Fn(&mut Window, &mut gpui::App) -> bool>>,
+    dense: bool,
     integer: bool,
     guarded: bool,
     scrub: Option<(Pixels, f64)>,
@@ -131,11 +133,24 @@ impl TextField {
                 None
             }),
             numeric: false,
+            activate: None,
+            dense: false,
             integer: false,
             guarded: false,
             scrub: None,
             scrubbed: false,
         }
+    }
+    pub fn on_activate(
+        mut self,
+        activate: impl Fn(&mut Window, &mut gpui::App) -> bool + 'static,
+    ) -> Self {
+        self.activate = Some(Rc::new(activate));
+        self
+    }
+    pub fn dense(mut self) -> Self {
+        self.dense = true;
+        self
     }
     pub fn numeric(mut self) -> Self {
         self.numeric = true;
@@ -508,7 +523,7 @@ impl Render for TextField {
             .track_focus(&self.focus)
             .tab_index(0)
             .cursor_text()
-            .h(px(24.0))
+            .h(px(if self.dense { 20.0 } else { 24.0 }))
             .w_full()
             .px_1()
             .overflow_hidden()
@@ -519,6 +534,16 @@ impl Render for TextField {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, event: &gpui::MouseDownEvent, window, cx| {
+                    if !this.focus.is_focused(window)
+                        && this
+                            .activate
+                            .as_ref()
+                            .is_some_and(|activate| !activate(window, cx))
+                    {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        return;
+                    }
                     window.focus(&this.focus);
                     cx.set_global(ActiveField(cx.entity().downgrade()));
                     if this.numeric {

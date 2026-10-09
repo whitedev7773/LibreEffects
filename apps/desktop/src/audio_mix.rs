@@ -488,6 +488,22 @@ impl Mixer {
         end: f64,
         cancel: &AtomicBool,
     ) -> Result<Vec<[f32; 2]>, String> {
+        self.render_speed(origin, start, count, end, 1.0, cancel)
+    }
+    /// Preview speed changes the source time for every output sample, keeping
+    /// audio and rendered video on the same clock (pitch follows speed).
+    pub fn render_speed(
+        &mut self,
+        origin: f64,
+        start: u64,
+        count: usize,
+        end: f64,
+        speed: f64,
+        cancel: &AtomicBool,
+    ) -> Result<Vec<[f32; 2]>, String> {
+        if !speed.is_finite() || !(0.25..=2.0).contains(&speed) {
+            return Err("Invalid audio preview speed".into());
+        }
         if count > SAMPLE_RATE as usize || !origin.is_finite() || !end.is_finite() {
             return Err("Invalid audio block".into());
         }
@@ -497,7 +513,7 @@ impl Mixer {
             if offset % 256 == 0 && cancel.load(Ordering::Relaxed) {
                 return Err("Audio processing canceled".into());
             }
-            let seconds = origin + (start + offset as u64) as f64 / f64::from(SAMPLE_RATE);
+            let seconds = origin + (start + offset as u64) as f64 * speed / f64::from(SAMPLE_RATE);
             if seconds >= end - 1e-12 {
                 continue;
             }

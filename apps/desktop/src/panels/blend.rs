@@ -73,7 +73,7 @@ impl Render for BlendPicker {
         let mut element = div()
             .relative()
             .w_full()
-            .h(px(23.0))
+            .h(px(21.0))
             .child(
                 ui::text_button("blend-picker", format!("{label} ▾"))
                     .track_focus(&self.focus)

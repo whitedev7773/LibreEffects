@@ -94,6 +94,7 @@ impl Render for RenderDock {
         let choice_count = choices.len();
         self.preset_cursor = self.preset_cursor.min(choice_count - 1);
         let mut root=div().relative().size_full().flex().flex_col().bg(rgb(ui::PANEL))
+            .child(ui::composition_tabs(&self.state, cx, false))
             .child(div().flex().items_center().gap_2().h(px(27.0)).border_b_1().border_color(rgb(ui::BORDER))
                 .child(div().px_2().text_color(rgb(ui::BLUE)).child("Render Queue"))
                 .child(self.button("queue-timeline","Timeline",QueueAction::Show(false)))

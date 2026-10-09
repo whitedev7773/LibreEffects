@@ -1,12 +1,12 @@
 //! Bounded producer/device transport. Disk access and mixing never block GPUI
-//! or the WASAPI consumer. Device position, not queued samples, drives video.
+//! or the WASAPI consumer. Preview grants audio only for rendered video frames.
 use crate::audio_mix::{Levels, Mixer, SAMPLE_RATE};
 use libre_effects_core::{Frame, FrameRate, Project};
 use std::{
     collections::VecDeque,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc,
     },
     time::Duration,
@@ -26,6 +26,8 @@ pub(crate) struct Range {
     pub first: Frame,
     pub looping: bool,
     pub limit: Option<u64>,
+    pub speed_quarters: u8,
+    pub render_gated: bool,
 }
 impl Range {
     pub fn new(
@@ -45,15 +47,23 @@ impl Range {
             first,
             looping,
             limit: None,
+            speed_quarters: 4,
+            render_gated: false,
         })
     }
     fn denominator(self) -> u128 {
-        u128::from(self.fps.denominator()) * u128::from(SAMPLE_RATE)
+        u128::from(self.fps.denominator()) * u128::from(SAMPLE_RATE) * 4
+    }
+    fn numerator(self) -> u128 {
+        u128::from(self.fps.numerator()) * u128::from(self.speed_quarters)
+    }
+    pub fn frame_boundary(self, frames: u64) -> u64 {
+        (u128::from(frames) * self.denominator()).div_ceil(self.numerator()) as u64
     }
     fn remaining(self, sample: u64) -> u128 {
         let width = u128::from(self.end - self.start) * self.denominator();
         let offset = u128::from(self.first - self.start) * self.denominator()
-            + u128::from(sample) * u128::from(self.fps.numerator());
+            + u128::from(sample) * self.numerator();
         if self.looping {
             width - offset % width
         } else {
@@ -68,12 +78,10 @@ impl Range {
         let width = u128::from(self.end - self.start) * self.denominator();
         self.fps.seconds(u64::from(self.start))
             + (width - self.remaining(sample)) as f64
-                / (f64::from(SAMPLE_RATE) * f64::from(self.fps.numerator()))
+                / (f64::from(SAMPLE_RATE) * f64::from(self.fps.numerator()) * 4.0)
     }
     fn count(self, sample: u64, maximum: usize) -> usize {
-        let until_wrap = self
-            .remaining(sample)
-            .div_ceil(u128::from(self.fps.numerator()));
+        let until_wrap = self.remaining(sample).div_ceil(self.numerator());
         let until_limit = self
             .limit
             .map_or(u64::MAX, |limit| limit.saturating_sub(sample));
@@ -111,6 +119,7 @@ pub(crate) struct Session {
     cancel: Arc<AtomicBool>,
     status: Arc<Mutex<Status>>,
     pub range: Range,
+    permitted: Arc<AtomicU64>,
 }
 impl Drop for Session {
     fn drop(&mut self) {
@@ -132,11 +141,17 @@ impl Session {
         {
             let cancel = Arc::new(AtomicBool::new(false));
             let status = Arc::new(Mutex::new(Status::default()));
+            let permitted = Arc::new(AtomicU64::new(if range.render_gated {
+                0
+            } else {
+                u64::MAX
+            }));
+            let gate = permitted.clone();
             let (flag, result) = (cancel.clone(), status.clone());
             std::thread::Builder::new()
                 .name("audio-output".into())
                 .spawn(move || {
-                    let outcome = run(mixer, range, &flag, &result);
+                    let outcome = run(mixer, range, &flag, &result, &gate);
                     flag.store(true, Ordering::Release);
                     if let Err(error) = outcome {
                         result.lock().unwrap().phase = Phase::Failed(error);
@@ -147,11 +162,16 @@ impl Session {
                 cancel,
                 status,
                 range,
+                permitted,
             }))
         }
     }
     pub fn status(&self) -> Status {
         self.status.lock().unwrap().clone()
+    }
+    pub fn permit_frames(&self, frames: u64) {
+        self.permitted
+            .store(self.range.frame_boundary(frames), Ordering::Release);
     }
 }
 
@@ -174,11 +194,12 @@ fn produce(mut mixer: Mixer, range: Range, cancel: &AtomicBool, sender: mpsc::Sy
             if count == 0 {
                 break;
             }
-            match mixer.render(
+            match mixer.render_speed(
                 range.seconds(sample),
                 0,
                 count,
                 range.fps.seconds(u64::from(range.end)),
+                f64::from(range.speed_quarters) / 4.0,
                 cancel,
             ) {
                 Ok(data) => pcm.extend(data),
@@ -244,6 +265,7 @@ struct Transport {
     running: bool,
     base: u64,
     status: Status,
+    permitted: u64,
 }
 impl Default for Transport {
     fn default() -> Self {
@@ -256,6 +278,7 @@ impl Default for Transport {
             running: false,
             base: 0,
             status: Status::default(),
+            permitted: u64::MAX,
         }
     }
 }
@@ -299,15 +322,25 @@ impl Transport {
                 device.reset()?;
                 self.running = false;
                 self.base = self.status.submitted;
-                self.status.underruns += 1;
+                if self.status.submitted < self.permitted {
+                    self.status.underruns += 1;
+                }
                 self.status.phase = Phase::Buffering;
                 self.status.levels = Levels::default();
             }
         }
-        if !self.running && self.buffered < PREROLL && !self.ended {
+        let allowed = self.permitted.saturating_sub(self.status.submitted);
+        if allowed == 0 {
+            return Ok(false);
+        }
+        if !self.running
+            && self.buffered < PREROLL.min(allowed.min(usize::MAX as u64) as usize)
+            && !self.ended
+        {
             return Ok(false);
         }
         let mut free = device.capacity() - if self.running { padding } else { 0 };
+        free = free.min(allowed.min(usize::MAX as u64) as usize);
         while free > 0 {
             let Some(block) = self.pending.front() else {
                 break;
@@ -342,6 +375,7 @@ fn run(
     range: Range,
     cancel: &Arc<AtomicBool>,
     status: &Mutex<Status>,
+    permitted: &AtomicU64,
 ) -> Result<(), String> {
     let _apartment = device::Apartment::new()?;
     let device = device::Device::open()?;
@@ -363,6 +397,7 @@ fn run(
                     }
                 }
             }
+            transport.permitted = permitted.load(Ordering::Acquire);
             let done = transport.tick(&device)?;
             *status.lock().unwrap() = transport.status.clone();
             if done {

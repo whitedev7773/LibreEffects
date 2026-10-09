@@ -1,0 +1,95 @@
+// Exact fractional box3: f64 arithmetic, transparent borders, byte truncation.
+.version 6.0
+.target sm_50
+.address_size 64
+.visible .entry fractional_column(
+ .param .u64 src, .param .u64 dst,
+ .param .u32 width, .param .u32 height, .param .u32 radius,
+ .param .f64 weight, .param .f64 divisor
+) {
+ .reg .pred %p<8>;
+ .reg .b32 %r<48>;
+ .reg .b64 %d<8>;
+ .reg .f64 %f<8>;
+ ld.param.u64 %d0, [src]; ld.param.u64 %d1, [dst];
+ ld.param.u32 %r0, [width]; ld.param.u32 %r1, [height];
+ ld.param.u32 %r2, [radius];
+ ld.param.f64 %f0, [weight]; ld.param.f64 %f1, [divisor];
+ mov.u32 %r3, %ctaid.x; mov.u32 %r4, %ntid.x; mov.u32 %r5, %tid.x;
+ mad.lo.u32 %r6, %r3, %r4, %r5;
+ setp.ge.u32 %p0, %r6, %r0; @%p0 bra DONE;
+ mov.u32 %r7, 0; mov.u32 %r8, 0; mov.u32 %r9, 0; mov.u32 %r10, 0;
+ mov.u32 %r11, 0; min.u32 %r12, %r2, %r1;
+INIT:
+ setp.ge.u32 %p1, %r11, %r12; @%p1 bra INIT_DONE;
+ mad.lo.u32 %r13, %r11, %r0, %r6; mul.wide.u32 %d2, %r13, 4;
+ add.u64 %d3, %d0, %d2; ld.global.u32 %r14, [%d3];
+ shr.u32 %r15, %r14, 0; and.b32 %r15, %r15, 255; add.u32 %r7, %r7, %r15;
+ shr.u32 %r16, %r14, 8; and.b32 %r16, %r16, 255; add.u32 %r8, %r8, %r16;
+ shr.u32 %r17, %r14, 16; and.b32 %r17, %r17, 255; add.u32 %r9, %r9, %r17;
+ shr.u32 %r18, %r14, 24; and.b32 %r18, %r18, 255; add.u32 %r10, %r10, %r18;
+ add.u32 %r11, %r11, 1; bra INIT;
+INIT_DONE:
+ mov.u32 %r19, 0;
+ROW:
+ sub.s32 %r24, %r19, %r2;
+ mov.u32 %r25, 0;
+ setp.ge.s32 %p2, %r24, 0;
+ @!%p2 bra LEFT_DONE;
+ mad.lo.u32 %r13, %r24, %r0, %r6; mul.wide.u32 %d2, %r13, 4;
+ add.u64 %d3, %d0, %d2; ld.global.u32 %r25, [%d3];
+LEFT_DONE:
+ add.u32 %r26, %r19, %r2; mov.u32 %r27, 0;
+ setp.lt.u32 %p3, %r26, %r1; @!%p3 bra RIGHT_DONE;
+ mad.lo.u32 %r13, %r26, %r0, %r6; mul.wide.u32 %d2, %r13, 4;
+ add.u64 %d3, %d0, %d2; ld.global.u32 %r27, [%d3];
+RIGHT_DONE:
+ shr.u32 %r28, %r25, 0; and.b32 %r28, %r28, 255;
+ shr.u32 %r32, %r27, 0; and.b32 %r32, %r32, 255;
+ add.u32 %r28, %r28, %r32; cvt.rn.f64.u32 %f2, %r28;
+ mul.rn.f64 %f2, %f2, %f0; cvt.rn.f64.u32 %f3, %r7;
+ add.rn.f64 %f2, %f3, %f2; div.rn.f64 %f2, %f2, %f1;
+ abs.f64 %f3, %f2; mul.rn.f64 %f3, %f3, 0d3D00000000000000;
+ add.rn.f64 %f2, %f2, %f3; max.f64 %f2, %f2, 0d0000000000000000;
+ min.f64 %f2, %f2, 0d406FE00000000000; cvt.rzi.u32.f64 %r20, %f2;
+ shr.u32 %r28, %r25, 8; and.b32 %r28, %r28, 255;
+ shr.u32 %r33, %r27, 8; and.b32 %r33, %r33, 255;
+ add.u32 %r28, %r28, %r33; cvt.rn.f64.u32 %f2, %r28;
+ mul.rn.f64 %f2, %f2, %f0; cvt.rn.f64.u32 %f3, %r8;
+ add.rn.f64 %f2, %f3, %f2; div.rn.f64 %f2, %f2, %f1;
+ abs.f64 %f3, %f2; mul.rn.f64 %f3, %f3, 0d3D00000000000000;
+ add.rn.f64 %f2, %f2, %f3; max.f64 %f2, %f2, 0d0000000000000000;
+ min.f64 %f2, %f2, 0d406FE00000000000; cvt.rzi.u32.f64 %r21, %f2;
+ shr.u32 %r28, %r25, 16; and.b32 %r28, %r28, 255;
+ shr.u32 %r34, %r27, 16; and.b32 %r34, %r34, 255;
+ add.u32 %r28, %r28, %r34; cvt.rn.f64.u32 %f2, %r28;
+ mul.rn.f64 %f2, %f2, %f0; cvt.rn.f64.u32 %f3, %r9;
+ add.rn.f64 %f2, %f3, %f2; div.rn.f64 %f2, %f2, %f1;
+ abs.f64 %f3, %f2; mul.rn.f64 %f3, %f3, 0d3D00000000000000;
+ add.rn.f64 %f2, %f2, %f3; max.f64 %f2, %f2, 0d0000000000000000;
+ min.f64 %f2, %f2, 0d406FE00000000000; cvt.rzi.u32.f64 %r22, %f2;
+ shr.u32 %r28, %r25, 24; and.b32 %r28, %r28, 255;
+ shr.u32 %r35, %r27, 24; and.b32 %r35, %r35, 255;
+ add.u32 %r28, %r28, %r35; cvt.rn.f64.u32 %f2, %r28;
+ mul.rn.f64 %f2, %f2, %f0; cvt.rn.f64.u32 %f3, %r10;
+ add.rn.f64 %f2, %f3, %f2; div.rn.f64 %f2, %f2, %f1;
+ abs.f64 %f3, %f2; mul.rn.f64 %f3, %f3, 0d3D00000000000000;
+ add.rn.f64 %f2, %f2, %f3; max.f64 %f2, %f2, 0d0000000000000000;
+ min.f64 %f2, %f2, 0d406FE00000000000; cvt.rzi.u32.f64 %r23, %f2;
+ shl.b32 %r21, %r21, 8; shl.b32 %r22, %r22, 16; shl.b32 %r23, %r23, 24;
+ or.b32 %r20, %r20, %r21; or.b32 %r20, %r20, %r22; or.b32 %r20, %r20, %r23;
+ mad.lo.u32 %r13, %r19, %r0, %r6; mul.wide.u32 %d2, %r13, 4;
+ add.u64 %d3, %d1, %d2; st.global.u32 [%d3], %r20;
+ add.s32 %r24, %r24, 1; mov.u32 %r25, 0;
+ setp.ge.s32 %p2, %r24, 0; @!%p2 bra REMOVE_DONE;
+ setp.lt.s32 %p2, %r24, %r1; @!%p2 bra REMOVE_DONE;
+ mad.lo.u32 %r13, %r24, %r0, %r6; mul.wide.u32 %d2, %r13, 4;
+ add.u64 %d3, %d0, %d2; ld.global.u32 %r25, [%d3];
+REMOVE_DONE:
+ shr.u32 %r28, %r25, 0; and.b32 %r28, %r28, 255; sub.u32 %r7, %r7, %r28; add.u32 %r7, %r7, %r32;
+ shr.u32 %r28, %r25, 8; and.b32 %r28, %r28, 255; sub.u32 %r8, %r8, %r28; add.u32 %r8, %r8, %r33;
+ shr.u32 %r28, %r25, 16; and.b32 %r28, %r28, 255; sub.u32 %r9, %r9, %r28; add.u32 %r9, %r9, %r34;
+ shr.u32 %r28, %r25, 24; and.b32 %r28, %r28, 255; sub.u32 %r10, %r10, %r28; add.u32 %r10, %r10, %r35;
+ add.u32 %r19, %r19, 1; setp.lt.u32 %p4, %r19, %r1; @%p4 bra ROW;
+DONE: ret;
+}

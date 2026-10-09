@@ -1,4 +1,6 @@
 mod badge;
+mod choice;
+pub(crate) use choice::Choice;
 mod button;
 mod context_menu;
 mod label;

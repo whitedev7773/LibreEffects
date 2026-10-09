@@ -47,6 +47,11 @@ pub(crate) struct Browser {
     by_type: bool,
     descending: bool,
     move_open: bool,
+    details_open: bool,
+    filters_open: bool,
+    menu_position: Option<gpui::Point<gpui::Pixels>>,
+    type_width: f32,
+    column_drag: Option<(f32, f32)>,
     interpretation_open: bool,
     usage_open: Option<ProjectItem>,
     usage_cache: Option<usage::Cache>,
@@ -99,6 +104,11 @@ impl Browser {
             by_type: false,
             descending: false,
             move_open: false,
+            details_open: false,
+            filters_open: false,
+            menu_position: None,
+            type_width: 58.0,
+            column_drag: None,
             interpretation_open: false,
             usage_open: None,
             usage_cache: None,
@@ -185,18 +195,46 @@ impl Browser {
         let mut element = ui::text_button(SharedString::from(format!("project-{item:?}")), "")
             .w_full()
             .min_w_0()
-            .h(px(29.0))
+            .h(px(22.0))
             .flex_none()
-            .gap_2()
+            .gap_1()
             .justify_start()
             .pl(px(12.0 + depth as f32 * 12.0))
             .pr_2()
             .when(item == selected, |s| s.bg(rgb(0x343434)))
+            .child(div().w(px(18.0)).flex_none().when_some(
+                match item {
+                    ProjectItem::Folder(id) => Some(id),
+                    _ => None,
+                },
+                |d, id| {
+                    d.child(
+                        ui::tool(
+                            SharedString::from(format!("folder-toggle-{id}")),
+                            if self.collapsed.contains(&id) {
+                                "chevron-right"
+                            } else {
+                                "chevron-down"
+                            },
+                            "Expand or collapse folder",
+                            false,
+                        )
+                        .size(px(18.0))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            cx.stop_propagation();
+                            this.toggle_folder(id, cx);
+                            cx.notify();
+                        })),
+                    )
+                },
+            ))
             .child(ui::icon(icon))
             .child(label)
             .child(
                 div()
                     .flex_none()
+                    .w(px(self.type_width + 5.0))
+                    .overflow_hidden()
                     .whitespace_nowrap()
                     .text_size(px(10.0))
                     .text_color(rgb(ui::MUTED))
@@ -207,6 +245,20 @@ impl Browser {
                     cx.stop_propagation();
                 }
             })
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                    this.state.update(cx, |s, cx| {
+                        s.project_item = Some(item);
+                        cx.notify();
+                    });
+                    this.menu_position = Some(event.position);
+                    window.focus(&this.focus);
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
             .on_click(
                 cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
                     window.focus(&this.focus);
@@ -221,57 +273,50 @@ impl Browser {
                     });
                 }),
             );
+        let mut actions = div().w(px(36.0)).flex_none().flex().items_center();
         match item {
-            ProjectItem::Folder(id) => {
-                element = element.child(
-                    ui::tool(
-                        SharedString::from(format!("folder-toggle-{id}")),
-                        if self.collapsed.contains(&id) {
-                            "chevron-right"
-                        } else {
-                            "chevron-down"
-                        },
-                        "Expand or collapse folder",
+            ProjectItem::Folder(_) => {}
+            ProjectItem::Asset(id) => {
+                actions = actions.child(
+                    ui::action_tool(
+                        SharedString::from(format!("asset-add-{id}")),
+                        "plus",
+                        "Add footage at playhead",
+                        &self.state,
+                        Action::Edit(Command::AddAssetLayer { asset: id, frame }),
                         false,
                     )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        cx.stop_propagation();
-                        this.toggle_folder(id, cx);
-                        cx.notify();
-                    })),
+                    .size(px(18.0)),
                 );
             }
-            ProjectItem::Asset(id) => {
-                element = element.child(ui::action_tool(
-                    SharedString::from(format!("asset-add-{id}")),
-                    "plus",
-                    "Add footage at playhead",
-                    &self.state,
-                    Action::Edit(Command::AddAssetLayer { asset: id, frame }),
-                    false,
-                ));
-            }
             ProjectItem::Composition(id) => {
-                element = element.child(ui::action_tool(
-                    SharedString::from(format!("comp-open-{id}")),
-                    "arrow-right",
-                    "Open composition",
-                    &self.state,
-                    Action::ActivateComposition(id),
-                    false,
-                ));
-                if id != active {
-                    element = element.child(ui::action_tool(
-                        SharedString::from(format!("comp-add-{id}")),
-                        "plus",
-                        "Add to active composition",
+                actions = actions.child(
+                    ui::action_tool(
+                        SharedString::from(format!("comp-open-{id}")),
+                        "arrow-right",
+                        "Open composition",
                         &self.state,
-                        Action::AddComposition(id),
+                        Action::ActivateComposition(id),
                         false,
-                    ));
+                    )
+                    .size(px(18.0)),
+                );
+                if id != active {
+                    actions = actions.child(
+                        ui::action_tool(
+                            SharedString::from(format!("comp-add-{id}")),
+                            "plus",
+                            "Add to active composition",
+                            &self.state,
+                            Action::AddComposition(id),
+                            false,
+                        )
+                        .size(px(18.0)),
+                    );
                 }
             }
         }
+        element = element.child(actions);
         element
     }
 }
@@ -450,7 +495,9 @@ impl Render for Browser {
         self.name.update(cx, |field, _| {
             field.sync(format!("{selected:?}"), name, window)
         });
-        self.load_thumbnail(&project, selected, window, cx);
+        if self.details_open {
+            self.load_thumbnail(&project, selected, window, cx);
+        }
         let mut thumb = div()
             .w(px(72.0))
             .h(px(45.0))
@@ -505,10 +552,23 @@ impl Render for Browser {
         );
         let mut panel = div()
             .id("project-browser")
+            .border_1()
+            .border_color(rgb(ui::BORDER))
+            .focus(|s| s.border_color(rgb(ui::BLUE)))
             .track_focus(&self.focus)
             .tab_index(0)
             .capture_key_down(cx.listener(Self::tab_key))
-            .on_key_down(cx.listener(Self::browsing_key))
+            .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+                if this.menu_position.is_some() {
+                    if event.keystroke.key == "escape" {
+                        this.menu_position = None;
+                        cx.notify();
+                    }
+                    cx.stop_propagation();
+                } else {
+                    this.browsing_key(event, window, cx);
+                }
+            }))
             .flex()
             .flex_col()
             .size_full()
@@ -516,32 +576,36 @@ impl Render for Browser {
             .bg(rgb(ui::BG))
             .overflow_hidden()
             .child(tabs)
-            .child(
-                div()
-                    .flex()
-                    .gap_3()
-                    .p_3()
-                    .h(px(110.0))
-                    .flex_none()
-                    .child(thumb)
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .text_size(px(11.0))
-                            .child(self.name.clone())
-                            .children(details.into_iter().map(|line| {
-                                div()
-                                    .overflow_hidden()
-                                    .text_color(rgb(ui::MUTED))
-                                    .child(line)
-                            })),
-                    ),
-            )
-            .child(self.usage_details(&project, selected, cx))
+            .when(self.details_open, |d| {
+                d.child(
+                    div()
+                        .flex()
+                        .gap_3()
+                        .p_3()
+                        .h(px(96.0))
+                        .flex_none()
+                        .child(thumb)
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .text_size(px(11.0))
+                                .child(self.name.clone())
+                                .children(details.into_iter().map(|line| {
+                                    div()
+                                        .overflow_hidden()
+                                        .text_color(rgb(ui::MUTED))
+                                        .child(line)
+                                })),
+                        ),
+                )
+            })
+            .when(self.usage_open == Some(selected), |d| {
+                d.child(self.usage_details(&project, selected, cx))
+            })
             .child(
                 div()
                     .flex()
@@ -563,6 +627,40 @@ impl Render for Browser {
                     .child(div().flex_1().min_w_0().child(self.search.clone()))
                     .child(
                         ui::tool(
+                            "project-filters",
+                            "magnifier",
+                            "Show Project type filters",
+                            self.filters_open,
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.filters_open = !this.filters_open;
+                            cx.notify();
+                            cx.stop_propagation();
+                        })),
+                    )
+                    .child(
+                        ui::tool(
+                            "project-actions",
+                            "chevron-down",
+                            "Project item actions (also right-click an item)",
+                            false,
+                        )
+                        .on_key_down(|e, _, cx| {
+                            if matches!(e.keystroke.key.as_str(), "enter" | "space") {
+                                cx.stop_propagation();
+                            }
+                        })
+                        .on_click(cx.listener(
+                            |this, event: &gpui::ClickEvent, window, cx| {
+                                this.menu_position = Some(event.position());
+                                window.focus(&this.focus);
+                                cx.notify();
+                                cx.stop_propagation();
+                            },
+                        )),
+                    )
+                    .child(
+                        ui::tool(
                             "project-clear-filters",
                             "xmark",
                             "Clear Project search and type filter",
@@ -579,43 +677,47 @@ impl Render for Browser {
                         ),
                     ),
             )
-            .child(self.type_filters(cx))
-            .child(
-                div()
-                    .flex()
-                    .h(px(25.0))
-                    .px_2()
-                    .items_center()
-                    .child(
-                        ui::text_button("project-move", format!("Move to… · {path}"))
-                            .flex_1()
-                            .overflow_hidden()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.move_open = !this.move_open;
-                                cx.notify();
-                            })),
-                    )
-                    .when(matches!(selected, ProjectItem::Asset(_)), |d| {
-                        d.child(ui::action_tool(
-                            "delete-project-asset",
-                            "trash-bin",
-                            "Delete unused source",
-                            &self.state,
-                            Action::Edit(Command::DeleteProjectItem(selected)),
-                            false,
-                        ))
-                    })
-                    .when(matches!(selected, ProjectItem::Folder(_)), |d| {
-                        d.child(ui::action_tool(
-                            "delete-project-folder",
-                            "trash-bin",
-                            "Delete empty folder",
-                            &self.state,
-                            Action::Edit(Command::DeleteProjectItem(selected)),
-                            false,
-                        ))
-                    }),
-            );
+            .when(self.filters_open || self.item_type != ItemType::All, |d| {
+                d.child(self.type_filters(cx))
+            })
+            .when(self.move_open, |d| {
+                d.child(
+                    div()
+                        .flex()
+                        .h(px(25.0))
+                        .px_2()
+                        .items_center()
+                        .child(
+                            ui::text_button("project-move", format!("Move to… · {path}"))
+                                .flex_1()
+                                .overflow_hidden()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.move_open = !this.move_open;
+                                    cx.notify();
+                                })),
+                        )
+                        .when(matches!(selected, ProjectItem::Asset(_)), |d| {
+                            d.child(ui::action_tool(
+                                "delete-project-asset",
+                                "trash-bin",
+                                "Delete unused source",
+                                &self.state,
+                                Action::Edit(Command::DeleteProjectItem(selected)),
+                                false,
+                            ))
+                        })
+                        .when(matches!(selected, ProjectItem::Folder(_)), |d| {
+                            d.child(ui::action_tool(
+                                "delete-project-folder",
+                                "trash-bin",
+                                "Delete empty folder",
+                                &self.state,
+                                Action::Edit(Command::DeleteProjectItem(selected)),
+                                false,
+                            ))
+                        }),
+                )
+            });
         if self.move_open {
             let mut destinations = vec![(None, "Project root".to_owned())];
             destinations.extend(
@@ -668,42 +770,46 @@ impl Render for Browser {
             );
         }
         if let ProjectItem::Asset(id) = selected {
-            panel = panel.child(
-                div()
-                    .flex()
-                    .px_2()
-                    .gap_1()
-                    .when(
-                        !matches!(
-                            project.asset_library().assets()[&id].content(),
-                            Content::Audio { .. }
+            panel = panel.when(self.interpretation_open, |d| {
+                d.child(
+                    div()
+                        .flex()
+                        .px_2()
+                        .gap_1()
+                        .when(
+                            !matches!(
+                                project.asset_library().assets()[&id].content(),
+                                Content::Audio { .. }
+                            ),
+                            |d| {
+                                d.child(
+                                    ui::text_button("interpret-footage", "Interpret footage…")
+                                        .flex_1()
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.interpretation_open = !this.interpretation_open;
+                                            cx.notify();
+                                        })),
+                                )
+                            },
+                        )
+                        .child(
+                            ui::text_button("comp-from-footage", "New comp from source").on_click(
+                                {
+                                    let state = self.state.clone();
+                                    move |_, window, cx| {
+                                        state.update(cx, |s, cx| {
+                                            s.dispatch(
+                                                &Action::Edit(Command::CompositionFromAsset(id)),
+                                                window,
+                                                cx,
+                                            )
+                                        });
+                                    }
+                                },
+                            ),
                         ),
-                        |d| {
-                            d.child(
-                                ui::text_button("interpret-footage", "Interpret footage…")
-                                    .flex_1()
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.interpretation_open = !this.interpretation_open;
-                                        cx.notify();
-                                    })),
-                            )
-                        },
-                    )
-                    .child(
-                        ui::text_button("comp-from-footage", "New comp from source").on_click({
-                            let state = self.state.clone();
-                            move |_, window, cx| {
-                                state.update(cx, |s, cx| {
-                                    s.dispatch(
-                                        &Action::Edit(Command::CompositionFromAsset(id)),
-                                        window,
-                                        cx,
-                                    )
-                                });
-                            }
-                        }),
-                    ),
-            );
+                )
+            });
             if self.interpretation_open
                 && !matches!(
                     project.asset_library().assets()[&id].content(),
@@ -759,6 +865,115 @@ impl Render for Browser {
                 );
             }
         }
+        panel = panel
+            .on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _, cx| {
+                if let Some((x, width)) = this.column_drag {
+                    this.type_width = (width + x - f32::from(event.position.x)).clamp(24.0, 150.0);
+                    cx.notify();
+                }
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| {
+                    this.column_drag = None;
+                    cx.notify();
+                }),
+            )
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| {
+                    this.column_drag = None;
+                    cx.notify();
+                }),
+            );
+        if let Some(position) = self.menu_position {
+            let mut menu = div()
+                .id("project-actions-menu")
+                .w(px(225.0))
+                .p_1()
+                .bg(rgb(ui::PANEL))
+                .border_1()
+                .border_color(rgb(ui::BLUE))
+                .occlude()
+                .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                    this.menu_position = None;
+                    cx.notify();
+                }));
+            for (index, label) in [
+                "Item details",
+                "Show uses",
+                "Move to folder…",
+                "Interpret footage…",
+                "New composition from source",
+                "Delete unused item",
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let disabled = match index {
+                    1 => matches!(selected, ProjectItem::Folder(_)),
+                    3 | 4 => !matches!(selected, ProjectItem::Asset(_)),
+                    _ => false,
+                };
+                menu = menu.child(
+                    ui::text_button(("project-action", index), label)
+                        .when(disabled, |d| d.opacity(0.35))
+                        .w_full()
+                        .justify_start()
+                        .on_key_down(|e, _, cx| {
+                            if matches!(e.keystroke.key.as_str(), "enter" | "space") {
+                                cx.stop_propagation();
+                            }
+                        })
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.menu_position = None;
+                            match index {
+                                0 => this.details_open = !this.details_open,
+                                1 => {
+                                    this.usage_open = if this.usage_open == Some(selected) {
+                                        None
+                                    } else {
+                                        Some(selected)
+                                    }
+                                }
+                                2 => this.move_open = !this.move_open,
+                                3 => this.interpretation_open = !this.interpretation_open,
+                                4 => {
+                                    if let ProjectItem::Asset(id) = selected {
+                                        this.state.update(cx, |s, cx| {
+                                            s.dispatch(
+                                                &Action::Edit(Command::CompositionFromAsset(id)),
+                                                window,
+                                                cx,
+                                            )
+                                        });
+                                    }
+                                }
+                                _ => {
+                                    this.state.update(cx, |s, cx| {
+                                        s.dispatch(
+                                            &Action::Edit(Command::DeleteProjectItem(selected)),
+                                            window,
+                                            cx,
+                                        )
+                                    });
+                                }
+                            }
+                            cx.notify();
+                            cx.stop_propagation();
+                        })),
+                );
+            }
+            panel = panel.child(
+                gpui::deferred(
+                    gpui::anchored()
+                        .position(position)
+                        .snap_to_window_with_margin(px(8.0))
+                        .child(menu),
+                )
+                .with_priority(2),
+            );
+        }
         panel
             .child(
                 div()
@@ -788,14 +1003,21 @@ impl Render for Browser {
                         })),
                     )
                     .child(
-                        ui::text_button("project-sort-type", "Type").on_click(cx.listener(
+                        div().id("project-column-divider").w(px(5.0)).h_full().cursor_col_resize().hover(|d| d.bg(rgb(ui::BLUE)))
+                            .on_mouse_down(MouseButton::Left, cx.listener(|this, event: &gpui::MouseDownEvent, window, cx| {
+                                this.column_drag = Some((f32::from(event.position.x), this.type_width)); window.prevent_default(); cx.stop_propagation();
+                            }))
+                    )
+                    .child(
+                        ui::text_button("project-sort-type", "Type").w(px(self.type_width)).flex_none().px_0().justify_start().on_click(cx.listener(
                             |this, _, _, cx| {
                                 this.descending = this.by_type && !this.descending;
                                 this.by_type = true;
                                 cx.notify();
                             },
                         )),
-                    ),
+                    )
+                    .child(div().w(px(36.0)).flex_none()),
             )
             .child(
                 div()

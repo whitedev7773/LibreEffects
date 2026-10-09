@@ -28,6 +28,12 @@ impl GraphView {
     }
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct LayerTree {
+    pub expanded: std::collections::BTreeSet<libre_effects_core::LayerId>,
+    pub collapsed_groups: std::collections::BTreeSet<(libre_effects_core::LayerId, String)>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct CompositionView {
@@ -42,6 +48,8 @@ pub(crate) struct CompositionView {
     pub graph_open: bool,
     pub graph_view: GraphView,
     pub expanded: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layer_tree: Option<LayerTree>,
     #[serde(default, skip_serializing_if = "GraphChannels::is_legacy")]
     pub graph_channels: GraphChannels,
 }
@@ -53,12 +61,13 @@ impl Default for CompositionView {
             timeline_zoom: 1.0,
             preview_zoom: None,
             preview_pan: [0.0; 2],
-            preview_resolution: 1,
+            preview_resolution: 0,
             checkerboard: false,
             viewer: Default::default(),
             graph_open: false,
             graph_view: Default::default(),
-            expanded: true,
+            expanded: false,
+            layer_tree: None,
             graph_channels: Default::default(),
         }
     }
@@ -80,7 +89,7 @@ impl CompositionView {
         self.timeline_start = self.timeline_start.min(duration.saturating_sub(visible));
         self.preview_zoom = self.preview_zoom.map(|v| finite(v, 0.5, 0.0625, 8.0));
         self.preview_pan = self.preview_pan.map(|v| finite(v, 0.0, -32768.0, 32768.0));
-        if !matches!(self.preview_resolution, 1 | 2 | 4) {
+        if !matches!(self.preview_resolution, 0 | 1 | 2 | 4) {
             self.preview_resolution = 1;
         }
     }
@@ -102,8 +111,8 @@ impl Default for WorkspaceView {
     fn default() -> Self {
         Self {
             fractions: [0.84, 0.20, 0.615, 0.615],
-            timeline_left: 560.0,
-            sidebar_expanded: [true, false, false, false],
+            timeline_left: 640.0,
+            sidebar_expanded: [false, false, true, false],
             extra_sidebar_expanded: [false; 3],
             effect_controls_open: false,
             snapping: true,
@@ -112,7 +121,31 @@ impl Default for WorkspaceView {
     }
 }
 impl WorkspaceView {
-    fn normalize(&mut self) {
+    /// Layout presets use existing VIEW fields; they never change project content.
+    pub fn preset(preset: WorkspacePreset) -> Self {
+        let mut view = Self::default();
+        view.timeline_left = 640.0;
+        view.sidebar_expanded = [false, false, true, false];
+        match preset {
+            WorkspacePreset::Standard => {}
+            WorkspacePreset::SmallScreen => {
+                view.fractions = [0.80, 0.18, 0.56, 0.78];
+                view.timeline_left = 540.0;
+            }
+            WorkspacePreset::Effects => {
+                view.fractions = [0.77, 0.22, 0.62, 0.80];
+                view.sidebar_expanded = [false, false, false, true];
+                view.effect_controls_open = true;
+            }
+            WorkspacePreset::Text => {
+                view.fractions = [0.79, 0.18, 0.62, 0.80];
+                view.extra_sidebar_expanded = [false, true, true];
+                view.sidebar_expanded = [false; 4];
+            }
+        }
+        view
+    }
+    pub(crate) fn normalize(&mut self) {
         for (i, min) in [0.12, 0.12, 0.22, 0.20].into_iter().enumerate() {
             self.fractions[i] = finite(
                 self.fractions[i],
@@ -121,7 +154,31 @@ impl WorkspaceView {
                 1.0 - min,
             );
         }
-        self.timeline_left = finite(self.timeline_left, 560.0, 380.0, 800.0);
+        self.timeline_left = finite(
+            self.timeline_left,
+            Self::default().timeline_left,
+            380.0,
+            800.0,
+        );
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WorkspacePreset {
+    Standard,
+    SmallScreen,
+    Effects,
+    Text,
+}
+impl WorkspacePreset {
+    pub const ALL: [Self; 4] = [Self::Standard, Self::SmallScreen, Self::Effects, Self::Text];
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Standard => "Standard",
+            Self::SmallScreen => "Small Screen",
+            Self::Effects => "Effects",
+            Self::Text => "Text",
+        }
     }
 }
 
@@ -147,6 +204,11 @@ impl ProjectViews {
             if let Some(comp) = project.composition_by_id(*id) {
                 view.normalize(comp.duration());
                 view.graph_channels.prune(comp);
+                if let Some(tree) = &mut view.layer_tree {
+                    tree.expanded.retain(|id| comp.layer(*id).is_some());
+                    tree.collapsed_groups
+                        .retain(|(id, group)| comp.layer(*id).is_some() && group.len() <= 128);
+                }
                 true
             } else {
                 false
@@ -154,6 +216,12 @@ impl ProjectViews {
         });
         self.workspace.normalize();
         self.version = if self
+            .compositions
+            .values()
+            .any(|view| view.layer_tree.is_some())
+        {
+            3
+        } else if self
             .compositions
             .values()
             .any(|v| !v.graph_channels.is_legacy())
@@ -202,8 +270,10 @@ impl ProjectViews {
             "editor view",
         )?;
         let version = root.get("version").and_then(|version| version.as_u64());
-        if !matches!(version, Some(1 | 2)) {
-            return Err("Unsupported native editor view version; expected version 1 or 2".into());
+        if !matches!(version, Some(1 | 2 | 3)) {
+            return Err(
+                "Unsupported native editor view version; expected version 1, 2 or 3".into(),
+            );
         }
         let compositions = root
             .get("compositions")
@@ -234,10 +304,28 @@ impl ProjectViews {
                     "graph_open",
                     "graph_view",
                     "expanded",
+                    "layer_tree",
                     "graph_channels",
                 ],
                 "composition view",
             )?;
+            if let Some(tree) = view.get("layer_tree") {
+                if version != Some(3) {
+                    return Err(
+                        "Independent layer trees require native editor view version 3".into(),
+                    );
+                }
+                let tree = object(tree, &["expanded", "collapsed_groups"], "layer tree")?;
+                for key in ["expanded", "collapsed_groups"] {
+                    if tree
+                        .get(key)
+                        .and_then(|v| v.as_array())
+                        .is_none_or(|values| values.len() > 20000)
+                    {
+                        return Err("Invalid or oversized layer tree".into());
+                    }
+                }
+            }
             if version == Some(1) && view.contains_key("graph_channels") {
                 return Err("Graph channels require native editor view version 2".into());
             }
@@ -313,20 +401,13 @@ impl ProjectViews {
         Ok(bytes)
     }
     fn for_encoding(&self, project: &Project) -> Result<Self, String> {
-        if !matches!(self.version, 1 | 2) {
-            return Err("Unsupported native editor view version; expected version 1 or 2".into());
+        if !matches!(self.version, 1 | 2 | 3) {
+            return Err(
+                "Unsupported native editor view version; expected version 1, 2 or 3".into(),
+            );
         }
         let mut views = self.clone();
         views.normalize(project);
-        views.version = if views
-            .compositions
-            .values()
-            .any(|v| !v.graph_channels.is_legacy())
-        {
-            2
-        } else {
-            1
-        };
         Ok(views)
     }
     pub fn write(&self, project: &Project) -> Result<String, String> {
@@ -423,13 +504,35 @@ fn strict_view_json(bytes: &[u8]) -> Result<serde_json::Value, String> {
 mod tests {
     use super::*;
     #[test]
+    fn ae_workspaces_roundtrip_existing_native_view_schema_without_authored_edits() {
+        let project = Project::default();
+        let original = project.clone();
+        for preset in WorkspacePreset::ALL {
+            let views = ProjectViews {
+                workspace: WorkspaceView::preset(preset),
+                ..Default::default()
+            };
+            let encoded = views.encode_native(&project).unwrap();
+            let restored = ProjectViews::read_native(&encoded, &project).unwrap();
+            assert_eq!(restored.workspace, views.workspace, "{preset:?}");
+            assert_eq!(project, original);
+        }
+        assert!(WorkspaceView::preset(WorkspacePreset::Standard).sidebar_expanded[2]);
+        assert!(WorkspaceView::preset(WorkspacePreset::Effects).effect_controls_open);
+        assert!(WorkspaceView::preset(WorkspacePreset::Text).extra_sidebar_expanded[1]);
+        assert!(
+            WorkspaceView::preset(WorkspacePreset::SmallScreen).timeline_left
+                < WorkspaceView::preset(WorkspacePreset::Standard).timeline_left
+        );
+    }
+    #[test]
     fn native_views_reject_future_versions_shapes_and_unknown_fields() {
         let project = Project::default();
         let valid = ProjectViews::default().encode_native(&project).unwrap();
         let base: serde_json::Value = serde_json::from_slice(&valid).unwrap();
         let mut invalid = Vec::new();
         for value in [
-            serde_json::json!(3),
+            serde_json::json!(4),
             serde_json::json!("1"),
             serde_json::Value::Null,
         ] {
@@ -553,6 +656,7 @@ mod tests {
                     height: Some([-200.0, 300.0]),
                 },
                 expanded: false,
+                layer_tree: None,
                 graph_channels: Default::default(),
             },
         );
@@ -603,7 +707,7 @@ mod tests {
                 timeline_zoom: -1.0,
                 preview_zoom: Some(f32::INFINITY),
                 preview_pan: [f32::NAN, 999999.0],
-                preview_resolution: 0,
+                preview_resolution: 7,
                 ..Default::default()
             },
         );
@@ -653,8 +757,12 @@ mod tests {
         let views = ProjectViews::default();
         assert_eq!(
             String::from_utf8(views.encode_native(&project).unwrap()).unwrap(),
-            r#"{"version":1,"compositions":{},"workspace":{"fractions":[0.84,0.2,0.615,0.615],"timeline_left":560.0,"sidebar_expanded":[true,false,false,false],"extra_sidebar_expanded":[false,false,false],"effect_controls_open":false,"snapping":true,"align_to_selection":false}}"#
+            r#"{"version":1,"compositions":{},"workspace":{"fractions":[0.84,0.2,0.615,0.615],"timeline_left":640.0,"sidebar_expanded":[false,false,true,false],"extra_sidebar_expanded":[false,false,false],"effect_controls_open":false,"snapping":true,"align_to_selection":false}}"#
         );
+        // Saved legacy layouts retain their exact bytes despite the new UI defaults.
+        let legacy = br#"{"version":1,"compositions":{},"workspace":{"fractions":[0.84,0.2,0.615,0.615],"timeline_left":560.0,"sidebar_expanded":[true,false,false,false],"extra_sidebar_expanded":[false,false,false],"effect_controls_open":false,"snapping":true,"align_to_selection":false}}"#;
+        let loaded = ProjectViews::read_native(legacy, &project).unwrap();
+        assert_eq!(loaded.encode_native(&project).unwrap(), legacy);
         let mut views = views;
         views.compositions.insert(
             1,
@@ -725,7 +833,7 @@ mod tests {
         let bytes = views.encode_native(&project).unwrap();
         let base: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         let mut invalid = Vec::new();
-        for version in [0, 1, 3, 999] {
+        for version in [0, 1, 4, 999] {
             let mut value = base.clone();
             value["version"] = version.into();
             invalid.push(value);

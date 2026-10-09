@@ -838,4 +838,59 @@ fn main() {
     println!(
         "PASS: JSX selected during an expression batch waits for its worker permit and then succeeds"
     );
+    let mut session = automation_process::ExpressionSession::default();
+    let cancel = AtomicBool::new(false);
+    for batch in 0..40 {
+        let mut next = snapshot.clone();
+        next.time = batch as f64 / 60.0;
+        next.sources[1] = if batch % 2 == 0 {
+            "value + time * 3".into()
+        } else {
+            "value + 12".into()
+        };
+        let expected = if batch % 2 == 0 {
+            80.0 + next.time * 3.0
+        } else {
+            92.0
+        };
+        let actual = session
+            .evaluate(&next, &roots, &cancel, Duration::from_secs(2))
+            .unwrap();
+        assert_eq!(
+            actual.get(&roots[1]),
+            Some(&ae::PropertyValue::Scalar(expected))
+        );
+    }
+    println!(
+        "PASS: 40 reused-process batches preserve fresh time/source identities across recycling"
+    );
+    let mut runaway = snapshot.clone();
+    runaway.sources[1] = "3n ** 33554432n; value".into();
+    let started = Instant::now();
+    let failure = session
+        .evaluate(&runaway, &roots, &cancel, Duration::from_millis(150))
+        .unwrap_err();
+    assert_eq!(failure.kind, ae::EvaluationErrorKind::Budget);
+    assert!(started.elapsed() < Duration::from_secs(3));
+    assert!(!automation_process::worker_active());
+    let actual = session
+        .evaluate(&snapshot, &roots, &cancel, Duration::from_secs(2))
+        .unwrap();
+    assert_eq!(
+        actual.get(&roots[1]),
+        Some(&ae::PropertyValue::Scalar(83.0))
+    );
+    cancel.store(true, Ordering::Relaxed);
+    assert_eq!(
+        session
+            .evaluate(&snapshot, &roots, &cancel, Duration::from_secs(2))
+            .unwrap_err()
+            .kind,
+        ae::EvaluationErrorKind::Canceled
+    );
+    session.clear();
+    assert!(!automation_process::worker_active());
+    println!(
+        "PASS: reused expression worker native timeout/cancellation reaps and recovers cleanly"
+    );
 }

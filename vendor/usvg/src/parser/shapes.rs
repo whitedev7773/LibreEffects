@@ -25,6 +25,9 @@ pub(crate) fn convert(node: SvgNode, state: &converter::State) -> Option<Arc<Pat
 
 pub(crate) fn convert_path(node: SvgNode) -> Option<Arc<Path>> {
     let value: &str = node.attribute(AId::D)?;
+    if let Some(path) = crate::path_cache::get(value) {
+        return Some(path);
+    }
     let mut builder = tiny_skia_path::PathBuilder::new();
     for segment in svgtypes::SimplifyingPathParser::from(value) {
         let segment = match segment {
@@ -60,7 +63,9 @@ pub(crate) fn convert_path(node: SvgNode) -> Option<Arc<Path>> {
         }
     }
 
-    builder.finish().map(Arc::new)
+    let path = Arc::new(builder.finish()?);
+    crate::path_cache::insert(value, path.clone());
+    Some(path)
 }
 
 fn convert_rect(node: SvgNode, state: &converter::State) -> Option<Arc<Path>> {

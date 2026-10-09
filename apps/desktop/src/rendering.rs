@@ -208,7 +208,14 @@ pub(crate) struct Renderer {
     pub(crate) options: resvg::usvg::Options<'static>,
     decoders: std::sync::Mutex<crate::video_decoder::Pool>,
     audio_analysis: std::sync::Mutex<crate::audio_analysis::AudioAnalysis>,
+    expression_worker: std::sync::Mutex<crate::automation_process::ExpressionSession>,
     cancel: Arc<std::sync::atomic::AtomicBool>,
+    image_sources: Arc<std::sync::Mutex<crate::render_images::Sources>>,
+    raster_images: Arc<std::sync::Mutex<resvg::RasterImageCache>>,
+    pub(crate) raster_scenes: std::sync::Mutex<crate::raster_scenes::Cache>,
+    filter_cache: Arc<std::sync::Mutex<resvg::FilterCache>>,
+    text_compositions: Arc<std::sync::Mutex<crate::rich_text_render::CompositionCache>>,
+    paths: Arc<std::sync::Mutex<resvg::usvg::PathCache>>,
     #[cfg(test)]
     contents_budget: libre_effects_core::ContentsRenderBudget,
 }
@@ -471,16 +478,36 @@ fn count_layer(budget: &mut FrameRenderBudget) -> Result<(), String> {
 }
 
 impl Renderer {
+    pub(crate) fn filter_cache_hits(&self) -> u64 {
+        self.filter_cache.lock().unwrap().hits()
+    }
+    pub(crate) fn decoder_status(&self) -> crate::video_decoder::Status {
+        self.decoders.lock().unwrap().status()
+    }
     pub fn new() -> Self {
         Self::with_cancel(Default::default())
     }
     pub fn with_cancel(cancel: Arc<std::sync::atomic::AtomicBool>) -> Self {
-        let options = crate::fonts::render_options();
+        let mut options = crate::fonts::render_options();
+        options.image_href_resolver.resolve_string = crate::render_images::resolver();
         Self {
             options,
             decoders: Default::default(),
             audio_analysis: Default::default(),
             cancel,
+            expression_worker: Default::default(),
+            image_sources: Default::default(),
+            raster_scenes: Default::default(),
+            filter_cache: Arc::new(std::sync::Mutex::new(resvg::FilterCache::new(
+                128 * 1024 * 1024,
+            ))),
+            text_compositions: Default::default(),
+            paths: Arc::new(std::sync::Mutex::new(resvg::usvg::PathCache::new(
+                16 * 1024 * 1024,
+            ))),
+            raster_images: Arc::new(std::sync::Mutex::new(resvg::RasterImageCache::new(
+                128 * 1024 * 1024,
+            ))),
             #[cfg(test)]
             contents_budget: TEST_CONTENTS_BUDGET
                 .with(|budget| budget.borrow().clone().unwrap_or_default()),
@@ -507,8 +534,18 @@ impl Renderer {
     pub fn clear_decoders(&self) {
         self.decoders.lock().unwrap().clear();
         *self.audio_analysis.lock().unwrap() = Default::default();
+        self.expression_worker.lock().unwrap().clear();
+        self.image_sources.lock().unwrap().clear();
+        self.raster_images.lock().unwrap().clear();
+        self.raster_scenes.lock().unwrap().clear();
+        self.filter_cache.lock().unwrap().clear();
+        self.text_compositions.lock().unwrap().clear();
+        self.paths.lock().unwrap().clear();
     }
-    fn check_cancel(&self) -> Result<(), String> {
+    pub(crate) fn path_cache_hits(&self) -> u64 {
+        self.paths.lock().map_or(0, |s| s.hits())
+    }
+    pub(crate) fn check_cancel(&self) -> Result<(), String> {
         crate::video_decoder::check_cancel(&self.cancel)
     }
     fn expression_view(
@@ -519,6 +556,7 @@ impl Renderer {
         include_guides: bool,
         budget: &mut FrameRenderBudget,
     ) -> Result<Option<Arc<Project>>, String> {
+        let _time = crate::gpu_render::time(crate::gpu_render::Stage::Expression);
         let sample = budget
             .sample_times
             .get(&composition)
@@ -578,32 +616,37 @@ impl Renderer {
                 return Err("A frame exceeds 128 expression composition/time evaluations".into());
             }
             let snapshot = source.expression_snapshot_at_sample(composition, sample)?;
-            let values = crate::automation_process::evaluate_expressions(
-                &snapshot,
-                &roots,
-                self.cancel.clone(),
-            )
-            .map_err(|error| {
-                let property = error
-                    .property
-                    .as_ref()
-                    .map(|property| {
-                        let layer = source
-                            .composition_by_id(property.composition.0)
-                            .and_then(|comp| comp.layer(property.layer.0));
-                        format!(
-                            " · layer '{}' ({}) {:?}",
-                            layer.map_or("unknown", |layer| layer.name()),
-                            property.layer.0,
-                            property.property
-                        )
-                    })
-                    .unwrap_or_default();
-                format!(
-                    "Expression {:?} in composition {composition}{property}: {}",
-                    error.kind, error.message
+            let values = self
+                .expression_worker
+                .lock()
+                .map_err(|_| "Expression worker is unavailable")?
+                .evaluate(
+                    &snapshot,
+                    &roots,
+                    &self.cancel,
+                    std::time::Duration::from_secs(2),
                 )
-            })?;
+                .map_err(|error| {
+                    let property = error
+                        .property
+                        .as_ref()
+                        .map(|property| {
+                            let layer = source
+                                .composition_by_id(property.composition.0)
+                                .and_then(|comp| comp.layer(property.layer.0));
+                            format!(
+                                " · layer '{}' ({}) {:?}",
+                                layer.map_or("unknown", |layer| layer.name()),
+                                property.layer.0,
+                                property.property
+                            )
+                        })
+                        .unwrap_or_default();
+                    format!(
+                        "Expression {:?} in composition {composition}{property}: {}",
+                        error.kind, error.message
+                    )
+                })?;
             let values = Arc::new(values);
             budget.expression_values.insert(key, values.clone());
             values
@@ -1094,10 +1137,11 @@ impl Renderer {
             }
             Content::Image { png } => {
                 let png = crate::source_render::alpha_png(png, l.footage_interpretation())?;
+                let href = crate::render_images::href(&png)?;
                 append_svg(
                     &mut svg,
                     format_args!(
-                        "<image width='{}' height='{}' xlink:href='data:image/png;base64,{png}'/>",
+                        "<image width='{}' height='{}' xlink:href='{href}'/>",
                         l.width(),
                         l.height()
                     ),
@@ -1154,10 +1198,11 @@ impl Renderer {
                         l.height() as u32,
                         l.footage_interpretation(),
                     )? {
+                        let href = crate::render_images::href(&png)?;
                         append_svg(
                             &mut svg,
                             format_args!(
-                                "<image width='{}' height='{}' xlink:href='data:image/png;base64,{png}'/>",
+                                "<image width='{}' height='{}' xlink:href='{href}'/>",
                                 l.width(),
                                 l.height()
                             ),
@@ -1188,10 +1233,11 @@ impl Renderer {
                         &self.cancel,
                     )?;
                     let png = crate::source_render::alpha_png(&png, interpretation)?;
+                    let href = crate::render_images::href(&png)?;
                     append_svg(
                         &mut svg,
                         format_args!(
-                            "<image width='{}' height='{}' xlink:href='data:image/png;base64,{png}'/>",
+                            "<image width='{}' height='{}' xlink:href='{href}'/>",
                             l.width(),
                             l.height()
                         ),
@@ -1288,6 +1334,14 @@ impl Renderer {
         include_guides: bool,
         output_size: Option<[u32; 2]>,
     ) -> Result<RenderedFrame, String> {
+        let _hardware = crate::gpu_render::begin_frame();
+        let _paths = resvg::usvg::install_path_cache(Some(self.paths.clone()));
+        let _images = crate::render_images::begin(self.image_sources.clone());
+        let _raster = resvg::install_raster_image_cache(Some(self.raster_images.clone()));
+        let _filters = resvg::install_filter_cache(Some(self.filter_cache.clone()));
+        let _text =
+            crate::rich_text_render::install_composition_cache(self.text_compositions.clone());
+        crate::gpu_render::reset_timings();
         self.check_cancel()?;
         let c = project.composition();
         if frame >= c.duration() {
@@ -1307,6 +1361,7 @@ impl Renderer {
             root_sample.key(),
             include_guides,
         ));
+        let lower_timer = crate::gpu_render::time(crate::gpu_render::Stage::Lowering);
         let body = self.layers_svg(
             project,
             project.active_composition_id(),
@@ -1317,10 +1372,14 @@ impl Renderer {
             include_guides,
         )?;
         let svg = svg_document(&body, f64::from(c.width()), f64::from(c.height()))?;
+        drop(lower_timer);
         self.check_cancel()?;
+        let parse_timer = crate::gpu_render::time(crate::gpu_render::Stage::Parse);
         let tree = resvg::usvg::Tree::from_str(&svg, &self.options).map_err(|e| e.to_string())?;
+        drop(parse_timer);
         self.check_cancel()?;
         let mut pixmap = frame_pixmap(width, height, !budget.repeat_domains.is_empty())?;
+        let paint_timer = crate::gpu_render::time(crate::gpu_render::Stage::Paint);
         paint_svg_tree(
             &tree,
             resvg::tiny_skia::Transform::from_scale(
@@ -1330,6 +1389,8 @@ impl Renderer {
             &mut pixmap.as_mut(),
             &budget.repeat_domains,
         )?;
+        drop(paint_timer);
+        let finish_timer = crate::gpu_render::time(crate::gpu_render::Stage::Finish);
         let pixels: Vec<u8> = pixmap
             .pixels()
             .iter()
@@ -1341,6 +1402,7 @@ impl Renderer {
         self.check_cancel()?;
         let pixels =
             image::RgbaImage::from_raw(width, height, pixels).ok_or("Invalid render buffer")?;
+        drop(finish_timer);
         Ok(RenderedFrame {
             pixels,
             evaluated: budget.expression_view,

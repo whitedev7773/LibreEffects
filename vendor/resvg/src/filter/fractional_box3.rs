@@ -27,6 +27,10 @@ pub(super) fn apply(
     let limits = state.map(|s| s.options.limits).unwrap_or_default();
     let bytes = checked::image_bytes(source.width(), source.height(), limits)?;
     let _scratch_live = state.map(|s| s.reserve(bytes)).transpose()?;
+    let (width, height) = (source.width(), source.height());
+    if crate::acceleration::apply_box3(source.data_mut(), width, height, radii, vertical_first) {
+        return Ok(());
+    }
     let mut scratch = checked::pixmap(source.width(), source.height(), limits)?;
     for axis in if vertical_first { [1, 0] } else { [0, 1] } {
         let radius = radii[axis];

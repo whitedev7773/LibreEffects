@@ -1,5 +1,5 @@
 //! Source ranges for point text and Unicode-aware paragraph wrapping.
-use crate::text_edit::layout::metrics;
+use crate::text_metrics as metrics;
 use libre_effects_core::TextStyle;
 use std::{cell::RefCell, ops::Range, sync::Arc};
 use unicode_segmentation::UnicodeSegmentation;

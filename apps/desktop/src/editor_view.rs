@@ -311,6 +311,7 @@ impl EditorState {
             graph_open: self.graph_open,
             graph_view: self.graph_view.clone(),
             expanded: self.expanded,
+            layer_tree: self.layer_tree.clone(),
             graph_channels: self.graph_channels.clone(),
         }
     }
@@ -348,6 +349,7 @@ impl EditorState {
             self.graph_property = channel.property;
         }
         self.expanded = view.expanded;
+        self.layer_tree = view.layer_tree;
     }
     pub(super) fn capture_views(&mut self) -> ProjectViews {
         self.remember_view();
@@ -360,6 +362,10 @@ impl EditorState {
         views
     }
     pub(super) fn load_views(&mut self, mut views: ProjectViews) {
+        self.composition_tabs = vec![self.editor.project().active_composition_id()];
+        self.navigation_history = self.composition_tabs.clone();
+        self.navigation_index = 0;
+        self.navigation_replay = false;
         self.gradient_controls = None;
         self.project_item = None;
         views.normalize(self.editor.project());
@@ -379,6 +385,25 @@ impl EditorState {
 mod tests {
     use super::*;
     use libre_effects_core::Command;
+    #[test]
+    fn composition_tabs_open_only_visited_views_and_reset_on_document_load() {
+        let mut s = EditorState::default();
+        s.editor.execute(Command::NewComposition).unwrap();
+        s.editor.execute(Command::NewComposition).unwrap();
+        s.saved = s.editor.project().clone();
+        let active = s.editor.project().active_composition_id();
+        s.composition_tabs = vec![1, active, active, u64::MAX];
+        assert_eq!(s.composition_tab_ids(), vec![1, active]);
+        let mut views = s.capture_views();
+        for (id, _) in s.editor.project().compositions() {
+            views.compositions.entry(id).or_default();
+        }
+        s.load_views(views);
+        assert_eq!(s.composition_tab_ids(), vec![active]);
+        assert_eq!(s.editor.project().compositions().len(), 3);
+        assert!(!s.dirty());
+        assert_eq!(s.editor.project(), &s.saved);
+    }
     #[test]
     fn composition_views_survive_switches_history_and_save_without_document_edits() {
         let mut s = EditorState::default();

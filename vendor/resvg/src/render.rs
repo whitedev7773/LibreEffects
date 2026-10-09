@@ -207,6 +207,7 @@ fn render_group(
         quality: tiny_skia::FilterQuality::Nearest,
     };
 
+    let _profile = crate::profile::time("GroupComposite");
     if group.opaque_opacity_byte257() {
         if let Err(kind) = crate::opaque_opacity::draw(
             sub_pixmap.as_ref(),

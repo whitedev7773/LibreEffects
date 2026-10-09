@@ -52,6 +52,8 @@ and can focus just on the rendering part.
 #![warn(missing_copy_implementations)]
 
 mod parser;
+mod path_cache;
+pub use path_cache::{install_path_cache, PathCache, PathCacheGuard};
 #[cfg(feature = "text")]
 mod text;
 mod tree;

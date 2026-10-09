@@ -78,6 +78,108 @@ fn invalid_requests_and_cancellation_do_not_launch_decoders() {
 }
 
 #[test]
+fn hardware_decoder_requires_hardware_frame_output_and_bounds_diagnostics() {
+    assert_eq!(Backend::Cuda.arguments(), Some(("cuda", "cuda")));
+    assert_eq!(Backend::D3d11.arguments(), Some(("d3d11va", "d3d11")));
+    assert_eq!(Backend::Qsv.arguments(), Some(("qsv", "qsv")));
+    assert_eq!(Backend::Cpu.arguments(), None);
+    let mut diagnostics = Diagnostics::default();
+    diagnostics.append(&vec![b'a'; 64 * 1024]);
+    diagnostics.append(b"last decoder error");
+    assert_eq!(diagnostics.0.len(), 16 * 1024);
+    assert!(diagnostics.message().ends_with("last decoder error"));
+}
+
+#[test]
+#[ignore = "requires NVIDIA NVDEC and FFmpeg CUDA; exact fractional CFR decode, seeks, loops and alpha fallback"]
+fn nvdec_frames_and_unsupported_alpha_match_software_reference() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("hardware.mp4");
+    generate(&path, "30000/1001", "libx264", "192x128", 96);
+    let reference = reference(&path, "128:85");
+    let fps = 30000. / 1001.;
+    let cancel = AtomicBool::new(false);
+    let mut pool = Pool {
+        backend: Some(Backend::Cuda),
+        ..Pool::default()
+    };
+    for f in 0..96 {
+        let png = pool
+            .frame_png(
+                path.to_str().unwrap(),
+                f as f64 / fps,
+                fps,
+                192,
+                128,
+                128,
+                &cancel,
+            )
+            .unwrap();
+        assert_eq!(
+            pixels(&png).as_raw(),
+            &reference[f * 128 * 85 * 4..(f + 1) * 128 * 85 * 4],
+            "CUDA frame {f}"
+        );
+    }
+    assert_eq!(pool.metrics.cuda_frames, 96);
+    assert_eq!(pool.metrics.software_frames, 0);
+    assert_eq!(pool.metrics.hardware_fallbacks, 0);
+    assert_eq!(pool.metrics.starts, 1);
+    pool.clear();
+    for f in [61, 62, 4, 5, 88, 89, 0] {
+        let png = pool
+            .frame_png(
+                path.to_str().unwrap(),
+                f as f64 / fps,
+                fps,
+                192,
+                128,
+                128,
+                &cancel,
+            )
+            .unwrap();
+        assert_eq!(
+            pixels(&png).as_raw(),
+            &reference[f * 128 * 85 * 4..(f + 1) * 128 * 85 * 4],
+            "CUDA seek frame {f}"
+        );
+    }
+    let path = dir.path().join("alpha.mov");
+    generate(&path, "30", "qtrle", "64x48", 12);
+    let alpha = super::tests::reference(&path, "64:48");
+    for f in [0, 1, 8, 0] {
+        let png = pool
+            .frame_png(
+                path.to_str().unwrap(),
+                f as f64 / 30.,
+                30.,
+                64,
+                48,
+                64,
+                &cancel,
+            )
+            .unwrap();
+        assert_eq!(
+            pixels(&png).as_raw(),
+            &alpha[f * 64 * 48 * 4..(f + 1) * 64 * 48 * 4],
+            "Unsupported alpha frame {f}"
+        );
+    }
+    assert_eq!(pool.metrics.hardware_fallbacks, 1);
+    assert!(pool.metrics.software_frames > 0);
+    assert!(
+        pool.fallback_reason
+            .as_ref()
+            .unwrap()
+            .contains("CUDA / NVDEC")
+    );
+    assert!(pool.bytes <= CACHE_BYTES && pool.streams.len() <= SESSIONS);
+    pool.clear();
+    std::fs::remove_file(path).unwrap();
+    eprintln!("NVDEC qualification: {:?}", pool.metrics);
+}
+
+#[test]
 #[ignore = "requires FFmpeg; verifies neutral limited-range YUV with an independent RGB oracle"]
 fn limited_range_video_decode_preserves_neutral_rgb_rounding() {
     let dir = tempfile::tempdir().unwrap();

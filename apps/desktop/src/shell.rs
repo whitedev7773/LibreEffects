@@ -12,6 +12,8 @@ mod media;
 mod menu;
 #[path = "shell_search.rs"]
 mod search;
+#[path = "shell_workspace.rs"]
+mod workspace;
 
 /// Shell-owned overlays that do not install their own initial focus handler.
 /// Keep this separate from save/recovery rendering, and detect each newly opened
@@ -96,6 +98,11 @@ pub(crate) struct Shell {
     search_query: String,
     search_scroll: gpui::ScrollHandle,
     search_return_focus: Option<FocusHandle>,
+    workspace_library: crate::workspace_library::Library,
+    workspace_selected: Option<String>,
+    workspace_dialog: bool,
+    workspace_name: Entity<TextField>,
+    workspace_error: String,
     settings: bool,
     settings_new: bool,
     settings_error: String,
@@ -210,6 +217,11 @@ impl Shell {
             search_query: String::new(),
             search_scroll: gpui::ScrollHandle::new(),
             search_return_focus: None,
+            workspace_library: crate::workspace_library::Library::load(),
+            workspace_selected: None,
+            workspace_dialog: false,
+            workspace_name: cx.new(|cx| TextField::new(cx, |_, _, _| {}).tab_stop()),
+            workspace_error: String::new(),
             settings: false,
             settings_new: false,
             settings_error: String::new(),
@@ -303,23 +315,37 @@ impl Shell {
             .update(cx, |state, cx| state.dispatch(&action, window, cx));
     }
     fn reset_layout(&mut self, cx: &mut Context<Self>) {
+        self.apply_workspace(crate::view_state::WorkspacePreset::Standard, cx);
+    }
+    fn apply_workspace(
+        &mut self,
+        preset: crate::view_state::WorkspacePreset,
+        cx: &mut Context<Self>,
+    ) {
         if self.state.read(cx).automation.is_some()
             || self.about
+            || self.settings
+            || self.help
+            || self.closing
+            || self.pending_document.is_some()
+            || self.state.read(cx).colors.session.is_some()
+            || self.state.read(cx).gradient_editor.is_some()
             || self.state.read(cx).vertex_editor.is_some()
             || self.state.read(cx).expression_editor.is_some()
         {
             return;
         }
+        self.workspace_selected = None;
         self.state.update(cx, |s, cx| {
-            s.workspace = Default::default();
-            s.effect_controls_open = false;
-            s.snapping = true;
+            let snapping = s.snapping;
+            let align_to_selection = s.workspace.align_to_selection;
+            s.workspace = crate::view_state::WorkspaceView::preset(preset);
+            s.workspace.snapping = snapping;
+            s.workspace.align_to_selection = align_to_selection;
+            s.effect_controls_open = s.workspace.effect_controls_open;
             cx.notify();
         });
-        self.layout.update(cx, |p, cx| p.reset(cx));
-        self.upper.update(cx, |p, cx| p.reset(cx));
-        self.middle.update(cx, |p, cx| p.reset(cx));
-        self.right.update(cx, |p, cx| p.reset(cx));
+        cx.notify();
     }
     fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.state.read(cx).automation.is_some()
@@ -655,6 +681,8 @@ impl Shell {
             menu::Target::NewComposition => self.new_composition(window, cx),
             menu::Target::Settings => self.open_settings(window, cx),
             menu::Target::ResetWorkspace => self.reset_layout(cx),
+            menu::Target::ManageWorkspaces => self.open_workspaces(window, cx),
+            menu::Target::Workspace(preset) => self.apply_workspace(preset, cx),
             menu::Target::Help => self.help = true,
             menu::Target::About => self.open_about(window, cx),
             menu::Target::Search => self.open_search(window, cx),
@@ -846,7 +874,8 @@ impl Shell {
             }
             return;
         }
-        if self.settings
+        if self.workspace_dialog
+            || self.settings
             || self.help
             || self.about
             || self.closing
@@ -1028,6 +1057,7 @@ impl Shell {
                 s.colors_key_owned.set(false);
             });
             self.menu = None;
+            self.workspace_dialog = false;
             self.settings = false;
             self.help = false;
             self.about = false;
@@ -1044,6 +1074,21 @@ impl Shell {
             || self.pending_document.is_some()
             || self.state.read(cx).recovery.is_some()
         {
+            return;
+        }
+        if m.alt && m.shift && !m.control && key == "j" {
+            self.timeline
+                .update(cx, |timeline, cx| timeline.focus_time(window, cx));
+            cx.stop_propagation();
+            return;
+        }
+        if m.alt && !m.control && matches!(key, "left" | "right") {
+            self.dispatch(
+                Action::NavigateHistory(if key == "left" { -1 } else { 1 }),
+                window,
+                cx,
+            );
+            cx.stop_propagation();
             return;
         }
         let action = if m.control {
@@ -1445,9 +1490,19 @@ impl Render for Shell {
                     .child(div().mx_2().w(px(1.0)).h(px(20.0)).bg(rgb(0x414141)))
                     .child(ui::text_button("toolbar-snapping", if self.state.read(cx).snapping {"☑ Snapping"} else {"☐ Snapping"}).on_click(cx.listener(|this,_,window,cx| {let _ = window; this.state.update(cx, |s,cx| {s.snapping = !s.snapping; cx.notify();});})))
                     .child(div().flex_1())
-                    .child(div().text_color(rgb(ui::BLUE)).mr_4().child("Default"))
+                    .children(crate::view_state::WorkspacePreset::ALL.into_iter().map(|preset| {
+                        ui::text_button(gpui::SharedString::from(format!("workspace-{}", preset.label())), preset.label())
+                            .text_size(px(11.0))
+                            .on_key_down(|e, _, cx| { if matches!(e.keystroke.key.as_str(), "enter" | "space") { cx.stop_propagation(); } })
+                            .when(self.workspace_matches(preset, cx), |button| button.text_color(rgb(ui::BLUE)))
+                            .on_click(cx.listener(move |this, _, _, cx| this.apply_workspace(preset, cx)))
+                    }))
+                    .child(ui::text_button("user-workspaces", self.workspace_selected.clone().unwrap_or_else(|| "Workspaces…".into()))
+                        .on_key_down(|e, _, cx| { if matches!(e.keystroke.key.as_str(), "enter" | "space") { cx.stop_propagation(); } })
+                        .on_click(cx.listener(|this, _, window, cx| this.open_workspaces(window, cx))))
                     .child(
                         ui::text_button("reset-workspace", "Reset workspace")
+                            .on_key_down(|e, _, cx| { if matches!(e.keystroke.key.as_str(), "enter" | "space") { cx.stop_propagation(); } })
                             .on_click(cx.listener(|this, _, _, cx| this.reset_layout(cx))),
                     ),
             )
@@ -1532,6 +1587,9 @@ impl Render for Shell {
                     .child("Libre Effects  •  2D compositor"),
             );
 
+        if self.workspace_dialog {
+            root = root.child(gpui::deferred(self.workspaces_view(cx)).with_priority(5));
+        }
         if let Some(menu) = self.menu {
             let items = menu::items(menu, self.state.read(cx));
             let mut dropdown = div()
@@ -1856,6 +1914,7 @@ impl Render for Shell {
                     "Page Up / Down — Step frame (Shift: 10 frames)",
                     "P / A / S / R / T — Reveal transform property",
                     "U — Animated properties    J / K — Previous / Next key",
+                    "F4 — Toggle Timeline Switches / Modes columns",
                     "Ctrl+Shift+C — Pre-compose selected layers",
                     "Shift+F3 — Graph Editor    F9 — Easy Ease selected keys",
                     "Shift+F9 — Ease In    Ctrl+Shift+F9 — Ease Out (timeline/graph)",

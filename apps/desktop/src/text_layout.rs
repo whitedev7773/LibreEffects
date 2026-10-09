@@ -1,7 +1,6 @@
 //! Grapheme hit regions in layer coordinates, shaped with the selected real face.
 use super::Session;
-#[path = "text_metrics.rs"]
-pub(crate) mod metrics;
+pub(crate) use crate::text_metrics as metrics;
 use std::ops::Range;
 use std::{cell::RefCell, sync::Arc};
 use unicode_segmentation::UnicodeSegmentation;

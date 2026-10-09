@@ -233,10 +233,21 @@ pub(crate) fn run() -> Result<bool, String> {
         println!(
             "Exact reference qualification: --compare-reference PROJECT.lep --cases CASES.json --output NEW_REPORT.json"
         );
+        println!(
+            "GPU diagnostics: --gpu-info; LIBRE_EFFECTS_RENDER_BACKEND=auto|cuda|d3d11|cpu; LIBRE_EFFECTS_VIDEO_BACKEND=auto|cuda|d3d11va|qsv|cpu"
+        );
         return Ok(true);
     }
     if args[0] == "--preview-benchmark" {
         crate::preview_benchmark::run(args.into_iter().skip(1).collect())?;
+        return Ok(true);
+    }
+    if args.len() == 1 && args[0] == "--gpu-info" {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&libre_effects_gpu_render::initialize())
+                .map_err(|e| e.to_string())?
+        );
         return Ok(true);
     }
     if args[0] == "--compare-reference" {

@@ -4,6 +4,10 @@ A Windows-first motion graphics editor built with Rust and GPUI. Its workspace
 and basic editing workflow follow After Effects conventions. It is an early 2D
 editor, not a complete After Effects replacement or an AEP-compatible application.
 
+The [AE UI/UX comparison](AE_UIUX.md) describes workspace presets, visited
+composition navigation, independent property disclosure, editable time,
+adaptive Timeline rulers, native preview resolutions and named user layouts.
+
 See [current implementation status](STATUS.md) for all backlog IDs, the latest
 verification results and remaining milestones. Dated test counts later in this
 guide and the backlog are historical checkpoints.
@@ -24,6 +28,36 @@ after a crash; do not delete `LibreEffects/editor.lock` in the user data directo
 Command-line renders remain independent of the interactive editor.
 
 ![Libre Effects workspace with the Content and Motion Study sample](screenshots/workspace.png)
+
+## Frame-complete preview
+
+Preview playback waits for the current frame's pixels and expression geometry
+before starting its playback interval. Rendering continues one frame ahead;
+when that frame is late, the image and audio stop until it is ready. Waiting
+never causes skipped frames or catch-up playback. RAM cache settings still
+apply, including a zero-byte cache; playback can use its displayed frame and
+one pending frame without requiring the whole work area to fit in RAM.
+
+In the **Preview** panel, **Speed** selects 1×, 1.5×, 2×,
+0.25× or 0.5×. Changing speed during playback restarts from the current frame.
+The speed is a target: rendering and the display refresh rate can limit actual
+playback. Audio follows the same speed, including the corresponding pitch
+change. Scrubbing continues to play a 100 ms audio excerpt at its original speed.
+Seek, stop, editing and preview quality changes reject stale render receipts;
+a failed current frame stops playback and displays the render error.
+
+**Range** selects the work area, entire composition or current time ±2 seconds.
+**Play from** selects the current time or range start. **Cache before playback**
+warms the selected range before playback when RAM is enabled; insufficient RAM
+stops warming with a message. Auto limits the longest preview dimension to 1280;
+Full/Half/Quarter use the native composition dimensions. The viewer and Preview
+panel show actual preview dimensions and the requested target playback rate.
+
+**Alt+Shift+J** focuses editable current time: enter a timecode, absolute frame,
+or relative offset (`+20`, `-20`, `+1s`). **Alt+Left/Right** navigate composition
+history. Layers and property groups expand independently and save in optional
+VIEW v3; v1/v2 projects remain readable. **Workspaces…** saves, renames and
+restores up to 16 named layouts in the local profile, independently of source edits.
 
 ## Recent projects
 
@@ -1642,6 +1676,7 @@ cargo run -p libre-effects-core --example make_animation_study -- examples/curve
 | Page Up / Page Down | Previous / Next frame (Shift: 10 frames) |
 | P / A / S / R / T | Position / Anchor / Scale / Rotation / Opacity |
 | U | Reveal animated properties |
+| F4 (Timeline focused) | Toggle Switches / Modes columns |
 | Shift+F3 | Toggle Graph Editor |
 | F9 (timeline/graph focused) | Easy Ease selected scalar keys |
 | Shift+F9 | Easy Ease In: incoming side only |
@@ -2960,16 +2995,22 @@ layers remain audible in preview. Windows WASAPI shared mode sends float PCM to
 the current default multimedia output; Windows handles its hardware format.
 No system volume, device setting or exclusive-mode configuration is changed.
 
-The visual playhead follows IAudioClock's consumed sample position. Audio-disabled
-or silent compositions retain the visual wall clock. A half-second preroll starts
-playback, with a requested 100 ms device buffer and a bounded producer queue.
+The visual playhead uses IAudioClock's consumed sample position within the current
+rendered frame. Only that frame's audio interval is granted to the device; queued
+audio for later frames remains in the producer queue until their render receipts
+arrive. Audio-disabled or silent compositions use the same render-gated cadence
+with a wall clock. The requested device buffer remains 100 ms and the producer
+queue is bounded. Preroll is capped to the currently granted frame interval;
+ordinary ungated transport tests retain the half-second target, while finite
+scrubbing can start with its shorter completed excerpt.
 The mixer retains its bounded source PCM cache across work-area loops. Decoding,
 mixing and device servicing run off GPUI. Starvation freezes composition time,
 reports Buffering and resumes without skipping unheard samples. Stop, seek,
 project edits and document changes cancel the old stream; a missing/disconnected
 output reports an error instead of claiming sound is playing.
 
-Preview offers Audio, Scrub and Loop work area switches. They are session
+Preview offers Audio, Scrub and Loop work area switches, plus Playback speed.
+They are session
 preferences and do not change the project or exported audio. Disabling Loop stops
 at the last frame. Scrub defaults off; when enabled, a seek that remains unchanged
 for 75 ms previews up to the next 100 ms without moving the playhead. Pause/resume
@@ -3472,6 +3513,93 @@ keys and both Feather keys remained. Timeline groups keep each mask's Path and
 scalar properties together. Validation passed 133 core and 130 desktop tests
 with 30 external media/device tests excluded, Cargo check, rustfmt and release
 build. Moon/proto were not on PATH, so Cargo equivalents were used.
+
+## Hardware GPU acceleration
+
+Windows builds automatically use CUDA cores on NVIDIA GPUs for large ordinary
+Gaussian box-blur passes in previews and exports, with hardware Direct3D11
+compute as the next choice. CUDA uses the installed driver and embedded PTX;
+installing a CUDA toolkit is unnecessary. The preview header shows `CUDA blur`
+or `Direct3D11 blur` after successful hardware work. Unsupported kernels and
+small jobs retain CPU rendering. CUDA failures retry Direct3D11, then CPU,
+without committing partial GPU output. `LIBRE_EFFECTS_RENDER_BACKEND` accepts
+`auto` (default), `cuda`, `d3d11` or `cpu`. `--gpu-info` probes compute support;
+`--preview-benchmark` reports actual CUDA/Direct3D11 jobs alongside timings.
+
+Persistent video decoder sessions also use hardware: NVIDIA NVDEC via CUDA,
+or D3D11VA on other Windows GPUs, including AMD VCN and Intel video engines.
+`LIBRE_EFFECTS_VIDEO_BACKEND` accepts `auto` (default), `cuda`, `d3d11va`, `qsv`
+(Intel Quick Sync) or `cpu`. Hardware frame output and an explicit download
+filter ensure successful hardware reads really used a video engine. Downloaded
+8-bit NV12 frames retain the existing CPU bicubic/color conversion; codecs or
+transfer formats unsupported by that path retry the same frame on CPU. Alpha
+codecs preserve alpha through the CPU fallback. Failures are remembered per
+source and bounded, and cancellation/deadlines, bounded queues and child-process
+cleanup remain in effect. Benchmark decoder counters distinguish actual
+hardware frames, software frames and fallback reasons. Source decoding can
+accelerate both previews and exports; it does not accelerate PNG encoding or
+all compositing stages. AMD/Intel hardware requires separate machine validation.
+See [GPU implementation](../../crates/gpu-render/README.md) for memory bounds,
+exact-byte qualifications and which stages still use CPU.
+
+The common preview/export renderer also reuses decoded raster images, exact
+area-reduction levels, unchanged intermediate composites and unchanged filtered
+groups. Generated SVGs refer to frame-local compressed image resources instead
+of copying their Base64 through every nested XML document. Each cache is bounded
+and owned by the renderer: 32 MiB of encoded sources, 32 MiB of shaped rich-text
+compositions (including verified authored glyphs), and 128 MiB each for decoded
+images/reductions, intermediate composites and filter input/output pairs. The
+frame resource map is limited to 128 MiB/4096 images and is released on completion
+or unwinding. These limits are separate from the user-selected preview RAM budget.
+Media revision/cancellation clears retained data. Keys include complete media
+bytes, geometry, dimensions and filter/support parameters; checked filter keys
+also include memory limits and current live allocation. Anisotropic image keys
+include every rounded reduction step. Animated inputs are recomputed. Preview
+benchmarks report `intermediate_cache_hits` and `filter_cache_hits` in addition to
+CUDA/video-engine counters. Caching preserves complete-frame playback gating;
+first renders and changing video/effects can still be expensive.
+
+CUDA additionally handles fractional Box3 and exact alpha/channel color-space
+tables. An eligible single LinearRGB Gaussian filter runs both conversions and
+blur on the device with one upload/readback. Transparent margins are excluded
+only with their complete blur support preserved, and Gaussian column bands
+increase GPU parallel work. Pixel rounding, transform/filter regions, checked
+allocation limits and CPU fallback remain unchanged. Diagnostics report
+`fractional_box3_jobs`, `color_lookup_jobs` and `color_blur_jobs` separately.
+
+Movie export and PNG sequence rendering use up to six ordered frame workers on
+canvases up to 4,194,304 pixels; larger canvases remain serial. The count is
+capped by half the logical CPUs and current available Windows physical memory:
+2 GiB is reserved for the system, with 2 GiB plus two raw frames admitted per
+lane. If available memory cannot be queried, at most two lanes are used. Each worker owns
+its renderer, media decoder and the bounded caches described above. At most
+thirteen raw frames coexist in this pipeline (two per lane plus the consumer). Completed frames reach the encoder
+in source order; failed/canceled workers are joined before staged output can
+be published. `LIBRE_EFFECTS_RENDER_WORKERS=1` forces serial export; larger
+values remain capped by CPU/memory/canvas admission and six. This does not skip preview frames or change the
+complete-frame playback gate.
+
+Renderers reuse isolated expression worker processes for up to 16 batches or
+128 MiB of transport. Each batch constructs a fresh expression VM, so authored
+time/source data and globals cannot leak between frames. Existing input/output
+budgets, process watchdogs, cancellation and result validation remain in force;
+errors kill and reap the worker, and the next evaluation starts cleanly.
+
+An optional console renderer shares the editor's exact render/export modules:
+`cargo build --release -p libre-effects-desktop --bin libre-effects-render
+--features render-cli --locked`. It accepts the same `--render`,
+`--preview-benchmark`, `--compare-reference` and `--gpu-info` arguments. The
+feature is opt-in so normal workspace tests do not duplicate all shared tests.
+`LIBRE_EFFECTS_RENDER_PROFILE=1` enables inclusive SVG-operation timings in
+preview benchmark JSON; nested operation times overlap and must not be summed.
+
+Each renderer also retains up to 16 MiB/1024 immutable parsed SVG paths. Exact
+complete `d` strings qualify only geometry; current paint, transforms, CSS,
+clipping and filters are still resolved on every parse. Total retained cache
+payload admission is now 464 MiB per renderer. Scope restoration, cancellation
+clearing and changed path-data invalidation remain explicit. Preview benchmark
+JSON reports `path_cache_hits`; no evaluated project or authored field is cached
+as geometry.
 
 ## Automation and ScriptUI preview
 

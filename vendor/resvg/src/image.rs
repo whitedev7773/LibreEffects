@@ -21,6 +21,7 @@ pub fn render_inner(
     #[allow(unused_variables)] rendering_mode: usvg::ImageRendering,
     pixmap: &mut tiny_skia::PixmapMut,
 ) {
+    let _profile = crate::profile::time("Image");
     match image_kind {
         usvg::ImageKind::SVG(ref tree) => {
             render_vector(tree, ctx, transform, pixmap);
@@ -212,7 +213,13 @@ mod raster_images {
         rendering_mode: usvg::ImageRendering,
         pixmap: &mut tiny_skia::PixmapMut,
     ) -> Option<()> {
-        let mut raster = decode_raster(image)?;
+        let mut raster = if let Some(pixels) = crate::raster_cache::get(image, &[]) {
+            pixels
+        } else {
+            let pixels = std::sync::Arc::new(decode_raster(image)?);
+            crate::raster_cache::insert(image, &[], pixels.clone());
+            pixels
+        };
 
         let rect = tiny_skia::Size::from_wh(raster.width() as f32, raster.height() as f32)?
             .to_rect(0.0, 0.0)?;
@@ -235,6 +242,7 @@ mod raster_images {
         ) {
             let scale_x = transform.sx.hypot(transform.ky);
             let scale_y = transform.kx.hypot(transform.sy);
+            let mut reductions = Vec::new();
             loop {
                 let x = scale_x * rect.width() / raster.width() as f32;
                 let y = scale_y * rect.height() / raster.height() as f32;
@@ -251,12 +259,21 @@ mod raster_images {
                 if width == raster.width() && height == raster.height() {
                     break;
                 }
-                raster = area_reduce(&raster, width, height)?;
+                // Every reduction rounds premultiplied coverage. Different
+                // anisotropic paths to the same dimensions are distinct keys.
+                reductions.push((width, height));
+                raster = if let Some(pixels) = crate::raster_cache::get(image, &reductions) {
+                    pixels
+                } else {
+                    let pixels = std::sync::Arc::new(area_reduce(&raster, width, height)?);
+                    crate::raster_cache::insert(image, &reductions, pixels.clone());
+                    pixels
+                };
             }
         }
 
         let pattern = tiny_skia::Pattern::new(
-            raster.as_ref(),
+            raster.as_ref().as_ref(),
             tiny_skia::SpreadMode::Pad,
             quality,
             1.0,
@@ -310,6 +327,51 @@ mod raster_images {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn reused_decodes_and_anisotropic_reductions_match_uncached_pixels() {
+            use std::sync::{Arc, Mutex};
+            let mut source = tiny_skia::Pixmap::new(65, 49).unwrap();
+            for (index, pixel) in source.pixels_mut().iter_mut().enumerate() {
+                *pixel = tiny_skia::Color::from_rgba8(
+                    (index * 31) as u8,
+                    (index * 13) as u8,
+                    (index * 7) as u8,
+                    (index * 19) as u8,
+                )
+                .to_color_u8()
+                .premultiply();
+            }
+            let kind = usvg::ImageKind::PNG(Arc::new(source.encode_png().unwrap()));
+            let cache = Arc::new(Mutex::new(crate::RasterImageCache::new(1024 * 1024)));
+            for (sx, sy) in [
+                (0.07, 0.07),
+                (0.03, 0.3),
+                (0.3, 0.03),
+                (0.07, 0.07),
+                (0.3, 0.3),
+            ] {
+                for quality in [
+                    ImageRendering::HighQuality,
+                    ImageRendering::Smooth,
+                    ImageRendering::Pixelated,
+                ] {
+                    let transform = tiny_skia::Transform::from_scale(sx, sy);
+                    let mut expected = tiny_skia::Pixmap::new(24, 24).unwrap();
+                    {
+                        let _scope = crate::install_raster_image_cache(None);
+                        render_raster(&kind, transform, quality, &mut expected.as_mut()).unwrap();
+                    }
+                    let mut actual = tiny_skia::Pixmap::new(24, 24).unwrap();
+                    {
+                        let _scope = crate::install_raster_image_cache(Some(cache.clone()));
+                        render_raster(&kind, transform, quality, &mut actual.as_mut()).unwrap();
+                        assert!(crate::raster_cache::get(&kind, &[]).is_some());
+                    }
+                    assert_eq!(actual.data(), expected.data(), "{sx},{sy}: {quality:?}");
+                }
+            }
+        }
 
         #[test]
         fn minified_checkerboard_preserves_coverage_and_pixel_art_stays_discrete() {

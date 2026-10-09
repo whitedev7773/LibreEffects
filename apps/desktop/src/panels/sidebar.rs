@@ -8,6 +8,11 @@ use libre_effects_core::{AlignTarget, Alignment, Command};
 
 pub(crate) struct Sidebar {
     state: Entity<EditorState>,
+    speed: Entity<crate::components::Choice>,
+    resolution: Entity<crate::components::Choice>,
+    range: Entity<crate::components::Choice>,
+    from: Entity<crate::components::Choice>,
+    budget: Entity<crate::components::Choice>,
     character: Entity<super::character::Character>,
     paragraph: Entity<super::character::Paragraph>,
     inspector: Entity<Inspector>,
@@ -16,7 +21,73 @@ pub(crate) struct Sidebar {
 impl Sidebar {
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
+        let make_choice = |label,
+                           labels: Vec<String>,
+                           action: fn(usize) -> Action,
+                           cx: &mut Context<Self>| {
+            let state = state.clone();
+            cx.new(|cx| {
+                crate::components::Choice::new(label, labels, 0, cx, move |index, window, cx| {
+                    state.update(cx, |s, cx| s.dispatch(&action(index), window, cx));
+                })
+            })
+        };
+        let speed = make_choice(
+            "Speed",
+            ["0.25×", "0.5×", "1×", "1.5×", "2×"]
+                .map(String::from)
+                .to_vec(),
+            |i| Action::SetPreviewSpeed([1, 2, 4, 6, 8][i]),
+            cx,
+        );
+        let resolution = make_choice(
+            "Resolution",
+            ["Auto", "Full", "Half", "Quarter"]
+                .map(String::from)
+                .to_vec(),
+            |i| Action::SetPreviewResolution([0, 1, 2, 4][i]),
+            cx,
+        );
+        let range = make_choice(
+            "Range",
+            crate::preview_options::PreviewRange::ALL
+                .map(|v| v.label().to_string())
+                .to_vec(),
+            |i| Action::SetPreviewRange(crate::preview_options::PreviewRange::ALL[i]),
+            cx,
+        );
+        let from_state = state.clone();
+        let from = cx.new(|cx| {
+            crate::components::Choice::new(
+                "Play from",
+                ["Current time".into(), "Start of range".into()],
+                0,
+                cx,
+                move |i, window, cx| {
+                    from_state.update(cx, |s, cx| {
+                        if s.preview_from_start != (i == 1) {
+                            s.dispatch(&Action::PreviewFromStart, window, cx);
+                        }
+                    });
+                },
+            )
+        });
+        let budget = make_choice(
+            "RAM budget",
+            ["Off", "64 MiB", "256 MiB", "512 MiB", "1 GiB", "2 GiB"]
+                .map(String::from)
+                .to_vec(),
+            |i| {
+                Action::SetCacheBudget([0, 64, 256, 512, 1024, 2048][i] * crate::preview_cache::MIB)
+            },
+            cx,
+        );
         Self {
+            speed,
+            resolution,
+            range,
+            from,
+            budget,
             character: cx.new(|cx| super::character::Character::new(state.clone(), cx)),
             paragraph: cx.new(|cx| super::character::Paragraph::new(state.clone(), cx)),
             inspector: cx.new(|cx| Inspector::new(state.clone(), cx)),
@@ -27,6 +98,31 @@ impl Sidebar {
 }
 impl Render for Sidebar {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let s = self.state.read(cx);
+        let indices = (
+            [1, 2, 4, 6, 8]
+                .iter()
+                .position(|v| *v == s.preview_speed_quarters)
+                .unwrap_or(2),
+            [0, 1, 2, 4]
+                .iter()
+                .position(|v| *v == s.preview_resolution)
+                .unwrap_or(1),
+            crate::preview_options::PreviewRange::ALL
+                .iter()
+                .position(|v| *v == s.preview_range)
+                .unwrap_or(0),
+            usize::from(s.preview_from_start),
+            [0, 64, 256, 512, 1024, 2048]
+                .iter()
+                .position(|v| *v * crate::preview_cache::MIB == s.preview_cache_limit)
+                .unwrap_or(2),
+        );
+        self.speed.update(cx, |v, _| v.sync(indices.0));
+        self.resolution.update(cx, |v, _| v.sync(indices.1));
+        self.range.update(cx, |v, _| v.sync(indices.2));
+        self.from.update(cx, |v, _| v.sync(indices.3));
+        self.budget.update(cx, |v, _| v.sync(indices.4));
         let state = self.state.read(cx);
         let text_session = state
             .text_session
@@ -52,9 +148,9 @@ impl Render for Sidebar {
         } else {
             info.push_str("\nMove over the composition to sample RGBA");
         }
-        let playing = state.playing;
+        let playing = state.playing || state.preview_play_after_cache;
         let expanded = state.workspace.sidebar_expanded;
-        let work = format!("Work area: {}–{}f", state.work_start, state.work_end);
+
         let mut panel = div()
             .id("sidebar-scroll")
             .overflow_y_scroll()
@@ -86,7 +182,14 @@ impl Render for Sidebar {
                     .justify_start()
                     .border_b_1()
                     .border_color(rgb(ui::BORDER))
-                    .when(active, |s| s.text_color(rgb(ui::BLUE)))
+                    .child(
+                        ui::icon(if active {
+                            "chevron-down"
+                        } else {
+                            "chevron-right"
+                        })
+                        .size(px(10.0)),
+                    )
                     .when(index == 5 && text_session.is_some(), |button| {
                         crate::color_edit::input_pointer_text_selection_guarded(
                             button,
@@ -138,7 +241,7 @@ impl Render for Sidebar {
                         .into_any_element(),
                     4 => div()
                         .p_3()
-                        .child(preview_audio_controls(&self.state, cx))
+                        .child(audio_output_controls(&self.state, cx))
                         .into_any_element(),
                     5 => div()
                         .flex_none()
@@ -160,10 +263,10 @@ impl Render for Sidebar {
                         .overflow_y_scroll()
                         .child(
                             div()
-                                .p_3()
+                                .p_2()
                                 .flex()
                                 .flex_col()
-                                .gap_2()
+                                .gap_1()
                                 .child(
                                     div()
                                         .flex()
@@ -199,10 +302,35 @@ impl Render for Sidebar {
                                             &self.state,
                                             Action::Step(1),
                                             false,
+                                        ))
+                                        .child(ui::action_tool(
+                                            "preview-last",
+                                            "arrow-right",
+                                            "Last frame (End)",
+                                            &self.state,
+                                            Action::Seek(comp.duration() - 1),
+                                            false,
                                         )),
                                 )
                                 .child("Shortcut: Space")
-                                .child(work.clone())
+                                .child(
+                                    div()
+                                        .flex()
+                                        .gap_1()
+                                        .child(div().flex_1().min_w_0().child(self.range.clone()))
+                                        .child(div().flex_1().min_w_0().child(self.from.clone())),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .gap_1()
+                                        .child(div().flex_1().min_w_0().child(self.speed.clone()))
+                                        .child(
+                                            div().flex_1().min_w_0().child(self.resolution.clone()),
+                                        ),
+                                )
+                                .child(preview_audio_controls(&self.state, cx))
+                                .child(self.budget.clone())
                                 .child(preview_cache_controls(&self.state, cx)),
                         )
                         .into_any_element(),
@@ -220,6 +348,7 @@ fn cache_button(
 ) -> impl IntoElement {
     let pointer_state = state.clone();
     ui::text_button(id, label)
+        .h(px(22.0))
         .justify_start()
         .on_click(move |_, window, cx| {
             pointer_state.update(cx, |s, cx| s.dispatch(&action, window, cx));
@@ -245,7 +374,7 @@ fn preview_cache_controls(state: &Entity<EditorState>, cx: &gpui::App) -> impl I
             if s.preview_caching {
                 "Stop caching"
             } else {
-                "Cache work area"
+                "Cache range"
             },
             state,
             Action::CacheWorkArea,
@@ -256,12 +385,6 @@ fn preview_cache_controls(state: &Entity<EditorState>, cx: &gpui::App) -> impl I
             state,
             Action::PurgePreviewCache,
         ));
-    let limit = s.preview_cache_limit / crate::preview_cache::MIB;
-    let budget = if limit == 0 {
-        "RAM cache: Off".to_string()
-    } else {
-        format!("RAM cache: {limit} MiB")
-    };
     let summary = format!(
         "{} frames · {:.1} MiB · {} hits",
         s.preview_cache.frames,
@@ -274,12 +397,6 @@ fn preview_cache_controls(state: &Entity<EditorState>, cx: &gpui::App) -> impl I
         .gap_1()
         .text_size(px(10.0))
         .child(controls)
-        .child(cache_button(
-            "preview-cache-budget",
-            budget,
-            state,
-            Action::CycleCacheBudget,
-        ))
         .child(summary)
 }
 pub(crate) struct Align {
@@ -440,9 +557,9 @@ impl Render for Align {
 }
 
 fn preview_audio_controls(state: &Entity<EditorState>, cx: &gpui::App) -> gpui::Div {
-    use crate::audio_playback::Phase;
     let s = state.read(cx);
-    let mut panel = div().flex().flex_col().gap_1().text_size(px(11.0));
+    let mut controls = div().flex().flex_col().gap_1().text_size(px(11.0));
+    let mut row = div().flex().gap_1();
     for (id, label, enabled, action) in [
         (
             "preview-audio",
@@ -452,41 +569,73 @@ fn preview_audio_controls(state: &Entity<EditorState>, cx: &gpui::App) -> gpui::
         ),
         (
             "preview-scrub",
-            "Scrub",
+            "Scrub audio",
             s.preview_scrub,
             Action::PreviewScrub,
         ),
-        (
-            "preview-loop",
-            "Loop work area",
-            s.preview_loop,
-            Action::PreviewLoop,
-        ),
+        ("preview-loop", "Loop", s.preview_loop, Action::PreviewLoop),
     ] {
-        let state = state.clone();
-        panel = panel.child(
-            ui::text_button(
-                id,
-                format!("{label}: {}", if enabled { "On" } else { "Off" }),
-            )
-            .justify_start()
-            .on_click(move |_, window, cx| {
-                state.update(cx, |s, cx| s.dispatch(&action, window, cx))
-            }),
-        );
+        row = row.child(cache_button(
+            id,
+            format!("{} {label}", if enabled { "☑" } else { "☐" }),
+            state,
+            action,
+        ));
     }
+    controls = controls.child(row).child(cache_button(
+        "preview-cache-before",
+        format!(
+            "{} Cache before playback",
+            if s.preview_cache_before { "☑" } else { "☐" }
+        ),
+        state,
+        Action::PreviewCacheBefore,
+    ));
+    let dim =
+        crate::preview_options::dimension(s.editor.project().composition(), s.preview_resolution);
+    let comp = s.editor.project().composition();
+    let scale = dim as f64 / comp.width().max(comp.height()) as f64;
+    controls
+        .child(format!(
+            "{}×{} · Comp {} fps · Target {:.1} fps",
+            (comp.width() as f64 * scale).round() as u32,
+            (comp.height() as f64 * scale).round() as u32,
+            comp.fps().label(),
+            comp.fps().as_f64() * f64::from(s.preview_speed_quarters) / 4.0
+        ))
+        .child(
+            div()
+                .text_color(rgb(ui::MUTED))
+                .child(if s.preview_play_after_cache {
+                    "Caching before playback…"
+                } else if s.preview_buffering() {
+                    "Waiting for rendered frame…"
+                } else {
+                    "Playback waits for completed frames"
+                }),
+        )
+}
+
+fn audio_output_controls(state: &Entity<EditorState>, cx: &gpui::App) -> gpui::Div {
+    use crate::audio_playback::Phase;
+    let s = state.read(cx);
     let status = &s.audio_status;
-    let label = match &status.phase {
-        Phase::Buffering => "Buffering audio…".to_string(),
-        Phase::Playing => format!("Playing · {} buffer underruns", status.underruns),
-        Phase::Ended if s.playing => if s.preview_audio {
-            "No active audio · visual preview"
-        } else {
-            "Audio off · visual preview"
+    let mut panel = div().flex().flex_col().gap_1().text_size(px(11.0));
+    let label = if s.preview_buffering() {
+        "Waiting for rendered frame…".to_string()
+    } else {
+        match &status.phase {
+            Phase::Buffering => "Buffering audio…".to_string(),
+            Phase::Playing => format!("Playing · {} buffer underruns", status.underruns),
+            Phase::Ended if s.playing => if s.preview_audio {
+                "No active audio · visual preview"
+            } else {
+                "Audio off · visual preview"
+            }
+            .to_string(),
+            Phase::Ended => "Stopped".to_string(),
+            Phase::Failed(error) => format!("Audio error: {error}"),
         }
-        .to_string(),
-        Phase::Ended => "Stopped".to_string(),
-        Phase::Failed(error) => format!("Audio error: {error}"),
     };
     panel = panel
         .child("Default Windows output · 48 kHz stereo")
@@ -532,9 +681,5 @@ fn preview_audio_controls(state: &Entity<EditorState>, cx: &gpui::App) -> gpui::
             status.levels.clipped_frames
         ));
     }
-    panel.child(
-        div()
-            .text_color(rgb(ui::MUTED))
-            .child("Scrub previews 100 ms after seeking."),
-    )
+    panel.child(div().text_color(rgb(ui::MUTED)).child("Peak / RMS · dBFS"))
 }

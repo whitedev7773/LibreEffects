@@ -13,6 +13,16 @@ fallback, flattening and painting remain unchanged. No independent shaper or
 font-outline approximation is introduced. All upstream outline/COLR/SVG/bitmap
 flatten branches remain authoritative.
 
+Libre Effects can additionally install a renderer-owned `PathCache` for a
+synchronous parse/render scope. It reuses immutable path geometry only when
+the entire `d` string matches; paints, CSS, transforms, clipping and filters
+remain current. The retained-payload limit includes source keys, conservative
+point/verb capacity and entry overhead, with 1024 entries and an 8-MiB maximum
+key. Cache allocation failure simply declines insertion. Scopes restore their
+caller on drop and cannot move between threads. The default parser has no cache.
+Pixel regressions cover changed paint/transforms/clipping, changed curves and
+the upstream partial-path behavior on malformed suffixes.
+
 The callback addresses ordinary scene text by its ID and receives its original
 layout. It must return one validated effect per positioned glyph, or None.
 Identity-affine effects retain the existing translation/opacity path and its

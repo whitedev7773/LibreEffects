@@ -31,6 +31,7 @@ mod font_coverage;
 mod font_usage;
 mod fonts;
 mod footage;
+mod gpu_render;
 mod image_sequence;
 #[cfg(test)]
 mod layer_transform_render_tests;
@@ -52,11 +53,15 @@ mod path_order_render_tests;
 mod preview_benchmark;
 mod preview_cache;
 mod preview_frame;
+mod preview_options;
 mod project_browser;
 mod project_io;
+mod raster_scenes;
 mod recent_projects;
 mod recovery;
 mod reference_compare;
+mod render_images;
+mod render_pipeline;
 mod render_queue;
 mod rendering;
 mod rich_text_render;
@@ -80,11 +85,13 @@ mod text_animator_render;
 mod text_animator_stack_acceptance_tests;
 mod text_edit;
 mod text_flow;
+mod text_metrics;
 #[cfg(test)]
 mod text_paint_render_tests;
 mod theme;
 #[cfg(test)]
 mod time_remap_render;
+mod workspace_library;
 use libre_effects_editor_model::timeline_filter;
 #[cfg(test)]
 mod typography_render_tests;

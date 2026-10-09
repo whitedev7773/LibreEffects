@@ -799,7 +799,7 @@ fn inline_svg_export_authors_exact_active_composition_default_view() {
                     "timeline_zoom": 1.0,
                     "preview_zoom": null,
                     "preview_pan": [0.0, 0.0],
-                    "preview_resolution": 1,
+                    "preview_resolution": 0,
                     "checkerboard": false,
                     "viewer": {
                         "rulers": false, "grid": false, "guides": true,
@@ -808,13 +808,13 @@ fn inline_svg_export_authors_exact_active_composition_default_view() {
                     },
                     "graph_open": false,
                     "graph_view": {"speed": false, "height": null},
-                    "expanded": true
+                    "expanded": false
                 }
             },
             "workspace": {
                 "fractions": [0.84, 0.2, 0.615, 0.615],
-                "timeline_left": 560.0,
-                "sidebar_expanded": [true, false, false, false],
+                "timeline_left": 640.0,
+                "sidebar_expanded": [false, false, true, false],
                 "extra_sidebar_expanded": [false, false, false],
                 "effect_controls_open": false,
                 "snapping": true,

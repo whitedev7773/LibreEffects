@@ -35,6 +35,50 @@ impl InputTarget {
             layer,
         })
     }
+    /// A visible Timeline value can select its own expanded layer before focus.
+    /// The document/frame receipt remains strict even when selection is different.
+    pub(crate) fn source_at_frame(&self, s: &crate::editor::EditorState) -> bool {
+        !s.playing
+            && self.revision == s.document_revision
+            && self.frame == s.frame
+            && self.origin.as_ref() == s.editor.project()
+            && s.editor
+                .project()
+                .composition()
+                .layer(self.layer)
+                .is_some_and(|l| !l.locked())
+    }
+    pub(crate) fn refresh_layer(
+        previous: &mut Option<Self>,
+        s: &crate::editor::EditorState,
+        layer: LayerId,
+    ) {
+        if previous
+            .as_ref()
+            .is_some_and(|t| t.layer == layer && t.source_at_frame(s))
+        {
+            return;
+        }
+        *previous = None;
+        if s.playing
+            || s.editor
+                .project()
+                .composition()
+                .layer(layer)
+                .is_none_or(|l| l.locked())
+        {
+            return;
+        }
+        static NEXT_LAYER: std::sync::atomic::AtomicU64 =
+            std::sync::atomic::AtomicU64::new(1 << 63);
+        *previous = Some(Self {
+            identity: NEXT_LAYER.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            origin: std::sync::Arc::new(s.editor.project().clone()),
+            revision: s.document_revision,
+            frame: s.frame,
+            layer,
+        });
+    }
     pub fn current(&self, s: &crate::editor::EditorState) -> bool {
         self.same_context(s)
             && self.revision == s.document_revision

@@ -8,10 +8,10 @@ use libre_effects_core::{AuthoredTextLine, RichText, TextCharacterStyle, TextSty
 use resvg::usvg;
 use std::{
     cell::RefCell,
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     ops::Range,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicU64, Ordering},
     },
 };
@@ -42,7 +42,7 @@ pub(crate) struct Composition {
     stroke: String,
     stroke_over_fill: bool,
 }
-#[derive(PartialEq)]
+#[derive(PartialEq, serde::Serialize)]
 struct Key {
     text: String,
     rich: RichText,
@@ -50,7 +50,109 @@ struct Key {
     style: TextStyle,
 }
 thread_local! {
-    static LAST: RefCell<Option<(Key, Arc<Composition>)>> = const { RefCell::new(None) };
+    static LAST: RefCell<Option<(Arc<Key>, Arc<Composition>)>> = const { RefCell::new(None) };
+    static COMPOSITIONS: RefCell<Option<Arc<Mutex<CompositionCache>>>> = const { RefCell::new(None) };
+}
+#[derive(Default)]
+pub(crate) struct CompositionCache {
+    entries: VecDeque<(Arc<Key>, Arc<Composition>, usize)>,
+    bytes: usize,
+}
+impl CompositionCache {
+    pub(crate) fn clear(&mut self) {
+        self.entries.clear();
+        self.bytes = 0;
+    }
+}
+pub(crate) struct CompositionCacheGuard {
+    previous: Option<Arc<Mutex<CompositionCache>>>,
+    thread: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+impl Drop for CompositionCacheGuard {
+    fn drop(&mut self) {
+        COMPOSITIONS.with(|slot| *slot.borrow_mut() = self.previous.take());
+    }
+}
+pub(crate) fn install_composition_cache(
+    cache: Arc<Mutex<CompositionCache>>,
+) -> CompositionCacheGuard {
+    CompositionCacheGuard {
+        previous: COMPOSITIONS.with(|slot| slot.replace(Some(cache))),
+        thread: std::marker::PhantomData,
+    }
+}
+fn cached_composition(
+    text: &str,
+    rich: &RichText,
+    width: f64,
+    style: &TextStyle,
+) -> Option<Arc<Composition>> {
+    COMPOSITIONS.with(|slot| {
+        let cache = slot.borrow().clone()?;
+        let mut cache = cache.lock().ok()?;
+        let index = cache.entries.iter().position(|(key, _, _)| {
+            key.text == text && key.rich == *rich && key.width == width && key.style == *style
+        })?;
+        let entry = cache.entries.remove(index)?;
+        let composition = entry.1.clone();
+        cache.entries.push_back(entry);
+        Some(composition)
+    })
+}
+fn store_composition(key: Arc<Key>, result: Arc<Composition>) {
+    COMPOSITIONS.with(|slot| {
+        let Some(cache) = slot.borrow().clone() else {
+            return;
+        };
+        // Count without materializing JSON or an unbounded auxiliary key.
+        struct Count(usize);
+        impl std::io::Write for Count {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0 = self.0.saturating_add(bytes.len());
+                if self.0 > 8 * 1024 * 1024 {
+                    return Err(std::io::Error::other(
+                        "Composition key exceeds cache budget",
+                    ));
+                }
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let mut count = Count(0);
+        if serde_json::to_writer(&mut count, key.as_ref()).is_err() {
+            return;
+        }
+        let bytes = count
+            .0
+            .saturating_mul(4)
+            .saturating_add(1024)
+            .saturating_add(result.fill.len())
+            .saturating_add(result.stroke.len())
+            .saturating_add(result.lines.capacity() * std::mem::size_of::<Line>())
+            .saturating_add(
+                result
+                    .lines
+                    .iter()
+                    .map(|line| line.clusters.capacity() * std::mem::size_of::<Cluster>())
+                    .sum::<usize>(),
+            );
+        const LIMIT: usize = 32 * 1024 * 1024;
+        if bytes > LIMIT {
+            return;
+        }
+        let Ok(mut cache) = cache.lock() else {
+            return;
+        };
+        while !cache.entries.is_empty()
+            && (cache.bytes + bytes > LIMIT || cache.entries.len() >= 32)
+        {
+            cache.bytes -= cache.entries.pop_front().unwrap().2;
+        }
+        cache.bytes += bytes;
+        cache.entries.push_back((key, result, bytes));
+    });
 }
 fn xml(text: &str) -> String {
     text.replace('&', "&amp;")
@@ -394,9 +496,13 @@ pub(crate) fn compose(
     width: f64,
     style: &TextStyle,
 ) -> Result<Arc<Composition>, String> {
+    if let Some(result) = cached_composition(text, rich, width, style) {
+        return Ok(result);
+    }
     LAST.with(|last| {
         if let Some((key, result)) = &*last.borrow() {
             if key.text == text && key.rich == *rich && key.width == width && key.style == *style {
+                store_composition(key.clone(), result.clone());
                 return Ok(result.clone());
             }
         }
@@ -541,15 +647,14 @@ pub(crate) fn compose(
             });
         }
         let result = Arc::new(result);
-        *last.borrow_mut() = Some((
-            Key {
-                text: text.into(),
-                rich: rich.clone(),
-                width,
-                style: style.clone(),
-            },
-            result.clone(),
-        ));
+        let key = Arc::new(Key {
+            text: text.into(),
+            rich: rich.clone(),
+            width,
+            style: style.clone(),
+        });
+        store_composition(key.clone(), result.clone());
+        *last.borrow_mut() = Some((key, result.clone()));
         Ok(result)
     })
 }
@@ -1002,6 +1107,38 @@ mod tests {
         );
         let error = compose(text, &rich, 480.0, &TextStyle::default()).unwrap_err();
         assert!(error.contains("crosses a shaped cluster"), "{error}");
+    }
+    #[test]
+    fn renderer_cache_retains_multiple_texts_and_invalidates_paint_width_and_metrics() {
+        let cache = Arc::new(Mutex::new(CompositionCache::default()));
+        let _scope = install_composition_cache(cache.clone());
+        let base = TextStyle::default();
+        let a = rich("ABC", &[(0..3, style(36., 0xff0000, 400))]);
+        let b = rich("XYZ", &[(0..3, style(24., 0x0000ff, 700))]);
+        let first = compose("ABC", &a, 480., &base).unwrap();
+        let second = compose("XYZ", &b, 480., &base).unwrap();
+        let again = compose("ABC", &a, 480., &base).unwrap();
+        assert!(Arc::ptr_eq(&first, &again));
+        assert!(Arc::ptr_eq(
+            &second,
+            &compose("XYZ", &b, 480., &base).unwrap()
+        ));
+        let mut changed = a.clone();
+        changed.runs[0].style.fill_color = 0x00ff00;
+        let painted = compose("ABC", &changed, 480., &base).unwrap();
+        assert_ne!(first.fill, painted.fill);
+        assert!(!Arc::ptr_eq(
+            &first,
+            &compose("ABC", &a, 240., &base).unwrap()
+        ));
+        changed.runs[0].style.font_size = 60.;
+        assert_ne!(
+            painted.lines[0].clusters[1].x,
+            compose("ABC", &changed, 480., &base).unwrap().lines[0].clusters[1].x
+        );
+        assert!(cache.lock().unwrap().bytes <= 32 * 1024 * 1024);
+        cache.lock().unwrap().clear();
+        assert_eq!(cache.lock().unwrap().bytes, 0);
     }
     #[test]
     fn paint_changes_do_not_change_layout_but_metrics_changes_invalidate_cache() {

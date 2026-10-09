@@ -24,6 +24,7 @@ use std::{
 
 pub(crate) const WORKER_FLAG: &str = "--automation-worker";
 const EXPRESSION_WORKER_FLAG: &str = "--expression-worker";
+const EXPRESSION_SESSION_FLAG: &str = "--expression-session-worker";
 const MAX_EXPRESSION_INPUT_BYTES: usize = 4 * 1024 * 1024;
 const MAX_EXPRESSION_FRAME_BYTES: usize = 16 * 1024 * 1024;
 const MAX_PROJECT_BYTES: usize = 16 * 1024 * 1024;
@@ -592,7 +593,7 @@ pub(crate) fn run_script_with(
 pub(crate) fn dispatch_worker() -> Option<Result<(), String>> {
     let mut args = std::env::args_os().skip(1);
     let mode = args.next()?;
-    if mode != WORKER_FLAG && mode != EXPRESSION_WORKER_FLAG {
+    if mode != WORKER_FLAG && mode != EXPRESSION_WORKER_FLAG && mode != EXPRESSION_SESSION_FLAG {
         return None;
     }
     if args.next().is_some() {
@@ -600,6 +601,8 @@ pub(crate) fn dispatch_worker() -> Option<Result<(), String>> {
     }
     Some(if mode == WORKER_FLAG {
         worker_main()
+    } else if mode == EXPRESSION_SESSION_FLAG {
+        expression_session_main()
     } else {
         expression_worker_main()
     })
@@ -726,6 +729,102 @@ struct ExpressionInput {
 struct ExpressionInputRef<'a> {
     snapshot: &'a ae::CompositionSnapshot,
     roots: &'a [ae::PropertyAddress],
+}
+
+/// A renderer owns this child; every request creates a fresh VM and context.
+/// Recycle after 16 batches or 128 MiB IPC, within the existing process limits.
+#[derive(Default)]
+pub(crate) struct ExpressionSession {
+    worker: Option<WorkerProcess>,
+    batches: u32,
+}
+impl ExpressionSession {
+    pub(crate) fn clear(&mut self) {
+        self.worker.take();
+        self.batches = 0;
+    }
+    pub(crate) fn evaluate(
+        &mut self,
+        snapshot: &ae::CompositionSnapshot,
+        roots: &[ae::PropertyAddress],
+        cancel: &AtomicBool,
+        timeout: Duration,
+    ) -> Result<ae::EvaluatedProperties, ae::EvaluationError> {
+        let permit = WorkerGuard::wait(cancel);
+        let result =
+            (|| -> Result<Result<ae::EvaluatedProperties, ae::EvaluationError>, String> {
+                permit.as_ref().map_err(Clone::clone)?;
+                if roots.len() > 16_384 {
+                    return Err("Expression root budget exceeded".into());
+                }
+                let input = encode(
+                    &ExpressionInputRef { snapshot, roots },
+                    MAX_EXPRESSION_INPUT_BYTES,
+                )?;
+                if self.batches >= 16
+                    || self
+                        .worker
+                        .as_ref()
+                        .is_some_and(|w| w.transferred >= MAX_TOTAL_IPC_BYTES / 2)
+                {
+                    self.clear();
+                }
+                let deadline = Deadline::new(timeout, timeout);
+                if self.worker.is_none() {
+                    let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+                    self.worker = Some(WorkerProcess::spawn(
+                        &executable,
+                        EXPRESSION_SESSION_FLAG,
+                        MAX_EXPRESSION_FRAME_BYTES,
+                    )?);
+                }
+                let worker = self.worker.as_mut().unwrap();
+                worker.send(input)?;
+                loop {
+                    deadline.check(cancel)?;
+                    match worker.receive()? {
+                        Some(PipeEvent::Frame(bytes)) => {
+                            deadline.check(cancel)?;
+                            let mut result: Result<ae::EvaluatedProperties, ae::EvaluationError> =
+                                decode(&bytes)?;
+                            if let Err(error) = &mut result {
+                                error.message = error.message.chars().take(4096).collect();
+                            }
+                            if let Ok(values) = &result {
+                                validate_expression_result(snapshot, roots, values)?;
+                            }
+                            self.batches += 1;
+                            return Ok(result);
+                        }
+                        Some(PipeEvent::Eof) => {
+                            return Err("Expression worker exited without a result".into());
+                        }
+                        Some(PipeEvent::Failed(error)) => return Err(error),
+                        None => {
+                            if worker.status()?.is_some() {
+                                return Err("Expression worker crashed; frame discarded".into());
+                            }
+                        }
+                    }
+                }
+            })();
+        if result.is_err() || result.as_ref().is_ok_and(|r| r.is_err()) {
+            // Kill and reap on every timeout, cancellation, protocol or VM error.
+            self.clear();
+        }
+        drop(permit);
+        result.map_err(|message| ae::EvaluationError {
+            kind: if cancel.load(Ordering::Relaxed) {
+                ae::EvaluationErrorKind::Canceled
+            } else if message.contains("limit") || message.contains("budget") {
+                ae::EvaluationErrorKind::Budget
+            } else {
+                ae::EvaluationErrorKind::Runtime
+            },
+            message,
+            property: None,
+        })?
+    }
 }
 
 /// Called on an existing background render/export worker, once per immutable
@@ -930,6 +1029,36 @@ fn expression_worker_main() -> Result<(), String> {
     let result = ae::ExpressionEvaluator::default().evaluate(&input.snapshot, &input.roots);
     let bytes = encode(&result, MAX_EXPRESSION_FRAME_BYTES)?;
     write_frame(&mut io::stdout().lock(), &bytes, MAX_EXPRESSION_FRAME_BYTES)
+}
+
+fn expression_session_main() -> Result<(), String> {
+    worker_limits()?;
+    let mut input = io::stdin().lock();
+    let mut output = io::stdout().lock();
+    let mut transferred = 0usize;
+    for _ in 0..16 {
+        let Some(bytes) = read_frame(&mut input, MAX_EXPRESSION_INPUT_BYTES)? else {
+            return Ok(());
+        };
+        transferred = transferred
+            .checked_add(bytes.len() + 8)
+            .ok_or("Worker IPC budget exceeded")?;
+        let input: ExpressionInput = decode(&bytes)?;
+        if input.roots.len() > 16_384 {
+            return Err("Expression root budget exceeded".into());
+        }
+        // No globals, compiled closures, dependency or result caches survive a request.
+        let result = ae::ExpressionEvaluator::default().evaluate(&input.snapshot, &input.roots);
+        let bytes = encode(&result, MAX_EXPRESSION_FRAME_BYTES)?;
+        transferred = transferred
+            .checked_add(bytes.len() + 8)
+            .ok_or("Worker IPC budget exceeded")?;
+        if transferred > MAX_TOTAL_IPC_BYTES {
+            return Err("Worker IPC budget exceeded".into());
+        }
+        write_frame(&mut output, &bytes, MAX_EXPRESSION_FRAME_BYTES)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -390,7 +390,7 @@ pub(super) fn source_text_control(
     )
 }
 
-const LEFT: f32 = 560.0;
+const LEFT: f32 = 640.0;
 #[derive(Clone)]
 struct KeyDrag {
     from: u32,
@@ -414,12 +414,14 @@ pub(crate) struct Timeline {
     animator: super::text_animator::TimelineAnimator,
     colors: compound_colors::TimelineColors,
     parent_open: Option<LayerId>,
+    mode_columns: bool,
     bar_drag: Option<(Vec<LayerId>, i32, f64, i64)>,
     marquee: Option<(gpui::Point<Pixels>, gpui::Point<Pixels>)>,
     marquee_additive: bool,
     hit_keys: Rc<RefCell<Vec<(KeyRef, Bounds<Pixels>)>>>,
     hit_layers: Rc<RefCell<Vec<(LayerId, Bounds<Pixels>)>>>,
     search: Entity<TextField>,
+    time_input: Entity<TextField>,
     layer_type: LayerTypeFilter,
     selected_only: bool,
     type_open: bool,
@@ -452,6 +454,10 @@ fn frame_at(x: f32, left: f32, width: f32, start: u32, visible: u32, duration: u
     .min(f64::from(duration - 1))
 }
 impl Timeline {
+    pub(crate) fn focus_time(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.time_input
+            .update(cx, |field, cx| field.focus_select_all(window, cx));
+    }
     pub fn new(state: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
         cx.observe(&state, |this, _, cx| {
             if this
@@ -465,7 +471,17 @@ impl Timeline {
         })
         .detach();
         let focus = cx.focus_handle();
-        let search = cx.new(|cx| TextField::new(cx, |_, _, _| {}).return_focus(focus.clone()));
+        let search = cx.new(|cx| {
+            TextField::new(cx, |_, _, _| {})
+                .dense()
+                .return_focus(focus.clone())
+        });
+        let time_input = cx.new(|cx| {
+            TextField::new(cx, |_, _, _| {})
+                .dense()
+                .tab_stop()
+                .return_focus(focus.clone())
+        });
         cx.observe(&search, |this, _, cx| {
             this.cancel_filtered_gestures();
             cx.notify();
@@ -474,6 +490,7 @@ impl Timeline {
         let waveforms = cx.new(|_| super::audio_waveform::AudioWaveforms::new());
         cx.observe(&waveforms, |_, _, cx| cx.notify()).detach();
         Self {
+            time_input,
             waveforms,
             blend_pickers: BTreeMap::new(),
             matte_pickers: BTreeMap::new(),
@@ -484,6 +501,7 @@ impl Timeline {
             animator: Default::default(),
             colors: Default::default(),
             parent_open: None,
+            mode_columns: true,
             bar_drag: None,
             marquee: None,
             marquee_additive: false,
@@ -847,23 +865,48 @@ impl Render for Timeline {
         self.prepare_layer_rename(window, cx);
         self.reveal_project_usage(window, cx);
         let layer_filters = self.render_layer_filters(cx);
+        let input_state = self.state.clone();
+        let snapshot = self.state.read(cx);
+        let binding = format!(
+            "time:{}:{}",
+            snapshot.document_revision,
+            snapshot.editor.project().active_composition_id()
+        );
+        let value = snapshot
+            .editor
+            .project()
+            .composition()
+            .timecode(snapshot.frame);
+        self.time_input.update(cx, |field, _| {
+            field.sync_guarded(binding, value, window, move |value, window, cx| {
+                input_state.update(cx, |s, cx| {
+                    match crate::preview_options::seek(
+                        value,
+                        s.editor.project().composition(),
+                        s.frame,
+                    ) {
+                        Ok(frame) => s.dispatch(&Action::Seek(frame), window, cx),
+                        Err(error) => {
+                            s.status = error;
+                            cx.notify();
+                        }
+                    }
+                    s.editor.project().composition().timecode(s.frame)
+                })
+            })
+        });
         let key_menu = self.render_key_menu(cx);
         self.left = self.state.read(cx).workspace.timeline_left;
         self.hit_keys.borrow_mut().clear();
         self.hit_layers.borrow_mut().clear();
         let left = self.left;
-        let show_modes = left >= 540.0;
-        let show_mattes = left >= 750.0;
+        let show_modes = self.mode_columns && left >= 540.0;
+        let show_mattes = self.mode_columns && left >= 620.0;
         let state = self.state.read(cx);
         InputTarget::refresh(&mut self.input_source, state);
         self.animator.observe(state);
         self.colors.observe(state);
         self.colors.observe_pointer_ui(&self.focus, window, cx);
-        let input_binding = self
-            .input_source
-            .as_ref()
-            .map(InputTarget::binding)
-            .unwrap_or_default();
         let cached_ranges = state.preview_cache.ranges.clone();
         let selected_layers = state.selected_layers.clone();
         let selected_keys = state.selected_keys.clone();
@@ -895,8 +938,22 @@ impl Render for Timeline {
             self.selected_key = None;
             self.drag = None;
         }
-        let expanded = state.expanded;
+
         let filter = state.property_filter;
+        let expanded_layers = comp
+            .layers()
+            .iter()
+            .filter(|l| state.layer_expanded(l.id()))
+            .map(|l| l.id())
+            .collect::<BTreeSet<_>>();
+        let collapsed_groups = state
+            .layer_tree
+            .as_ref()
+            .map(|t| t.collapsed_groups.clone())
+            .unwrap_or_default();
+        let property_group_open = |id: LayerId, group: &str| {
+            filter.is_some() || !collapsed_groups.contains(&(id, group.to_string()))
+        };
         let zoom = state.timeline_zoom;
         let work_start = state.work_start;
         let work_end = state.work_end;
@@ -929,15 +986,18 @@ impl Render for Timeline {
                 .w(px(left))
                 .flex_none()
                 .overflow_hidden()
-                .child(ui::action_tool(
-                    control_id("visible"),
-                    if layer.visible() { "eye" } else { "eye-slash" },
-                    "Toggle layer visibility",
-                    &self.state,
-                    Action::Edit(Command::ToggleVisible(id)),
-                    false,
-                ))
-                .child(div().w(px(22.0)).flex_none().when(layer.can_audio(), |d| {
+                .child(
+                    ui::action_tool(
+                        control_id("visible"),
+                        if layer.visible() { "eye" } else { "eye-slash" },
+                        "Toggle layer visibility",
+                        &self.state,
+                        Action::Edit(Command::ToggleVisible(id)),
+                        false,
+                    )
+                    .size(px(18.0)),
+                )
+                .child(div().w(px(18.0)).flex_none().when(layer.can_audio(), |d| {
                     d.child(
                         ui::action_tool(
                             control_id("audio"),
@@ -954,18 +1014,21 @@ impl Render for Timeline {
                             }),
                             false,
                         )
-                        .w(px(22.0))
-                        .h(px(22.0)),
+                        .w(px(18.0))
+                        .h(px(18.0)),
                     )
                 }))
-                .child(ui::action_tool(
-                    control_id("lock"),
-                    if layer.locked() { "lock" } else { "lock-open" },
-                    "Toggle layer lock",
-                    &self.state,
-                    Action::Edit(Command::ToggleLocked(id)),
-                    layer.locked(),
-                ))
+                .child(
+                    ui::action_tool(
+                        control_id("lock"),
+                        if layer.locked() { "lock" } else { "lock-open" },
+                        "Toggle layer lock",
+                        &self.state,
+                        Action::Edit(Command::ToggleLocked(id)),
+                        layer.locked(),
+                    )
+                    .size(px(18.0)),
+                )
                 .children(
                     [
                         (
@@ -991,6 +1054,9 @@ impl Render for Timeline {
                         ),
                     ]
                     .into_iter()
+                    .filter(|(_, _, _, switch, _)| {
+                        !self.mode_columns || matches!(switch, LayerSwitch::Solo)
+                    })
                     .map(|(key, icon, label, switch, enabled)| {
                         ui::action_tool(
                             control_id(key),
@@ -1004,14 +1070,14 @@ impl Render for Timeline {
                             }),
                             enabled,
                         )
-                        .w(px(22.0))
-                        .h(px(22.0))
+                        .w(px(18.0))
+                        .h(px(18.0))
                     }),
                 )
                 .child(
                     ui::tool(
                         control_id("expand"),
-                        if selected_row && expanded {
+                        if expanded_layers.contains(&id) {
                             "chevron-down"
                         } else {
                             "chevron-right"
@@ -1019,23 +1085,20 @@ impl Render for Timeline {
                         "Reveal transform properties",
                         false,
                     )
-                    .on_click(cx.listener(move |this, _, window, cx| {
+                    .size(px(18.0))
+                    .on_click(cx.listener(move |this, _, _window, cx| {
                         this.selected_key = None;
                         this.state.update(cx, |state, cx| {
-                            if state.editor.selected() == Some(id) {
-                                state.dispatch(&Action::ToggleExpanded, window, cx);
-                            } else {
-                                state.dispatch(&Action::Select(id), window, cx);
-                                state.expanded = true;
-                            }
+                            state.toggle_layer_expanded(id);
+                            cx.notify();
                         });
                     })),
                 )
                 .child(
                     div()
                         .w(px(8.0))
-                        .h(px(14.0))
-                        .mr_2()
+                        .h(px(12.0))
+                        .mr(px(4.0))
                         .bg(rgb(layer.label_color().unwrap_or_else(|| layer.color()))),
                 )
                 .child(
@@ -1058,6 +1121,7 @@ impl Render for Timeline {
                             .into_any_element()
                     } else {
                         ui::text_button(control_id("name"), layer.name().to_string())
+                            .h_full()
                             .flex_1()
                             .min_w_0()
                             .justify_start()
@@ -1112,7 +1176,7 @@ impl Render for Timeline {
                 let picker = self.blend_pickers.entry(id).or_insert_with(|| {
                     cx.new(|cx| super::blend::BlendPicker::new(self.state.clone(), id, cx))
                 });
-                controls = controls.child(div().w(px(88.0)).flex_none().child(picker.clone()));
+                controls = controls.child(div().w(px(72.0)).flex_none().child(picker.clone()));
             }
             if show_mattes {
                 let (source, mode) = self.matte_pickers.entry(id).or_insert_with(|| {
@@ -1126,8 +1190,8 @@ impl Render for Timeline {
                     )
                 });
                 controls = controls
-                    .child(div().w(px(120.0)).flex_none().child(source.clone()))
-                    .child(div().w(px(80.0)).flex_none().child(mode.clone()));
+                    .child(div().w(px(88.0)).flex_none().child(source.clone()))
+                    .child(div().w(px(52.0)).flex_none().child(mode.clone()));
             }
             let parent_name = layer
                 .parent()
@@ -1136,13 +1200,13 @@ impl Render for Timeline {
             controls = controls.child(
                 div()
                     .relative()
-                    .w(px(135.0))
+                    .w(px(110.0))
                     .flex_none()
                     .child(
                         div().flex().items_center().child(
                             ui::tool(control_id("pick-whip"),"circle-link",
                                 "Parent Pick Whip: drag to a layer name; click for the parent menu",false)
-                                .w(px(22.0)).h(px(22.0))
+                                .w(px(18.0)).h(px(18.0))
                                 .when(layer.locked(),|b|b.opacity(0.35))
                                 .when(!layer.locked(),|b| b.on_drag(
                                     parent_drags[&id].clone(),
@@ -1152,7 +1216,7 @@ impl Render for Timeline {
                                     cx.notify();
                                 }))
                         ).child(
-                        ui::text_button(control_id("parent"), format!("{parent_name} ▾"))
+                        ui::text_button(control_id("parent"), format!("{parent_name} ▾")).h(px(21.0))
                             .flex_1().min_w_0()
                             .overflow_hidden()
                             .justify_start()
@@ -1229,6 +1293,7 @@ impl Render for Timeline {
                         },
                         false,
                     )
+                    .size(px(18.0))
                     .when(!reorder_allowed, |d| d.opacity(0.35))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.move_visible_layer(id, direction, window, cx)
@@ -1396,7 +1461,7 @@ impl Render for Timeline {
             rows = rows.child(
                 div()
                     .flex()
-                    .h(px(23.0))
+                    .h(px(21.0))
                     .flex_none()
                     .border_b_1()
                     .border_color(rgb(0x151515))
@@ -1404,7 +1469,7 @@ impl Render for Timeline {
                     .child(controls)
                     .when(!graph_open, |s| s.child(time_area)),
             );
-            if selected_row && expanded {
+            if expanded_layers.contains(&id) {
                 row_index += 1;
                 rows = rows.child(
                     self.colors
@@ -1444,7 +1509,7 @@ impl Render for Timeline {
                     rows = rows.child(
                         div()
                             .flex()
-                            .h(px(24.0))
+                            .h(px(22.0))
                             .flex_none()
                             .child(
                                 div()
@@ -1455,8 +1520,28 @@ impl Render for Timeline {
                                     .gap_2()
                                     .items_center()
                                     .text_color(rgb(ui::MUTED))
-                                    .child(ui::icon("chevron-down"))
-                                    .child("Transform"),
+                                    .child(
+                                        ui::text_button(
+                                            SharedString::from(format!("transform-group-{id}")),
+                                            "Transform",
+                                        )
+                                        .h(px(21.0))
+                                        .child(ui::icon(if property_group_open(id, "Transform") {
+                                            "chevron-down"
+                                        } else {
+                                            "chevron-right"
+                                        }))
+                                        .on_click({
+                                            let state = self.state.clone();
+                                            move |_, _, cx| {
+                                                state.update(cx, |s, cx| {
+                                                    s.toggle_property_group(id, "Transform".into());
+                                                    cx.notify();
+                                                });
+                                                cx.stop_propagation();
+                                            }
+                                        }),
+                                    ),
                             )
                             .child(
                                 div()
@@ -1468,6 +1553,7 @@ impl Render for Timeline {
                     );
                 }
                 if !is_audio
+                    && property_group_open(id, "Transform")
                     && joined_position_visible(layer, filter)
                     && let Some((value, keys)) = super::inspector::joined_position_summary(
                         layer,
@@ -1508,6 +1594,7 @@ impl Render for Timeline {
                     );
                 }
                 if !is_audio
+                    && property_group_open(id, "Transform")
                     && native_opacity_visible(layer, filter)
                     && let Some((value, keys)) = super::inspector::native_opacity_summary(
                         layer,
@@ -1633,6 +1720,11 @@ impl Render for Timeline {
                 }
                 let mut last_section = None;
                 for (label, properties) in groups {
+                    if matches!(properties[0], PropertyPath::Transform(_))
+                        && !property_group_open(id, "Transform")
+                    {
+                        continue;
+                    }
                     if !group_visible(layer, &properties, filter) {
                         continue;
                     }
@@ -1713,8 +1805,20 @@ impl Render for Timeline {
                                     .unwrap_or("Effect")
                             ),
                         )),
+                        PropertyPath::SourceText | PropertyPath::Text(_) => {
+                            Some(((4, 0), "Text".into()))
+                        }
+                        PropertyPath::Audio(_) => Some(((5, 0), "Audio".into())),
+                        PropertyPath::TimeRemap => Some(((6, 0), "Time Remap".into())),
+                        PropertyPath::Shape(_)
+                        | PropertyPath::Path(libre_effects_core::PathTarget::Shape) => {
+                            Some(((7, 0), "Shape".into()))
+                        }
                         _ => None,
                     };
+                    if section.is_none() {
+                        last_section = None;
+                    }
                     if let Some((section_id, name)) = section {
                         if last_section != Some(section_id) {
                             last_section = Some(section_id);
@@ -1722,7 +1826,7 @@ impl Render for Timeline {
                             rows = rows.child(
                                 div()
                                     .flex()
-                                    .h(px(24.0))
+                                    .h(px(22.0))
                                     .flex_none()
                                     .child(
                                         div()
@@ -1731,7 +1835,39 @@ impl Render for Timeline {
                                             .pl(px(128.0))
                                             .text_color(rgb(ui::MUTED))
                                             .overflow_hidden()
-                                            .child(name),
+                                            .child(
+                                                ui::text_button(
+                                                    SharedString::from(format!(
+                                                        "property-group-{id}-{section_id:?}"
+                                                    )),
+                                                    name.clone(),
+                                                )
+                                                .h(px(21.0))
+                                                .child(ui::icon(
+                                                    if property_group_open(
+                                                        id,
+                                                        &format!("{section_id:?}"),
+                                                    ) {
+                                                        "chevron-down"
+                                                    } else {
+                                                        "chevron-right"
+                                                    },
+                                                ))
+                                                .on_click({
+                                                    let state = self.state.clone();
+                                                    let group = format!("{section_id:?}");
+                                                    move |_, _, cx| {
+                                                        state.update(cx, |s, cx| {
+                                                            s.toggle_property_group(
+                                                                id,
+                                                                group.clone(),
+                                                            );
+                                                            cx.notify();
+                                                        });
+                                                        cx.stop_propagation();
+                                                    }
+                                                }),
+                                            ),
                                     )
                                     .when(!graph_open, |s| {
                                         s.child(
@@ -1744,6 +1880,11 @@ impl Render for Timeline {
                                     }),
                             );
                         }
+                    }
+                    if last_section
+                        .is_some_and(|section| !property_group_open(id, &format!("{section:?}")))
+                    {
+                        continue;
                     }
                     let prop_id = |suffix: &str| {
                         SharedString::from(format!("prop-{id}-{:?}-{suffix}", properties[0]))
@@ -1822,10 +1963,12 @@ impl Render for Timeline {
                                 Action::Edit(watch),
                                 animated,
                             )
+                            .size(px(18.0))
                             .into_any_element()
                         })
                         .child(
                             ui::text_button(prop_id("label"), label.clone())
+                                .h(px(22.0))
                                 .min_w_0()
                                 .overflow_hidden()
                                 .flex_1()
@@ -1899,6 +2042,8 @@ impl Render for Timeline {
                                     let target: Rc<RefCell<Option<InputTarget>>> =
                                         Default::default();
                                     let captured = target.clone();
+                                    let activate_target = target.clone();
+                                    let activate_state = self.state.clone();
                                     let input = cx.new(|cx| {
                                         TextField::new(cx, move |text, window, cx| {
                                             edit.update(cx, |s, cx| {
@@ -1961,14 +2106,37 @@ impl Render for Timeline {
                                             })
                                         })
                                         .numeric()
+                                        .on_activate(move |window, cx| {
+                                            if !activate_target.borrow().as_ref().is_some_and(|t| {
+                                                t.source_at_frame(activate_state.read(cx))
+                                            }) {
+                                                return false;
+                                            }
+                                            TextField::commit_active(window, cx);
+                                            activate_state.update(cx, |s, cx| {
+                                                if s.editor.selected() != Some(id) {
+                                                    s.dispatch(&Action::Select(id), window, cx);
+                                                }
+                                                s.editor.selected() == Some(id) && !s.playing
+                                            })
+                                        })
+                                        .dense()
                                     });
                                     (input, target)
                                 })
                                 .clone();
-                            *input_target.borrow_mut() = self.input_source.clone();
+                            InputTarget::refresh_layer(
+                                &mut input_target.borrow_mut(),
+                                self.state.read(cx),
+                                id,
+                            );
                             input.update(cx, |field, _| {
                                 field.sync(
-                                    input_binding.clone(),
+                                    input_target
+                                        .borrow()
+                                        .as_ref()
+                                        .map(InputTarget::binding)
+                                        .unwrap_or_default(),
                                     {
                                         let value = layer
                                             .track_value(property, frame)
@@ -2330,7 +2498,7 @@ impl Render for Timeline {
                     rows = rows.child(
                         div()
                             .flex()
-                            .h(px(25.0))
+                            .h(px(22.0))
                             .flex_none()
                             .child(controls)
                             .when(!graph_open, |s| s.child(keys)),
@@ -2358,6 +2526,9 @@ impl Render for Timeline {
         let pointer_owner = cx.entity();
         div()
             .id("timeline")
+            .border_1()
+            .border_color(rgb(ui::BORDER))
+            .focus(|s| s.border_color(rgb(ui::BLUE)))
             .relative()
             .track_focus(&self.focus)
             .flex()
@@ -2446,6 +2617,12 @@ impl Render for Timeline {
                 if !this.focus.is_focused(window) {
                     return;
                 }
+                if event.keystroke.key == "f4" && !event.keystroke.modifiers.modified() {
+                    this.mode_columns = !this.mode_columns;
+                    cx.notify();
+                    cx.stop_propagation();
+                    return;
+                }
                 if this.layer_rename_key(event, window, cx) {
                     cx.stop_propagation();
                     return;
@@ -2520,11 +2697,7 @@ impl Render for Timeline {
                     cx.stop_propagation();
                 }
             }))
-            .child(ui::panel_header(if self.state.read(cx).welcome() {
-                "Timeline".to_string()
-            } else {
-                comp.name().to_string()
-            }))
+            .child(ui::composition_tabs(&self.state, cx, false))
             .child(
                 div()
                     .flex()
@@ -2540,9 +2713,8 @@ impl Render for Timeline {
                             .flex_col()
                             .child(
                                 div()
-                                    .text_size(px(14.0))
                                     .text_color(rgb(ui::BLUE))
-                                    .child(comp.timecode(frame)),
+                                    .child(self.time_input.clone()),
                             )
                             .child(
                                 div()
@@ -2666,6 +2838,7 @@ impl Render for Timeline {
                             }
                         }),
                     )
+                    .child(layer_filters)
                     .child(div().flex_1())
                     .child(ui::action_tool(
                         "timeline-minus",
@@ -2685,48 +2858,49 @@ impl Render for Timeline {
                         false,
                     )),
             )
-            .child(layer_filters)
-            .child(
-                div()
-                    .flex()
-                    .h(px(22.0))
-                    .flex_none()
-                    .border_b_1()
-                    .border_color(rgb(ui::BORDER))
-                    .child(
-                        div()
-                            .w(px(left))
-                            .flex_none()
-                            .pl_2()
-                            .text_size(px(10.0))
-                            .text_color(rgb(ui::MUTED))
-                            .child("Composition markers"),
-                    )
-                    .child(
-                        div()
-                            .relative()
-                            .flex_1()
-                            .h_full()
-                            .overflow_hidden()
-                            .children(
-                                comp.markers()
-                                    .iter()
-                                    .filter(|m| {
-                                        m.frame() < start.saturating_add(visible)
-                                            && m.end() >= start
-                                    })
-                                    .map(|m| {
-                                        super::markers::marker_item(
-                                            m,
-                                            libre_effects_core::MarkerTarget::Composition,
-                                            start,
-                                            visible,
-                                            &self.state,
-                                        )
-                                    }),
-                            ),
-                    ),
-            )
+            .when(!comp.markers().is_empty(), |root| {
+                root.child(
+                    div()
+                        .flex()
+                        .h(px(22.0))
+                        .flex_none()
+                        .border_b_1()
+                        .border_color(rgb(ui::BORDER))
+                        .child(
+                            div()
+                                .w(px(left))
+                                .flex_none()
+                                .pl_2()
+                                .text_size(px(10.0))
+                                .text_color(rgb(ui::MUTED))
+                                .child("Composition markers"),
+                        )
+                        .child(
+                            div()
+                                .relative()
+                                .flex_1()
+                                .h_full()
+                                .overflow_hidden()
+                                .children(
+                                    comp.markers()
+                                        .iter()
+                                        .filter(|m| {
+                                            m.frame() < start.saturating_add(visible)
+                                                && m.end() >= start
+                                        })
+                                        .map(|m| {
+                                            super::markers::marker_item(
+                                                m,
+                                                libre_effects_core::MarkerTarget::Composition,
+                                                start,
+                                                visible,
+                                                &self.state,
+                                            )
+                                        }),
+                                ),
+                        ),
+                )
+            })
             .child(
                 div()
                     .flex()
@@ -2743,13 +2917,17 @@ impl Render for Timeline {
                             .pb_1()
                             .text_size(px(10.0))
                             .text_color(rgb(ui::MUTED))
-                            .child(div().w(px(178.0)).child("Switches"))
+                            .child(
+                                div()
+                                    .w(px(if self.mode_columns { 122.0 } else { 158.0 }))
+                                    .child("Switches"),
+                            )
                             .child(div().flex_1().child("Source Name"))
-                            .when(show_modes, |s| s.child(div().w(px(88.0)).child("Mode")))
+                            .when(show_modes, |s| s.child(div().w(px(72.0)).child("Mode")))
                             .when(show_mattes, |s| {
-                                s.child(div().w(px(200.0)).child("Track Matte"))
+                                s.child(div().w(px(140.0)).child("Track Matte"))
                             })
-                            .child(div().w(px(181.0)).child("Parent & Link       Order")),
+                            .child(div().w(px(146.0)).child("Parent & Link   Order")),
                     )
                     .child(
                         div()
@@ -2814,22 +2992,27 @@ impl Render for Timeline {
                                     .border_r_2()
                                     .border_color(rgb(ui::BLUE)),
                             )
-                            .children((0..10).map(|tick| {
-                                div()
-                                    .absolute()
-                                    .left(relative(tick as f32 / 10.0))
-                                    .top(px(10.0))
-                                    .h(px(19.0))
-                                    .border_l_1()
-                                    .border_color(rgb(0x777777))
-                                    .pl_1()
-                                    .text_size(px(10.0))
-                                    .child(format!(
-                                        "{:.2}s",
-                                        (start as f32 + visible as f32 * tick as f32 / 10.0)
-                                            / comp.fps().as_f64() as f32
-                                    ))
-                            }))
+                            .children(
+                                crate::preview_options::ruler_ticks(
+                                    start,
+                                    visible,
+                                    comp.fps(),
+                                    comp.display_start(),
+                                )
+                                .into_iter()
+                                .map(|(tick, label)| {
+                                    div()
+                                        .absolute()
+                                        .left(relative((tick - start) as f32 / visible as f32))
+                                        .top(px(10.0))
+                                        .h(px(19.0))
+                                        .border_l_1()
+                                        .border_color(rgb(0x777777))
+                                        .pl_1()
+                                        .text_size(px(10.0))
+                                        .child(label)
+                                }),
+                            )
                             .children(cached_ranges.iter().filter_map(|range| {
                                 let first = range.start.max(start);
                                 let end = range.end.min(start.saturating_add(visible));
@@ -2932,6 +3115,15 @@ impl Render for Timeline {
                                 (start + visible).min(comp.duration())
                             )),
                     )
+                    .child(
+                        ui::text_button("timeline-columns", "Toggle Switches / Modes (F4)")
+                            .text_size(px(10.0))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.mode_columns = !this.mode_columns;
+                                window.focus(&this.focus);
+                                cx.notify();
+                            })),
+                    )
                     .child(div().flex_1())
                     .child(ui::text_button("work-start", "Set In (B)").on_click({
                         let state = self.state.clone();
@@ -2961,7 +3153,10 @@ impl Render for Timeline {
                     .id("timeline-column-divider")
                     .absolute()
                     .left(px(left - 2.0))
-                    .top(px(58.0))
+                    .top(px(26.0
+                        + 32.0
+                        + 29.0
+                        + if comp.markers().is_empty() { 0.0 } else { 22.0 }))
                     .bottom(px(29.0))
                     .w(px(4.0))
                     .cursor_col_resize()

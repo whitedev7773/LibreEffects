@@ -80,9 +80,8 @@ impl PreviewRequest {
             && self.core_generation == other.core_generation
             && self.transport == other.transport
     }
-    pub fn accepts(&self, ready: &Self, playing: bool) -> bool {
-        self.same_context(ready)
-            && (self.frame == ready.frame || (playing && ready.frame < self.frame))
+    pub fn accepts(&self, ready: &Self, _playing: bool) -> bool {
+        self.same_context(ready) && self.frame == ready.frame
     }
     /// Errors conservatively require a worker result, never an authored fallback.
     pub fn needs_evaluated_view(&self) -> bool {
@@ -110,8 +109,7 @@ impl PreviewRequest {
             None => Ok(()),
         }
     }
-    /// Exact receipts are required for editing and selection. Playback may display
-    /// older pixels, but those never authorize current-frame geometry or gestures.
+    /// Exact receipts are required for playback, editing and selection.
     pub fn current_geometry<'a>(
         &self,
         displayed: &'a Self,
@@ -242,7 +240,7 @@ mod tests {
         }
         let mut next = current.clone();
         next.frame += 1;
-        assert!(next.accepts(&current, true));
+        assert!(!next.accepts(&current, true));
         assert!(next.validate_evaluated_view(Some(&view)).is_err());
         let mut editor = Editor::default();
         editor.replace_project(current.project.clone()).unwrap();

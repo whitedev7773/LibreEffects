@@ -27,6 +27,8 @@ pub enum Target {
     NewComposition,
     Settings,
     ResetWorkspace,
+    ManageWorkspaces,
+    Workspace(crate::view_state::WorkspacePreset),
     Help,
     About,
     Search,
@@ -474,11 +476,21 @@ pub fn items(menu: &str, state: &EditorState) -> Vec<Item> {
             ),
             Item::special("Composition settings…", "Ctrl+K", Target::Settings),
         ]),
-        "Window" => result.push(Item::special(
-            "Reset default workspace",
-            "",
-            Target::ResetWorkspace,
-        )),
+        "Window" => {
+            result.push(Item::special(
+                "User workspaces…",
+                "",
+                Target::ManageWorkspaces,
+            ));
+            for preset in crate::view_state::WorkspacePreset::ALL {
+                result.push(Item::special(preset.label(), "", Target::Workspace(preset)));
+            }
+            result.push(Item::special(
+                "Reset standard workspace",
+                "",
+                Target::ResetWorkspace,
+            ));
+        }
         "Help" => result.extend([
             Item::special("Find command…", "Ctrl+Shift+P", Target::Search),
             Item::special("Keyboard shortcuts", "", Target::Help),

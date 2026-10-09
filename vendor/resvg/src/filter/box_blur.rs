@@ -6,7 +6,7 @@
 #![allow(clippy::needless_range_loop)]
 
 use super::ImageRefMut;
-use rgb::RGBA8;
+use rgb::{ComponentBytes, RGBA8};
 use std::cmp;
 
 const STEPS: usize = 5;
@@ -23,6 +23,9 @@ const STEPS: usize = 5;
 pub fn apply(sigma_x: f64, sigma_y: f64, mut src: ImageRefMut) {
     let boxes_horz = create_box_gauss(sigma_x as f32);
     let boxes_vert = create_box_gauss(sigma_y as f32);
+    if accelerate(&mut src, boxes_horz, boxes_vert) {
+        return;
+    }
     let mut backbuf = src.data.to_vec();
     let mut backbuf = ImageRefMut::new(src.width, src.height, &mut backbuf);
 
@@ -43,6 +46,9 @@ pub(super) fn apply_with_scratch(
 ) {
     let boxes_horz = create_box_gauss(sigma_x as f32);
     let boxes_vert = create_box_gauss(sigma_y as f32);
+    if accelerate(&mut src, boxes_horz, boxes_vert) {
+        return;
+    }
     for (x, y) in boxes_horz.iter().zip(boxes_vert.iter()) {
         box_blur_impl(
             ((x - 1) / 2) as usize,
@@ -51,6 +57,20 @@ pub(super) fn apply_with_scratch(
             &mut src,
         );
     }
+}
+
+fn accelerate(src: &mut ImageRefMut<'_>, horizontal: [i32; STEPS], vertical: [i32; STEPS]) -> bool {
+    let mut radii = [[0; 2]; STEPS];
+    for i in 0..STEPS {
+        let (Ok(x), Ok(y)) = (
+            u32::try_from((horizontal[i] - 1) / 2),
+            u32::try_from((vertical[i] - 1) / 2),
+        ) else {
+            return false;
+        };
+        radii[i] = [x, y];
+    }
+    crate::acceleration::apply(src.data.as_bytes_mut(), src.width, src.height, radii)
 }
 
 #[inline(never)]

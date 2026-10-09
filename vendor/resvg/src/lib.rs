@@ -17,7 +17,9 @@
 pub use tiny_skia;
 pub use usvg;
 
+mod acceleration;
 mod checked;
+pub use acceleration::{install_box_blur_accelerator, BoxBlurAccelerator, BoxBlurAcceleratorGuard};
 mod clip;
 mod opaque_opacity;
 
@@ -25,11 +27,17 @@ pub use checked::{
     CheckedRenderOptions, RenderError, RenderErrorKind, RenderLimits, RepeatEdgeDomain,
 };
 mod filter;
+mod filter_cache;
+pub use filter_cache::{install_filter_cache, FilterCache, FilterCacheGuard};
 mod geom;
 mod image;
+mod raster_cache;
+pub use raster_cache::{install_raster_image_cache, RasterImageCache, RasterImageCacheGuard};
 mod mask;
 mod path;
+mod profile;
 mod render;
+pub use profile::{render_profile, reset_render_profile};
 
 /// Renders a tree onto the pixmap.
 ///

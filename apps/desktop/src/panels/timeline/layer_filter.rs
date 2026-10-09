@@ -347,13 +347,14 @@ impl Timeline {
         div()
             .flex()
             .items_center()
-            .h(px(30.0))
+            .h(px(24.0))
+            .flex_1()
+            .min_w_0()
             .flex_none()
             .px_3()
             .gap_2()
             .border_b_1()
             .border_color(rgb(ui::BORDER))
-            .child(div().text_color(rgb(ui::MUTED)).child("Layers"))
             .child(
                 ui::tool(
                     "timeline-search-focus",

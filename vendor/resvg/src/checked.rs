@@ -139,6 +139,9 @@ pub(crate) struct CheckedState<'a> {
 }
 
 impl<'a> CheckedState<'a> {
+    pub(crate) fn live_bytes(&self) -> usize {
+        self.live.get()
+    }
     pub fn new(
         options: &'a CheckedRenderOptions<'a>,
         target_bytes: usize,

@@ -116,15 +116,46 @@ impl PixmapExt for tiny_skia::Pixmap {
     }
 
     fn into_srgb(&mut self) {
-        demultiply_alpha(self.data_mut().as_rgba_mut());
-        from_linear_rgb(self.data_mut().as_rgba_mut());
-        multiply_alpha(self.data_mut().as_rgba_mut());
+        let _profile = crate::profile::time("ColorSpace");
+        apply_color_space_table(self, srgb_table());
     }
 
     fn into_linear_rgb(&mut self) {
-        demultiply_alpha(self.data_mut().as_rgba_mut());
-        into_linear_rgb(self.data_mut().as_rgba_mut());
-        multiply_alpha(self.data_mut().as_rgba_mut());
+        let _profile = crate::profile::time("ColorSpace");
+        apply_color_space_table(self, linear_table());
+    }
+}
+
+fn srgb_table() -> &'static [u8; 65536] {
+    static TABLE: std::sync::OnceLock<Box<[u8; 65536]>> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| color_space_table(LINEAR_RGB_TO_SRGB_TABLE))
+}
+fn linear_table() -> &'static [u8; 65536] {
+    static TABLE: std::sync::OnceLock<Box<[u8; 65536]>> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| color_space_table(SRGB_TO_LINEAR_RGB_TABLE))
+}
+
+fn color_space_table(curve: &[u8; 256]) -> Box<[u8; 65536]> {
+    let mut table = Box::new([0; 65536]);
+    for alpha in 0..256 {
+        let a = alpha as f32 / 255.0;
+        for channel in 0..256 {
+            let unmultiplied = (channel as f32 / a + 0.5) as u8;
+            table[alpha * 256 + channel] = (curve[unmultiplied as usize] as f32 * a + 0.5) as u8;
+        }
+    }
+    table
+}
+fn apply_color_space_table(pixmap: &mut tiny_skia::Pixmap, table: &[u8; 65536]) {
+    let (width, height) = (pixmap.width(), pixmap.height());
+    if crate::acceleration::apply_lut(pixmap.data_mut(), width, height, table) {
+        return;
+    }
+    for pixel in pixmap.data_mut().as_rgba_mut() {
+        let base = usize::from(pixel.a) * 256;
+        pixel.r = table[base + usize::from(pixel.r)];
+        pixel.g = table[base + usize::from(pixel.g)];
+        pixel.b = table[base + usize::from(pixel.b)];
     }
 }
 
@@ -219,6 +250,7 @@ const LINEAR_RGB_TO_SRGB_TABLE: &[u8; 256] = &[
 /// Provided pixels should have an **unpremultiplied alpha**.
 ///
 /// RGB channels order of the input image doesn't matter, but alpha channel must be the last one.
+#[cfg(test)]
 fn into_linear_rgb(data: &mut [RGBA8]) {
     for p in data {
         p.r = SRGB_TO_LINEAR_RGB_TABLE[p.r as usize];
@@ -232,6 +264,7 @@ fn into_linear_rgb(data: &mut [RGBA8]) {
 /// Provided pixels should have an **unpremultiplied alpha**.
 ///
 /// RGB channels order of the input image doesn't matter, but alpha channel must be the last one.
+#[cfg(test)]
 fn from_linear_rgb(data: &mut [RGBA8]) {
     for p in data {
         p.r = LINEAR_RGB_TO_SRGB_TABLE[p.r as usize];
@@ -341,8 +374,27 @@ pub fn apply(
     source: &mut tiny_skia::Pixmap,
     checked: Option<&crate::checked::CheckedState<'_>>,
 ) {
-    let result = apply_inner(filter, ts, source, checked);
-    let result = result.and_then(|image| apply_to_canvas(image, source));
+    let key = crate::filter_cache::key(filter, ts, checked);
+    if key
+        .as_ref()
+        .is_some_and(|key| crate::filter_cache::get(key, source))
+    {
+        return;
+    }
+    let saved_source = key
+        .as_ref()
+        .and_then(|key| crate::filter_cache::source_copy(key, source));
+    let result = if apply_single_color_blur(filter, ts, source, checked) {
+        Ok(())
+    } else {
+        apply_inner(filter, ts, source, checked).and_then(|image| apply_to_canvas(image, source))
+    };
+
+    if result.is_ok() {
+        if let (Some(key), Some(saved_source)) = (key, saved_source) {
+            crate::filter_cache::insert(key, saved_source, source);
+        }
+    }
 
     if let (Some(state), Err(error)) = (checked, &result) {
         state.fail(match error {
@@ -370,6 +422,84 @@ pub fn apply(
         Err(Error::NoResults) => {}
         Err(Error::Checked(error)) => log::warn!("{error}"),
     }
+}
+
+// A single source Gaussian with no primitive clipping has exactly the same
+// pixel sequence as two LUTs and the existing ten box axes. All other filter
+// graphs, IIR, repeat/Box3 and color spaces keep the generic renderer.
+fn apply_single_color_blur(
+    filter: &usvg::filter::Filter,
+    ts: tiny_skia::Transform,
+    source: &mut tiny_skia::Pixmap,
+    checked: Option<&crate::checked::CheckedState<'_>>,
+) -> bool {
+    let [primitive] = filter.primitives() else {
+        return false;
+    };
+    let usvg::filter::Kind::GaussianBlur(fe) = primitive.kind() else {
+        return false;
+    };
+    if fe.box3_radius().is_some()
+        || fe.edge_mode() != usvg::filter::EdgeMode::None
+        || !matches!(fe.input(), usvg::filter::Input::SourceGraphic)
+        || primitive.color_interpolation() != usvg::filter::ColorInterpolation::LinearRGB
+    {
+        return false;
+    }
+    let region = |r: usvg::NonZeroRect| {
+        let r = r.transform(ts)?;
+        if checked.is_some() {
+            crate::checked::int_rect(r.to_rect()).ok()
+        } else {
+            Some(r.to_int_rect())
+        }
+    };
+    match (region(filter.rect()), region(primitive.rect())) {
+        (Some(a), Some(b)) if a == b => {}
+        _ => return false,
+    }
+    let Some((x, y, true)) = resolve_std_dev(fe.std_dev_x().get(), fe.std_dev_y().get(), ts) else {
+        return false;
+    };
+    // Validate the upstream width arithmetic before creating radius pairs.
+    if repeat_blur::box_support(x).is_err() || repeat_blur::box_support(y).is_err() {
+        return false;
+    }
+    let horizontal = box_blur::create_box_gauss(x as f32);
+    let vertical = box_blur::create_box_gauss(y as f32);
+    let radii = std::array::from_fn(|i| {
+        [
+            ((horizontal[i] - 1) / 2) as u32,
+            ((vertical[i] - 1) / 2) as u32,
+        ]
+    });
+    // Preserve the checked CPU input+scratch admission even though hardware
+    // needs fewer host copies. Declining lets the generic path report errors.
+    let _live = if let Some(state) = checked {
+        let Ok(bytes) =
+            crate::checked::image_bytes(source.width(), source.height(), state.options.limits)
+        else {
+            return false;
+        };
+        let Some(bytes) = bytes.checked_mul(2) else {
+            return false;
+        };
+        let Ok(live) = state.reserve(bytes) else {
+            return false;
+        };
+        Some(live)
+    } else {
+        None
+    };
+    let _profile = crate::profile::time("ColorGaussian");
+    let (w, h) = (source.width(), source.height());
+    crate::acceleration::apply_color_blur(
+        source.data_mut(),
+        w,
+        h,
+        radii,
+        [linear_table(), srgb_table()],
+    )
 }
 
 fn apply_inner(
@@ -421,6 +551,18 @@ fn apply_inner(
             }
         }
 
+        let _profile = crate::profile::time(match primitive.kind() {
+            usvg::filter::Kind::GaussianBlur(_) => "GaussianBlur",
+            usvg::filter::Kind::ColorMatrix(_) => "ColorMatrix",
+            usvg::filter::Kind::ComponentTransfer(_) => "ComponentTransfer",
+            usvg::filter::Kind::Blend(_) => "Blend",
+            usvg::filter::Kind::Composite(_) => "Composite",
+            usvg::filter::Kind::Image(_) => "FilterImage",
+            usvg::filter::Kind::Flood(_) => "Flood",
+            usvg::filter::Kind::Merge(_) => "Merge",
+            usvg::filter::Kind::Offset(_) => "Offset",
+            _ => "OtherFilter",
+        });
         let cs = primitive.color_interpolation();
         // Retained primitive outputs coexist with any nested feImage renderer
         // and the repeat halo. Count them before either path allocates.
@@ -1339,4 +1481,129 @@ fn resolve_std_dev(std_dx: f32, std_dy: f32, ts: usvg::Transform) -> Option<(f64
 fn scale_coordinates(x: f32, y: f32, ts: usvg::Transform) -> Option<(f32, f32)> {
     let (sx, sy) = ts.get_scale();
     Some((x * sx, y * sy))
+}
+
+#[cfg(test)]
+mod color_space_regression {
+    use super::*;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    struct ResidentOracle(AtomicUsize);
+    impl crate::BoxBlurAccelerator for ResidentOracle {
+        fn apply(&self, _: &mut [u8], _: u32, _: u32, _: [[u32; 2]; 5]) -> bool {
+            false
+        }
+        fn apply_color_blur(
+            &self,
+            pixels: &mut [u8],
+            w: u32,
+            h: u32,
+            radii: [[u32; 2]; 5],
+            tables: [&[u8; 65536]; 2],
+        ) -> bool {
+            let expected = std::array::from_fn(|i| {
+                [
+                    ((box_blur::create_box_gauss(13.5)[i] - 1) / 2) as u32,
+                    ((box_blur::create_box_gauss(7.0)[i] - 1) / 2) as u32,
+                ]
+            });
+            assert_eq!(radii, expected);
+            let lookup = |bytes: &mut [u8], table: &[u8; 65536]| {
+                for p in bytes.chunks_exact_mut(4) {
+                    let base = usize::from(p[3]) * 256;
+                    for c in 0..3 {
+                        p[c] = table[base + usize::from(p[c])];
+                    }
+                }
+            };
+            lookup(pixels, tables[0]);
+            box_blur::apply(13.5, 7.0, ImageRefMut::new(w, h, pixels.as_rgba_mut()));
+            lookup(pixels, tables[1]);
+            self.0.fetch_add(1, Ordering::Relaxed);
+            true
+        }
+    }
+    #[test]
+    fn resident_single_filter_matches_generic_with_offsets_and_transparency() {
+        for bounds in [
+            "x='0' y='0' width='64' height='48'",
+            "x='-32' y='-24' width='128' height='96'",
+        ] {
+            let svg = format!(
+                r##"<svg xmlns="http://www.w3.org/2000/svg" width="64" height="48"><defs><filter id="b" filterUnits="userSpaceOnUse" {bounds} color-interpolation-filters="linearRGB"><feGaussianBlur stdDeviation="13.5 7"/></filter></defs><g filter="url(#b)"><rect x="2" y="1" width="20" height="17" fill="#246080" fill-opacity=".37"/><rect x="31" y="20" width="14" height="16" fill="#753025"/></g></svg>"##
+            );
+            let tree = usvg::Tree::from_str(&svg, &usvg::Options::default()).unwrap();
+            let mut expected = tiny_skia::Pixmap::new(64, 48).unwrap();
+            crate::render(
+                &tree,
+                tiny_skia::Transform::identity(),
+                &mut expected.as_mut(),
+            );
+            let backend = Arc::new(ResidentOracle(AtomicUsize::new(0)));
+            let _guard = crate::install_box_blur_accelerator(Some(backend.clone()));
+            let mut actual = tiny_skia::Pixmap::new(64, 48).unwrap();
+            crate::render(
+                &tree,
+                tiny_skia::Transform::identity(),
+                &mut actual.as_mut(),
+            );
+            assert_eq!(actual.data(), expected.data());
+            assert_eq!(backend.0.load(Ordering::Relaxed), 1);
+        }
+    }
+    #[test]
+    fn resident_filter_keeps_checked_allocation_admission_and_failure() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="64" height="48"><defs><filter id="b" filterUnits="userSpaceOnUse" x="0" y="0" width="64" height="48" color-interpolation-filters="linearRGB"><feGaussianBlur stdDeviation="13.5 7"/></filter></defs><rect width="64" height="48" filter="url(#b)"/></svg>"#;
+        let tree = usvg::Tree::from_str(svg, &usvg::Options::default()).unwrap();
+        let filter = tree.filters().iter().find(|f| f.id() == "b").unwrap();
+        let backend = Arc::new(ResidentOracle(AtomicUsize::new(0)));
+        let _guard = crate::install_box_blur_accelerator(Some(backend.clone()));
+        let mut pixels = tiny_skia::Pixmap::new(64, 48).unwrap();
+        let options = crate::CheckedRenderOptions {
+            limits: crate::RenderLimits {
+                max_live_bytes: pixels.data().len() * 2,
+                ..crate::RenderLimits::default()
+            },
+            ..crate::CheckedRenderOptions::default()
+        };
+        let state = crate::checked::CheckedState::new(&options, pixels.data().len()).unwrap();
+        apply(
+            filter,
+            tiny_skia::Transform::identity(),
+            &mut pixels,
+            Some(&state),
+        );
+        assert_eq!(backend.0.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            state.finish().unwrap_err().kind,
+            crate::RenderErrorKind::AllocationLimit
+        );
+    }
+    #[test]
+    fn fused_conversion_matches_all_alpha_channel_bytes_in_both_directions() {
+        for linear in [false, true] {
+            let mut pixels = tiny_skia::Pixmap::new(256, 256).unwrap();
+            for (i, p) in pixels.data_mut().as_rgba_mut().iter_mut().enumerate() {
+                *p = RGBA8::new(
+                    i as u8,
+                    255 - i as u8,
+                    (i as u8).wrapping_mul(73),
+                    (i / 256) as u8,
+                );
+            }
+            let mut expected = pixels.clone();
+            demultiply_alpha(expected.data_mut().as_rgba_mut());
+            if linear {
+                into_linear_rgb(expected.data_mut().as_rgba_mut());
+                pixels.into_linear_rgb();
+            } else {
+                from_linear_rgb(expected.data_mut().as_rgba_mut());
+                pixels.into_srgb();
+            }
+            multiply_alpha(expected.data_mut().as_rgba_mut());
+            assert_eq!(pixels.data(), expected.data());
+        }
+    }
 }
